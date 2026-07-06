@@ -6,9 +6,9 @@ import { apiPath, appPath } from "@/lib/client/url";
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
-  const [name, setName] = useState("张经纪");
-  const [email, setEmail] = useState("broker@example.com");
-  const [password, setPassword] = useState("broker123");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -47,7 +47,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         <h1 style={{ margin: "0 0 8px" }}>{mode === "login" ? "经纪人登录" : "创建经纪人账号"}</h1>
         <p style={{ margin: "0 0 18px", color: "var(--muted)" }}>
           {mode === "login"
-            ? "测试账号：broker@example.com / broker123。登录后会进入真实数据库工作台。"
+            ? "登录后进入你的真实数据库工作台。"
             : "注册后会创建经纪人账号、机构空间，后续通过思维设定生成个人画像。"}
         </p>
         <form className="form" onSubmit={submit}>
