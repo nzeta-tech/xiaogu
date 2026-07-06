@@ -1,0 +1,42 @@
+{
+  "name": "insurance-content-agent",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:seed": "node scripts/seed-demo-user.mjs",
+    "db:backfill-works": "node scripts/backfill-drafts-to-works.mjs",
+    "db:backfill-thinking-snapshots": "node scripts/backfill-thinking-snapshots.mjs",
+    "model:check": "node scripts/check-model.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@types/node": "25.8.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.3",
+    "next": "16.2.6",
+    "pg": "^8.20.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "stripe": "^22.1.1",
+    "typescript": "6.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.2.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

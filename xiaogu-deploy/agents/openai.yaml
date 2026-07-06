@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xiaogu Deploy"
+  short_description: "Deploy Xiaogu changes with local builds and production checks."
+  default_prompt: "Use $xiaogu-deploy to build locally, publish Xiaogu runtime updates, and verify production behavior end to end."

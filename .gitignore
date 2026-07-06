@@ -1,0 +1,12 @@
+.next
+node_modules
+.env
+.env.local
+.env.backup.codex
+dist
+coverage
+*.log
+.DS_Store
+tmp/
+data/*.db
+*.tsbuildinfo
