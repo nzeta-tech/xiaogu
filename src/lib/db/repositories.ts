@@ -2,7 +2,6 @@ import { getPool, query } from "./client";
 import type { AgentMessage } from "@/lib/agent/insurance-agent";
 import { creationApps, creationCategories, creationExamples, type CreationApp } from "@/lib/apps/catalog";
 import type { BillingPlan } from "@/lib/billing/plans";
-import { defaultBillingPlans } from "@/lib/billing/plans";
 import type { ComplianceIssue } from "@/lib/compliance/check";
 import {
   localQuestionnaireTemplate,
@@ -678,9 +677,6 @@ export async function tryListBillingPlans(options: { includeInactive?: boolean }
        order by sort_order asc, amount_cents asc`,
       [Boolean(options.includeInactive)],
     );
-    if (result.rows.length === 0) {
-      return defaultBillingPlans.map((plan, index) => ({ ...plan, status: "active", sortOrder: index }));
-    }
     return result.rows.map((row) => ({
       code: row.code,
       name: row.name,
@@ -693,7 +689,7 @@ export async function tryListBillingPlans(options: { includeInactive?: boolean }
       sortOrder: row.sort_order,
     }));
   } catch {
-    return defaultBillingPlans.map((plan, index) => ({ ...plan, status: "active", sortOrder: index }));
+    return [];
   }
 }
 
@@ -887,7 +883,7 @@ export async function tryListAdminOrders(limit = 100) {
   }
 }
 
-export async function tryUpdateAdminOrderStatus(input: { orderId: string; status: string }) {
+export async function tryUpdateAdminOrderStatus(input: { orderId: string; status: string; expectedStatus?: string }) {
   try {
     const result = await query<{
       id: string;
@@ -898,8 +894,9 @@ export async function tryUpdateAdminOrderStatus(input: { orderId: string; status
        set status = $2,
            paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end
        where id = $1
+         and ($3::text is null or status = $3)
        returning id, status, paid_at`,
-      [input.orderId, input.status],
+      [input.orderId, input.status, input.expectedStatus ?? null],
     );
     return result.rows[0] ?? null;
   } catch {
@@ -1041,7 +1038,7 @@ export async function tryEnsureQuestionnaireTemplate(template: QuestionnaireTemp
   try {
     const inserted = await query<{ id: string }>(
       `insert into questionnaire_templates(code, name, version, description, status)
-       values ('default-thinking-questionnaire', $1, 1, $2, 'active')
+       values ('persona-questionnaire-v2', $1, 2, $2, 'active')
        on conflict (code) do update set
          name = excluded.name,
          description = excluded.description,
@@ -1091,13 +1088,15 @@ export async function tryEnsureQuestionnaireTemplate(template: QuestionnaireTemp
             JSON.stringify({
               minItems: question.min_items ?? null,
               maxTotalDuration: question.max_total_duration ?? null,
+              options: question.options ?? null,
+              choiceLabels: question.choice_labels ?? null,
             }),
           ],
         );
       }
     }
 
-    return { id: templateId, code: "default-thinking-questionnaire" };
+    return { id: templateId, code: "persona-questionnaire-v2" };
   } catch {
     return null;
   }
@@ -1959,6 +1958,15 @@ export async function tryUpdateAdminUser(input: { userId: string; status?: strin
   }
 }
 
+export async function tryCountActiveAdmins() {
+  try {
+    const result = await query<{ count: string }>("select count(*)::text as count from users where role = 'admin' and status = 'active'");
+    return Number(result.rows[0]?.count ?? 0);
+  } catch {
+    return null;
+  }
+}
+
 export async function tryCreateAdminAuditLog(input: {
   adminUserId: string | null;
   action: string;
@@ -2317,15 +2325,16 @@ type AnnouncementRecord = {
   updated_at: string;
 };
 
-export async function tryListPublishedAnnouncements(limit = 6) {
+export async function tryListPublishedAnnouncements(limit = 6, placement?: "global" | "dashboard" | "billing" | "benefits") {
   try {
     const result = await query<AnnouncementRecord>(
       `select id, title, content, kind, placement, status, link_url, is_pinned, published_at, created_at, updated_at
        from announcements
        where status = 'published'
+         and ($2::text is null or placement in ('global', $2))
        order by is_pinned desc, coalesce(published_at, created_at) desc
        limit $1`,
-      [Math.min(Math.max(limit, 1), 20)],
+      [Math.min(Math.max(limit, 1), 20), placement ?? null],
     );
     return result.rows;
   } catch {
@@ -2528,8 +2537,56 @@ export async function tryUpdatePromoCodeStatus(input: { id: string; status: stri
 
 export async function tryDeletePromoCode(id: string) {
   try {
-    const result = await query<{ id: string }>("delete from promo_codes where id = $1 returning id", [id]);
+    const result = await query<{ id: string }>(
+      `delete from promo_codes
+       where id = $1 and redeemed_count = 0
+       returning id`,
+      [id],
+    );
     return Boolean(result.rows[0]);
+  } catch {
+    return false;
+  }
+}
+
+export async function tryGetAvailableDiscountRedemption(userId: string) {
+  try {
+    const result = await query<{ id: string; code: string; discount_percent: number }>(
+      `select pr.id, pc.code, pr.discount_percent
+       from promo_redemptions pr
+       join promo_codes pc on pc.id = pr.promo_code_id
+       where pr.user_id = $1
+         and pr.discount_percent > 0
+         and pr.used_at is null
+       order by pr.created_at asc
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryConsumeDiscountRedemption(input: { redemptionId: string; userId: string; orderId: string }) {
+  try {
+    const result = await query<{ id: string }>(
+      `update promo_redemptions
+       set used_at = now(), order_id = $3
+       where id = $1 and user_id = $2 and used_at is null
+       returning id`,
+      [input.redemptionId, input.userId, input.orderId],
+    );
+    return Boolean(result.rows[0]);
+  } catch {
+    return false;
+  }
+}
+
+export async function tryReleaseDiscountRedemption(orderId: string) {
+  try {
+    await query("update promo_redemptions set used_at = null, order_id = null where order_id = $1", [orderId]);
+    return true;
   } catch {
     return false;
   }
@@ -2547,7 +2604,8 @@ export async function tryRedeemPromoCode(input: { userId: string | null; code: s
       `select id, code, reward_type, credit_amount, discount_percent, status, max_redemptions, redeemed_count, starts_at, expires_at, notes, created_at, updated_at
        from promo_codes
        where code = upper($1)
-       limit 1`,
+       limit 1
+       for update`,
       [input.code.trim()],
     );
     const row = promo.rows[0];
@@ -2747,18 +2805,25 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
   if (!userId) return null;
 
   try {
-    const [balance, works, usage, orders, announcements, gifts] = await Promise.all([
+    const [balance, works, usage, orders, announcements, gifts, topicSnapshot] = await Promise.all([
       tryGetLocalQuotaBalance(userId),
       tryListWorks(userId),
       tryListUsageLogs(userId),
       tryListOrders(userId),
-      tryListPublishedAnnouncements(5),
+      tryListPublishedAnnouncements(5, "dashboard"),
       tryListGiftRecords(userId),
+      tryListLatestTopicSnapshots({ limit: 5, maxAgeMinutes: 1440 }),
     ]);
+
+    const weekStart = startOfCurrentWeek();
+    const weeklyWorks = works.filter((work) => new Date(work.updated_at).getTime() >= weekStart);
+    const weeklyUsage = usage.filter((item) => new Date(item.created_at).getTime() >= weekStart);
 
     return {
       balance,
       draftCount: works.length,
+      weeklyDraftCount: weeklyWorks.length,
+      weeklyUsed: weeklyUsage.reduce((sum, item) => sum + item.quota_cost, 0),
       paidOrders: orders.filter((order) => order.status === "paid").length,
       pendingOrders: orders.filter((order) => order.status !== "paid").length,
       totalUsed: usage.reduce((sum, item) => sum + item.quota_cost, 0),
@@ -2767,10 +2832,19 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
       recentOrders: orders.slice(0, 6),
       announcements,
       recentGifts: gifts.slice(0, 4),
+      topics: topicSnapshot.topics,
+      topicsRefreshedAt: topicSnapshot.refreshedAt,
     };
   } catch {
     return null;
   }
+}
+
+function startOfCurrentWeek() {
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
+  return start.getTime();
 }
 
 export async function tryGetCreationHubData(userId: string | null) {
@@ -2780,7 +2854,7 @@ export async function tryGetCreationHubData(userId: string | null) {
     const [balance, works, announcements, usage] = await Promise.all([
       tryGetLocalQuotaBalance(userId),
       tryListWorks(userId),
-      tryListPublishedAnnouncements(3),
+      tryListPublishedAnnouncements(3, "dashboard"),
       tryListUsageLogs(userId),
     ]);
 

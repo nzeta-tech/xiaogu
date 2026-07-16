@@ -1,4 +1,5 @@
 import { hasModelConfig, isDemoModeEnabled } from "@/lib/config/runtime";
+import { formatAvatarMemoriesForPrompt, tryListActiveAvatarMemories, tryLogAvatarUsage } from "@/lib/avatar/store";
 import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt } from "@/lib/thinking/profile-snapshot";
 import { getHotTopics } from "@/lib/topics/hot-topics";
@@ -16,19 +17,23 @@ export async function runInsuranceContentAgent(
   styleMode: WritingStyleMode = "general",
 ) {
   const latest = messages.at(-1)?.content ?? "";
-  const [profile, thinkingSnapshot] = userId
-    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId)])
-    : [null, null];
+  const [profile, thinkingSnapshot, avatarMemories] = userId
+    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId), tryListActiveAvatarMemories(userId)])
+    : [null, null, []];
 
   if (hasModelConfig()) {
-    return callModel(messages, profile, thinkingSnapshot, styleMode);
+    const output = await callModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode);
+    await tryLogAvatarUsage({ userId: userId ?? null, memoryIds: avatarMemories.map((item) => item.id), contextType: "agent" });
+    return output;
   }
 
   if (!isDemoModeEnabled()) {
     throw new Error("大模型服务未配置，生产模式不能使用模板文案");
   }
 
-  return runDemoAgent(latest, profile, thinkingSnapshot, styleMode);
+  const output = await runDemoAgent(latest, profile, thinkingSnapshot, styleMode);
+  await tryLogAvatarUsage({ userId: userId ?? null, memoryIds: avatarMemories.map((item) => item.id), contextType: "agent-demo" });
+  return output;
 }
 
 export async function* streamInsuranceContentAgent(
@@ -36,24 +41,27 @@ export async function* streamInsuranceContentAgent(
   userId?: string | null,
   styleMode: WritingStyleMode = "traffic",
 ) {
-  const [profile, thinkingSnapshot] = userId
-    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId)])
-    : [null, null];
+  const [profile, thinkingSnapshot, avatarMemories] = userId
+    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId), tryListActiveAvatarMemories(userId)])
+    : [null, null, []];
   if (hasModelConfig()) {
-    for await (const chunk of streamModel(messages, profile, thinkingSnapshot, styleMode)) {
+    for await (const chunk of streamModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode)) {
       yield chunk;
     }
+    await tryLogAvatarUsage({ userId: userId ?? null, memoryIds: avatarMemories.map((item) => item.id), contextType: "agent-stream" });
   } else {
     if (!isDemoModeEnabled()) {
       throw new Error("大模型服务未配置，生产模式不能使用模板文案");
     }
     yield await runDemoAgent(messages.at(-1)?.content ?? "", profile, thinkingSnapshot, styleMode);
+    await tryLogAvatarUsage({ userId: userId ?? null, memoryIds: avatarMemories.map((item) => item.id), contextType: "agent-demo-stream" });
   }
 }
 
 function buildSystemPrompt(
   profile: Awaited<ReturnType<typeof tryGetBrokerProfile>>,
   thinkingSnapshot: Awaited<ReturnType<typeof tryGetLatestThinkingProfileSnapshot>>,
+  avatarMemories: Awaited<ReturnType<typeof tryListActiveAvatarMemories>>,
   styleMode: WritingStyleMode,
 ) {
   const styleInstruction =
@@ -94,7 +102,7 @@ function buildSystemPrompt(
 
   const brief = thinkingSnapshot?.snapshot_json ? buildThinkingProfileBrief(thinkingSnapshot.snapshot_json, thinkingSnapshot.summary_json) : null;
   const profileLine = brief
-    ? `当前经纪人长期思维画像：人设底色=${brief.persona || "未设置"}。目标受众=${brief.targetAudience || "未设置"}。擅长主题=${brief.specialty || "未设置"}。表达偏好=${brief.topicPreference || "未设置"}。`
+    ? `当前经纪人长期人设画像：人设底色=${brief.persona || "未设置"}。目标受众=${brief.targetAudience || "未设置"}。擅长主题=${brief.specialty || "未设置"}。表达偏好=${brief.topicPreference || "未设置"}。`
     : profile
       ? `当前经纪人账号展示信息：昵称=${profile.display_name || "未设置"}。签名=${profile.ip_tagline || "未设置"}。简介=${profile.profile_summary || "未设置"}。`
       : "如果没有读取到账户人设，默认按专业理性、家庭保障和养老医疗方向输出。";
@@ -107,6 +115,7 @@ function buildSystemPrompt(
     thinkingSnapshot?.snapshot_json
       ? formatThinkingProfileSnapshotForPrompt(thinkingSnapshot.snapshot_json, thinkingSnapshot.summary_json)
       : "",
+    formatAvatarMemoriesForPrompt(avatarMemories),
     "你的任务是帮助经纪人发现热点选题、改写成保险角度、生成视频号/抖音短视频口播文案。",
     "必须遵守保险销售宣传合规要求：不得承诺收益、不得承诺理赔、不得夸大保障、不得制造恐慌逼单。",
     "表达要像可靠的专业伙伴：温和、稳妥、不过度营销，不制造焦虑。",
@@ -123,9 +132,10 @@ async function callModel(
   messages: AgentMessage[],
   profile: Awaited<ReturnType<typeof tryGetBrokerProfile>>,
   thinkingSnapshot: Awaited<ReturnType<typeof tryGetLatestThinkingProfileSnapshot>>,
+  avatarMemories: Awaited<ReturnType<typeof tryListActiveAvatarMemories>>,
   styleMode: WritingStyleMode,
 ) {
-  const system = buildSystemPrompt(profile, thinkingSnapshot, styleMode);
+  const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
 
   if (provider === "google") return callGoogleGemini(system, messages);
@@ -142,9 +152,10 @@ async function* streamModel(
   messages: AgentMessage[],
   profile: Awaited<ReturnType<typeof tryGetBrokerProfile>>,
   thinkingSnapshot: Awaited<ReturnType<typeof tryGetLatestThinkingProfileSnapshot>>,
+  avatarMemories: Awaited<ReturnType<typeof tryListActiveAvatarMemories>>,
   styleMode: WritingStyleMode,
 ) {
-  const system = buildSystemPrompt(profile, thinkingSnapshot, styleMode);
+  const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
 
   if (provider === "google") {

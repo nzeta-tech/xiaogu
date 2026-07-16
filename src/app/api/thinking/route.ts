@@ -52,7 +52,7 @@ export async function GET() {
   const questionnaire = await tryGetLatestQuestionnaire(user.id);
   const thinkingProfileSnapshot = await tryGetLatestThinkingProfileSnapshot(user.id);
   if (!profile && !questionnaire && !thinkingProfileSnapshot) {
-    return Response.json({ error: "思维档案暂不可用" }, { status: 404 });
+    return Response.json({ error: "人设档案暂不可用" }, { status: 404 });
   }
 
   const derived = thinkingProfileSnapshot?.snapshot_json
@@ -129,7 +129,7 @@ export async function POST(request: Request) {
     });
 
     if (!profile || !savedQuestionnaire || !savedThinkingSnapshot) {
-      return Response.json({ error: "思维保存失败，请稍后再试。" }, { status: 503 });
+      return Response.json({ error: "人设保存失败，请稍后再试。" }, { status: 503 });
     }
 
     const derivedSummary = computeThinkingProfileSummary(buildThinkingProfileBrief(builtProfile.snapshot, builtProfile.summary));
@@ -176,7 +176,7 @@ export async function POST(request: Request) {
   });
 
   if (!profile || !savedThinkingSnapshot) {
-    return Response.json({ error: "思维保存失败，请稍后再试。" }, { status: 503 });
+    return Response.json({ error: "人设保存失败，请稍后再试。" }, { status: 503 });
   }
 
   const summary = computeThinkingProfileSummary(buildThinkingProfileBrief(builtProfile.snapshot, builtProfile.summary));
@@ -204,22 +204,12 @@ function hydrateDefaultQuestionnaireAnswers(
   answers: QuestionnaireAnswers,
   input: z.infer<typeof thinkingSchema>,
 ) {
-  const sections = localQuestionnaireTemplate.structure.sections;
-  const firstSection = sections[0];
-  const secondSection = sections[1];
-  const thirdSection = sections[2];
-  const fifthSection = sections[4];
+  setAnswer("identity", "role_context", input.persona);
+  setAnswer("audience", "specialty", input.specialty);
+  setAnswer("audience", "primary_audience", input.targetAudience);
+  setAnswer("voice", "tone_preference", input.topicPreference);
 
-  if (firstSection?.questions[0]) {
-    answers[firstSection.section_id][firstSection.questions[0].question_id].items[0].content = input.persona;
-  }
-  if (secondSection?.questions[0]) {
-    answers[secondSection.section_id][secondSection.questions[0].question_id].items[0].content = input.specialty;
-  }
-  if (thirdSection?.questions[1]) {
-    answers[thirdSection.section_id][thirdSection.questions[1].question_id].items[0].content = input.targetAudience;
-  }
-  if (fifthSection?.questions[0]) {
-    answers[fifthSection.section_id][fifthSection.questions[0].question_id].items[0].content = input.topicPreference;
+  function setAnswer(sectionId: string, questionId: string, value: string) {
+    if (answers[sectionId]?.[questionId]) answers[sectionId][questionId].items[0].content = value;
   }
 }

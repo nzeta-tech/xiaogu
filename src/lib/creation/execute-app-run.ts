@@ -12,7 +12,12 @@ import {
   type CreationFieldValue,
 } from "@/lib/creation/output";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
-import { buildLeadCopyPrompt } from "@/lib/creation/lead-copy";
+import {
+  buildLeadCopyPrompt,
+  getMultiChannelCopyStyleMode,
+  getMultiChannelCopyVariant,
+  isMultiChannelCopyAppSlug,
+} from "@/lib/creation/lead-copy";
 import { buildXiaohongshuCheckPrompt } from "@/lib/creation/xiaohongshu-check";
 import {
   tryCompleteAppRun,
@@ -76,8 +81,8 @@ export async function executeCreationAppRun(input: {
 
   const prompt = app.slug === "write-copy"
     ? buildWriteCopyPrompt(values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
-    : app.slug === "lead-copy"
-      ? buildLeadCopyPrompt(effectiveApp.fields, values, effectiveApp.promptHint, caseContext)
+    : isMultiChannelCopyAppSlug(app.slug)
+      ? buildLeadCopyPrompt(effectiveApp.fields, values, effectiveApp.promptHint, caseContext, getMultiChannelCopyVariant(app.slug))
     : app.slug === "general-content"
       ? buildGeneralContentPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "xiaohongshu-check"
@@ -107,7 +112,7 @@ export async function executeCreationAppRun(input: {
         appCode: app.slug,
         tone: app.slug === "write-copy"
           ? stringifyCreationFieldValue(values.tone) || "self"
-          : app.slug === "lead-copy"
+          : isMultiChannelCopyAppSlug(app.slug)
             ? stringifyCreationFieldValue(values.tone)
             : "",
         targetChannels: Array.isArray(values.targets) ? values.targets : [],
@@ -172,7 +177,7 @@ export async function executeCreationAppRun(input: {
         throw imageResult?.retryable ? new RetryableCreationRunError(errorMessage) : new Error(errorMessage);
       }
     } else {
-      const styleMode = app.slug === "write-copy" ? "general" : "traffic";
+      const styleMode = app.slug === "write-copy" ? "general" : getMultiChannelCopyStyleMode(app.slug);
       for await (const chunk of streamInsuranceContentAgent([{ role: "user", content: prompt }], input.userId, styleMode)) {
         result += chunk;
         await input.onEvent?.({ type: "delta", content: chunk });
@@ -213,7 +218,7 @@ export async function executeCreationAppRun(input: {
     throw new Error("本次生成没有返回有效内容，请稍后重试。");
   }
 
-  const titleFields = app.slug === "lead-copy" ? ["source"] : effectiveApp.fields.map((field) => field.id);
+  const titleFields = isMultiChannelCopyAppSlug(app.slug) ? ["source"] : effectiveApp.fields.map((field) => field.id);
   const title = `${effectiveApp.name}｜${summarizeTitle(values, titleFields)}`;
   const contentJson =
     (resultJson?.contentJson as Record<string, unknown> | undefined) ??
@@ -301,7 +306,7 @@ function buildTopicPickerPrompt(
     `应用提示：${promptHint}`,
     brief
       ? `长期人物底盘：人设底色=${brief.persona || "未提供"}；核心客群=${brief.targetAudience || "未提供"}；擅长主题=${brief.specialty || "未提供"}；表达偏好=${brief.topicPreference || "未提供"}。`
-      : "长期人物底盘：用户未提供完整思维画像，请用资深保险内容顾问视角生成。",
+      : "长期人设底盘：用户未提供完整人设画像，请用资深保险内容顾问视角生成。",
     `特殊要求：${specialRequirements || "用户未填写，请根据个人定位和风格自动生成。"}`,
     "输出必须严格包含以下 4 个一级模块，标题必须完全一致：",
     "1)【一、人设提炼】",

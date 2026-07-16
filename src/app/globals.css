@@ -8804,18 +8804,14 @@ a {
 
 .adminConsole {
   display: grid;
-  grid-template-columns: 244px minmax(0, 1fr);
-  gap: 0;
-  width: 100vw;
-  height: 100vh;
-  min-height: 100vh;
+  gap: 20px;
+  width: 100%;
+  min-height: 0;
   margin: 0;
   padding: 0;
-  overflow: auto;
-  background:
-    radial-gradient(circle at 48% -16%, rgba(20, 184, 166, 0.15), transparent 26%),
-    linear-gradient(180deg, #0a111b 0%, #0c1420 48%, #090f18 100%);
-  color: #dbe7f3;
+  overflow: visible;
+  background: transparent;
+  color: #0f172a;
 }
 
 .adminSidebar {
@@ -8937,12 +8933,10 @@ a {
   min-width: 0;
   display: grid;
   align-content: start;
-  gap: 18px;
-  min-height: 100vh;
-  padding: 0 22px 34px;
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(10, 17, 27, 0.68)),
-    radial-gradient(circle at 90% 0%, rgba(14, 165, 233, 0.12), transparent 32%);
+  gap: 20px;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .adminHeaderBar {
@@ -8950,28 +8944,26 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 68px;
-  margin: 0 -22px;
-  padding: 14px 28px;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 0 0;
   border: 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 0;
-  background: rgba(22, 32, 47, 0.92);
-  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(16px);
+  background: transparent;
+  box-shadow: none;
 }
 
 .adminHeaderBar h1 {
   margin: 0;
-  color: #f8fafc;
-  font-size: 22px;
+  color: #0f172a;
+  font-size: 26px;
   letter-spacing: 0;
 }
 
 .adminHeaderBar p {
   margin: 5px 0 0;
-  color: #8ea0b7;
-  font-size: 13px;
+  color: #64748b;
+  font-size: 14px;
 }
 
 .adminHeaderActions {
@@ -8983,20 +8975,20 @@ a {
 }
 
 .adminHeaderActions span {
-  border: 1px solid rgba(45, 212, 191, 0.22);
+  border: 1px solid #ccfbf1;
   border-radius: 999px;
   padding: 7px 10px;
-  color: #99f6e4;
-  background: rgba(20, 184, 166, 0.1);
+  color: #0f766e;
+  background: #f0fdfa;
   font-size: 12px;
   font-weight: 800;
 }
 
 .adminConsole .panel {
-  border-color: rgba(148, 163, 184, 0.14);
+  border-color: #e2e8f0;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.66);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14);
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.045);
 }
 
 .adminPanelCard {
@@ -9015,12 +9007,10 @@ a {
   position: relative;
   min-height: 96px;
   padding: 16px 16px 14px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  background:
-    radial-gradient(circle at top right, rgba(45, 212, 191, 0.1), transparent 34%),
-    linear-gradient(180deg, rgba(21, 32, 48, 0.9), rgba(13, 22, 35, 0.9));
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.14);
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.045);
   overflow: hidden;
 }
 
@@ -9033,32 +9023,32 @@ a {
 }
 
 .adminConsole .adminMetricCard span {
-  color: #8ea0b7;
+  color: #64748b;
   font-size: 12px;
   font-weight: 700;
 }
 
 .adminConsole .adminMetricCard strong {
   margin-top: 8px;
-  color: #f8fafc;
+  color: #0f172a;
   font-size: 25px;
   line-height: 1.1;
 }
 
 .adminConsole .panelHeader {
   padding: 13px 16px 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(30, 41, 59, 0.38);
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
 }
 
 .adminConsole .panelHeader h2 {
-  color: #f1f5f9;
+  color: #0f172a;
   font-size: 16px;
   font-weight: 800;
 }
 
 .adminConsole .panelHeader p {
-  color: #8ea0b7;
+  color: #64748b;
 }
 
 .adminConsole .sideBody {
@@ -9069,48 +9059,48 @@ a {
   display: grid;
   gap: 5px;
   padding: 11px 12px;
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.5);
+  background: #ffffff;
   transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
 }
 
 .adminInfoRow:hover {
-  border-color: rgba(45, 212, 191, 0.26);
-  background: rgba(20, 184, 166, 0.08);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.14);
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  box-shadow: 0 10px 24px rgba(20, 184, 166, 0.08);
 }
 
 .adminInfoRow strong {
-  color: #e5eef8;
+  color: #1e293b;
   font-size: 14px;
   line-height: 1.35;
 }
 
 .adminInfoRow p {
   margin: 0;
-  color: #8ea0b7;
+  color: #64748b;
   font-size: 12px;
   line-height: 1.5;
 }
 
 .adminConsole .tableList {
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(10, 17, 27, 0.42);
+  background: #ffffff;
 }
 
 .adminConsole .tableRow {
   min-height: 62px;
   padding: 11px 14px;
   border-top: 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-  background: rgba(15, 23, 42, 0.46);
+  border-bottom: 1px solid #edf2f7;
+  background: #ffffff;
 }
 
 .adminConsole .tableRow:hover {
-  background: rgba(30, 41, 59, 0.6);
+  background: #f8fafc;
 }
 
 .adminConsole .tableRow:last-child {
@@ -9118,29 +9108,29 @@ a {
 }
 
 .adminConsole .tableRow strong {
-  color: #e5eef8;
+  color: #1e293b;
   font-size: 14px;
 }
 
 .adminConsole .tableRow span {
-  color: #8ea0b7;
+  color: #64748b;
   line-height: 1.45;
 }
 
 .adminConsole input,
 .adminConsole select,
 .adminConsole textarea {
-  border-color: rgba(148, 163, 184, 0.18);
+  border-color: #dbe3ee;
   border-radius: 8px;
-  background: rgba(8, 14, 23, 0.72);
-  color: #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   min-height: 38px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  box-shadow: none;
 }
 
 .adminConsole input::placeholder,
 .adminConsole textarea::placeholder {
-  color: #64748b;
+  color: #94a3b8;
 }
 
 .adminConsole textarea {
@@ -9150,8 +9140,8 @@ a {
 .adminConsole input:focus,
 .adminConsole select:focus,
 .adminConsole textarea:focus {
-  border-color: rgba(45, 212, 191, 0.5);
-  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
   outline: none;
 }
 
@@ -9170,22 +9160,23 @@ a {
 }
 
 .adminConsole .secondaryButton {
-  border-color: rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.66);
-  color: #cbd5e1;
+  border-color: #dbe3ee;
+  background: #ffffff;
+  color: #475569;
 }
 
 .adminConsole .secondaryButton:hover {
-  background: rgba(45, 212, 191, 0.1);
-  color: #99f6e4;
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
 }
 
 .adminConsole .emptyState {
   margin: 0;
-  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border: 1px dashed #cbd5e1;
   border-radius: 8px;
-  background: rgba(8, 14, 23, 0.42);
-  color: #8ea0b7;
+  background: #f8fafc;
+  color: #64748b;
   text-align: center;
 }
 
@@ -9208,8 +9199,8 @@ a {
 
 .adminConsole .sectionBlock > .inlineFields {
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(8, 14, 23, 0.32);
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
 
 .adminConsole .pageStack {
@@ -9220,11 +9211,11 @@ a {
 }
 
 .adminConsole .stackForm label {
-  color: #a8b6c8;
+  color: #475569;
 }
 
 .adminConsole .checkboxRow {
-  color: #a8b6c8;
+  color: #475569;
 }
 
 .adminConsole .checkboxRow input {
@@ -9232,37 +9223,37 @@ a {
 }
 
 .adminConsole .alertPanel {
-  border-color: rgba(248, 113, 113, 0.22);
-  background: rgba(127, 29, 29, 0.18);
-  color: #fecaca;
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
   padding: 12px 14px;
 }
 
 .adminConsole .successPanel {
-  border-color: rgba(45, 212, 191, 0.22);
-  background: rgba(20, 184, 166, 0.11);
-  color: #99f6e4;
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
   padding: 12px 14px;
 }
 
 .adminConsole .statusPill {
-  border: 1px solid rgba(129, 140, 248, 0.22);
-  background: rgba(79, 70, 229, 0.16);
-  color: #c4b5fd;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
 }
 
 .adminConsole .statusPill.active,
 .adminConsole .statusPill.published,
 .adminConsole .statusPill.resolved {
-  border-color: rgba(34, 197, 94, 0.22);
-  background: rgba(22, 163, 74, 0.16);
-  color: #86efac;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
 }
 
 .adminConsole .statusPill.paid {
-  border-color: rgba(45, 212, 191, 0.24);
-  background: rgba(20, 184, 166, 0.16);
-  color: #99f6e4;
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
 }
 
 .adminConsole .statusPill.failed,
@@ -9270,18 +9261,18 @@ a {
 .adminConsole .statusPill.inactive,
 .adminConsole .statusPill.closed,
 .adminConsole .statusPill.high {
-  border-color: rgba(248, 113, 113, 0.24);
-  background: rgba(220, 38, 38, 0.16);
-  color: #fecaca;
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .adminConsole .statusPill.pending,
 .adminConsole .statusPill.draft,
 .adminConsole .statusPill.in_progress,
 .adminConsole .statusPill.normal {
-  border-color: rgba(251, 191, 36, 0.24);
-  background: rgba(217, 119, 6, 0.16);
-  color: #fde68a;
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #a16207;
 }
 
 .adminGrid {
@@ -22096,12 +22087,12 @@ a {
   }
 
   .adminMainSurface {
-    padding: 0 14px 24px;
+    padding: 0;
   }
 
   .adminHeaderBar {
-    margin: 0 -14px;
-    padding: 14px;
+    margin: 0;
+    padding: 0;
   }
 
   .adminSidebarNav {

@@ -11,6 +11,7 @@
     "db:seed": "node scripts/seed-demo-user.mjs",
     "db:backfill-works": "node scripts/backfill-drafts-to-works.mjs",
     "db:backfill-thinking-snapshots": "node scripts/backfill-thinking-snapshots.mjs",
+    "avatar:backfill-guyu": "node --env-file=.env scripts/backfill-guyu-avatar.mjs",
     "model:check": "node scripts/check-model.mjs",
     "typecheck": "tsc --noEmit"
   },

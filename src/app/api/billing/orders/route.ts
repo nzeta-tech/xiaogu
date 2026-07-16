@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { grantCredits } from "@/lib/billing/openmeter";
-import { tryCreateOrder, tryGetBillingPlan, tryGetSystemSettings, tryListOrders, tryUpdateOrderCheckout } from "@/lib/db/repositories";
+import { tryConsumeDiscountRedemption, tryCreateOrder, tryGetAvailableDiscountRedemption, tryGetBillingPlan, tryGetSystemSettings, tryListOrders, tryReleaseDiscountRedemption, tryUpdateAdminOrderStatus, tryUpdateOrderCheckout } from "@/lib/db/repositories";
 import { createStripeCheckoutSession, isStripeConfigured } from "@/lib/payments/stripe";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 
@@ -52,39 +52,52 @@ export async function POST(request: Request) {
   if (!plan) {
     return Response.json({ error: "套餐不存在" }, { status: 404 });
   }
+  if (input.provider === "stripe" && !isStripeConfigured()) {
+    return Response.json({ error: "Stripe 未配置，请检查 STRIPE_SECRET_KEY" }, { status: 503 });
+  }
+
+  const discount = await tryGetAvailableDiscountRedemption(user.id);
+  const effectivePlan = discount
+    ? { ...plan, amountCents: Math.max(0, Math.round(plan.amountCents * (100 - discount.discount_percent) / 100)) }
+    : plan;
 
   const order = await tryCreateOrder({
     userId: user.id,
     provider: input.provider,
-    plan,
+    plan: effectivePlan,
     status: input.provider === "demo" ? "paid" : "pending",
-    metadata: { checkoutMode: input.provider === "demo" ? "instant_grant" : "redirect" },
+    metadata: { checkoutMode: input.provider === "demo" ? "instant_grant" : "redirect", originalAmountCents: plan.amountCents, promoCode: discount?.code ?? null, discountPercent: discount?.discount_percent ?? 0 },
   });
 
   if (!order) {
     return Response.json({ error: "数据库不可用，无法创建支付订单" }, { status: 503 });
   }
+  if (discount) {
+    const consumed = await tryConsumeDiscountRedemption({ redemptionId: discount.id, userId: user.id, orderId: order.id });
+    if (!consumed) {
+      await tryUpdateAdminOrderStatus({ orderId: order.id, status: "failed", expectedStatus: order.status });
+      return Response.json({ error: "优惠权益状态已变化，请刷新后重试" }, { status: 409 });
+    }
+  }
 
   if (input.provider === "demo") {
     await grantCredits({
       customerId: user.id,
-      amount: plan.quotaAmount,
+      amount: effectivePlan.quotaAmount,
       reason: "demo_order",
       metadata: { planCode: plan.code, orderId: order?.id ?? "demo-order" },
     });
   }
 
   if (input.provider === "stripe") {
-    if (!isStripeConfigured()) {
-      return Response.json({ error: "Stripe 未配置，请检查 STRIPE_SECRET_KEY" }, { status: 503 });
+    let session;
+    try {
+      session = await createStripeCheckoutSession({ orderId: order.id, userId: user.id, userEmail: user.email, plan: effectivePlan });
+    } catch {
+      await tryUpdateAdminOrderStatus({ orderId: order.id, status: "failed", expectedStatus: "pending" });
+      await tryReleaseDiscountRedemption(order.id);
+      return Response.json({ error: "支付会话创建失败，请稍后重试" }, { status: 502 });
     }
-
-    const session = await createStripeCheckoutSession({
-      orderId: order.id,
-      userId: user.id,
-      userEmail: user.email,
-      plan,
-    });
     await tryUpdateOrderCheckout({
       orderId: order.id,
       providerOrderId: session.id,

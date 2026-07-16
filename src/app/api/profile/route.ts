@@ -16,7 +16,7 @@ export async function GET() {
 
   const [profile, thinkingSnapshot] = await Promise.all([tryGetBrokerProfile(user.id), tryGetLatestThinkingProfileSnapshot(user.id)]);
   if (!profile && !thinkingSnapshot) {
-    return Response.json({ error: "账号画像不存在，请先完成思维设定" }, { status: 404 });
+    return Response.json({ error: "人设画像不存在，请先完善人设" }, { status: 404 });
   }
 
   const brief = thinkingSnapshot?.snapshot_json

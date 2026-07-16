@@ -41,6 +41,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isImageCard = appFamily === "image-card";
   const isWriteCopy = appFamily === "write-copy";
   const isLeadCopy = app.slug === "lead-copy";
+  const isMultiChannelPolishLayout = app.slug === "traffic-copy" || app.slug === "marketing-copy";
   const isLeadPackage = app.slug === "lead-package";
   const isLiveScript = app.slug === "live-script";
   const isGeneralContent = app.slug === "general-content";
@@ -71,9 +72,12 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   });
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
-  const [values, setValues] = useState<Record<string, FieldValue>>(() =>
-    createInitialValues(pageApp, exampleSlug ? activeExample : null, searchParams.get("from") === "workspace"),
-  );
+  const [values, setValues] = useState<Record<string, FieldValue>>(() => {
+    const initialValues = createInitialValues(pageApp, exampleSlug ? activeExample : null, searchParams.get("from") === "workspace");
+    const initialPrompt = searchParams.get("prompt")?.trim();
+    const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
+    return initialPrompt && promptField ? { ...initialValues, [promptField.id]: initialPrompt } : initialValues;
+  });
   const [loading, setLoading] = useState(false);
   const [showExample, setShowExample] = useState(false);
   const [error, setError] = useState("");
@@ -238,7 +242,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     <div className={buildAppPageClassName(appFamily, app.slug, workspaceEntry)}>
         <div className="page-content">
         <div className="page-back-bar pageBackBar">
-          <a className="back-btn backLink" href={appPath("/workspace")}>{isCompactWechatFlow || isCompactWriteCopyFlow || isLeadCopy || isCompactRecruitPage ? "返回" : "返回广场"}</a>
+          <a className="back-btn backLink" href={appPath("/workspace")}>{isCompactWechatFlow || isCompactWriteCopyFlow || (isLeadCopy && !isMultiChannelPolishLayout) || isCompactRecruitPage ? "返回" : "返回广场"}</a>
         </div>
 
         <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : "app-info-card"}>
@@ -248,14 +252,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               <h1 className="app-name">{pageApp.name}</h1>
               <p className="app-description">{pageApp.description}</p>
             </div>
-            {isImageCard || isWechatArticlePolish || isVideoScriptPolish || isGeneralContent ? (
+            {isImageCard || isWechatArticlePolish || isVideoScriptPolish || isGeneralContent || isMultiChannelPolishLayout ? (
               <button className="imageCardGuideButton" onClick={handleGuideAction} type="button">
                 <span className="imageCardGuideFire" aria-hidden="true">✓</span>
                 <span>创作规范</span>
               </button>
             ) : null}
           </div>
-          {isLeadCopy ? (
+          {isLeadCopy && !isMultiChannelPolishLayout ? (
             <div className="app-meta leadCopyMeta">
               <span>{app.points} 积分/次</span>
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
@@ -271,11 +275,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
               <em>工具型诊断页</em>
             </div>
-          ) : !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && !isCompactWechatFlow && !isCompactWriteCopyFlow && !isCompactRecruitPage ? (
+          ) : !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && !isMultiChannelPolishLayout && !isCompactWechatFlow && !isCompactWriteCopyFlow && !isCompactRecruitPage ? (
             <div className="app-meta">
               <span>{pageApp.points} 积分/次</span>
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
-              {pageApp.requiresThinking ? <em>建议先创建思维</em> : null}
+              {pageApp.requiresThinking ? <em>建议先完善人设</em> : null}
             </div>
           ) : null}
           {!isImageCard && !isLeadCopy && !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && hasRealExample && activeExample && !isCompactWriteCopyFlow ? (
@@ -294,7 +298,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               </button>
             </div>
           ) : null}
-          {isLeadCopy ? <div className="leadCopyIntro">围绕引流转化目标，一次产出口播稿、小红书笔记和公众号文章。</div> : null}
+          {isLeadCopy && !isMultiChannelPolishLayout ? (
+            <div className="leadCopyIntro">
+              围绕引流转化目标，一次产出口播稿、小红书笔记和公众号文章。
+            </div>
+          ) : null}
           {isLeadPackage ? (
             <div className="leadPackageHeroBody">
               <div className="leadPackageHeroIntro">
@@ -343,7 +351,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             <div className="topicPickerHeroBody">
               <div className="topicPickerHeroIntro">
                 <strong>一次给你 6 个高质量选题，覆盖流量、信任、引流三个方向。</strong>
-                <p>围绕你的平台、主题和思维画像，拆出可继续创作并能说明事实来源的选题方向。</p>
+                <p>围绕你的平台、主题和人设画像，拆出可继续创作并能说明事实来源的选题方向。</p>
               </div>
               <div className="topicPickerHeroChecklist">
                 <div>
@@ -394,7 +402,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           {isIpPositioningEntry ? (
             <div className="polishHeroBody">
               <div className="polishHeroIntro">
-                <strong>一键生成专属 IP 定位方案，重点是调用你的思维画像，而不是重新写一堆需求说明</strong>
+                <strong>一键生成专属 IP 定位方案，重点是调用你的人设画像，而不是重新写一堆需求说明</strong>
                 <p>这里更像思维驱动型定位页。包含定位分析、包装升级、个人传记文章，完成思维后可以直接开始创作。</p>
               </div>
               <div className="polishHeroChecklist">
@@ -408,7 +416,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 </div>
                 <div>
                   <span>推荐方式</span>
-                  <strong>先完成思维画像，再补当前阶段最真实的业务现状</strong>
+                  <strong>先完成人设画像，再补当前阶段最真实的业务现状</strong>
                 </div>
               </div>
             </div>
@@ -834,7 +842,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             <div className="resultSavedHint submit-alert">尚未提交思维问卷，将使用资深创作者风格创作，若想打造自己的个性化风格，请填写思维问卷 →</div>
           ) : null}
           {isTopicPicker ? (
-            <div className="resultSavedHint submit-alert">这类选题更依赖你的思维画像来判断人设和内容重心。如果还没完成思维，建议先补齐，结果会更像你本人。</div>
+            <div className="resultSavedHint submit-alert">这类选题更依赖你的人设画像来判断内容重心。如果还没完善人设，建议先补齐，结果会更像你本人。</div>
           ) : null}
           {isXiaohongshuCheck ? (
             <div className="resultSavedHint submit-alert">这类应用更偏审核和修改建议。结果页会先标出潜在风险点，再给更稳妥的替代表达方向。</div>
@@ -845,12 +853,19 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
           <section className="submit-section submitSection">
             <button className="primaryButton submit-button submitButton" disabled={loading} onClick={() => void handleSubmit()} type="button">
-              {loading ? (isPolicyDiagnosis ? "诊断中..." : "创作中...") : isXiaohongshuCheck ? `开始检测（${app.points}积分）` : isPolicyDiagnosis ? `开始诊断（${app.points}积分）` : isLeadCopy || isWriteCopy || isGeneralContent || isCompactRecruitPage || isLetter ? `开始创作（${app.points}积分）` : isImageCard || isWechatImages || isWechatArticlePolish || isVideoScriptPolish || isLeadPackage || isTopicPicker ? `开始创作（${app.points}积分）` : `立即创作（${app.points}积分）`}
+              {loading ? (isPolicyDiagnosis ? "诊断中..." : "创作中...") : isXiaohongshuCheck ? `开始检测（${app.points}积分）` : isPolicyDiagnosis ? `开始诊断（${app.points}积分）` : isLeadCopy || isWriteCopy || isGeneralContent || isMultiChannelPolishLayout || isCompactRecruitPage || isLetter ? `开始创作（${app.points}积分）` : isImageCard || isWechatImages || isWechatArticlePolish || isVideoScriptPolish || isLeadPackage || isTopicPicker ? `开始创作（${app.points}积分）` : `立即创作（${app.points}积分）`}
             </button>
             {isImageCard || isLetter ? <div className="imageCardRemakeHint">已载入功能示例的输入方式。请替换为自己的真实内容后开始创作。</div> : null}
             {isWechatImages ? <div className="wechatImagesSubmitHint">生成后会进入作品详情页，重点查看图片是否贴合文章段落节奏与阅读场景。</div> : null}
             {isWriteCopy && !isCompactWriteCopyFlow ? <div className="writeCopySubmitHint">生成后会直接进入作品详情页，支持复制、导出、改写和继续保存。</div> : null}
-            {isLeadCopy ? <div className="leadCopySubmitHint">生成后会进入作品详情页，重点查看首屏钩子、评论承接和私信转化动作。</div> : null}
+            {isLeadCopy && !isMultiChannelPolishLayout ? <div className="leadCopySubmitHint">生成后会进入作品详情页，按口播、小红书和公众号分组查看与继续编辑。</div> : null}
+            {isMultiChannelPolishLayout ? (
+              <div className="polishSubmitHint">
+                {app.slug === "traffic-copy"
+                  ? "生成后会进入作品详情页，重点查看开头钩子、主体逻辑、结尾总结和标题建议。"
+                  : "生成后会进入作品详情页，分别查看讲产品、讲方案、讲案例和讲观念四篇成稿。"}
+              </div>
+            ) : null}
             {isLeadPackage ? <div className="leadPackageSubmitHint">生成后会进入作品详情页，重点查看资料目录、领取动作和朋友圈/私信承接是否完整。</div> : null}
             {isTopicPicker ? <div className="topicPickerSubmitHint">生成后会进入作品详情页，重点看 6 个选题是否同时覆盖流量、信任、引流，以及是否真的适合你当前的平台和客户人群。</div> : null}
             {isGeneralContent ? <div className="generalContentSubmitHint">生成后会进入作品详情页，重点查看口播稿和公众号版本是否都围绕同一个核心观点展开。</div> : null}
@@ -880,7 +895,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 <button className="creationExampleClose" onClick={() => setGuideOpen(false)} type="button">×</button>
               </div>
               <div className="imageGuideModalBody">
-                {isVideoScriptPolish ? (
+                {isMultiChannelPolishLayout ? (
+                  <>
+                    <p>1. 直接粘贴完整素材或上传资料，不要只输入一个抽象主题。</p>
+                    <p>2. 先确认表达倾向，再勾选本轮真正需要的发布渠道。</p>
+                    <p>3. 流量文案重点核对事实与观点，营销文案还要补充产品规则和适用边界。</p>
+                    <p>4. 生成后会按口播、小红书和公众号分组进入作品详情页。</p>
+                  </>
+                ) : isVideoScriptPolish ? (
                   <>
                     <p>1. 直接粘贴你准备讲的原稿，不要只写一个主题或方向。</p>
                     <p>2. 原稿越接近你真实会说的话，精修后的节奏和人味越自然。</p>
@@ -974,6 +996,7 @@ function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, e
   if (appFamily === "write-copy") classes.push("writeCopyAppPage");
   if (appSlug === "write-copy") classes.push("writeCopyBaseAppPage");
   if (appSlug === "lead-copy") classes.push("leadCopyAppPage");
+  if (appSlug === "traffic-copy" || appSlug === "marketing-copy") classes.push("polishAppPage", "videoPolishAppPage", "multiChannelPolishAppPage");
   if (appSlug === "lead-package") classes.push("leadPackageAppPage");
   if (appFamily === "topic-picker") classes.push("topicPickerAppPage");
   if (appFamily === "polish-video" || appFamily === "polish-wechat-article") classes.push("polishAppPage");

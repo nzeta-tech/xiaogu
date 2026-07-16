@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
 import { apiPath } from "@/lib/client/url";
 
 type Summary = {
@@ -177,6 +178,7 @@ type Announcement = {
   status: string;
   is_pinned: boolean;
   published_at?: string | null;
+  link_url?: string | null;
 };
 
 type Plan = {
@@ -247,16 +249,6 @@ const defaultSettings: Settings = {
   },
 };
 
-const adminMenuItems = [
-  { id: "overview", label: "仪表盘", hint: "核心指标", icon: "▦" },
-  { id: "users", label: "用户管理", hint: "账号与积分", icon: "◎" },
-  { id: "content", label: "内容运营", hint: "作品与应用", icon: "✎" },
-  { id: "commerce", label: "商业化", hint: "订单与套餐", icon: "¥" },
-  { id: "growth", label: "增长活动", hint: "公告与优惠", icon: "✦" },
-  { id: "support", label: "反馈审计", hint: "工单与日志", icon: "?" },
-  { id: "settings", label: "系统设置", hint: "站点配置", icon: "⚙" },
-] as const;
-
 export function AdminPageClient() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -271,21 +263,38 @@ export function AdminPageClient() {
   const [planForm, setPlanForm] = useState<Plan>({ code: "", name: "", quotaAmount: 100, amountCents: 9900, currency: "CNY", description: "", recommended: false, status: "active", sortOrder: 0 });
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [tab, setTab] = useState<"overview" | "users" | "content" | "commerce" | "growth" | "support" | "settings">("overview");
+  const [tab, setTab] = useState<AdminSectionId>("overview");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [orderSearch, setOrderSearch] = useState("");
   const [appStatusFilter, setAppStatusFilter] = useState("all");
+  const [feedbackStatusFilter, setFeedbackStatusFilter] = useState("all");
+  const [auditSearch, setAuditSearch] = useState("");
   const [grantAmount, setGrantAmount] = useState(100);
+  const [loading, setLoading] = useState(true);
+  const [feedbackReplies, setFeedbackReplies] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    function syncTab() {
+      setTab(getAdminSection(window.location.hash));
+    }
+
+    syncTab();
+    window.addEventListener("hashchange", syncTab);
+    return () => window.removeEventListener("hashchange", syncTab);
+  }, []);
 
   const [announcementForm, setAnnouncementForm] = useState({
+    id: "",
     title: "",
     content: "",
     kind: "notice",
     placement: "global",
     status: "draft",
     isPinned: false,
+    linkUrl: "",
   });
   const [promoForm, setPromoForm] = useState({
     code: "",
@@ -295,10 +304,14 @@ export function AdminPageClient() {
     status: "active",
     maxRedemptions: 100,
     notes: "",
+    startsAt: "",
+    expiresAt: "",
   });
 
   async function loadAll(signal?: AbortSignal) {
+    setLoading(true);
     setError("");
+    try {
     const [summaryResponse, usersResponse, ordersResponse, appsResponse, feedbackResponse, auditResponse, promoResponse, announcementsResponse, contentResponse, settingsResponse, plansResponse] = await Promise.all([
       fetch(apiPath("/api/admin/summary"), { signal }),
       fetch(apiPath("/api/admin/users"), { signal }),
@@ -325,7 +338,7 @@ export function AdminPageClient() {
     const settingsPayload = (await settingsResponse.json()) as { settings?: Settings; error?: string };
     const plansPayload = (await plansResponse.json()) as { plans?: Plan[] };
 
-    if (!summaryResponse.ok || !usersResponse.ok || !ordersResponse.ok || !appsResponse.ok || !feedbackResponse.ok || !auditResponse.ok || !promoResponse.ok || !announcementsResponse.ok || !contentResponse.ok || !settingsResponse.ok) {
+    if (!summaryResponse.ok || !usersResponse.ok || !ordersResponse.ok || !appsResponse.ok || !feedbackResponse.ok || !auditResponse.ok || !promoResponse.ok || !announcementsResponse.ok || !contentResponse.ok || !settingsResponse.ok || !plansResponse.ok) {
       setError(
         summaryPayload.error ??
           usersPayload.error ??
@@ -353,6 +366,11 @@ export function AdminPageClient() {
     setContentOverview(contentPayload.content ?? null);
     setSettings(settingsPayload.settings ?? defaultSettings);
     setPlans(plansPayload.plans ?? []);
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === "AbortError")) setError("后台数据加载失败，请检查网络或服务状态");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
   }
 
   async function updateUser(userId: string, input: { status?: string; role?: string }) {
@@ -396,6 +414,7 @@ export function AdminPageClient() {
   }
 
   async function updateOrder(orderId: string, status: string) {
+    if ((status === "paid" || status === "refunded") && !window.confirm(status === "paid" ? "确认将这笔手工订单标记为已支付并发放额度？" : "确认执行退款并回收对应额度？此操作不可撤销。")) return;
     const response = await fetch(apiPath("/api/admin/orders"), {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -410,7 +429,7 @@ export function AdminPageClient() {
     setNotice("订单状态已更新。");
   }
 
-  async function updateCreationApp(appId: string, input: { status?: string; featured?: boolean; pointsCost?: number }) {
+  async function updateCreationApp(appId: string, input: { status?: string; featured?: boolean; pointsCost?: number; badge?: string; sortOrder?: number }) {
     const response = await fetch(apiPath("/api/admin/apps"), {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -441,6 +460,7 @@ export function AdminPageClient() {
   }
 
   async function deleteAnnouncement(id: string) {
+    if (!window.confirm("确认删除这条公告？")) return;
     const response = await fetch(apiPath(`/api/admin/announcements?id=${encodeURIComponent(id)}`), { method: "DELETE" });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) {
@@ -467,6 +487,7 @@ export function AdminPageClient() {
   }
 
   async function deletePromo(id: string) {
+    if (!window.confirm("确认删除这个优惠码？已有兑换记录的优惠码可能无法删除，建议优先停用。")) return;
     const response = await fetch(apiPath(`/api/admin/promo-codes?id=${encodeURIComponent(id)}`), { method: "DELETE" });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) {
@@ -514,14 +535,14 @@ export function AdminPageClient() {
     const response = await fetch(apiPath("/api/admin/announcements"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(announcementForm),
+      body: JSON.stringify({ ...announcementForm, id: announcementForm.id || undefined, linkUrl: announcementForm.linkUrl || undefined }),
     });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) {
       setError(payload.error ?? "公告保存失败");
       return;
     }
-    setAnnouncementForm({ title: "", content: "", kind: "notice", placement: "global", status: "draft", isPinned: false });
+    setAnnouncementForm({ id: "", title: "", content: "", kind: "notice", placement: "global", status: "draft", isPinned: false, linkUrl: "" });
     await loadAll();
     setNotice("公告已保存。");
   }
@@ -531,7 +552,13 @@ export function AdminPageClient() {
     const response = await fetch(apiPath("/api/admin/promo-codes"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(promoForm),
+      body: JSON.stringify({
+        ...promoForm,
+        creditAmount: promoForm.rewardType === "credit" ? promoForm.creditAmount : 0,
+        discountPercent: promoForm.rewardType === "discount" ? promoForm.discountPercent : 0,
+        startsAt: promoForm.startsAt ? new Date(promoForm.startsAt).toISOString() : undefined,
+        expiresAt: promoForm.expiresAt ? new Date(promoForm.expiresAt).toISOString() : undefined,
+      }),
     });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) {
@@ -546,6 +573,8 @@ export function AdminPageClient() {
       status: "active",
       maxRedemptions: 100,
       notes: "",
+      startsAt: "",
+      expiresAt: "",
     });
     await loadAll();
     setNotice("优惠码已创建。");
@@ -577,29 +606,20 @@ export function AdminPageClient() {
     if (!keyword) return true;
     return `${user.name} ${user.email} ${user.role} ${user.status}`.toLowerCase().includes(keyword);
   });
-  const filteredOrders = orders.filter((order) => orderStatusFilter === "all" || order.status === orderStatusFilter);
+  const filteredOrders = orders.filter((order) => {
+    const matchesStatus = orderStatusFilter === "all" || order.status === orderStatusFilter;
+    const keyword = orderSearch.trim().toLowerCase();
+    return matchesStatus && (!keyword || `${order.user_email} ${order.user_name} ${order.provider} ${order.id}`.toLowerCase().includes(keyword));
+  });
   const filteredCreationApps = creationApps.filter((app) => appStatusFilter === "all" || app.status === appStatusFilter);
+  const filteredFeedbackTickets = feedbackTickets.filter((ticket) => feedbackStatusFilter === "all" || ticket.status === feedbackStatusFilter);
+  const filteredAuditLogs = auditLogs.filter((log) => {
+    const keyword = auditSearch.trim().toLowerCase();
+    return !keyword || `${log.action} ${log.target_type} ${log.target_id} ${log.admin_email ?? ""}`.toLowerCase().includes(keyword);
+  });
 
   return (
     <div className="adminConsole">
-      <aside className="adminSidebar" aria-label="管理后台菜单">
-        <div className="adminSidebarBrand">
-          <strong>小谷后台</strong>
-          <span>运营管理控制台</span>
-        </div>
-        <nav className="adminSidebarNav">
-          {adminMenuItems.map((item) => (
-            <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)} type="button">
-              <em aria-hidden="true">{item.icon}</em>
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.hint}</small>
-              </span>
-            </button>
-          ))}
-        </nav>
-      </aside>
-
       <section className="adminMainSurface">
         <div className="adminHeaderBar">
           <div>
@@ -608,7 +628,7 @@ export function AdminPageClient() {
           </div>
           <div className="adminHeaderActions">
             <span>{summary?.activeUsers ?? 0} 活跃用户</span>
-            <button className="secondaryButton" onClick={() => void loadAll()}>刷新</button>
+            <button className="secondaryButton" onClick={() => void loadAll()} disabled={loading}>{loading ? "刷新中" : "刷新"}</button>
           </div>
         </div>
 
@@ -813,6 +833,8 @@ export function AdminPageClient() {
                     </span>
                   </div>
                   <div className="rowActions">
+                    <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { sortOrder: Math.max(app.sort_order - 1, 0) })}>上移</button>
+                    <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { sortOrder: app.sort_order + 1 })}>下移</button>
                     <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { pointsCost: Math.max(app.points_cost - 1, 0) })}>-1 点</button>
                     <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { pointsCost: app.points_cost + 1 })}>+1 点</button>
                     <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { featured: !app.featured })}>
@@ -835,11 +857,10 @@ export function AdminPageClient() {
           <div className="adminGrid">
             <AdminPanel title="套餐管理">
               {plans.map((plan) => (
-                <Row
-                  key={plan.code}
-                  title={`${plan.name}${plan.recommended ? " · 推荐" : ""}`}
-                  meta={`${plan.quotaAmount} 点 · ${formatMoney(plan.amountCents, plan.currency)} · ${plan.status ?? "active"} · ${plan.description}`}
-                />
+                <div className="tableRow" key={plan.code}>
+                  <div><strong>{plan.name}{plan.recommended ? " · 推荐" : ""}</strong><span>{plan.quotaAmount} 点 · {formatMoney(plan.amountCents, plan.currency)} · {plan.status ?? "active"} · {plan.description}</span></div>
+                  <button className="secondaryButton" onClick={() => setPlanForm(plan)}>编辑</button>
+                </div>
               ))}
             </AdminPanel>
             <AdminPanel title="支付表现">
@@ -893,18 +914,23 @@ export function AdminPageClient() {
                     <option value="credit">赠送点数</option>
                     <option value="discount">折扣</option>
                   </select>
-                  <input
+                  {promoForm.rewardType === "credit" ? <input
                     type="number"
+                    min="1"
                     value={promoForm.creditAmount}
                     onChange={(event) => setPromoForm((current) => ({ ...current, creditAmount: Number(event.target.value) }))}
                     placeholder="赠送点数"
-                  />
+                  /> : <input type="number" min="1" max="100" value={promoForm.discountPercent} onChange={(event) => setPromoForm((current) => ({ ...current, discountPercent: Number(event.target.value) }))} placeholder="折扣百分比" />}
                   <input
                     type="number"
                     value={promoForm.maxRedemptions}
                     onChange={(event) => setPromoForm((current) => ({ ...current, maxRedemptions: Number(event.target.value) }))}
                     placeholder="可兑换次数"
                   />
+                </div>
+                <div className="inlineFields">
+                  <label>开始时间<input type="datetime-local" value={promoForm.startsAt} onChange={(event) => setPromoForm((current) => ({ ...current, startsAt: event.target.value }))} /></label>
+                  <label>结束时间<input type="datetime-local" value={promoForm.expiresAt} onChange={(event) => setPromoForm((current) => ({ ...current, expiresAt: event.target.value }))} /></label>
                 </div>
                 <textarea value={promoForm.notes} placeholder="备注" onChange={(event) => setPromoForm((current) => ({ ...current, notes: event.target.value }))} />
                 <button className="primaryButton" type="submit">保存优惠码</button>
@@ -914,6 +940,7 @@ export function AdminPageClient() {
 
           <AdminPanel title="订单管理">
             <div className="inlineFields">
+              <input value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} placeholder="搜索用户、订单号或支付渠道" />
               <select value={orderStatusFilter} onChange={(event) => setOrderStatusFilter(event.target.value)}>
                 <option value="all">全部订单</option>
                 <option value="pending">待支付</option>
@@ -932,13 +959,13 @@ export function AdminPageClient() {
                     </span>
                   </div>
                   <div className="rowActions">
-                    {order.status !== "paid" ? (
+                    {order.status === "pending" && order.provider !== "stripe" ? (
                       <button className="secondaryButton" onClick={() => void updateOrder(order.id, "paid")}>标记已支付</button>
                     ) : null}
-                    {order.status !== "failed" ? (
+                    {order.status === "pending" ? (
                       <button className="secondaryButton" onClick={() => void updateOrder(order.id, "failed")}>标记失败</button>
                     ) : null}
-                    {order.status !== "refunded" ? (
+                    {order.status === "paid" ? (
                       <button className="secondaryButton" onClick={() => void updateOrder(order.id, "refunded")}>标记退款</button>
                     ) : null}
                   </div>
@@ -980,6 +1007,7 @@ export function AdminPageClient() {
             <form className="stackForm" onSubmit={saveAnnouncement}>
               <input value={announcementForm.title} placeholder="公告标题" onChange={(event) => setAnnouncementForm((current) => ({ ...current, title: event.target.value }))} />
               <textarea value={announcementForm.content} placeholder="公告内容" onChange={(event) => setAnnouncementForm((current) => ({ ...current, content: event.target.value }))} />
+              <input value={announcementForm.linkUrl} placeholder="跳转链接（可选，需填写完整 https:// 地址）" onChange={(event) => setAnnouncementForm((current) => ({ ...current, linkUrl: event.target.value }))} />
               <div className="inlineFields">
                 <select value={announcementForm.kind} onChange={(event) => setAnnouncementForm((current) => ({ ...current, kind: event.target.value }))}>
                   <option value="notice">通知</option>
@@ -1004,7 +1032,8 @@ export function AdminPageClient() {
                 />
                 置顶公告
               </label>
-              <button className="primaryButton" type="submit">保存公告</button>
+              <button className="primaryButton" type="submit">{announcementForm.id ? "保存修改" : "保存公告"}</button>
+              {announcementForm.id ? <button className="secondaryButton" type="button" onClick={() => setAnnouncementForm({ id: "", title: "", content: "", kind: "notice", placement: "global", status: "draft", isPinned: false, linkUrl: "" })}>取消编辑</button> : null}
             </form>
           </AdminPanel>
 
@@ -1017,6 +1046,7 @@ export function AdminPageClient() {
                     <span>{item.kind} · {item.placement} · {item.status}{item.is_pinned ? " · 已置顶" : ""}</span>
                   </div>
                   <div className="rowActions">
+                    <button className="secondaryButton" onClick={() => setAnnouncementForm({ id: item.id, title: item.title, content: item.content, kind: item.kind, placement: item.placement, status: item.status, isPinned: item.is_pinned, linkUrl: item.link_url ?? "" })}>编辑</button>
                     <button className="secondaryButton" onClick={() => void updateAnnouncementStatus(item.id, item.status === "published" ? "draft" : "published")}>
                       {item.status === "published" ? "下线" : "发布"}
                     </button>
@@ -1034,8 +1064,9 @@ export function AdminPageClient() {
         <div className="pageStack">
           <div className="adminGrid">
             <AdminPanel title="反馈工单">
+              <div className="inlineFields"><select value={feedbackStatusFilter} onChange={(event) => setFeedbackStatusFilter(event.target.value)}><option value="all">全部状态</option><option value="open">待处理</option><option value="in_progress">处理中</option><option value="resolved">已解决</option><option value="closed">已关闭</option></select></div>
               <div className="tableList">
-                {feedbackTickets.map((ticket) => (
+                {filteredFeedbackTickets.map((ticket) => (
                   <div className="tableRow" key={ticket.id}>
                     <div>
                       <strong>{ticket.title}</strong>
@@ -1043,17 +1074,19 @@ export function AdminPageClient() {
                         {ticket.user_email ?? "未知用户"} · {ticket.category} · {ticket.priority} · {ticket.status} · {formatDate(ticket.updated_at)} · {ticket.content}
                       </span>
                       {ticket.admin_reply ? <span>回复：{ticket.admin_reply}</span> : null}
+                      <textarea value={feedbackReplies[ticket.id] ?? ticket.admin_reply ?? ""} onChange={(event) => setFeedbackReplies((current) => ({ ...current, [ticket.id]: event.target.value }))} placeholder="输入给用户的回复" />
                     </div>
                     <div className="rowActions">
                       <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { status: "in_progress" })}>处理中</button>
-                      <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { status: "resolved", adminReply: ticket.admin_reply || "已处理，感谢反馈。" })}>解决</button>
+                      <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { status: "resolved", adminReply: feedbackReplies[ticket.id] || ticket.admin_reply || "已处理，感谢反馈。" })}>回复并解决</button>
+                      <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { status: ticket.status === "closed" ? "open" : "closed" })}>{ticket.status === "closed" ? "重新打开" : "关闭"}</button>
                       <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { priority: ticket.priority === "high" ? "normal" : "high" })}>
                         {ticket.priority === "high" ? "降为普通" : "设为高优先级"}
                       </button>
                     </div>
                   </div>
                 ))}
-                {feedbackTickets.length === 0 ? <div className="emptyState">暂无反馈工单。</div> : null}
+                {filteredFeedbackTickets.length === 0 ? <div className="emptyState">暂无匹配的反馈工单。</div> : null}
               </div>
             </AdminPanel>
 
@@ -1065,21 +1098,23 @@ export function AdminPageClient() {
           </div>
 
           <AdminPanel title="管理员操作审计">
+            <div className="inlineFields"><input value={auditSearch} onChange={(event) => setAuditSearch(event.target.value)} placeholder="搜索管理员、动作或目标" /></div>
             <div className="tableList">
-              {auditLogs.map((log) => (
+              {filteredAuditLogs.map((log) => (
                 <div className="tableRow" key={log.id}>
                   <div>
                     <strong>{log.action}</strong>
                     <span>
                       {log.admin_email ?? "未知管理员"} · {log.target_type} · {log.target_id || "-"} · {formatDate(log.created_at)}
                     </span>
+                    {Object.keys(log.detail ?? {}).length ? <code>{JSON.stringify(log.detail)}</code> : null}
                   </div>
                   <div className="rowActions">
                     <span className="statusPill active">审计</span>
                   </div>
                 </div>
               ))}
-              {auditLogs.length === 0 ? <div className="emptyState">暂无审计日志。</div> : null}
+              {filteredAuditLogs.length === 0 ? <div className="emptyState">暂无匹配的审计日志。</div> : null}
             </div>
           </AdminPanel>
         </div>
@@ -1106,6 +1141,7 @@ export function AdminPageClient() {
                 <input checked={settings.auth.requireInviteCode} type="checkbox" onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, requireInviteCode: event.target.checked } }))} />
                 注册要求邀请码
               </label>
+              <input value={settings.auth.passwordHint} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordHint: event.target.value } }))} placeholder="注册密码规则提示" />
               <label className="checkboxRow">
                 <input checked={settings.payment.enableStripe} type="checkbox" onChange={(event) => setSettings((current) => ({ ...current, payment: { ...current.payment, enableStripe: event.target.checked } }))} />
                 启用 Stripe 支付

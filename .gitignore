@@ -10,3 +10,5 @@ coverage
 tmp/
 data/*.db
 *.tsbuildinfo
+# Local UI verification screenshots
+tmp-*.png

@@ -13,6 +13,16 @@ const schema = z.object({
   startsAt: z.string().datetime().optional().or(z.literal("")),
   expiresAt: z.string().datetime().optional().or(z.literal("")),
   notes: z.string().max(500).optional(),
+}).superRefine((value, context) => {
+  if (value.rewardType === "credit" && value.creditAmount < 1) {
+    context.addIssue({ code: "custom", path: ["creditAmount"], message: "点数优惠码至少赠送 1 点" });
+  }
+  if (value.rewardType === "discount" && (value.discountPercent < 1 || value.discountPercent > 100)) {
+    context.addIssue({ code: "custom", path: ["discountPercent"], message: "折扣比例必须在 1 到 100 之间" });
+  }
+  if (value.startsAt && value.expiresAt && new Date(value.startsAt) >= new Date(value.expiresAt)) {
+    context.addIssue({ code: "custom", path: ["expiresAt"], message: "结束时间必须晚于开始时间" });
+  }
 });
 
 async function requireAdmin() {
@@ -85,9 +95,11 @@ export async function DELETE(request: Request) {
   if (user instanceof Response) return user;
 
   const { searchParams } = new URL(request.url);
-  const id = z.string().uuid().parse(searchParams.get("id"));
+  const parsed = z.string().uuid().safeParse(searchParams.get("id"));
+  if (!parsed.success) return Response.json({ error: "优惠码编号格式不正确" }, { status: 400 });
+  const id = parsed.data;
   const ok = await tryDeletePromoCode(id);
-  if (!ok) return Response.json({ error: "优惠码删除失败" }, { status: 503 });
+  if (!ok) return Response.json({ error: "优惠码已有兑换记录，不能删除；请改为停用以保留审计历史" }, { status: 409 });
 
   await tryCreateAdminAuditLog({
     adminUserId: user.id,

@@ -36,7 +36,7 @@ type ThinkingProfilePayload = {
   } | null;
 };
 
-const storageKey = "ica-questionnaire-draft-v2";
+const storageKey = "ica-persona-questionnaire-draft-v3";
 const questionnaireCharLimit = 30000;
 
 export function QuestionnairePageClient() {
@@ -102,14 +102,16 @@ export function QuestionnairePageClient() {
       const serverTemplate = payload.questionnaire?.template ?? template;
       const initial = createEmptyQuestionnaireAnswers(serverTemplate);
 
-      if (draft) {
-        hydrateAnswersFromDraft(initial, draft);
-      } else if (payload.questionnaire?.answers) {
-        hydrateAnswersFromDraft(initial, payload.questionnaire.answers);
-      } else if (payload.thinkingProfileSnapshot?.snapshot) {
+      if (payload.thinkingProfileSnapshot?.snapshot) {
         hydrateAnswersFromThinkingSnapshot(initial, payload.thinkingProfileSnapshot.snapshot);
       } else {
         hydrateAnswersFromThinkingProfile(initial, payload);
+      }
+      if (payload.questionnaire?.answers) {
+        hydrateAnswersFromDraft(initial, payload.questionnaire.answers);
+      }
+      if (draft) {
+        hydrateAnswersFromDraft(initial, draft);
       }
 
       setAnswers(initial);
@@ -194,14 +196,17 @@ export function QuestionnairePageClient() {
         status: "completed",
         profile: {
           persona: buildQuestionnaireSummary(answers, template),
-          targetAudience: collectSectionAnswerText(answers, template.structure.sections[2]?.section_id),
-          specialty: collectSectionAnswerText(answers, template.structure.sections[1]?.section_id),
-          topicPreference: collectSectionAnswerText(answers, template.structure.sections[4]?.section_id),
-          displayName: getAnswerValue(answers, template.structure.sections[0]?.section_id ?? "", template.structure.sections[0]?.questions[0]?.question_id ?? ""),
+          targetAudience: getAnswerByQuestionId(answers, template, "primary_audience"),
+          specialty: getAnswerByQuestionId(answers, template, "specialty"),
+          topicPreference: [
+            getAnswerByQuestionId(answers, template, "tone_preference"),
+            getAnswerByQuestionId(answers, template, "core_beliefs"),
+          ].filter(Boolean).join("\n"),
+          displayName: getAnswerByQuestionId(answers, template, "display_name"),
           ipTagline: summarizeQuestionnaireTagline(answers, template),
           profileSummary: summarizeQuestionnaireProfile(answers, template),
-          brandKeywords: collectKeywordAnswers(answers, template.structure.sections[0]?.section_id, template.structure.sections[0]?.questions[4]?.question_id),
-          contentStyleSummary: collectSectionAnswerText(answers, template.structure.sections[4]?.section_id),
+          brandKeywords: splitKeywords(getAnswerByQuestionId(answers, template, "identity_tags")),
+          contentStyleSummary: getAnswerByQuestionId(answers, template, "tone_preference"),
         },
       }),
     }).catch(() => null);
@@ -221,7 +226,7 @@ export function QuestionnairePageClient() {
 
     localStorage.removeItem(storageKey);
     setIsDirty(false);
-    setNotice("提交成功！正在分析您的写作风格...");
+    setNotice("提交成功，正在生成人设画像...");
     window.setTimeout(() => {
       location.href = appPath("/thinking");
     }, 900);
@@ -398,7 +403,32 @@ function QuestionItem({
           {question.helper_text ? <p className="question-helper">{question.helper_text}</p> : null}
         </div>
         <div className="question-content">
-          <textarea placeholder={question.placeholder || "请输入..."} value={value} onChange={(event) => onChange(event.target.value)} />
+          {question.input_type === "choice" ? (
+            <div className="question-choice-wrap">
+              {question.choice_labels ? (
+                <div className="question-choice-poles">
+                  <span>{question.choice_labels.left}</span>
+                  <span>{question.choice_labels.right}</span>
+                </div>
+              ) : null}
+              <div className="question-choice-grid" role="radiogroup" aria-label={question.question_text}>
+                {question.options?.map((option) => (
+                  <button
+                    aria-checked={value === option.value}
+                    className={`question-choice-option ${value === option.value ? "selected" : ""}`}
+                    key={option.value}
+                    onClick={() => onChange(option.value)}
+                    role="radio"
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <textarea placeholder={question.placeholder || "请输入..."} value={value} onChange={(event) => onChange(event.target.value)} />
+          )}
         </div>
       </div>
     </div>
@@ -458,47 +488,22 @@ function hydrateAnswersFromThinkingProfile(initial: QuestionnaireAnswers, payloa
 }
 
 function hydrateAnswersFromThinkingSnapshot(initial: QuestionnaireAnswers, snapshot: ThinkingProfileSnapshot) {
-  const orderedSections = Object.keys(initial);
-  const firstSection = orderedSections[0];
-  const secondSection = orderedSections[1];
-  const thirdSection = orderedSections[2];
-  const fourthSection = orderedSections[3];
-  const fifthSection = orderedSections[4];
-
-  if (firstSection) {
-    const questionIds = Object.keys(initial[firstSection]);
-    if (questionIds[0]) initial[firstSection][questionIds[0]].items[0].content = snapshot.identity_profile.display_name ?? "";
-    if (questionIds[3]) initial[firstSection][questionIds[3]].items[0].content = snapshot.identity_profile.honors.join("\n");
-    if (questionIds[4]) initial[firstSection][questionIds[4]].items[0].content = snapshot.identity_profile.core_identity.join("\n");
-    if (questionIds[5]) initial[firstSection][questionIds[5]].items[0].content = snapshot.identity_profile.career_path ?? "";
-  }
-
-  if (secondSection) {
-    const questionIds = Object.keys(initial[secondSection]);
-    if (questionIds[0]) initial[secondSection][questionIds[0]].items[0].content = snapshot.expression_style.style_summary ?? "";
-    if (questionIds[4]) initial[secondSection][questionIds[4]].items[0].content = snapshot.expression_style.time_budget ?? "";
-  }
-
-  if (thirdSection) {
-    const questionIds = Object.keys(initial[thirdSection]);
-    if (questionIds[0]) initial[thirdSection][questionIds[0]].items[0].content = snapshot.audience_profile.buying_motivations.join("\n");
-    if (questionIds[1]) initial[thirdSection][questionIds[1]].items[0].content = snapshot.audience_profile.primary_audience ?? "";
-    if (questionIds[2]) initial[thirdSection][questionIds[2]].items[0].content = snapshot.trust_signals.client_quotes.join("\n");
-    if (questionIds[3]) initial[thirdSection][questionIds[3]].items[0].content = snapshot.audience_profile.common_questions.join("\n");
-  }
-
-  if (fourthSection) {
-    const questionIds = Object.keys(initial[fourthSection]);
-    if (questionIds[0]) initial[fourthSection][questionIds[0]].items[0].content = snapshot.belief_system.believes.join("\n");
-    if (questionIds[1]) initial[fourthSection][questionIds[1]].items[0].content = snapshot.belief_system.disbelieves.join("\n");
-  }
-
-  if (fifthSection) {
-    const questionIds = Object.keys(initial[fifthSection]);
-    if (questionIds[0]) initial[fifthSection][questionIds[0]].items[0].content = snapshot.identity_profile.turning_points.join("\n");
-    if (questionIds[4]) initial[fifthSection][questionIds[4]].items[0].content = snapshot.belief_system.decision_style ?? "";
-    if (questionIds[7]) initial[fifthSection][questionIds[7]].items[0].content = snapshot.trust_signals.case_signals.join("\n");
-  }
+  setInitialAnswer(initial, "display_name", snapshot.identity_profile.display_name);
+  setInitialAnswer(initial, "role_context", snapshot.identity_profile.life_roles.join("\n"));
+  setInitialAnswer(initial, "career_path", snapshot.identity_profile.career_path);
+  setInitialAnswer(initial, "credentials", snapshot.identity_profile.honors.join("\n"));
+  setInitialAnswer(initial, "identity_tags", snapshot.identity_profile.core_identity.join("\n"));
+  setInitialAnswer(initial, "turning_points", snapshot.identity_profile.turning_points.join("\n"));
+  setInitialAnswer(initial, "primary_audience", snapshot.audience_profile.primary_audience);
+  setInitialAnswer(initial, "common_questions", snapshot.audience_profile.common_questions.join("\n"));
+  setInitialAnswer(initial, "client_pains", snapshot.audience_profile.client_pains.join("\n"));
+  setInitialAnswer(initial, "trust_evidence", snapshot.trust_signals.client_quotes.join("\n"));
+  setInitialAnswer(initial, "case_stories", snapshot.trust_signals.case_signals.join("\n"));
+  setInitialAnswer(initial, "content_status", snapshot.expression_style.style_summary);
+  setInitialAnswer(initial, "tone_preference", snapshot.expression_style.tone.join("\n"));
+  setInitialAnswer(initial, "core_beliefs", snapshot.belief_system.believes.join("\n"));
+  setInitialAnswer(initial, "boundaries", snapshot.belief_system.disbelieves.join("\n"));
+  setInitialAnswer(initial, "time_budget", snapshot.expression_style.time_budget);
 }
 
 function collectSectionAnswerText(answers: QuestionnaireAnswers, sectionId?: string) {
@@ -520,29 +525,39 @@ function buildQuestionnaireSummary(answers: QuestionnaireAnswers, template: Ques
 }
 
 function summarizeQuestionnaireTagline(answers: QuestionnaireAnswers, template: QuestionnaireTemplate) {
-  const name = getAnswerValue(answers, template.structure.sections[0]?.section_id ?? "", template.structure.sections[0]?.questions[0]?.question_id ?? "").trim();
-  const tags = collectKeywordAnswers(answers, template.structure.sections[0]?.section_id, template.structure.sections[0]?.questions[4]?.question_id);
-  const audience = collectSectionAnswerText(answers, template.structure.sections[2]?.section_id)
-    .split("\n")
-    .map((item) => item.trim())
-    .find(Boolean) ?? "";
+  const name = getAnswerByQuestionId(answers, template, "display_name").trim();
+  const tags = splitKeywords(getAnswerByQuestionId(answers, template, "identity_tags"));
+  const audience = getAnswerByQuestionId(answers, template, "primary_audience").split("\n").find(Boolean) ?? "";
   return [name, tags.slice(0, 2).join("·"), audience ? `服务${audience.slice(0, 18)}` : ""].filter(Boolean).join("·").slice(0, 80);
 }
 
 function summarizeQuestionnaireProfile(answers: QuestionnaireAnswers, template: QuestionnaireTemplate) {
-  const career = getAnswerValue(answers, template.structure.sections[0]?.section_id ?? "", template.structure.sections[0]?.questions[5]?.question_id ?? "").trim();
-  const earning = getAnswerValue(answers, template.structure.sections[2]?.section_id ?? "", template.structure.sections[2]?.questions[0]?.question_id ?? "").trim();
-  const belief = getAnswerValue(answers, template.structure.sections[3]?.section_id ?? "", template.structure.sections[3]?.questions[0]?.question_id ?? "").trim();
-  return [career, earning, belief].filter(Boolean).join("\n").slice(0, 500);
+  const career = getAnswerByQuestionId(answers, template, "career_path");
+  const specialty = getAnswerByQuestionId(answers, template, "specialty");
+  const belief = getAnswerByQuestionId(answers, template, "core_beliefs");
+  return [career, specialty, belief].filter(Boolean).join("\n").slice(0, 500);
 }
 
-function collectKeywordAnswers(answers: QuestionnaireAnswers, sectionId?: string, questionId?: string) {
-  const raw = sectionId && questionId ? getAnswerValue(answers, sectionId, questionId) : "";
+function splitKeywords(raw: string) {
   return raw
     .split(/[，,、\n]/)
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 8);
+}
+
+function getAnswerByQuestionId(answers: QuestionnaireAnswers, template: QuestionnaireTemplate, questionId: string) {
+  const section = template.structure.sections.find((item) => item.questions.some((question) => question.question_id === questionId));
+  return section ? getAnswerValue(answers, section.section_id, questionId) : "";
+}
+
+function setInitialAnswer(answers: QuestionnaireAnswers, questionId: string, value?: string) {
+  for (const section of Object.values(answers)) {
+    if (section[questionId]) {
+      section[questionId].items[0].content = value ?? "";
+      return;
+    }
+  }
 }
 
 function readDraft(): (QuestionnaireAnswers & { _meta?: { updatedAt?: string } }) | null {

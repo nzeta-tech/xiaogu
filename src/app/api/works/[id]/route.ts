@@ -119,5 +119,5 @@ function normalizeWorkDetail<T extends {
 }
 
 function shouldRebuildContentJson(platform?: string) {
-  return platform === "write-copy" || platform === "general-content" || platform === "lead-copy" || platform === "video-script-polish" || platform === "wechat-article-polish" || platform === "topic-picker";
+  return platform === "write-copy" || platform === "general-content" || platform === "lead-copy" || platform === "traffic-copy" || platform === "marketing-copy" || platform === "video-script-polish" || platform === "wechat-article-polish" || platform === "topic-picker";
 }

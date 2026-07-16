@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiPath, appPath } from "@/lib/client/url";
+import type { HotTopic } from "@/lib/topics/types";
 
 type Overview = {
   balance: number;
@@ -9,6 +10,10 @@ type Overview = {
   paidOrders: number;
   pendingOrders: number;
   totalUsed: number;
+  weeklyDraftCount: number;
+  weeklyUsed: number;
+  topics: HotTopic[];
+  topicsRefreshedAt: string | null;
   recentDrafts: Array<{ id: string; title: string; platform: string; updated_at?: string }>;
   recentUsage: Array<{ id: string; action_type: string; quota_cost: number; created_at: string }>;
   recentOrders: Array<{ id: string; status: string; amount_cents: number; currency: string; created_at: string }>;
@@ -24,23 +29,27 @@ const actionCards = [
     badge: "推荐",
   },
   {
-    title: "改草稿",
-    desc: "把已有内容改成更适合成交和转介绍的版本。",
-    href: "/drafts",
-    badge: "高频",
+    title: "找选题",
+    desc: "结合你的数字分身，生成触达、信任和转化选题。",
+    href: "/apps/topic-picker?from=workspace&entry=topic-picker",
+    badge: "灵感",
   },
   {
-    title: "看账本",
-    desc: "确认额度、订单和最近经营动作是不是顺畅。",
-    href: "/billing",
-    badge: "经营",
+    title: "保单诊断",
+    desc: "梳理家庭保障结构，快速定位缺口与沟通重点。",
+    href: "/apps/policy-diagnosis?from=workspace&entry=policy-diagnosis",
+    badge: "专业",
   },
-  {
-    title: "活动兑换",
-    desc: "兑换活动码并查看最近到账的积分记录。",
-    href: "/benefits",
-    badge: "增长",
-  },
+];
+
+const dailyQuotes = [
+  "真正专业的内容，不是把风险说重，而是把选择说清。",
+  "先帮客户看懂家庭责任，再谈产品，信任会走得更稳。",
+  "好文案不是催促成交，而是让客户愿意认真规划一次。",
+  "保险内容的温度，藏在克制、准确和替客户多想一步里。",
+  "把复杂问题讲明白，本身就是一种值得长期积累的专业。",
+  "持续输出有用的判断，比追逐每一次热度更接近信任。",
+  "先理解客户正在经历什么，再决定今天应该说什么。",
 ];
 
 export function WorkbenchPageClient() {
@@ -73,9 +82,17 @@ export function WorkbenchPageClient() {
   const extraAnnouncements = overview?.announcements?.slice(1) ?? [];
   const hasDrafts = (overview?.recentDrafts?.length ?? 0) > 0;
   const hasAnnouncements = extraAnnouncements.length > 0;
+  const quote = dailyQuotes[new Date().getDate() % dailyQuotes.length];
+  const topics = overview?.topics ?? [];
 
   return (
     <div className="pageStack workbenchPage">
+      <section className="dailyBrief" aria-label="每日一句">
+        <span>每日一句</span>
+        <p>{quote}</p>
+        <time>{formatToday()}</time>
+      </section>
+
       {notice ? (
         <section className="noticeStrip">
           <span>限时提示</span>
@@ -85,24 +102,13 @@ export function WorkbenchPageClient() {
         </section>
       ) : null}
 
-      <section className="workbenchHero">
-        <div className="heroPrimaryCard">
-          <div className="heroPrimaryCopy">
-            <span className="heroBadge">工作台</span>
-            <h1>把今天的内容动作，排成一条清晰的经营路径。</h1>
-            <p>先创作，再复用，再看消耗和回报。首页只展示你现在真正用得上的模块。</p>
-          </div>
-          <div className="actionRow">
-            <a className="primaryButton linkButton" href={appPath("/workspace")}>继续创作</a>
-            {draftCount > 0 ? (
-              <a className="secondaryButton linkButton" href={appPath("/drafts")}>我的作品 {draftCount}</a>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="heroStatusCard panel">
+      <section className="todayStatusSection" aria-labelledby="weekly-status-title">
+        <div className="heroStatusCard todayStatusCard">
           <div className="heroStatusHeader">
-            <h2>本周状态</h2>
+            <div>
+              <h2 id="weekly-status-title">本周状态</h2>
+              <p>聚焦本周真实发生的创作和积分消耗。</p>
+            </div>
             <span>{loading ? "同步中" : "已更新"}</span>
           </div>
           <div className="heroStatusGrid">
@@ -111,44 +117,79 @@ export function WorkbenchPageClient() {
               <span>可用积分</span>
             </div>
             <div>
+              <strong>{overview?.weeklyDraftCount ?? 0}</strong>
+              <span>本周创作</span>
+            </div>
+            <div>
+              <strong>{overview?.weeklyUsed ?? 0}</strong>
+              <span>本周消耗</span>
+            </div>
+            <div>
               <strong>{draftCount}</strong>
-              <span>我的作品</span>
-            </div>
-            <div>
-              <strong>{overview?.paidOrders ?? 0}</strong>
-              <span>已支付订单</span>
-            </div>
-            <div>
-              <strong>{overview?.pendingOrders ?? 0}</strong>
-              <span>待处理订单</span>
+              <span>全部作品</span>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="workbenchPanel appPanel">
-        <div className="panelHeader workbenchPanelHeader">
-          <div>
-            <h2>获客创作</h2>
-            <p>把最常用的创作入口放在第一屏。</p>
+      <div className="todayContentGrid">
+        <section className="todayHotTopics" aria-labelledby="hot-topics-title">
+          <div className="workbenchSectionHeader">
+            <div>
+              <span>内容雷达</span>
+              <h2 id="hot-topics-title">今日热点</h2>
+              <p>读取最近一次热榜缓存，打开首页不会额外扣积分。</p>
+            </div>
+            {overview?.topicsRefreshedAt ? <time>更新于 {formatRefreshTime(overview.topicsRefreshedAt)}</time> : null}
           </div>
-          <a href={appPath("/workspace")}>最近使用</a>
-        </div>
-        <div className="toolCardGrid">
-          {actionCards.map((item) => (
-            <a className="toolCard" href={appPath(item.href)} key={item.href}>
-              <span>{item.badge}</span>
-              <strong>{item.title}</strong>
-              <p>{item.desc}</p>
-            </a>
-          ))}
-        </div>
-      </section>
+          <div className="hotTopicList">
+            {topics.length > 0 ? topics.slice(0, 5).map((topic, index) => (
+              <article className="hotTopicRow" key={topic.id}>
+                <span className="hotTopicRank">{String(index + 1).padStart(2, "0")}</span>
+                <div className="hotTopicBody">
+                  <div className="hotTopicTitleLine">
+                    <strong>{topic.title}</strong>
+                    <span>{topic.source} · {topic.heat}热度</span>
+                  </div>
+                  <p>{topic.recommendedAngle}</p>
+                </div>
+                <a href={buildTopicCreationHref(topic)}>转成文案</a>
+              </article>
+            )) : (
+              <div className="workbenchEmptyState">
+                <strong>热点正在整理中</strong>
+                <span>后台热榜刷新完成后会自动出现在这里。</span>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="todayQuickEntries" aria-labelledby="quick-entries-title">
+          <div className="workbenchSectionHeader">
+            <div>
+              <span>快捷入口</span>
+              <h2 id="quick-entries-title">接着做</h2>
+              <p>只保留最常用的创作动作。</p>
+            </div>
+            <a href={appPath("/workspace")}>全部应用</a>
+          </div>
+          <div className="quickEntryList">
+            {actionCards.map((item) => (
+              <a className="quickEntryRow" href={appPath(item.href)} key={item.href}>
+                <span>{item.badge}</span>
+                <div><strong>{item.title}</strong><p>{item.desc}</p></div>
+                <em aria-hidden="true">→</em>
+              </a>
+            ))}
+          </div>
+        </section>
+      </div>
 
       {hasDrafts ? (
-        <section className="workbenchPanel">
-          <div className="panelHeader workbenchPanelHeader">
+        <section className="recentWorksSection">
+          <div className="workbenchSectionHeader">
             <div>
+              <span>继续创作</span>
               <h2>我的作品</h2>
               <p>最近产出的作品，方便继续迭代和复用。</p>
             </div>
@@ -156,13 +197,13 @@ export function WorkbenchPageClient() {
           </div>
           <div className="draftCardGrid">
             {(overview?.recentDrafts ?? []).map((draft) => (
-              <article className="draftCard" key={draft.id}>
+              <a className="draftCard" href={appPath(`/works/${draft.id}`)} key={draft.id}>
                 <div className="draftCardMeta">
                   <span>{draft.platform}</span>
                   <em>{formatDate(draft.updated_at)}</em>
                 </div>
                 <strong>{draft.title}</strong>
-              </article>
+              </a>
             ))}
           </div>
         </section>
@@ -200,4 +241,17 @@ function formatDate(value?: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatToday() {
+  return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date());
+}
+
+function formatRefreshTime(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function buildTopicCreationHref(topic: HotTopic) {
+  const prompt = `${topic.title}\n\n热点背景：${topic.summary}\n保险内容角度：${topic.recommendedAngle}`;
+  return appPath(`/apps/traffic-copy?from=dashboard&entry=traffic-copy&prompt=${encodeURIComponent(prompt)}`);
 }

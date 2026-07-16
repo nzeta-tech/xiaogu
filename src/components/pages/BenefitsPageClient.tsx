@@ -29,7 +29,7 @@ export function BenefitsPageClient() {
   async function loadAll(signal?: AbortSignal) {
     try {
       const [announcementsResponse, giftsResponse] = await Promise.all([
-        fetch(apiPath("/api/announcements"), { signal }),
+        fetch(apiPath("/api/announcements?placement=benefits"), { signal }),
         fetch(apiPath("/api/gifts"), { signal }),
       ]);
       const announcementsPayload = (await announcementsResponse.json()) as { announcements?: Announcement[] };
@@ -57,13 +57,18 @@ export function BenefitsPageClient() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
     });
-    const payload = (await response.json()) as { redemption?: { creditAmount?: number; code?: string }; error?: string };
+    const payload = (await response.json()) as { redemption?: { rewardType?: string; creditAmount?: number; discountPercent?: number; code?: string }; error?: string };
     if (!response.ok) {
       setMessage(payload.error ?? "兑换失败");
       setBusy(false);
       return;
     }
-    setMessage(`兑换成功：${payload.redemption?.code ?? code} 已到账 ${payload.redemption?.creditAmount ?? 0} 点。`);
+    const redemption = payload.redemption;
+    setMessage(
+      redemption?.rewardType === "discount"
+        ? `兑换成功：${redemption.code ?? code} 可在下一笔充值中抵扣 ${redemption.discountPercent ?? 0}%。`
+        : `兑换成功：${redemption?.code ?? code} 已到账 ${redemption?.creditAmount ?? 0} 点。`,
+    );
     setCode("");
     await loadAll();
     setBusy(false);

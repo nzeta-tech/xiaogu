@@ -400,6 +400,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const effectiveWatermark = watermarkEnabled ? (watermarkText.trim() || defaultWatermark) : "";
   const imageScale = isImageWork ? Math.max(90, Math.min(140, fontScale)) : fontScale;
   const isWriteCopyWork = work?.platform === "write-copy";
+  const isTrafficCopyWork = work?.platform === "traffic-copy";
+  const isMarketingCopyWork = work?.platform === "marketing-copy";
+  const isSimpleCopyWork = isTrafficCopyWork || isMarketingCopyWork;
   const isLeadCopyWork = work?.platform === "lead-copy";
   const isStructuredCopyWork = isWriteCopyWork || isLeadCopyWork;
   const isGeneralContentWork = work?.platform === "general-content";
@@ -1782,13 +1785,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   }
 
   return (
-    <div className={isStructuredCopyWork ? "workDetailPage instanceStudioPage writeCopyWorkDetailPage" : isPolishWork ? "workDetailPage instanceStudioPage polishWorkDetailPage" : "workDetailPage instanceStudioPage"}>
+    <div className={isStructuredCopyWork ? "workDetailPage instanceStudioPage writeCopyWorkDetailPage" : isSimpleCopyWork ? "workDetailPage instanceStudioPage simpleCopyWorkDetailPage" : isPolishWork ? "workDetailPage instanceStudioPage polishWorkDetailPage" : "workDetailPage instanceStudioPage"}>
       <div className="page-content instanceStudioShell">
         <section className={isStructuredCopyWork ? "instanceStudioHero writeCopyInstanceHero" : isPolishWork ? "instanceStudioHero polishInstanceHero" : "instanceStudioHero"}>
           <div className="instanceStudioHeroHeader">
             <div className="instanceStudioTitleBlock">
               <h1>{formatWorkTitle(work)}</h1>
-              <p>{isWriteCopyWork ? "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写思维问卷。" : isLeadCopyWork ? "围绕同一份素材生成口播稿、小红书笔记和公众号文章，并按渠道保留各自的引流节奏。" : isVideoScriptPolishWork ? "这条作品保留了原稿的核心意思，同时把开头、结构和表达节奏重新提了一层，方便你直接复看、复制和继续改稿。" : isWechatArticlePolishWork ? "这条作品以现有文章为底稿，重点重做了标题、结构推进、语言质感和结尾互动，方便你直接进入长文阅读和继续调整。" : "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写思维问卷。"}</p>
+              <p>{isWriteCopyWork ? "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写人设问卷。" : isTrafficCopyWork ? "围绕素材生成流量内容，重点保留冲突钩子、逻辑推进和普通人代入场景。" : isMarketingCopyWork ? "围绕素材，从产品、方案、案例和观念四个方向生成营销内容。" : isLeadCopyWork ? "围绕同一份素材生成口播稿、小红书笔记和公众号文章，并按渠道保留各自的引流节奏。" : isVideoScriptPolishWork ? "这条作品保留了原稿的核心意思，同时把开头、结构和表达节奏重新提了一层，方便你直接复看、复制和继续改稿。" : isWechatArticlePolishWork ? "这条作品以现有文章为底稿，重点重做了标题、结构推进、语言质感和结尾互动，方便你直接进入长文阅读和继续调整。" : "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写人设问卷。"}</p>
             </div>
             <div className="instanceStudioHeroMeta compact">
               <span>{formatAppLabel(work.platform)}</span>
@@ -1881,6 +1884,14 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     type="button"
                   >
                     图片结果x{imageResults.length}
+                  </button>
+                ) : isSimpleCopyWork ? (
+                  <button
+                    className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
+                    onClick={() => jumpToSection("generated-content")}
+                    type="button"
+                  >
+                    正文
                   </button>
                 ) : (
                   batches.map((batch) => (
@@ -2003,18 +2014,18 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             ) : null}
 
             <section
-              className={isStructuredCopyWork ? "instanceSectionCard writeCopyResultSectionCard" : isPolishWork ? "instanceSectionCard polishResultSectionCard" : "instanceSectionCard"}
+              className={isStructuredCopyWork ? "instanceSectionCard writeCopyResultSectionCard" : isSimpleCopyWork ? "instanceSectionCard simpleCopyResultSectionCard" : isPolishWork ? "instanceSectionCard polishResultSectionCard" : "instanceSectionCard"}
               ref={(node) => { sectionRefs.current["generated-content"] = node; }}
             >
               <div className="instanceSectionHeader instanceSectionHeaderSplit">
                 <div>
                   <h2>{isImageWork ? "生成的图片" : isPolishWork ? "精修结果" : "生成内容"}</h2>
-                  <p>{isImageWork ? "集中展示生成图片、下载和复制动作。" : isWriteCopyWork ? "按渠道分组展示口播稿、小红书、公众号和朋友圈结果。" : isLeadCopyWork ? "按口播稿、小红书和公众号三个渠道展示 3 / 2 / 2 组引流成稿。" : isVideoScriptPolishWork ? "先看精修后的主稿，再看每一段是否更顺口、更好开口，保留复制和导出动作方便继续使用。" : isWechatArticlePolishWork ? "按长文阅读节奏展示精修结果，重点看标题、段落推进、语言质感和结尾互动是否更顺。" : "按内容结构顺序展示每一组生成结果。"}</p>
+                  <p>{isImageWork ? "集中展示生成图片、下载和复制动作。" : isWriteCopyWork ? "按渠道分组展示口播稿、小红书、公众号和朋友圈结果。" : isSimpleCopyWork ? "完整正文集中展示，可直接复制或导出继续使用。" : isLeadCopyWork ? "按口播稿、小红书和公众号三个渠道展示 3 / 2 / 2 组引流成稿。" : isVideoScriptPolishWork ? "先看精修后的主稿，再看每一段是否更顺口、更好开口，保留复制和导出动作方便继续使用。" : isWechatArticlePolishWork ? "按长文阅读节奏展示精修结果，重点看标题、段落推进、语言质感和结尾互动是否更顺。" : "按内容结构顺序展示每一组生成结果。"}</p>
                 </div>
                 {isImageWork ? (
                   imageNotice ? <span className="instanceSaveHint">{imageNotice}</span> : null
                 ) : (
-                  streamState.connected && isStructuredCopyWork
+                  streamState.connected && (isStructuredCopyWork || isSimpleCopyWork)
                     ? <span className="instanceSaveHint">内容生成中，正在持续回填结果...</span>
                     : saveMessage ? <span className="instanceSaveHint">{savingItemId ? "正在保存..." : saveMessage}</span> : null
                 )}
@@ -2025,7 +2036,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               ) : null}
 
               {isMalformedLeadCopyResult ? (
-                <div className="imageModeNotice">这条旧作品没有生成可识别的口播稿、小红书和公众号结构，请返回“写引流文案”重新创作。</div>
+                <div className="imageModeNotice">这条作品没有生成可识别的口播稿、小红书和公众号结构，请返回“{formatAppLabel(work?.platform)}”重新创作。</div>
               ) : null}
 
               {isImageWork ? (
@@ -2076,6 +2087,36 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     </div>
                   )}
                 </div>
+              ) : isSimpleCopyWork ? (
+                <article className="instanceResultBlock active simpleCopyResultBlock" aria-live="polite">
+                  <div className="instanceResultToolbar">
+                    <div className="instanceResultToolbarTitle">
+                      <strong>正文</strong>
+                      <span>文本预览</span>
+                    </div>
+                    <div className="instanceResultActions">
+                      <button
+                        className="instanceActionButton"
+                        disabled={!(streamState.content || work.content).trim()}
+                        onClick={() => void handleCopy("simple-copy", streamState.content || work.content)}
+                        type="button"
+                      >
+                        {copied["simple-copy"] ? "已复制" : "复制"}
+                      </button>
+                      <button
+                        className="instanceActionButton"
+                        disabled={!(streamState.content || work.content).trim()}
+                        onClick={() => handleExport(formatWorkTitle(work), streamState.content || work.content)}
+                        type="button"
+                      >
+                        导出Word
+                      </button>
+                    </div>
+                  </div>
+                  <div className="instancePlainResult simpleCopyResultBody" style={{ fontSize: `${fontScale}%` }}>
+                    {streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
+                  </div>
+                </article>
               ) : batches.length > 0 ? (
                 <div className={isStructuredCopyWork ? "instanceBatchStack writeCopyBatchStack" : isPolishWork ? "instanceBatchStack polishBatchStack" : "instanceBatchStack"} style={{ fontSize: `${fontScale}%` }}>
                   {batches.map((batch) => (
@@ -3304,10 +3345,16 @@ function isLeadCopyBatch(batch: CreationOutputBatch) {
   return batch.label === "口播稿" || batch.label === "小红书" || batch.label === "公众号";
 }
 
+function isMultiChannelCopyPlatform(platform?: string | null) {
+  return platform === "lead-copy" || platform === "traffic-copy" || platform === "marketing-copy";
+}
+
 function supportsWorkStreaming(platform: string) {
   return new Set([
     "write-copy",
     "lead-copy",
+    "traffic-copy",
+    "marketing-copy",
     "general-content",
     "image-card",
     "wechat-images",
@@ -3426,6 +3473,10 @@ function formatToneLabel(value?: string | null) {
   if (value === "gentle_empathy") return "温和共鸣";
   if (value === "analogy_thinking") return "类比思维";
   if (value === "raw_restore") return "原汁原味（还原整理）";
+  if (value === "professional_direct") return "专业直接";
+  if (value === "warm_trust") return "温和可信";
+  if (value === "scenario_analogy") return "场景类比";
+  if (value === "material_faithful") return "忠于素材";
   if (value === "traffic") return "偏犀利";
   if (value === "trust") return "偏稳重";
   if (value === "raw") return "尽量保留原意";
@@ -3457,6 +3508,8 @@ function formatAppLabel(value?: string | null) {
   if (value === "image-card") return "做图";
   if (value === "wechat-images") return "公众号配图";
   if (value === "lead-copy") return "写引流文案";
+  if (value === "traffic-copy") return "流量文案";
+  if (value === "marketing-copy") return "营销文案";
   if (value === "video-script-polish") return "口播文案精修";
   if (value === "wechat-article-polish") return "公众号文章精修";
   if (value === "topic-picker") return "找选题";
@@ -3544,13 +3597,14 @@ function formatWorkTitle(work: WorkDetail) {
     return buildImageWorkMeta(work).title;
   }
 
-  if (work.platform === "lead-copy") {
+  if (isMultiChannelCopyPlatform(work.platform)) {
     const source = typeof work.app_run?.input_payload?.source === "string"
       ? work.app_run.input_payload.source.replace(/\s+/g, " ").trim()
       : "";
-    const suffix = title.replace(/^写引流文案｜/, "").trim();
+    const appLabel = formatAppLabel(work.platform);
+    const suffix = title.replace(new RegExp(`^${appLabel}｜`), "").trim();
     const leakedTone = /^(?:sharp_insight|gentle_empathy|analogy_thinking|raw_restore|犀利洞察|温和共鸣|类比思维|原汁原味（还原整理）)$/.test(suffix);
-    if (source && leakedTone) return `写引流文案｜${source.slice(0, 18)}`;
+    if (source && leakedTone) return `${appLabel}｜${source.slice(0, 18)}`;
   }
 
   return title
@@ -3558,6 +3612,10 @@ function formatWorkTitle(work: WorkDetail) {
     .replace(/\bgentle_empathy\b/gi, formatToneLabel("gentle_empathy"))
     .replace(/\banalogy_thinking\b/gi, formatToneLabel("analogy_thinking"))
     .replace(/\braw_restore\b/gi, formatToneLabel("raw_restore"))
+    .replace(/\bprofessional_direct\b/gi, formatToneLabel("professional_direct"))
+    .replace(/\bwarm_trust\b/gi, formatToneLabel("warm_trust"))
+    .replace(/\bscenario_analogy\b/gi, formatToneLabel("scenario_analogy"))
+    .replace(/\bmaterial_faithful\b/gi, formatToneLabel("material_faithful"))
     .replace(/\btraffic\b/gi, formatToneLabel("traffic"))
     .replace(/\btrust\b/gi, formatToneLabel("trust"))
     .replace(/\braw\b/gi, formatToneLabel("raw"))

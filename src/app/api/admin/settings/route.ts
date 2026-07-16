@@ -3,9 +3,23 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { tryCreateAdminAuditLog, tryGetSystemSettings, tryUpdateSystemSettings } from "@/lib/db/repositories";
 
 const schema = z.object({
-  site: z.record(z.string(), z.unknown()).optional(),
-  auth: z.record(z.string(), z.unknown()).optional(),
-  payment: z.record(z.string(), z.unknown()).optional(),
+  site: z.object({
+    siteName: z.string().trim().min(1).max(40),
+    siteSubtitle: z.string().trim().min(1).max(120),
+    supportContact: z.string().trim().max(180),
+    footerNote: z.string().trim().max(300),
+  }).optional(),
+  auth: z.object({
+    allowRegistration: z.boolean(),
+    requireInviteCode: z.boolean(),
+    passwordHint: z.string().trim().min(1).max(120),
+  }).optional(),
+  payment: z.object({
+    enableStripe: z.boolean(),
+    enableManualTransfer: z.boolean().optional(),
+    displaySubscriptions: z.boolean(),
+    purchaseNotice: z.string().trim().max(500),
+  }).optional(),
 });
 
 async function requireAdmin() {

@@ -64,17 +64,39 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
 
   return (
     <div className="authPage">
-      <section className="panel authCard">
-        <div className="brand" style={{ color: "var(--text)", marginBottom: 18 }}>
+      <aside className="authBrandPanel">
+        <div className="authBrandLockup">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="brandMark" src={appPath("/brand/xiaogu-icon.png")} alt="小谷" />
-          <span>{config?.site?.siteName ?? "小谷"}</span>
+          <div>
+            <strong>{config?.site?.siteName ?? "小谷"}AI</strong>
+            <span>保险人的智能工作伙伴</span>
+          </div>
         </div>
-        <h1 style={{ margin: "0 0 8px" }}>{mode === "login" ? "经纪人登录" : "创建经纪人账号"}</h1>
-        <p style={{ margin: "0 0 18px", color: "var(--muted)" }}>
+        <div className="authBrandCopy">
+          <span>内容经营工作台</span>
+          <h1>让每一次表达，<br />都更像你。</h1>
+          <p>{config?.site?.siteSubtitle ?? "从客户问题到可发布内容，把专业经验沉淀成长期资产。"}</p>
+        </div>
+        <div className="authTrustStrip">
+          <span>个人风格记忆</span>
+          <span>保险合规检查</span>
+          <span>数字分身辅助</span>
+        </div>
+      </aside>
+
+      <section className="panel authCard">
+        <div className="authMobileBrand">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="brandMark" src={appPath("/brand/xiaogu-icon.png")} alt="" />
+          <strong>{config?.site?.siteName ?? "小谷"}AI</strong>
+        </div>
+        <span className="authEyebrow">{mode === "login" ? "欢迎回来" : "开始使用小谷"}</span>
+        <h2>{mode === "login" ? "登录你的工作台" : "创建经纪人账号"}</h2>
+        <p className="authLead">
           {mode === "login"
-            ? "登录后进入你的真实数据库工作台。"
-            : "注册后会创建经纪人账号、机构空间，后续通过思维设定生成个人画像。"}
+            ? "继续今天的内容创作与数字分身管理。"
+            : "注册后即可建立你的专属内容空间。"}
         </p>
         <form className="form" onSubmit={submit}>
           {mode === "register" ? (

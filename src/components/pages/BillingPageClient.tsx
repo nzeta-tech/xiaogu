@@ -47,12 +47,15 @@ type Gift = {
   created_at: string;
 };
 
+type BillingAnnouncement = { id: string; title: string; content: string; link_url?: string | null };
+
 export function BillingPageClient() {
   const searchParams = useSearchParams();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [usage, setUsage] = useState<Usage[]>([]);
   const [gifts, setGifts] = useState<Gift[]>([]);
+  const [announcements, setAnnouncements] = useState<BillingAnnouncement[]>([]);
   const [balance, setBalance] = useState<Balance>({});
   const [loading, setLoading] = useState(true);
   const [busyPlan, setBusyPlan] = useState("");
@@ -73,13 +76,14 @@ export function BillingPageClient() {
     setLoading(true);
     setError("");
     try {
-      const [plansResponse, ordersResponse, usageResponse, balanceResponse, giftsResponse, configResponse] = await Promise.all([
+      const [plansResponse, ordersResponse, usageResponse, balanceResponse, giftsResponse, configResponse, announcementsResponse] = await Promise.all([
         fetch(apiPath("/api/billing/plans"), { signal }),
         fetch(apiPath("/api/billing/orders"), { signal }),
         fetch(apiPath("/api/usage"), { signal }),
         fetch(apiPath("/api/billing/balance"), { signal }),
         fetch(apiPath("/api/gifts"), { signal }),
         fetch(apiPath("/api/system/public-config"), { signal }),
+        fetch(apiPath("/api/announcements?placement=billing"), { signal }),
       ]);
       const plansPayload = (await plansResponse.json()) as { plans?: Plan[] };
       const ordersPayload = (await ordersResponse.json()) as { orders?: Order[] };
@@ -87,12 +91,14 @@ export function BillingPageClient() {
       const balancePayload = (await balanceResponse.json()) as Balance;
       const giftsPayload = (await giftsResponse.json()) as { gifts?: Gift[] };
       const configPayload = (await configResponse.json()) as { payment?: Partial<typeof commerceConfig> };
+      const announcementsPayload = (await announcementsResponse.json()) as { announcements?: BillingAnnouncement[] };
       setPlans(plansPayload.plans ?? []);
       setOrders(ordersPayload.orders ?? []);
       setUsage(usagePayload.usage ?? []);
       setBalance(balancePayload);
       setGifts(giftsPayload.gifts ?? []);
       setCommerceConfig((current) => ({ ...current, ...configPayload.payment }));
+      setAnnouncements(announcementsPayload.announcements ?? []);
     } catch (cause) {
       if ((cause as Error).name !== "AbortError") setError("账单数据暂时无法加载，请稍后重试。");
     } finally {
@@ -133,6 +139,8 @@ export function BillingPageClient() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadAll(controller.signal);
     return () => controller.abort();
+    // loadAll is intentionally scoped to the initial page load and manual refresh actions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -149,6 +157,7 @@ export function BillingPageClient() {
       </section>
 
       {error ? <div className="alertPanel">{error}</div> : null}
+      {announcements.map((item) => <div className="panel" key={item.id}><strong>{item.title}</strong><p>{item.content}</p>{item.link_url ? <a href={item.link_url}>查看详情</a> : null}</div>)}
       {searchParams.get("checkout") === "success" ? <div className="successPanel">支付已完成，积分到账可能需要几秒，点击“刷新账单”即可更新。</div> : null}
       {searchParams.get("checkout") === "cancel" ? <div className="alertPanel">支付已取消，订单仍会保留，可从订单记录继续支付。</div> : null}
 
@@ -273,6 +282,8 @@ function StatusPill({ status }: { status: string }) {
     pending: "待支付",
     failed: "失败",
     canceled: "已取消",
+    cancelled: "已取消",
+    refunded: "已退款",
   };
   return <span className={`statusPill ${status}`}>{labelMap[status] ?? status}</span>;
 }

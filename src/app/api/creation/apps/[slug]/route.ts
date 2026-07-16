@@ -12,7 +12,12 @@ import {
   type CreationFieldValue,
 } from "@/lib/creation/output";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
-import { buildLeadCopyPrompt } from "@/lib/creation/lead-copy";
+import {
+  buildLeadCopyPrompt,
+  getMultiChannelCopyStyleMode,
+  getMultiChannelCopyVariant,
+  isMultiChannelCopyAppSlug,
+} from "@/lib/creation/lead-copy";
 import { buildXiaohongshuCheckPrompt } from "@/lib/creation/xiaohongshu-check";
 import {
   tryCompleteAppRun,
@@ -75,8 +80,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const content = app.slug === "write-copy"
     ? buildWriteCopyPrompt(app.fields, values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
-    : app.slug === "lead-copy"
-      ? buildLeadCopyPrompt(app.fields, values, app.promptHint, caseContext)
+    : isMultiChannelCopyAppSlug(app.slug)
+      ? buildLeadCopyPrompt(app.fields, values, app.promptHint, caseContext, getMultiChannelCopyVariant(app.slug))
       : app.slug === "xiaohongshu-check"
         ? buildXiaohongshuCheckPrompt(values, caseContext, app.promptHint)
       : app.slug === "ip-positioning"
@@ -100,7 +105,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     appCode: app.slug,
     tone: app.slug === "write-copy"
       ? stringifyValue(values.tone) || "self"
-      : app.slug === "lead-copy"
+      : isMultiChannelCopyAppSlug(app.slug)
         ? stringifyValue(values.tone)
         : "",
     targetChannels: Array.isArray(values.targets) ? values.targets : [],
@@ -120,7 +125,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
           : await runInsuranceContentAgent(
               [{ role: "user", content }],
               user.id,
-              app.slug === "write-copy" ? "general" : app.slug === "ip-positioning" ? "general" : "traffic",
+              app.slug === "write-copy" || app.slug === "ip-positioning" ? "general" : getMultiChannelCopyStyleMode(app.slug),
             );
   } catch (error) {
     await tryCompleteAppRun({
@@ -136,7 +141,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: error instanceof Error ? error.message : "内容生成失败，请稍后再试。" }, { status: 500 });
   }
 
-  const titleFields = app.slug === "lead-copy" ? ["source"] : app.fields.map((field) => field.id);
+  const titleFields = isMultiChannelCopyAppSlug(app.slug) ? ["source"] : app.fields.map((field) => field.id);
   const title = `${app.name}｜${summarizeTitle(values, titleFields)}`;
   const contentJson = buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []);
   await tryCompleteAppRun({
@@ -351,20 +356,20 @@ function buildIpPositioningPrompt(
   const lines = [
     "你现在在执行小谷应用：IP定位。",
     "你不是在写短视频文案，也不是在写一篇夸人的介绍稿。",
-    "你现在要完成的是：基于完整思维设定和本轮提交信息，输出一份可长期使用、可落地执行的保险经纪人个人IP定位分析。",
+    "你现在要完成的是：基于完整人设画像和本轮提交信息，输出一份可长期使用、可落地执行的保险经纪人个人IP定位分析。",
     ...caseContext,
     caseContext.length > 0 ? "" : "",
     hint,
     "",
     "分析原则：",
-    "1. 必须同时结合两类输入：长期思维画像 + 本轮IP定位页面填写内容。",
-    "2. 长期思维画像决定这个人的底层定位、人设底色、信任来源和表达方式。",
+    "1. 必须同时结合两类输入：长期人设画像 + 本轮IP定位页面填写内容。",
+    "2. 长期人设画像决定这个人的底层定位、人设底色、信任来源和表达方式。",
     "3. 本轮页面输入决定她当前阶段最适合如何定位、主打谁、解决什么问题。",
     "4. 不要只复述履历，不要空泛夸赞，不要用“专业、靠谱、有温度”这类万能词糊弄过去。",
     "5. 要优先寻找这个人最稀缺的身份组合、最强的信任锚点、最适合长期占据的认知位置。",
     "6. 如果长期人物底色和当前账号状态存在张力，优先保留底色，再给出现阶段更适合的表达打法。",
     "",
-    snapshot ? formatThinkingProfileSnapshotForPrompt(snapshot, summary ?? undefined) : "【长期思维画像摘要】\n- 当前暂无完整结构化画像，请谨慎分析，不要编造。",
+    snapshot ? formatThinkingProfileSnapshotForPrompt(snapshot, summary ?? undefined) : "【长期人设画像摘要】\n- 当前暂无完整结构化画像，请谨慎分析，不要编造。",
     "",
     "【本轮IP定位页面输入】",
     `- 当前账号状态：${currentState || "未填写"}`,

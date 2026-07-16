@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryCreateAdminAuditLog, tryListAdminUsers, tryUpdateAdminUser } from "@/lib/db/repositories";
+import { tryCountActiveAdmins, tryCreateAdminAuditLog, tryListAdminUsers, tryUpdateAdminUser } from "@/lib/db/repositories";
 
 const updateUserSchema = z.object({
   userId: z.string().uuid(),
@@ -23,8 +23,17 @@ export async function PATCH(request: Request) {
   if (user.role !== "admin") return Response.json({ error: "无权更新用户" }, { status: 403 });
 
   const input = updateUserSchema.parse(await request.json());
-  if (input.userId === user.id && input.status === "suspended") {
-    return Response.json({ error: "不能停用当前管理员账号" }, { status: 400 });
+  if (input.userId === user.id && (input.status === "suspended" || input.role === "broker")) {
+    return Response.json({ error: "不能停用当前管理员或降低自己的权限" }, { status: 400 });
+  }
+  if (input.status === "suspended" || input.role === "broker") {
+    const users = await tryListAdminUsers();
+    const target = users.find((item) => item.id === input.userId);
+    if (target?.role === "admin" && target.status === "active") {
+      const activeAdmins = await tryCountActiveAdmins();
+      if (activeAdmins === null) return Response.json({ error: "无法校验管理员数量，请稍后重试" }, { status: 503 });
+      if (activeAdmins <= 1) return Response.json({ error: "系统必须至少保留一个可用管理员" }, { status: 409 });
+    }
   }
 
   const updated = await tryUpdateAdminUser(input);

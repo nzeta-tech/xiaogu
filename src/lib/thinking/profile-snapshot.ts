@@ -1,8 +1,8 @@
 import type {
   QuestionnaireAnswers,
-  QuestionnaireQuestion,
   QuestionnaireTemplate,
 } from "./questionnaire-template";
+import { calculateMbtiResult, type MbtiResult } from "./mbti";
 
 export type ThinkingProfileSnapshot = {
   identity_profile: {
@@ -43,6 +43,7 @@ export type ThinkingProfileSnapshot = {
     repeatable_angles: string[];
     taboo_angles: string[];
   };
+  mbti_profile?: MbtiResult;
   evidence_map: Record<string, string[]>;
 };
 
@@ -61,61 +62,48 @@ export function buildThinkingProfileSnapshot(
   summary: ThinkingProfileSummary;
 } {
   const valueByQuestion = createQuestionValueMap(answers, template);
-  const personal = template.structure.sections[0];
-  const content = template.structure.sections[1];
-  const audience = template.structure.sections[2];
-  const beliefs = template.structure.sections[3];
-  const deep = template.structure.sections[4];
-
-  const displayName = getQuestionText(valueByQuestion, personal?.questions[0]);
-  const honors = splitAnswerToList(getQuestionText(valueByQuestion, personal?.questions[3]));
-  const tags = splitAnswerToList(getQuestionText(valueByQuestion, personal?.questions[4]));
-  const careerPath = getQuestionText(valueByQuestion, personal?.questions[5]);
-  const contentStatus = getQuestionText(valueByQuestion, content?.questions[0]);
-  const socialSamples = compactList([
-    getQuestionText(valueByQuestion, content?.questions[1]),
-    getQuestionText(valueByQuestion, content?.questions[2]),
-    getQuestionText(valueByQuestion, content?.questions[3]),
-  ]);
-  const timeBudget = getQuestionText(valueByQuestion, content?.questions[4]);
-  const earnings = getQuestionText(valueByQuestion, audience?.questions[0]);
-  const currentAudience = getQuestionText(valueByQuestion, audience?.questions[1]);
-  const clientQuotes = splitAnswerToList(getQuestionText(valueByQuestion, audience?.questions[2]));
-  const commonQuestions = splitAnswerToList(getQuestionText(valueByQuestion, audience?.questions[3]));
-  const believes = splitAnswerToList(getQuestionText(valueByQuestion, beliefs?.questions[0]));
-  const disbelieves = splitAnswerToList(getQuestionText(valueByQuestion, beliefs?.questions[1]));
-  const turningPoints = splitAnswerToList(getQuestionText(valueByQuestion, deep?.questions[0]));
-  const fearsAndDrives = compactList([
-    getQuestionText(valueByQuestion, deep?.questions[1]),
-    getQuestionText(valueByQuestion, deep?.questions[2]),
-  ]);
-  const failureView = getQuestionText(valueByQuestion, deep?.questions[3]);
-  const decisionStyle = getQuestionText(valueByQuestion, deep?.questions[4]);
-  const closePeopleFeedback = splitAnswerToList(getQuestionText(valueByQuestion, deep?.questions[5]));
-  const memorableMoment = getQuestionText(valueByQuestion, deep?.questions[6]);
-  const clientStories = splitAnswerToList(getQuestionText(valueByQuestion, deep?.questions[7]));
+  const get = (questionId: string) => valueByQuestion.get(questionId) ?? "";
+  const displayName = get("display_name");
+  const roleContext = get("role_context");
+  const careerPath = get("career_path");
+  const honors = splitAnswerToList(get("credentials"));
+  const tags = splitAnswerToList(get("identity_tags"));
+  const turningPoints = splitAnswerToList(get("turning_points"));
+  const currentAudience = get("primary_audience");
+  const commonQuestions = splitAnswerToList(get("common_questions"));
+  const statedPains = splitAnswerToList(get("client_pains"));
+  const specialty = get("specialty");
+  const clientQuotes = splitAnswerToList(get("trust_evidence"));
+  const clientStories = splitAnswerToList(get("case_stories"));
+  const contentStatus = get("content_status");
+  const contentSample = get("content_sample");
+  const tonePreference = splitAnswerToList(get("tone_preference"));
+  const believes = splitAnswerToList(get("core_beliefs"));
+  const boundaries = splitAnswerToList(get("boundaries"));
+  const timeBudget = get("time_budget");
+  const mbtiProfile = calculateMbtiResult(valueByQuestion);
 
   const personalStoryAnchor =
-    turningPoints[0] || clientStories[0] || failureView || memorableMoment || careerPath;
+    turningPoints[0] || clientStories[0] || careerPath;
   const trustReasons = compactList([
     tags.join(" · "),
     honors.join(" · "),
     clientQuotes[0],
     personalStoryAnchor,
   ]);
-  const pains = deriveClientPains(currentAudience, commonQuestions, clientQuotes, earnings);
+  const pains = uniqueStrings([...statedPains, ...deriveClientPains(currentAudience, commonQuestions, clientQuotes, specialty)], 8);
   const buyingMotivations = deriveBuyingMotivations(clientQuotes, commonQuestions, believes);
-  const tone = deriveTone(tags, believes, disbelieves, closePeopleFeedback);
-  const contentPreferences = deriveContentPreferences(contentStatus, socialSamples, timeBudget, commonQuestions);
-  const pillarTopics = derivePillarTopics(currentAudience, commonQuestions, believes, earnings);
-  const repeatableAngles = deriveRepeatableAngles(clientStories, personalStoryAnchor, commonQuestions, failureView);
-  const tabooAngles = deriveTabooAngles(disbelieves);
+  const tone = uniqueStrings([...tonePreference, ...deriveTone(tags, believes, boundaries, []), ...mbtiProfile.contentGuidance], 10);
+  const contentPreferences = deriveContentPreferences(contentStatus, [contentSample], timeBudget, commonQuestions);
+  const pillarTopics = derivePillarTopics(currentAudience, commonQuestions, believes, specialty);
+  const repeatableAngles = deriveRepeatableAngles(clientStories, personalStoryAnchor, commonQuestions, "");
+  const tabooAngles = deriveTabooAngles(boundaries);
 
   const snapshot: ThinkingProfileSnapshot = {
     identity_profile: {
       display_name: displayName,
-      core_identity: compactList([displayName, ...tags.slice(0, 6)]),
-      life_roles: tags.filter((item) => /妈妈|宝妈|爸爸|父亲|母亲|创业|博士|老师|医生|企业主/.test(item)),
+      core_identity: compactList([displayName, roleContext, ...tags.slice(0, 6)]),
+      life_roles: uniqueStrings([roleContext, ...tags].filter((item) => /妈妈|宝妈|爸爸|父亲|母亲|创业|博士|老师|医生|企业主|经纪人|顾问/.test(item)), 6),
       career_path: careerPath,
       honors,
       turning_points: compactList(turningPoints),
@@ -135,13 +123,13 @@ export function buildThinkingProfileSnapshot(
     },
     belief_system: {
       believes,
-      disbelieves,
-      decision_style: decisionStyle,
-      fears_and_drives: compactList([...fearsAndDrives, failureView]),
+      disbelieves: boundaries,
+      decision_style: `${mbtiProfile.type} 偏好：${mbtiProfile.contentGuidance.join(" ")}`,
+      fears_and_drives: compactList(believes),
     },
     expression_style: {
       tone,
-      style_summary: compactList([contentStatus, socialSamples[0], memorableMoment]).join(" "),
+      style_summary: compactList([contentStatus, contentSample, `${mbtiProfile.type} 表达偏好`]).join(" ").slice(0, 1000),
       content_preferences: contentPreferences,
       time_budget: timeBudget,
     },
@@ -150,13 +138,15 @@ export function buildThinkingProfileSnapshot(
       repeatable_angles: repeatableAngles,
       taboo_angles: tabooAngles,
     },
+    mbti_profile: mbtiProfile,
     evidence_map: {
-      identity_profile: compactList([displayName, careerPath, honors.join("；"), tags.join("；")]),
-      audience_profile: compactList([currentAudience, earnings, commonQuestions.join("；")]),
+      identity_profile: compactList([displayName, roleContext, careerPath, honors.join("；"), tags.join("；")]),
+      audience_profile: compactList([currentAudience, specialty, commonQuestions.join("；"), statedPains.join("；")]),
       trust_signals: compactList([clientQuotes.join("；"), personalStoryAnchor, clientStories.join("；")]),
-      belief_system: compactList([believes.join("；"), disbelieves.join("；"), decisionStyle, failureView]),
-      expression_style: compactList([contentStatus, socialSamples.join("；"), timeBudget, memorableMoment]),
+      belief_system: compactList([believes.join("；"), boundaries.join("；")]),
+      expression_style: compactList([contentStatus, contentSample, tonePreference.join("；"), timeBudget, mbtiProfile.type]),
       content_motifs: compactList([pillarTopics.join("；"), repeatableAngles.join("；")]),
+      mbti_profile: compactList([mbtiProfile.type, ...mbtiProfile.contentGuidance]),
     },
   };
 
@@ -164,7 +154,7 @@ export function buildThinkingProfileSnapshot(
     one_liner: compactList([displayName, tags.slice(0, 2).join("·"), pillarTopics[0]]).join(" · ").slice(0, 120),
     positioning_hint: compactList([trustReasons[0], believes[0], personalStoryAnchor]).join(" ").slice(0, 220),
     audience_hint: compactList([snapshot.audience_profile.primary_audience, pains.slice(0, 2).join("；")]).join(" | ").slice(0, 220),
-    style_hint: compactList([tone.slice(0, 4).join(" · "), timeBudget]).join(" | ").slice(0, 160),
+    style_hint: compactList([`${mbtiProfile.type} 偏好`, tone.slice(0, 3).join(" · "), timeBudget]).join(" | ").slice(0, 200),
   };
 
   return { snapshot, summary };
@@ -172,7 +162,7 @@ export function buildThinkingProfileSnapshot(
 
 export function formatThinkingProfileSnapshotForPrompt(snapshot: ThinkingProfileSnapshot, summary?: ThinkingProfileSummary) {
   const lines = [
-    "【长期思维画像摘要】",
+    "【长期人设画像摘要】",
   ];
 
   if (summary) {
@@ -210,6 +200,12 @@ export function formatThinkingProfileSnapshotForPrompt(snapshot: ThinkingProfile
   lines.push(`- 内容偏好：${snapshot.expression_style.content_preferences.join("；") || "未提供"}`);
   lines.push(`- 可投入时间：${snapshot.expression_style.time_budget || "未提供"}`);
 
+  if (snapshot.mbti_profile) {
+    lines.push("【MBTI 表达偏好】");
+    lines.push(`- 类型：${snapshot.mbti_profile.type}（倾向清晰度 ${snapshot.mbti_profile.confidence}%）`);
+    lines.push(`- 创作提示：${snapshot.mbti_profile.contentGuidance.join("；")}`);
+  }
+
   lines.push("【内容母题】");
   lines.push(`- 适合长期讲的主题：${snapshot.content_motifs.pillar_topics.join("；") || "未提供"}`);
   lines.push(`- 可反复使用的切角：${snapshot.content_motifs.repeatable_angles.join("；") || "未提供"}`);
@@ -240,6 +236,7 @@ export function buildThinkingProfileBrief(snapshot: ThinkingProfileSnapshot, sum
       uniqueStrings([
         ...snapshot.expression_style.tone,
         ...snapshot.content_motifs.repeatable_angles,
+        ...(snapshot.mbti_profile?.contentGuidance ?? []),
       ], 6).join("；"),
   };
 }
@@ -262,11 +259,6 @@ function createQuestionValueMap(answers: QuestionnaireAnswers, template: Questio
     });
   });
   return output;
-}
-
-function getQuestionText(map: Map<string, string>, question?: QuestionnaireQuestion) {
-  if (!question) return "";
-  return map.get(question.question_id) ?? "";
 }
 
 function splitAnswerToList(value: string) {

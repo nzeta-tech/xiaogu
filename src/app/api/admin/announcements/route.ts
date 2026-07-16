@@ -81,7 +81,9 @@ export async function DELETE(request: Request) {
   if (user instanceof Response) return user;
 
   const { searchParams } = new URL(request.url);
-  const id = z.string().uuid().parse(searchParams.get("id"));
+  const parsed = z.string().uuid().safeParse(searchParams.get("id"));
+  if (!parsed.success) return Response.json({ error: "公告编号格式不正确" }, { status: 400 });
+  const id = parsed.data;
   const ok = await tryDeleteAnnouncement(id);
   if (!ok) return Response.json({ error: "公告删除失败" }, { status: 503 });
 

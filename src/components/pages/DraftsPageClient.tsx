@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { apiPath, appPath } from "@/lib/client/url";
-import { useThinkingEntryState } from "@/lib/client/thinking-entry";
 
 type WorksPayload = {
   works: {
@@ -53,7 +52,6 @@ const appTabs: Array<{ value: AppFilter; label: string }> = [
 ];
 
 export function DraftsPageClient() {
-  const thinkingEntry = useThinkingEntryState();
   const [payload, setPayload] = useState<WorksPayload | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -125,17 +123,6 @@ export function DraftsPageClient() {
 
   return (
     <div className="pageStack creationWorksPageReset">
-      <section className="workspaceHubHero creationWorksHeroReset">
-        <div className="workspaceHubHeroIcon" aria-hidden="true">💡</div>
-        <div className="workspaceHubHeroCopy">
-          <strong>{thinkingEntry.title}</strong>
-          <p>{thinkingEntry.description}</p>
-        </div>
-        <div className="workspaceHubHeroActions">
-          <a className="primaryButton linkButton workspaceHubHeroAction" href={thinkingEntry.href}>{thinkingEntry.actionLabel}</a>
-        </div>
-      </section>
-
       <div className="page-top-block creationWorksTopBlock">
         <header className="creation-page-header creationWorksPageHeaderReset">
           <p className="creation-page-subtitle">围绕获客增长的全场景 AI 内容创作应用</p>
@@ -278,6 +265,8 @@ function formatPlatformLabel(platform: string) {
   if (platform === "write-copy") return "写文案";
   if (platform === "image-card") return "做图";
   if (platform === "lead-copy") return "写引流文案";
+  if (platform === "traffic-copy") return "流量文案";
+  if (platform === "marketing-copy") return "营销文案";
   if (platform === "video-script-polish") return "口播文案精修";
   if (platform === "wechat-article-polish") return "公众号文章精修";
   return platform;
@@ -287,13 +276,15 @@ function platformEmoji(platform: string) {
   if (platform === "write-copy") return "🎨";
   if (platform === "image-card") return "🪄";
   if (platform === "lead-copy") return "🌱";
+  if (platform === "traffic-copy") return "⚡";
+  if (platform === "marketing-copy") return "📣";
   if (platform === "video-script-polish") return "🔮";
   if (platform === "wechat-article-polish") return "🖊️";
   return "📝";
 }
 
 function platformPoints(platform: string) {
-  if (platform === "write-copy" || platform === "image-card" || platform === "lead-copy" || platform === "video-script-polish" || platform === "wechat-article-polish") {
+  if (platform === "write-copy" || platform === "image-card" || platform === "lead-copy" || platform === "traffic-copy" || platform === "marketing-copy" || platform === "video-script-polish" || platform === "wechat-article-polish") {
     return "100 积分";
   }
   return "作品";
