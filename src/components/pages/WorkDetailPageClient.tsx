@@ -54,7 +54,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const searchParams = useSearchParams();
   const [work, setWork] = useState<WorkDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState("run-info");
+  const [activeSection, setActiveSection] = useState("generated-content");
   const [activeBatchId, setActiveBatchId] = useState("");
   const [activeItemIds, setActiveItemIds] = useState<Record<string, string>>({});
   const [fontScale, setFontScale] = useState(100);
@@ -964,8 +964,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
             <main className="instanceOriginMain">
               <section className="instanceOriginNotice">
-                <span>本作品使用资深创作者风格创作，若想打造自己的个性化风格，</span>
-                <a href={appPath("/thinking")}>请填写思维问卷 →</a>
+                <span>想让后续内容更贴近你的表达方式？</span>
+                <a href={appPath("/profile")}>完善数字分身人设 →</a>
               </section>
 
               <section
