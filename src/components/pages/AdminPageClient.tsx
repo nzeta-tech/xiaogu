@@ -20,6 +20,54 @@ type Summary = {
   recentUsage: AdminUsage[];
 };
 
+type ContentOverview = {
+  totals: {
+    worksTotal: number;
+    worksUsed: number;
+    worksFavorite: number;
+    appRunsTotal: number;
+    appRunsFailed: number;
+    complianceReportsTotal: number;
+    questionnairesTotal: number;
+    questionnairesCompleted: number;
+    questionnaireAvgCompletion: number;
+  };
+  complianceRisk: Array<{ riskLevel: string; count: number }>;
+  recentWorks: AdminWork[];
+  recentComplianceReports: AdminComplianceReport[];
+  appUsage: AdminAppUsage[];
+};
+
+type AdminWork = {
+  id: string;
+  title: string;
+  status: string;
+  compliance_risk: string;
+  source_channel: string;
+  updated_at: string;
+  user_email: string | null;
+  app_name: string | null;
+  content_preview: string;
+};
+
+type AdminComplianceReport = {
+  id: string;
+  risk_level: string;
+  checked_text: string;
+  created_at: string;
+  user_email: string | null;
+  issue_count: number;
+};
+
+type AdminAppUsage = {
+  app_code: string | null;
+  app_name: string | null;
+  run_count: number;
+  success_count: number;
+  failed_count: number;
+  quota_total: number;
+};
+
 type AdminUser = {
   id: string;
   name: string;
@@ -66,6 +114,60 @@ type PromoCode = {
   notes?: string;
 };
 
+type AdminOrderDetail = AdminOrder & {
+  provider_order_id: string | null;
+  checkout_url: string | null;
+  metadata: Record<string, unknown>;
+  paid_at: string | null;
+  user_id: string;
+  user_name: string;
+};
+
+type AdminCreationApp = {
+  id: string;
+  code: string;
+  slug: string;
+  name: string;
+  emoji: string;
+  description: string;
+  badge: string | null;
+  points_cost: number;
+  result_type: string;
+  requires_thinking: boolean;
+  featured: boolean;
+  status: string;
+  sort_order: number;
+  category_name: string | null;
+  run_count: number;
+  updated_at: string;
+};
+
+type FeedbackTicket = {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  status: string;
+  priority: string;
+  admin_reply: string;
+  created_at: string;
+  updated_at: string;
+  user_email: string | null;
+  user_name: string | null;
+  assigned_admin_email: string | null;
+};
+
+type AuditLog = {
+  id: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+  admin_email: string | null;
+  admin_name: string | null;
+};
+
 type Announcement = {
   id: string;
   title: string;
@@ -85,6 +187,24 @@ type Plan = {
   currency: string;
   description: string;
   recommended?: boolean;
+  status?: string;
+  sortOrder?: number;
+};
+
+type AdminUserDetail = {
+  user: AdminUser;
+  balance: number;
+  orders: AdminOrderDetail[];
+  usage: AdminUsage[];
+  gifts: Array<{ id: string; source_type: string; source_label: string; quota_amount: number; status: string; created_at: string }>;
+  works: Array<{ id: string; title: string; status: string; updated_at: string; platform: string }>;
+  totals: {
+    orderAmountCents: number;
+    quotaPurchased: number;
+    quotaGifted: number;
+    quotaConsumed: number;
+    worksTotal: number;
+  };
 };
 
 type Settings = {
@@ -127,16 +247,37 @@ const defaultSettings: Settings = {
   },
 };
 
+const adminMenuItems = [
+  { id: "overview", label: "仪表盘", hint: "核心指标", icon: "▦" },
+  { id: "users", label: "用户管理", hint: "账号与积分", icon: "◎" },
+  { id: "content", label: "内容运营", hint: "作品与应用", icon: "✎" },
+  { id: "commerce", label: "商业化", hint: "订单与套餐", icon: "¥" },
+  { id: "growth", label: "增长活动", hint: "公告与优惠", icon: "✦" },
+  { id: "support", label: "反馈审计", hint: "工单与日志", icon: "?" },
+  { id: "settings", label: "系统设置", hint: "站点配置", icon: "⚙" },
+] as const;
+
 export function AdminPageClient() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [orders, setOrders] = useState<AdminOrderDetail[]>([]);
+  const [creationApps, setCreationApps] = useState<AdminCreationApp[]>([]);
+  const [feedbackTickets, setFeedbackTickets] = useState<FeedbackTicket[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [contentOverview, setContentOverview] = useState<ContentOverview | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [planForm, setPlanForm] = useState<Plan>({ code: "", name: "", quotaAmount: 100, amountCents: 9900, currency: "CNY", description: "", recommended: false, status: "active", sortOrder: 0 });
+  const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [tab, setTab] = useState<"overview" | "users" | "commerce" | "growth" | "settings">("overview");
+  const [tab, setTab] = useState<"overview" | "users" | "content" | "commerce" | "growth" | "support" | "settings">("overview");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [appStatusFilter, setAppStatusFilter] = useState("all");
+  const [grantAmount, setGrantAmount] = useState(100);
 
   const [announcementForm, setAnnouncementForm] = useState({
     title: "",
@@ -158,28 +299,43 @@ export function AdminPageClient() {
 
   async function loadAll(signal?: AbortSignal) {
     setError("");
-    const [summaryResponse, usersResponse, promoResponse, announcementsResponse, settingsResponse, plansResponse] = await Promise.all([
+    const [summaryResponse, usersResponse, ordersResponse, appsResponse, feedbackResponse, auditResponse, promoResponse, announcementsResponse, contentResponse, settingsResponse, plansResponse] = await Promise.all([
       fetch(apiPath("/api/admin/summary"), { signal }),
       fetch(apiPath("/api/admin/users"), { signal }),
+      fetch(apiPath("/api/admin/orders"), { signal }),
+      fetch(apiPath("/api/admin/apps"), { signal }),
+      fetch(apiPath("/api/admin/feedback"), { signal }),
+      fetch(apiPath("/api/admin/audit-logs"), { signal }),
       fetch(apiPath("/api/admin/promo-codes"), { signal }),
       fetch(apiPath("/api/admin/announcements"), { signal }),
+      fetch(apiPath("/api/admin/content"), { signal }),
       fetch(apiPath("/api/admin/settings"), { signal }),
-      fetch(apiPath("/api/billing/plans"), { signal }),
+      fetch(apiPath("/api/admin/billing-plans"), { signal }),
     ]);
 
     const summaryPayload = (await summaryResponse.json()) as { summary?: Summary; error?: string };
     const usersPayload = (await usersResponse.json()) as { users?: AdminUser[]; error?: string };
+    const ordersPayload = (await ordersResponse.json()) as { orders?: AdminOrderDetail[]; error?: string };
+    const appsPayload = (await appsResponse.json()) as { apps?: AdminCreationApp[]; error?: string };
+    const feedbackPayload = (await feedbackResponse.json()) as { tickets?: FeedbackTicket[]; error?: string };
+    const auditPayload = (await auditResponse.json()) as { logs?: AuditLog[]; error?: string };
     const promoPayload = (await promoResponse.json()) as { promoCodes?: PromoCode[]; error?: string };
     const announcementPayload = (await announcementsResponse.json()) as { announcements?: Announcement[]; error?: string };
+    const contentPayload = (await contentResponse.json()) as { content?: ContentOverview; error?: string };
     const settingsPayload = (await settingsResponse.json()) as { settings?: Settings; error?: string };
     const plansPayload = (await plansResponse.json()) as { plans?: Plan[] };
 
-    if (!summaryResponse.ok || !usersResponse.ok || !promoResponse.ok || !announcementsResponse.ok || !settingsResponse.ok) {
+    if (!summaryResponse.ok || !usersResponse.ok || !ordersResponse.ok || !appsResponse.ok || !feedbackResponse.ok || !auditResponse.ok || !promoResponse.ok || !announcementsResponse.ok || !contentResponse.ok || !settingsResponse.ok) {
       setError(
         summaryPayload.error ??
           usersPayload.error ??
+          ordersPayload.error ??
+          appsPayload.error ??
+          feedbackPayload.error ??
+          auditPayload.error ??
           promoPayload.error ??
           announcementPayload.error ??
+          contentPayload.error ??
           settingsPayload.error ??
           "后台数据加载失败",
       );
@@ -188,8 +344,13 @@ export function AdminPageClient() {
 
     setSummary(summaryPayload.summary ?? null);
     setUsers(usersPayload.users ?? []);
+    setOrders(ordersPayload.orders ?? []);
+    setCreationApps(appsPayload.apps ?? []);
+    setFeedbackTickets(feedbackPayload.tickets ?? []);
+    setAuditLogs(auditPayload.logs ?? []);
     setPromoCodes(promoPayload.promoCodes ?? []);
     setAnnouncements(announcementPayload.announcements ?? []);
+    setContentOverview(contentPayload.content ?? null);
     setSettings(settingsPayload.settings ?? defaultSettings);
     setPlans(plansPayload.plans ?? []);
   }
@@ -209,6 +370,16 @@ export function AdminPageClient() {
     setNotice("用户状态已更新。");
   }
 
+  async function loadUserDetail(userId: string) {
+    const response = await fetch(apiPath(`/api/admin/users/detail?userId=${encodeURIComponent(userId)}`));
+    const payload = (await response.json()) as { detail?: AdminUserDetail; error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "用户详情加载失败");
+      return;
+    }
+    setSelectedUserDetail(payload.detail ?? null);
+  }
+
   async function grantCredits(userId: string, quotaAmount: number) {
     const response = await fetch(apiPath("/api/admin/users/credits"), {
       method: "POST",
@@ -222,6 +393,120 @@ export function AdminPageClient() {
     }
     await loadAll();
     setNotice(`已赠送 ${quotaAmount} 点。`);
+  }
+
+  async function updateOrder(orderId: string, status: string) {
+    const response = await fetch(apiPath("/api/admin/orders"), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ orderId, status }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "订单更新失败");
+      return;
+    }
+    await loadAll();
+    setNotice("订单状态已更新。");
+  }
+
+  async function updateCreationApp(appId: string, input: { status?: string; featured?: boolean; pointsCost?: number }) {
+    const response = await fetch(apiPath("/api/admin/apps"), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ appId, ...input }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "创作应用更新失败");
+      return;
+    }
+    await loadAll();
+    setNotice("创作应用已更新。");
+  }
+
+  async function updateAnnouncementStatus(id: string, status: string) {
+    const response = await fetch(apiPath("/api/admin/announcements"), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "公告状态更新失败");
+      return;
+    }
+    await loadAll();
+    setNotice("公告状态已更新。");
+  }
+
+  async function deleteAnnouncement(id: string) {
+    const response = await fetch(apiPath(`/api/admin/announcements?id=${encodeURIComponent(id)}`), { method: "DELETE" });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "公告删除失败");
+      return;
+    }
+    await loadAll();
+    setNotice("公告已删除。");
+  }
+
+  async function updatePromoStatus(id: string, status: string) {
+    const response = await fetch(apiPath("/api/admin/promo-codes"), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "优惠码状态更新失败");
+      return;
+    }
+    await loadAll();
+    setNotice("优惠码状态已更新。");
+  }
+
+  async function deletePromo(id: string) {
+    const response = await fetch(apiPath(`/api/admin/promo-codes?id=${encodeURIComponent(id)}`), { method: "DELETE" });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "优惠码删除失败");
+      return;
+    }
+    await loadAll();
+    setNotice("优惠码已删除。");
+  }
+
+  async function updateFeedback(id: string, input: { status?: string; priority?: string; adminReply?: string }) {
+    const response = await fetch(apiPath("/api/admin/feedback"), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, ...input }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "反馈更新失败");
+      return;
+    }
+    await loadAll();
+    setNotice("反馈工单已更新。");
+  }
+
+  async function savePlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const response = await fetch(apiPath("/api/admin/billing-plans"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(planForm),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "套餐保存失败");
+      return;
+    }
+    setPlanForm({ code: "", name: "", quotaAmount: 100, amountCents: 9900, currency: "CNY", description: "", recommended: false, status: "active", sortOrder: 0 });
+    await loadAll();
+    setNotice("套餐已保存。");
   }
 
   async function saveAnnouncement(event: FormEvent<HTMLFormElement>) {
@@ -287,34 +572,48 @@ export function AdminPageClient() {
     return () => controller.abort();
   }, []);
 
+  const filteredUsers = users.filter((user) => {
+    const keyword = userSearch.trim().toLowerCase();
+    if (!keyword) return true;
+    return `${user.name} ${user.email} ${user.role} ${user.status}`.toLowerCase().includes(keyword);
+  });
+  const filteredOrders = orders.filter((order) => orderStatusFilter === "all" || order.status === orderStatusFilter);
+  const filteredCreationApps = creationApps.filter((app) => appStatusFilter === "all" || app.status === appStatusFilter);
+
   return (
-    <div className="pageStack">
-      <div className="topbar adminTopbar">
-        <div>
-          <h1>小谷管理后台</h1>
-          <div>围绕用户、订单、套餐、活动、系统配置开展日常运营。</div>
+    <div className="adminConsole">
+      <aside className="adminSidebar" aria-label="管理后台菜单">
+        <div className="adminSidebarBrand">
+          <strong>小谷后台</strong>
+          <span>运营管理控制台</span>
         </div>
-        <button className="secondaryButton" onClick={() => void loadAll()}>
-          刷新
-        </button>
-      </div>
+        <nav className="adminSidebarNav">
+          {adminMenuItems.map((item) => (
+            <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)} type="button">
+              <em aria-hidden="true">{item.icon}</em>
+              <span>
+                <strong>{item.label}</strong>
+                <small>{item.hint}</small>
+              </span>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <section className="adminMainSurface">
+        <div className="adminHeaderBar">
+          <div>
+            <h1>{adminMenuItems.find((item) => item.id === tab)?.label ?? "管理后台"}</h1>
+            <p>围绕用户、内容、订单、活动和系统配置开展日常运营。</p>
+          </div>
+          <div className="adminHeaderActions">
+            <span>{summary?.activeUsers ?? 0} 活跃用户</span>
+            <button className="secondaryButton" onClick={() => void loadAll()}>刷新</button>
+          </div>
+        </div>
 
       {error ? <div className="panel alertPanel">{error}</div> : null}
       {notice ? <div className="panel successPanel">{notice}</div> : null}
-
-      <div className="tabs">
-        {[
-          ["overview", "运营总览"],
-          ["users", "用户管理"],
-          ["commerce", "商业化"],
-          ["growth", "公告与增长"],
-          ["settings", "系统配置"],
-        ].map(([value, label]) => (
-          <button className={tab === value ? "active" : ""} key={value} onClick={() => setTab(value as typeof tab)}>
-            {label}
-          </button>
-        ))}
-      </div>
 
       {tab === "overview" ? (
         <>
@@ -365,8 +664,18 @@ export function AdminPageClient() {
             <h2>用户管理</h2>
             <p>支持启停账号、切换角色和赠送额度，优先满足日常运营动作。</p>
           </div>
+          <div className="inlineFields">
+            <input value={userSearch} placeholder="搜索姓名、邮箱、角色、状态" onChange={(event) => setUserSearch(event.target.value)} />
+            <input
+              min="1"
+              type="number"
+              value={grantAmount}
+              onChange={(event) => setGrantAmount(Math.max(Number(event.target.value), 1))}
+              placeholder="赠送点数"
+            />
+          </div>
           <div className="tableList">
-            {users.map((user) => (
+            {filteredUsers.map((user) => (
               <div className="tableRow" key={user.id}>
                 <div>
                   <strong>{user.email}</strong>
@@ -375,7 +684,8 @@ export function AdminPageClient() {
                   </span>
                 </div>
                 <div className="rowActions">
-                  <button className="secondaryButton" onClick={() => void grantCredits(user.id, 100)}>赠送 100 点</button>
+                  <button className="secondaryButton" onClick={() => void grantCredits(user.id, grantAmount)}>赠送 {grantAmount} 点</button>
+                  <button className="secondaryButton" onClick={() => void loadUserDetail(user.id)}>详情</button>
                   <button className="secondaryButton" onClick={() => void updateUser(user.id, { status: user.status === "active" ? "suspended" : "active" })}>
                     {user.status === "active" ? "停用" : "恢复"}
                   </button>
@@ -385,8 +695,139 @@ export function AdminPageClient() {
                 </div>
               </div>
             ))}
+            {filteredUsers.length === 0 ? <div className="emptyState">没有匹配的用户。</div> : null}
           </div>
+          {selectedUserDetail ? (
+            <div className="panel sectionBlock">
+              <div className="panelHeader">
+                <h2>{selectedUserDetail.user.email}</h2>
+                <p>{selectedUserDetail.user.name} · 余额 {selectedUserDetail.balance} 点 · 作品 {selectedUserDetail.totals.worksTotal} 份</p>
+              </div>
+              <div className="metricGrid adminMetrics">
+                <Metric label="付费金额" value={`¥${(selectedUserDetail.totals.orderAmountCents / 100).toFixed(0)}`} />
+                <Metric label="购买点数" value={selectedUserDetail.totals.quotaPurchased} />
+                <Metric label="赠送点数" value={selectedUserDetail.totals.quotaGifted} />
+                <Metric label="消耗点数" value={selectedUserDetail.totals.quotaConsumed} />
+              </div>
+              <div className="adminGrid">
+                <AdminPanel title="最近订单">
+                  {selectedUserDetail.orders.slice(0, 6).map((order) => (
+                    <Row key={order.id} title={order.status} meta={`${order.quota_amount} 点 · ${formatMoney(order.amount_cents, order.currency)} · ${formatDate(order.created_at)}`} />
+                  ))}
+                </AdminPanel>
+                <AdminPanel title="最近作品">
+                  {selectedUserDetail.works.slice(0, 6).map((work) => (
+                    <Row key={work.id} title={work.title} meta={`${work.platform} · ${work.status} · ${formatDate(work.updated_at)}`} />
+                  ))}
+                </AdminPanel>
+              </div>
+            </div>
+          ) : null}
         </section>
+      ) : null}
+
+      {tab === "content" ? (
+        <div className="pageStack">
+          <div className="metricGrid adminMetrics">
+            <Metric label="作品总数" value={contentOverview?.totals.worksTotal ?? 0} />
+            <Metric label="已使用作品" value={contentOverview?.totals.worksUsed ?? 0} />
+            <Metric label="收藏作品" value={contentOverview?.totals.worksFavorite ?? 0} />
+            <Metric label="创作运行" value={contentOverview?.totals.appRunsTotal ?? 0} />
+            <Metric label="失败运行" value={contentOverview?.totals.appRunsFailed ?? 0} />
+            <Metric label="合规报告" value={contentOverview?.totals.complianceReportsTotal ?? 0} />
+          </div>
+
+          <div className="adminGrid">
+            <AdminPanel title="最近作品">
+              {(contentOverview?.recentWorks ?? []).map((work) => (
+                <Row
+                  key={work.id}
+                  title={work.title}
+                  meta={`${work.user_email ?? "未知用户"} · ${work.app_name ?? work.source_channel ?? "未知应用"} · ${work.status} · 合规 ${work.compliance_risk} · ${formatDate(work.updated_at)}`}
+                />
+              ))}
+              {(contentOverview?.recentWorks ?? []).length === 0 ? <div className="emptyState">暂无作品数据。</div> : null}
+            </AdminPanel>
+
+            <AdminPanel title="应用使用排行">
+              {(contentOverview?.appUsage ?? []).map((item) => (
+                <Row
+                  key={item.app_code ?? item.app_name ?? "unknown"}
+                  title={item.app_name ?? item.app_code ?? "未知应用"}
+                  meta={`运行 ${item.run_count} 次 · 成功 ${item.success_count} · 失败 ${item.failed_count} · 消耗 ${item.quota_total} 点`}
+                />
+              ))}
+              {(contentOverview?.appUsage ?? []).length === 0 ? <div className="emptyState">暂无应用运行数据。</div> : null}
+            </AdminPanel>
+          </div>
+
+          <div className="adminGrid">
+            <AdminPanel title="合规风险分布">
+              {(contentOverview?.complianceRisk ?? []).map((item) => (
+                <Row key={item.riskLevel} title={riskLabel(item.riskLevel)} meta={`${item.count} 份报告`} />
+              ))}
+              {(contentOverview?.complianceRisk ?? []).length === 0 ? <div className="emptyState">暂无合规报告。</div> : null}
+            </AdminPanel>
+
+            <AdminPanel title="画像问卷沉淀">
+              <Metric label="问卷总数" value={contentOverview?.totals.questionnairesTotal ?? 0} />
+              <Metric label="已完成" value={contentOverview?.totals.questionnairesCompleted ?? 0} />
+              <Metric label="平均完成度" value={`${contentOverview?.totals.questionnaireAvgCompletion ?? 0}%`} />
+            </AdminPanel>
+          </div>
+
+          <AdminPanel title="最近合规报告">
+            <div className="tableList">
+              {(contentOverview?.recentComplianceReports ?? []).map((report) => (
+                <div className="tableRow" key={report.id}>
+                  <div>
+                    <strong>{report.user_email ?? "未知用户"}</strong>
+                    <span>
+                      {riskLabel(report.risk_level)} · {report.issue_count} 个问题 · {formatDate(report.created_at)} · {report.checked_text || "无检测文本"}
+                    </span>
+                  </div>
+                  <div className="rowActions">
+                    <span className={`statusPill ${report.risk_level}`}>{report.risk_level}</span>
+                  </div>
+                </div>
+              ))}
+              {(contentOverview?.recentComplianceReports ?? []).length === 0 ? <div className="emptyState">暂无合规报告。</div> : null}
+            </div>
+          </AdminPanel>
+
+          <AdminPanel title="创作应用管理">
+            <div className="inlineFields">
+              <select value={appStatusFilter} onChange={(event) => setAppStatusFilter(event.target.value)}>
+                <option value="all">全部应用</option>
+                <option value="active">已上架</option>
+                <option value="inactive">已下架</option>
+              </select>
+            </div>
+            <div className="tableList">
+              {filteredCreationApps.map((app) => (
+                <div className="tableRow" key={app.id}>
+                  <div>
+                    <strong>{app.emoji} {app.name}</strong>
+                    <span>
+                      {app.category_name ?? "未分类"} · {app.slug} · {app.points_cost} 点 · 运行 {app.run_count} 次 · {app.status}{app.featured ? " · 推荐" : ""}
+                    </span>
+                  </div>
+                  <div className="rowActions">
+                    <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { pointsCost: Math.max(app.points_cost - 1, 0) })}>-1 点</button>
+                    <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { pointsCost: app.points_cost + 1 })}>+1 点</button>
+                    <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { featured: !app.featured })}>
+                      {app.featured ? "取消推荐" : "设为推荐"}
+                    </button>
+                    <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { status: app.status === "active" ? "inactive" : "active" })}>
+                      {app.status === "active" ? "下架" : "上架"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredCreationApps.length === 0 ? <div className="emptyState">暂无创作应用数据。</div> : null}
+            </div>
+          </AdminPanel>
+        </div>
       ) : null}
 
       {tab === "commerce" ? (
@@ -396,8 +837,8 @@ export function AdminPageClient() {
               {plans.map((plan) => (
                 <Row
                   key={plan.code}
-                  title={plan.name}
-                  meta={`${plan.quotaAmount} 点 · ${formatMoney(plan.amountCents, plan.currency)} · ${plan.description}`}
+                  title={`${plan.name}${plan.recommended ? " · 推荐" : ""}`}
+                  meta={`${plan.quotaAmount} 点 · ${formatMoney(plan.amountCents, plan.currency)} · ${plan.status ?? "active"} · ${plan.description}`}
                 />
               ))}
             </AdminPanel>
@@ -407,9 +848,35 @@ export function AdminPageClient() {
             </AdminPanel>
           </div>
 
+          <AdminPanel title="编辑套餐">
+            <form className="stackForm" onSubmit={savePlan}>
+              <div className="inlineFields">
+                <input value={planForm.code} placeholder="套餐代码，如 pro_1200" onChange={(event) => setPlanForm((current) => ({ ...current, code: event.target.value }))} />
+                <input value={planForm.name} placeholder="套餐名称" onChange={(event) => setPlanForm((current) => ({ ...current, name: event.target.value }))} />
+              </div>
+              <div className="inlineFields">
+                <input type="number" value={planForm.quotaAmount} placeholder="点数" onChange={(event) => setPlanForm((current) => ({ ...current, quotaAmount: Number(event.target.value) }))} />
+                <input type="number" value={planForm.amountCents} placeholder="价格，单位分" onChange={(event) => setPlanForm((current) => ({ ...current, amountCents: Number(event.target.value) }))} />
+                <input type="number" value={planForm.sortOrder ?? 0} placeholder="排序" onChange={(event) => setPlanForm((current) => ({ ...current, sortOrder: Number(event.target.value) }))} />
+              </div>
+              <textarea value={planForm.description} placeholder="套餐说明" onChange={(event) => setPlanForm((current) => ({ ...current, description: event.target.value }))} />
+              <div className="inlineFields">
+                <select value={planForm.status ?? "active"} onChange={(event) => setPlanForm((current) => ({ ...current, status: event.target.value }))}>
+                  <option value="active">上架</option>
+                  <option value="inactive">下架</option>
+                </select>
+                <label className="checkboxRow">
+                  <input checked={Boolean(planForm.recommended)} type="checkbox" onChange={(event) => setPlanForm((current) => ({ ...current, recommended: event.target.checked }))} />
+                  推荐套餐
+                </label>
+              </div>
+              <button className="primaryButton" type="submit">保存套餐</button>
+            </form>
+          </AdminPanel>
+
           <div className="adminGrid">
             <AdminPanel title="最近订单">
-              {(summary?.recentOrders ?? []).map((order) => (
+              {orders.slice(0, 8).map((order) => (
                 <Row
                   key={order.id}
                   title={order.user_email}
@@ -445,6 +912,42 @@ export function AdminPageClient() {
             </AdminPanel>
           </div>
 
+          <AdminPanel title="订单管理">
+            <div className="inlineFields">
+              <select value={orderStatusFilter} onChange={(event) => setOrderStatusFilter(event.target.value)}>
+                <option value="all">全部订单</option>
+                <option value="pending">待支付</option>
+                <option value="paid">已支付</option>
+                <option value="failed">失败</option>
+                <option value="refunded">已退款</option>
+              </select>
+            </div>
+            <div className="tableList">
+              {filteredOrders.map((order) => (
+                <div className="tableRow" key={order.id}>
+                  <div>
+                    <strong>{order.user_email}</strong>
+                    <span>
+                      {order.user_name} · {order.provider} · {order.status} · {order.quota_amount} 点 · {formatMoney(order.amount_cents, order.currency)} · {formatDate(order.created_at)}
+                    </span>
+                  </div>
+                  <div className="rowActions">
+                    {order.status !== "paid" ? (
+                      <button className="secondaryButton" onClick={() => void updateOrder(order.id, "paid")}>标记已支付</button>
+                    ) : null}
+                    {order.status !== "failed" ? (
+                      <button className="secondaryButton" onClick={() => void updateOrder(order.id, "failed")}>标记失败</button>
+                    ) : null}
+                    {order.status !== "refunded" ? (
+                      <button className="secondaryButton" onClick={() => void updateOrder(order.id, "refunded")}>标记退款</button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+              {filteredOrders.length === 0 ? <div className="emptyState">暂无订单数据。</div> : null}
+            </div>
+          </AdminPanel>
+
           <AdminPanel title="优惠码列表">
             <div className="tableList">
               {promoCodes.map((item) => (
@@ -458,9 +961,14 @@ export function AdminPageClient() {
                   </div>
                   <div className="rowActions">
                     <span className={`statusPill ${item.status}`}>{item.status}</span>
+                    <button className="secondaryButton" onClick={() => void updatePromoStatus(item.id, item.status === "active" ? "inactive" : "active")}>
+                      {item.status === "active" ? "停用" : "启用"}
+                    </button>
+                    <button className="secondaryButton" onClick={() => void deletePromo(item.id)}>删除</button>
                   </div>
                 </div>
               ))}
+              {promoCodes.length === 0 ? <div className="emptyState">暂无优惠码。</div> : null}
             </div>
           </AdminPanel>
         </div>
@@ -501,13 +1009,78 @@ export function AdminPageClient() {
           </AdminPanel>
 
           <AdminPanel title="公告列表">
-            {announcements.map((item) => (
-              <Row
-                key={item.id}
-                title={item.title}
-                meta={`${item.kind} · ${item.placement} · ${item.status}${item.is_pinned ? " · 已置顶" : ""}`}
-              />
-            ))}
+            <div className="tableList">
+              {announcements.map((item) => (
+                <div className="tableRow" key={item.id}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>{item.kind} · {item.placement} · {item.status}{item.is_pinned ? " · 已置顶" : ""}</span>
+                  </div>
+                  <div className="rowActions">
+                    <button className="secondaryButton" onClick={() => void updateAnnouncementStatus(item.id, item.status === "published" ? "draft" : "published")}>
+                      {item.status === "published" ? "下线" : "发布"}
+                    </button>
+                    <button className="secondaryButton" onClick={() => void deleteAnnouncement(item.id)}>删除</button>
+                  </div>
+                </div>
+              ))}
+              {announcements.length === 0 ? <div className="emptyState">暂无公告。</div> : null}
+            </div>
+          </AdminPanel>
+        </div>
+      ) : null}
+
+      {tab === "support" ? (
+        <div className="pageStack">
+          <div className="adminGrid">
+            <AdminPanel title="反馈工单">
+              <div className="tableList">
+                {feedbackTickets.map((ticket) => (
+                  <div className="tableRow" key={ticket.id}>
+                    <div>
+                      <strong>{ticket.title}</strong>
+                      <span>
+                        {ticket.user_email ?? "未知用户"} · {ticket.category} · {ticket.priority} · {ticket.status} · {formatDate(ticket.updated_at)} · {ticket.content}
+                      </span>
+                      {ticket.admin_reply ? <span>回复：{ticket.admin_reply}</span> : null}
+                    </div>
+                    <div className="rowActions">
+                      <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { status: "in_progress" })}>处理中</button>
+                      <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { status: "resolved", adminReply: ticket.admin_reply || "已处理，感谢反馈。" })}>解决</button>
+                      <button className="secondaryButton" onClick={() => void updateFeedback(ticket.id, { priority: ticket.priority === "high" ? "normal" : "high" })}>
+                        {ticket.priority === "high" ? "降为普通" : "设为高优先级"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {feedbackTickets.length === 0 ? <div className="emptyState">暂无反馈工单。</div> : null}
+              </div>
+            </AdminPanel>
+
+            <AdminPanel title="处理概览">
+              <Metric label="待处理" value={feedbackTickets.filter((item) => item.status === "open").length} />
+              <Metric label="处理中" value={feedbackTickets.filter((item) => item.status === "in_progress").length} />
+              <Metric label="已解决" value={feedbackTickets.filter((item) => item.status === "resolved").length} />
+            </AdminPanel>
+          </div>
+
+          <AdminPanel title="管理员操作审计">
+            <div className="tableList">
+              {auditLogs.map((log) => (
+                <div className="tableRow" key={log.id}>
+                  <div>
+                    <strong>{log.action}</strong>
+                    <span>
+                      {log.admin_email ?? "未知管理员"} · {log.target_type} · {log.target_id || "-"} · {formatDate(log.created_at)}
+                    </span>
+                  </div>
+                  <div className="rowActions">
+                    <span className="statusPill active">审计</span>
+                  </div>
+                </div>
+              ))}
+              {auditLogs.length === 0 ? <div className="emptyState">暂无审计日志。</div> : null}
+            </div>
           </AdminPanel>
         </div>
       ) : null}
@@ -539,7 +1112,7 @@ export function AdminPageClient() {
               </label>
               <label className="checkboxRow">
                 <input checked={settings.payment.displaySubscriptions} type="checkbox" onChange={(event) => setSettings((current) => ({ ...current, payment: { ...current.payment, displaySubscriptions: event.target.checked } }))} />
-                充值页展示订阅入口
+                充值页显示积分套餐
               </label>
               <textarea value={settings.payment.purchaseNotice} onChange={(event) => setSettings((current) => ({ ...current, payment: { ...current.payment, purchaseNotice: event.target.value } }))} placeholder="充值说明" />
               <button className="primaryButton" type="button" onClick={() => void saveSettings()}>
@@ -549,13 +1122,14 @@ export function AdminPageClient() {
           </AdminPanel>
         </div>
       ) : null}
+      </section>
     </div>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="panel metric">
+    <div className="panel metric adminMetricCard">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
@@ -564,7 +1138,7 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function AdminPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="panel">
+    <section className="panel adminPanelCard">
       <div className="panelHeader">
         <h2>{title}</h2>
       </div>
@@ -575,7 +1149,7 @@ function AdminPanel({ title, children }: { title: string; children: React.ReactN
 
 function Row({ title, meta }: { title: string; meta: string }) {
   return (
-    <div className="topic">
+    <div className="adminInfoRow">
       <strong>{title}</strong>
       <p>{meta}</p>
     </div>
@@ -593,4 +1167,15 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function riskLabel(value: string) {
+  const labels: Record<string, string> = {
+    high: "高风险",
+    medium: "中风险",
+    low: "低风险",
+    safe: "安全",
+    unchecked: "未检查",
+  };
+  return labels[value] ?? value;
 }

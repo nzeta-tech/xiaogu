@@ -2,6 +2,7 @@ import { getPool, query } from "./client";
 import type { AgentMessage } from "@/lib/agent/insurance-agent";
 import { creationApps, creationCategories, creationExamples, type CreationApp } from "@/lib/apps/catalog";
 import type { BillingPlan } from "@/lib/billing/plans";
+import { defaultBillingPlans } from "@/lib/billing/plans";
 import type { ComplianceIssue } from "@/lib/compliance/check";
 import {
   localQuestionnaireTemplate,
@@ -199,6 +200,7 @@ export async function tryUpdateWorkContent(input: {
   title?: string;
   status?: string;
   appRunId?: string | null;
+  complianceRisk?: string;
   content: string;
   contentJson?: Record<string, unknown>;
 }) {
@@ -213,15 +215,16 @@ export async function tryUpdateWorkContent(input: {
     );
     if (!workRow.rows[0]) return null;
 
-    if (input.title || input.appRunId || input.status) {
+    if (input.title || input.appRunId || input.status || input.complianceRisk) {
       await query(
         `update works
          set title = coalesce($3, title),
              status = coalesce($4, status),
              app_run_id = coalesce($5, app_run_id),
+             compliance_risk = coalesce($6, compliance_risk),
              updated_at = now()
          where id = $1 and user_id = $2`,
-        [input.workId, input.userId, input.title ?? null, input.status ?? null, input.appRunId ?? null],
+        [input.workId, input.userId, input.title ?? null, input.status ?? null, input.appRunId ?? null, input.complianceRisk ?? null],
       );
     } else {
       await query(
@@ -656,6 +659,116 @@ export async function tryCreateOrder(input: {
   }
 }
 
+export async function tryListBillingPlans(options: { includeInactive?: boolean } = {}) {
+  try {
+    const result = await query<{
+      code: string;
+      name: string;
+      quota_amount: number;
+      amount_cents: number;
+      currency: "CNY" | "USD";
+      description: string;
+      recommended: boolean;
+      status: string;
+      sort_order: number;
+    }>(
+      `select code, name, quota_amount, amount_cents, currency, description, recommended, status, sort_order
+       from billing_plans
+       where $1::boolean = true or status = 'active'
+       order by sort_order asc, amount_cents asc`,
+      [Boolean(options.includeInactive)],
+    );
+    if (result.rows.length === 0) {
+      return defaultBillingPlans.map((plan, index) => ({ ...plan, status: "active", sortOrder: index }));
+    }
+    return result.rows.map((row) => ({
+      code: row.code,
+      name: row.name,
+      quotaAmount: row.quota_amount,
+      amountCents: row.amount_cents,
+      currency: row.currency,
+      description: row.description,
+      recommended: row.recommended,
+      status: row.status,
+      sortOrder: row.sort_order,
+    }));
+  } catch {
+    return defaultBillingPlans.map((plan, index) => ({ ...plan, status: "active", sortOrder: index }));
+  }
+}
+
+export async function tryGetBillingPlan(code: string) {
+  const plans = await tryListBillingPlans();
+  return plans.find((plan) => plan.code === code) ?? null;
+}
+
+export async function tryUpsertBillingPlan(input: {
+  code: string;
+  name: string;
+  quotaAmount: number;
+  amountCents: number;
+  currency: "CNY" | "USD";
+  description: string;
+  recommended?: boolean;
+  status?: string;
+  sortOrder?: number;
+}) {
+  try {
+    const result = await query<{
+      code: string;
+      name: string;
+      quota_amount: number;
+      amount_cents: number;
+      currency: "CNY" | "USD";
+      description: string;
+      recommended: boolean;
+      status: string;
+      sort_order: number;
+    }>(
+      `insert into billing_plans(code, name, quota_amount, amount_cents, currency, description, recommended, status, sort_order)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       on conflict (code) do update set
+         name = excluded.name,
+         quota_amount = excluded.quota_amount,
+         amount_cents = excluded.amount_cents,
+         currency = excluded.currency,
+         description = excluded.description,
+         recommended = excluded.recommended,
+         status = excluded.status,
+         sort_order = excluded.sort_order,
+         updated_at = now()
+       returning code, name, quota_amount, amount_cents, currency, description, recommended, status, sort_order`,
+      [
+        input.code,
+        input.name,
+        input.quotaAmount,
+        input.amountCents,
+        input.currency,
+        input.description,
+        Boolean(input.recommended),
+        input.status ?? "active",
+        input.sortOrder ?? 0,
+      ],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          code: row.code,
+          name: row.name,
+          quotaAmount: row.quota_amount,
+          amountCents: row.amount_cents,
+          currency: row.currency,
+          description: row.description,
+          recommended: row.recommended,
+          status: row.status,
+          sortOrder: row.sort_order,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function tryUpdateOrderCheckout(input: {
   orderId: string | null;
   providerOrderId?: string | null;
@@ -688,8 +801,23 @@ export async function tryMarkOrderPaidByProvider(input: { provider: string; prov
     }>(
       `update orders
        set status = 'paid', paid_at = coalesce(paid_at, now())
-       where provider = $1 and provider_order_id = $2
+       where provider = $1 and provider_order_id = $2 and status <> 'paid'
        returning id, user_id, quota_amount, status`,
+      [input.provider, input.providerOrderId],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryGetOrderByProvider(input: { provider: string; providerOrderId: string }) {
+  try {
+    const result = await query<{ id: string; user_id: string; quota_amount: number; status: string }>(
+      `select id, user_id, quota_amount, status
+       from orders
+       where provider = $1 and provider_order_id = $2
+       limit 1`,
       [input.provider, input.providerOrderId],
     );
     return result.rows[0] ?? null;
@@ -724,6 +852,58 @@ export async function tryListOrders(userId: string | null) {
     return result.rows;
   } catch {
     return [];
+  }
+}
+
+export async function tryListAdminOrders(limit = 100) {
+  try {
+    const result = await query<{
+      id: string;
+      provider: string;
+      provider_order_id: string | null;
+      checkout_url: string | null;
+      status: string;
+      amount_cents: number;
+      currency: string;
+      quota_amount: number;
+      metadata: Record<string, unknown>;
+      created_at: string;
+      paid_at: string | null;
+      user_id: string;
+      user_email: string;
+      user_name: string;
+    }>(
+      `select o.id, o.provider, o.provider_order_id, o.checkout_url, o.status, o.amount_cents, o.currency,
+              o.quota_amount, o.metadata, o.created_at, o.paid_at, u.id as user_id, u.email as user_email, u.name as user_name
+       from orders o
+       join users u on u.id = o.user_id
+       order by o.created_at desc
+       limit $1`,
+      [Math.min(Math.max(limit, 1), 500)],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryUpdateAdminOrderStatus(input: { orderId: string; status: string }) {
+  try {
+    const result = await query<{
+      id: string;
+      status: string;
+      paid_at: string | null;
+    }>(
+      `update orders
+       set status = $2,
+           paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end
+       where id = $1
+       returning id, status, paid_at`,
+      [input.orderId, input.status],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -1494,6 +1674,75 @@ export async function tryListCreationCatalog() {
   }
 }
 
+export async function tryListAdminCreationApps() {
+  try {
+    const result = await query<{
+      id: string;
+      code: string;
+      slug: string;
+      name: string;
+      emoji: string;
+      description: string;
+      badge: string | null;
+      points_cost: number;
+      result_type: string;
+      requires_thinking: boolean;
+      featured: boolean;
+      status: string;
+      sort_order: number;
+      category_name: string | null;
+      run_count: string;
+      updated_at: string;
+    }>(
+      `select a.id, a.code, a.slug, a.name, a.emoji, a.description, a.badge, a.points_cost, a.result_type,
+              a.requires_thinking, a.featured, a.status, a.sort_order, a.updated_at, c.name as category_name,
+              coalesce((select count(*) from app_runs ar where ar.app_id = a.id), 0)::text as run_count
+       from apps a
+       left join app_categories c on c.id = a.category_id
+       order by a.sort_order asc, a.created_at asc`,
+    );
+    return result.rows.map((row) => ({ ...row, run_count: Number(row.run_count ?? 0) }));
+  } catch {
+    return [];
+  }
+}
+
+export async function tryUpdateAdminCreationApp(input: {
+  appId: string;
+  status?: string;
+  featured?: boolean;
+  pointsCost?: number;
+  badge?: string | null;
+  sortOrder?: number;
+}) {
+  try {
+    const result = await query<{
+      id: string;
+      slug: string;
+      status: string;
+      featured: boolean;
+      points_cost: number;
+      badge: string | null;
+      sort_order: number;
+      updated_at: string;
+    }>(
+      `update apps
+       set status = coalesce($2, status),
+           featured = coalesce($3, featured),
+           points_cost = coalesce($4, points_cost),
+           badge = coalesce($5, badge),
+           sort_order = coalesce($6, sort_order),
+           updated_at = now()
+       where id = $1
+       returning id, slug, status, featured, points_cost, badge, sort_order, updated_at`,
+      [input.appId, input.status ?? null, input.featured ?? null, input.pointsCost ?? null, input.badge ?? null, input.sortOrder ?? null],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function tryGetCreationAppBySlug(slug: string) {
   const catalog = await tryListCreationCatalog();
   return catalog.apps.find((app) => app.slug === slug) ?? null;
@@ -1710,6 +1959,350 @@ export async function tryUpdateAdminUser(input: { userId: string; status?: strin
   }
 }
 
+export async function tryCreateAdminAuditLog(input: {
+  adminUserId: string | null;
+  action: string;
+  targetType: string;
+  targetId?: string | null;
+  detail?: Record<string, unknown>;
+}) {
+  try {
+    const result = await query<{ id: string }>(
+      `insert into admin_audit_logs(admin_user_id, action, target_type, target_id, detail)
+       values ($1, $2, $3, $4, $5::jsonb)
+       returning id`,
+      [input.adminUserId, input.action, input.targetType, input.targetId ?? "", JSON.stringify(input.detail ?? {})],
+    );
+    return result.rows[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryListAdminAuditLogs(limit = 100) {
+  try {
+    const result = await query<{
+      id: string;
+      action: string;
+      target_type: string;
+      target_id: string;
+      detail: Record<string, unknown>;
+      created_at: string;
+      admin_email: string | null;
+      admin_name: string | null;
+    }>(
+      `select l.id, l.action, l.target_type, l.target_id, l.detail, l.created_at, u.email as admin_email, u.name as admin_name
+       from admin_audit_logs l
+       left join users u on u.id = l.admin_user_id
+       order by l.created_at desc
+       limit $1`,
+      [Math.min(Math.max(limit, 1), 300)],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryCreateFeedbackTicket(input: {
+  userId: string | null;
+  title: string;
+  content: string;
+  category: string;
+  priority?: string;
+}) {
+  try {
+    const result = await query<{
+      id: string;
+      title: string;
+      status: string;
+      created_at: string;
+    }>(
+      `insert into feedback_tickets(user_id, title, content, category, priority)
+       values ($1, $2, $3, $4, $5)
+       returning id, title, status, created_at`,
+      [input.userId, input.title, input.content, input.category, input.priority ?? "normal"],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryListUserFeedbackTickets(userId: string | null) {
+  if (!userId) return [];
+  try {
+    const result = await query<{
+      id: string;
+      title: string;
+      content: string;
+      category: string;
+      status: string;
+      priority: string;
+      admin_reply: string;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `select id, title, content, category, status, priority, admin_reply, created_at, updated_at
+       from feedback_tickets
+       where user_id = $1
+       order by updated_at desc
+       limit 50`,
+      [userId],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryListAdminFeedbackTickets(limit = 100) {
+  try {
+    const result = await query<{
+      id: string;
+      title: string;
+      content: string;
+      category: string;
+      status: string;
+      priority: string;
+      admin_reply: string;
+      created_at: string;
+      updated_at: string;
+      user_email: string | null;
+      user_name: string | null;
+      assigned_admin_email: string | null;
+    }>(
+      `select f.id, f.title, f.content, f.category, f.status, f.priority, f.admin_reply, f.created_at, f.updated_at,
+              u.email as user_email, u.name as user_name, au.email as assigned_admin_email
+       from feedback_tickets f
+       left join users u on u.id = f.user_id
+       left join users au on au.id = f.assigned_admin_id
+       order by case f.status when 'open' then 0 when 'in_progress' then 1 when 'resolved' then 2 else 3 end,
+                f.updated_at desc
+       limit $1`,
+      [Math.min(Math.max(limit, 1), 300)],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryUpdateAdminFeedbackTicket(input: {
+  id: string;
+  status?: string;
+  priority?: string;
+  adminReply?: string;
+  assignedAdminId?: string | null;
+}) {
+  try {
+    const result = await query<{
+      id: string;
+      status: string;
+      priority: string;
+      admin_reply: string;
+      updated_at: string;
+    }>(
+      `update feedback_tickets
+       set status = coalesce($2, status),
+           priority = coalesce($3, priority),
+           admin_reply = coalesce($4, admin_reply),
+           assigned_admin_id = coalesce($5, assigned_admin_id),
+           resolved_at = case when $2 = 'resolved' then coalesce(resolved_at, now()) else resolved_at end,
+           updated_at = now()
+       where id = $1
+       returning id, status, priority, admin_reply, updated_at`,
+      [input.id, input.status ?? null, input.priority ?? null, input.adminReply ?? null, input.assignedAdminId ?? null],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryGetAdminUserDetail(userId: string) {
+  try {
+    const [user, balance, orders, usage, gifts, works] = await Promise.all([
+      query<{
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+        status: string;
+        created_at: string;
+      }>("select id, name, email, role, status, created_at from users where id = $1", [userId]),
+      tryGetLocalQuotaBalance(userId),
+      tryListOrders(userId),
+      tryListUsageLogs(userId),
+      tryListGiftRecords(userId),
+      tryListWorks(userId),
+    ]);
+    const row = user.rows[0];
+    if (!row) return null;
+    return {
+      user: row,
+      balance,
+      orders,
+      usage: usage.slice(0, 20),
+      gifts: gifts.slice(0, 20),
+      works: works.slice(0, 20),
+      totals: {
+        orderAmountCents: orders.reduce((sum, order) => sum + (order.status === "paid" ? order.amount_cents : 0), 0),
+        quotaPurchased: orders.reduce((sum, order) => sum + (order.status === "paid" ? order.quota_amount : 0), 0),
+        quotaGifted: gifts.reduce((sum, gift) => sum + gift.quota_amount, 0),
+        quotaConsumed: usage.reduce((sum, item) => sum + item.quota_cost, 0),
+        worksTotal: works.length,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function tryGetAdminContentOverview() {
+  try {
+    const [totals, complianceRisk, recentWorks, recentComplianceReports, appUsage, questionnaireStats] = await Promise.all([
+      query<{
+        works_total: string;
+        works_used: string;
+        works_favorite: string;
+        app_runs_total: string;
+        app_runs_failed: string;
+        compliance_reports_total: string;
+      }>(
+        `select
+           (select count(*) from works)::text as works_total,
+           (select count(*) from works where is_used = true)::text as works_used,
+           (select count(*) from works where is_favorite = true)::text as works_favorite,
+           (select count(*) from app_runs)::text as app_runs_total,
+           (select count(*) from app_runs where status = 'failed')::text as app_runs_failed,
+           (select count(*) from compliance_reports)::text as compliance_reports_total`,
+      ),
+      query<{ risk_level: string; count: string }>(
+        `select risk_level, count(*)::text as count
+         from compliance_reports
+         group by risk_level
+         order by count(*) desc, risk_level`,
+      ),
+      query<{
+        id: string;
+        title: string;
+        status: string;
+        compliance_risk: string;
+        source_channel: string;
+        updated_at: string;
+        user_email: string | null;
+        app_name: string | null;
+        content_preview: string;
+      }>(
+        `select w.id,
+                w.title,
+                w.status,
+                w.compliance_risk,
+                w.source_channel,
+                w.updated_at,
+                u.email as user_email,
+                a.name as app_name,
+                left(coalesce((
+                  select wv.content
+                  from work_versions wv
+                  where wv.work_id = w.id
+                  order by wv.version_no desc
+                  limit 1
+                ), ''), 160) as content_preview
+         from works w
+         left join users u on u.id = w.user_id
+         left join apps a on a.id = w.app_id
+         order by w.updated_at desc
+         limit 12`,
+      ),
+      query<{
+        id: string;
+        risk_level: string;
+        checked_text: string;
+        created_at: string;
+        user_email: string | null;
+        issue_count: string;
+      }>(
+        `select cr.id,
+                cr.risk_level,
+                left(cr.checked_text, 180) as checked_text,
+                cr.created_at,
+                u.email as user_email,
+                jsonb_array_length(coalesce(cr.issues, '[]'::jsonb))::text as issue_count
+         from compliance_reports cr
+         left join users u on u.id = cr.user_id
+         order by cr.created_at desc
+         limit 10`,
+      ),
+      query<{
+        app_code: string | null;
+        app_name: string | null;
+        run_count: string;
+        success_count: string;
+        failed_count: string;
+        quota_total: string | null;
+      }>(
+        `select coalesce(a.slug, a.code, 'unknown') as app_code,
+                coalesce(a.name, '未知应用') as app_name,
+                count(ar.id)::text as run_count,
+                count(ar.id) filter (where ar.status = 'succeeded')::text as success_count,
+                count(ar.id) filter (where ar.status = 'failed')::text as failed_count,
+                coalesce(sum(ar.quota_cost), 0)::text as quota_total
+         from app_runs ar
+         left join apps a on a.id = ar.app_id
+         group by a.slug, a.code, a.name
+         order by count(ar.id) desc
+         limit 8`,
+      ),
+      query<{
+        total: string;
+        completed: string;
+        avg_completion: string | null;
+      }>(
+        `select count(*)::text as total,
+                count(*) filter (where status = 'completed')::text as completed,
+                coalesce(avg(completion_percent), 0)::text as avg_completion
+         from profile_questionnaires`,
+      ),
+    ]);
+
+    const totalRow = totals.rows[0];
+    const questionnaireRow = questionnaireStats.rows[0];
+    return {
+      totals: {
+        worksTotal: Number(totalRow?.works_total ?? 0),
+        worksUsed: Number(totalRow?.works_used ?? 0),
+        worksFavorite: Number(totalRow?.works_favorite ?? 0),
+        appRunsTotal: Number(totalRow?.app_runs_total ?? 0),
+        appRunsFailed: Number(totalRow?.app_runs_failed ?? 0),
+        complianceReportsTotal: Number(totalRow?.compliance_reports_total ?? 0),
+        questionnairesTotal: Number(questionnaireRow?.total ?? 0),
+        questionnairesCompleted: Number(questionnaireRow?.completed ?? 0),
+        questionnaireAvgCompletion: Math.round(Number(questionnaireRow?.avg_completion ?? 0)),
+      },
+      complianceRisk: complianceRisk.rows.map((row) => ({
+        riskLevel: row.risk_level,
+        count: Number(row.count ?? 0),
+      })),
+      recentWorks: recentWorks.rows,
+      recentComplianceReports: recentComplianceReports.rows.map((row) => ({
+        ...row,
+        issue_count: Number(row.issue_count ?? 0),
+      })),
+      appUsage: appUsage.rows.map((row) => ({
+        ...row,
+        run_count: Number(row.run_count ?? 0),
+        success_count: Number(row.success_count ?? 0),
+        failed_count: Number(row.failed_count ?? 0),
+        quota_total: Number(row.quota_total ?? 0),
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
 type AnnouncementRecord = {
   id: string;
   title: string;
@@ -1805,6 +2398,32 @@ export async function tryUpsertAnnouncement(input: {
   }
 }
 
+export async function tryUpdateAnnouncementStatus(input: { id: string; status: string }) {
+  try {
+    const result = await query<AnnouncementRecord>(
+      `update announcements
+       set status = $2,
+           published_at = case when $2 = 'published' then coalesce(published_at, now()) else published_at end,
+           updated_at = now()
+       where id = $1
+       returning id, title, content, kind, placement, status, link_url, is_pinned, published_at, created_at, updated_at`,
+      [input.id, input.status],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryDeleteAnnouncement(id: string) {
+  try {
+    const result = await query<{ id: string }>("delete from announcements where id = $1 returning id", [id]);
+    return Boolean(result.rows[0]);
+  } catch {
+    return false;
+  }
+}
+
 type PromoCodeRecord = {
   id: string;
   code: string;
@@ -1888,6 +2507,31 @@ export async function tryUpsertPromoCode(input: {
     return result.rows[0] ?? null;
   } catch {
     return null;
+  }
+}
+
+export async function tryUpdatePromoCodeStatus(input: { id: string; status: string }) {
+  try {
+    const result = await query<PromoCodeRecord>(
+      `update promo_codes
+       set status = $2,
+           updated_at = now()
+       where id = $1
+       returning id, code, reward_type, credit_amount, discount_percent, status, max_redemptions, redeemed_count, starts_at, expires_at, notes, created_at, updated_at`,
+      [input.id, input.status],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryDeletePromoCode(id: string) {
+  try {
+    const result = await query<{ id: string }>("delete from promo_codes where id = $1 returning id", [id]);
+    return Boolean(result.rows[0]);
+  } catch {
+    return false;
   }
 }
 

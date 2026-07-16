@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiPath } from "@/lib/client/url";
 
 type Plan = {
@@ -20,6 +21,7 @@ type Order = {
   amount_cents: number;
   currency: string;
   quota_amount: number;
+  checkout_url?: string | null;
   created_at: string;
 };
 
@@ -46,6 +48,7 @@ type Gift = {
 };
 
 export function BillingPageClient() {
+  const searchParams = useSearchParams();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [usage, setUsage] = useState<Usage[]>([]);
@@ -54,6 +57,11 @@ export function BillingPageClient() {
   const [loading, setLoading] = useState(true);
   const [busyPlan, setBusyPlan] = useState("");
   const [error, setError] = useState("");
+  const [commerceConfig, setCommerceConfig] = useState({
+    enableStripe: true,
+    displayCreditPackages: true,
+    purchaseNotice: "充值成功后积分会自动到账，可在本页查看订单和用量明细。",
+  });
 
   const paidOrders = orders.filter((order) => order.status === "paid");
   const totalPurchased = paidOrders.reduce((sum, order) => sum + order.quota_amount, 0);
@@ -65,23 +73,26 @@ export function BillingPageClient() {
     setLoading(true);
     setError("");
     try {
-      const [plansResponse, ordersResponse, usageResponse, balanceResponse, giftsResponse] = await Promise.all([
+      const [plansResponse, ordersResponse, usageResponse, balanceResponse, giftsResponse, configResponse] = await Promise.all([
         fetch(apiPath("/api/billing/plans"), { signal }),
         fetch(apiPath("/api/billing/orders"), { signal }),
         fetch(apiPath("/api/usage"), { signal }),
         fetch(apiPath("/api/billing/balance"), { signal }),
         fetch(apiPath("/api/gifts"), { signal }),
+        fetch(apiPath("/api/system/public-config"), { signal }),
       ]);
       const plansPayload = (await plansResponse.json()) as { plans?: Plan[] };
       const ordersPayload = (await ordersResponse.json()) as { orders?: Order[] };
       const usagePayload = (await usageResponse.json()) as { usage?: Usage[] };
       const balancePayload = (await balanceResponse.json()) as Balance;
       const giftsPayload = (await giftsResponse.json()) as { gifts?: Gift[] };
+      const configPayload = (await configResponse.json()) as { payment?: Partial<typeof commerceConfig> };
       setPlans(plansPayload.plans ?? []);
       setOrders(ordersPayload.orders ?? []);
       setUsage(usagePayload.usage ?? []);
       setBalance(balancePayload);
       setGifts(giftsPayload.gifts ?? []);
+      setCommerceConfig((current) => ({ ...current, ...configPayload.payment }));
     } catch (cause) {
       if ((cause as Error).name !== "AbortError") setError("账单数据暂时无法加载，请稍后重试。");
     } finally {
@@ -90,6 +101,10 @@ export function BillingPageClient() {
   }
 
   async function buyPlan(plan: Plan) {
+    if (!commerceConfig.enableStripe) {
+      setError("在线支付暂未开放，请联系平台客服。");
+      return;
+    }
     setBusyPlan(plan.code);
     setError("");
     try {
@@ -134,6 +149,8 @@ export function BillingPageClient() {
       </section>
 
       {error ? <div className="alertPanel">{error}</div> : null}
+      {searchParams.get("checkout") === "success" ? <div className="successPanel">支付已完成，积分到账可能需要几秒，点击“刷新账单”即可更新。</div> : null}
+      {searchParams.get("checkout") === "cancel" ? <div className="alertPanel">支付已取消，订单仍会保留，可从订单记录继续支付。</div> : null}
 
       <section className="billingMetrics">
         <Metric label="当前可用额度" value={balanceLabel} detail={balance.mode ?? "quota billing"} />
@@ -142,13 +159,13 @@ export function BillingPageClient() {
         <Metric label="赠送到账额度" value={`${totalGifted} 点`} detail={`${gifts.length} 条权益记录`} />
       </section>
 
-      <section className="billingPlans">
+      {commerceConfig.displayCreditPackages ? <section className="billingPlans">
         <div className="billingSectionTitle">
           <div>
             <span className="eyebrow">套餐选择</span>
             <h2>选择适合当前运营强度的额度包</h2>
           </div>
-          <p>所有套餐均走 Stripe 沙盒支付通道，商业上线后可切换正式支付账户。</p>
+          <p>{commerceConfig.purchaseNotice}</p>
         </div>
 
         <div className="pricingGrid">
@@ -169,13 +186,13 @@ export function BillingPageClient() {
                 <li>短视频口播稿生成</li>
                 <li>文案改写与合规提示</li>
               </ul>
-              <button className={plan.recommended ? "primaryButton" : "secondaryButton"} onClick={() => buyPlan(plan)} disabled={Boolean(busyPlan)}>
+              <button className={plan.recommended ? "primaryButton" : "secondaryButton"} onClick={() => buyPlan(plan)} disabled={Boolean(busyPlan) || !commerceConfig.enableStripe}>
                 {busyPlan === plan.code ? "创建订单中" : "立即充值"}
               </button>
             </article>
           ))}
         </div>
-      </section>
+      </section> : null}
 
       <div className="billingTwoColumn">
         <section className="panel">
@@ -192,6 +209,7 @@ export function BillingPageClient() {
                   <span>{order.quota_amount.toLocaleString("zh-CN")} 点 · {formatDate(order.created_at)}</span>
                 </div>
                 <StatusPill status={order.status} />
+                {order.status === "pending" && order.checkout_url ? <a className="secondaryButton linkButton" href={order.checkout_url}>继续支付</a> : null}
               </div>
             ))}
           </div>

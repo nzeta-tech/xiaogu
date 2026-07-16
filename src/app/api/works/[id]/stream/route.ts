@@ -1,6 +1,7 @@
 import { requireSessionUser } from "@/lib/auth/session";
 import {
   ensureBackgroundWorkRun,
+  getBackgroundWorkRunPromise,
   getBackgroundWorkRunSnapshot,
   subscribeToBackgroundWorkRun,
 } from "@/lib/creation/background-run-registry";
@@ -17,13 +18,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   const payload = work.app_run?.input_payload;
+  const activeRunPromise = getBackgroundWorkRunPromise(work.id);
   const canStream =
     work.app_run?.status === "running" &&
     payload &&
     typeof payload === "object" &&
     Object.keys(payload).length > 0;
 
-  if (!canStream) {
+  if (!canStream && !activeRunPromise) {
     return Response.json({ error: "当前作品没有可连接的生成流" }, { status: 409 });
   }
 
@@ -53,7 +55,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
       safeEnqueue(encoder.encode(": stream\n\n"));
 
-      const runPromise = ensureBackgroundWorkRun({
+      const runPromise = activeRunPromise ?? ensureBackgroundWorkRun({
         workId: work.id,
         slug: work.platform,
         userId: user.id,

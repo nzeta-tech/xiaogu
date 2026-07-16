@@ -20,7 +20,7 @@ const actionCards = [
   {
     title: "写文案",
     desc: "从热点到脚本，一次完成今天要发的内容。",
-    href: "/workspace",
+    href: "/apps/write-copy?from=workspace&entry=write-copy",
     badge: "推荐",
   },
   {
@@ -36,8 +36,8 @@ const actionCards = [
     badge: "经营",
   },
   {
-    title: "领权益",
-    desc: "把最近到账奖励留给关键的创作周期使用。",
+    title: "活动兑换",
+    desc: "兑换活动码并查看最近到账的积分记录。",
     href: "/benefits",
     badge: "增长",
   },
@@ -48,11 +48,16 @@ export function WorkbenchPageClient() {
   const [loading, setLoading] = useState(true);
 
   async function loadOverview(signal?: AbortSignal) {
-    setLoading(true);
-    const response = await fetch(apiPath("/api/workbench/overview"), { signal });
-    const payload = (await response.json()) as { overview?: Overview };
-    setOverview(payload.overview ?? null);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const response = await fetch(apiPath("/api/workbench/overview"), { signal });
+      const payload = (await response.json()) as { overview?: Overview };
+      setOverview(payload.overview ?? null);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
   }
 
   useEffect(() => {

@@ -1,9 +1,11 @@
 import { getCreationAppBySlug } from "@/lib/apps/catalog";
+import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
 import { startBackgroundWorkRun } from "@/lib/creation/background-run-registry";
 import { query } from "@/lib/db/client";
-import { tryCreateWork, tryGetCreationAppBySlug, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { isEmptyCreationFieldValue } from "@/lib/creation/output";
+import { tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, trySyncCreationCatalog } from "@/lib/db/repositories";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -22,10 +24,24 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
   const values = body.values ?? {};
 
+  const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
+  const effectiveApp = getEntryAdjustedApp(app, entry);
+  const missingField = effectiveApp.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
+  if (missingField) {
+    return Response.json({ error: `${missingField.label}还没有填写。` }, { status: 400 });
+  }
+
+  if (effectiveApp.requiresThinking) {
+    const thinkingSnapshot = await tryGetLatestThinkingProfileSnapshot(user.id);
+    if (!thinkingSnapshot) {
+      return Response.json({ error: "请先完成思维问卷，再使用这个应用。" }, { status: 409 });
+    }
+  }
+
   const work = await tryCreateWork({
     userId: user.id,
     appCode: app.slug,
-    title: `${app.name}｜正在生成`,
+    title: `${effectiveApp.name}｜正在生成`,
     content: "",
     contentJson: { batches: [] },
     sourceChannel: app.slug,

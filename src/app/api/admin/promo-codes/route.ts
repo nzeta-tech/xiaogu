@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryListPromoCodes, tryUpsertPromoCode } from "@/lib/db/repositories";
+import { tryCreateAdminAuditLog, tryDeletePromoCode, tryListPromoCodes, tryUpdatePromoCodeStatus, tryUpsertPromoCode } from "@/lib/db/repositories";
 
 const schema = z.object({
   id: z.string().uuid().optional(),
@@ -51,5 +51,50 @@ export async function POST(request: Request) {
   if (!promoCode) {
     return Response.json({ error: "优惠码保存失败" }, { status: 503 });
   }
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: input.id ? "promo_code.update" : "promo_code.create",
+    targetType: "promo_code",
+    targetId: promoCode.id,
+    detail: { code: promoCode.code, status: promoCode.status, rewardType: input.rewardType },
+  });
   return Response.json({ promoCode, mode: "server" });
+}
+
+export async function PATCH(request: Request) {
+  const user = await requireAdmin();
+  if (user instanceof Response) return user;
+
+  const input = z.object({ id: z.string().uuid(), status: z.enum(["active", "inactive"]) }).parse(await request.json());
+  const promoCode = await tryUpdatePromoCodeStatus(input);
+  if (!promoCode) return Response.json({ error: "优惠码状态更新失败" }, { status: 503 });
+
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "promo_code.update_status",
+    targetType: "promo_code",
+    targetId: input.id,
+    detail: { status: input.status },
+  });
+
+  return Response.json({ promoCode, mode: "server" });
+}
+
+export async function DELETE(request: Request) {
+  const user = await requireAdmin();
+  if (user instanceof Response) return user;
+
+  const { searchParams } = new URL(request.url);
+  const id = z.string().uuid().parse(searchParams.get("id"));
+  const ok = await tryDeletePromoCode(id);
+  if (!ok) return Response.json({ error: "优惠码删除失败" }, { status: 503 });
+
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "promo_code.delete",
+    targetType: "promo_code",
+    targetId: id,
+  });
+
+  return Response.json({ ok: true, mode: "server" });
 }

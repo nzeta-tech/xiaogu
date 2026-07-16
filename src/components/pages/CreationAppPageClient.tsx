@@ -9,6 +9,7 @@ import {
   type CreationApp,
   type CreationAppFamily,
 } from "@/lib/apps/catalog";
+import { getEntryAdjustedApp, shouldShowRealExample } from "@/lib/apps/entry-app";
 import { apiPath, appPath } from "@/lib/client/url";
 import { CreationExamplePageClient } from "@/components/pages/CreationExamplePageClient";
 
@@ -40,12 +41,22 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isImageCard = appFamily === "image-card";
   const isWriteCopy = appFamily === "write-copy";
   const isLeadCopy = app.slug === "lead-copy";
+  const isLeadPackage = app.slug === "lead-package";
+  const isLiveScript = app.slug === "live-script";
+  const isGeneralContent = app.slug === "general-content";
+  const isTopicPicker = appFamily === "topic-picker";
   const isWechatImages = appFamily === "wechat-images";
+  const isXiaohongshuCheck = appFamily === "xiaohongshu-check";
+  const isPolicyDiagnosis = app.slug === "policy-diagnosis";
   const isVideoScriptPolish = appFamily === "polish-video";
   const isWechatArticlePolish = appFamily === "polish-wechat-article";
+  const isLetter = app.slug === "letter";
   const isVoiceNoteEntry = app.slug === "write-copy" && workspaceEntry === "voice-note-copy";
+  const isVoiceNoteSubpage = isWriteCopy && isVoiceNoteEntry;
   const isRecruitScriptEntry = app.slug === "team-recruit" && workspaceEntry === "recruit-script";
   const isRecruitFollowupEntry = app.slug === "team-recruit" && workspaceEntry === "recruit-followup";
+  const isRecruitEntry = isRecruitScriptEntry || isRecruitFollowupEntry;
+  const isCompactRecruitPage = isRecruitEntry;
   const isIpPositioningEntry = app.slug === "ip-positioning" && workspaceEntry === "ip-positioning";
   const isPersonalityCardEntry = app.slug === "ip-positioning" && workspaceEntry === "personality-card";
   const isBreakthroughEntry = app.slug === "breakthrough" && workspaceEntry === "breakthrough";
@@ -54,11 +65,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isCompactWriteCopyFlow = isWriteCopy;
   const exampleSlug = searchParams.get("example");
   const activeExample = (exampleSlug ? getCreationExampleBySlug(exampleSlug) : null) ?? getCreationExampleForApp(app.slug, pageApp.exampleTitle);
-  const visibleFields = pageApp.fields.filter((field) => !((isLeadCopy || isWriteCopy) && field.id === "targets"));
+  const visibleFields = pageApp.fields.filter((field) => {
+    if ((isLeadCopy || isWriteCopy) && field.id === "targets") return false;
+    return true;
+  });
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const [values, setValues] = useState<Record<string, FieldValue>>(() =>
-    createInitialValues(pageApp, activeExample, searchParams.get("from") === "workspace"),
+    createInitialValues(pageApp, exampleSlug ? activeExample : null, searchParams.get("from") === "workspace"),
   );
   const [loading, setLoading] = useState(false);
   const [showExample, setShowExample] = useState(false);
@@ -70,6 +84,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceSupported = useMemo(() => Boolean(getSpeechRecognitionConstructor()), []);
+  const guideUrl = typeof (app as CreationApp & { guide_url?: string }).guide_url === "string"
+    ? (app as CreationApp & { guide_url?: string }).guide_url ?? ""
+    : "";
+  const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
 
   useEffect(() => {
     return () => recognitionRef.current?.stop();
@@ -90,7 +108,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     const response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ values }),
+      body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "" } }),
     });
 
     const payload = (await response.json().catch(() => ({ error: "创建作品失败，请稍后再试。" }))) as {
@@ -119,10 +137,19 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     const file = fileList?.[0];
     if (!file) return;
 
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadErrors((current) => ({ ...current, [fieldId]: "文件不能超过 10MB。" }));
+      return;
+    }
+
     setUploadNames((current) => ({ ...current, [fieldId]: file.name }));
     setUploadErrors((current) => ({ ...current, [fieldId]: "" }));
 
     if (fieldId === "reference_image") {
+      if (!file.type.startsWith("image/")) {
+        setUploadErrors((current) => ({ ...current, [fieldId]: "请上传 JPG、PNG 或 WebP 图片。" }));
+        return;
+      }
       const encoded = await readFileAsDataUrl(file).catch(() => "");
       updateField(fieldId, encoded || file.name);
       return;
@@ -195,24 +222,36 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     recognitionRef.current = recognition;
   }
 
+  function handleGuideAction() {
+    if (isGeneralContent) {
+      setGuideOpen(true);
+      return;
+    }
+    if ((isWechatArticlePolish || isVideoScriptPolish) && guideUrl) {
+      window.open(guideUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    setGuideOpen(true);
+  }
+
   return (
-    <div className={buildAppPageClassName(appFamily)}>
+    <div className={buildAppPageClassName(appFamily, app.slug, workspaceEntry)}>
         <div className="page-content">
         <div className="page-back-bar pageBackBar">
-          <a className="back-btn backLink" href={appPath("/workspace")}>{isCompactWechatFlow || isCompactWriteCopyFlow ? "返回" : "返回广场"}</a>
+          <a className="back-btn backLink" href={appPath("/workspace")}>{isCompactWechatFlow || isCompactWriteCopyFlow || isLeadCopy || isCompactRecruitPage ? "返回" : "返回广场"}</a>
         </div>
 
-        <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : "app-info-card"}>
+        <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : "app-info-card"}>
           <div className="app-header">
-            <span className="app-icon creationToolEmoji">{app.emoji}</span>
+            <span className="app-icon creationToolEmoji">{pageApp.emoji}</span>
             <div className="app-text">
               <h1 className="app-name">{pageApp.name}</h1>
               <p className="app-description">{pageApp.description}</p>
             </div>
-            {isImageCard || isWechatArticlePolish ? (
-              <button className="imageCardGuideButton" onClick={() => setGuideOpen(true)} type="button">
-                <span className="imageCardGuideFire" aria-hidden="true">🔥</span>
-                <span>必看攻略</span>
+            {isImageCard || isWechatArticlePolish || isVideoScriptPolish || isGeneralContent ? (
+              <button className="imageCardGuideButton" onClick={handleGuideAction} type="button">
+                <span className="imageCardGuideFire" aria-hidden="true">✓</span>
+                <span>创作规范</span>
               </button>
             ) : null}
           </div>
@@ -221,14 +260,25 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               <span>{app.points} 积分/次</span>
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
             </div>
-          ) : !isCompactWechatFlow && !isCompactWriteCopyFlow ? (
+          ) : isXiaohongshuCheck ? (
+            <div className="app-meta xiaohongshuCheckMeta">
+              <span>{app.points} 积分/次</span>
+              <strong>审核型工具</strong>
+            </div>
+          ) : isPolicyDiagnosis ? (
+            <div className="app-meta policyDiagnosisMeta">
+              <span>{app.points} 积分/次</span>
+              {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
+              <em>工具型诊断页</em>
+            </div>
+          ) : !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && !isCompactWechatFlow && !isCompactWriteCopyFlow && !isCompactRecruitPage ? (
             <div className="app-meta">
               <span>{pageApp.points} 积分/次</span>
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
               {pageApp.requiresThinking ? <em>建议先创建思维</em> : null}
             </div>
           ) : null}
-          {!isImageCard && !isLeadCopy && hasRealExample && activeExample && !isCompactWechatFlow && !isCompactWriteCopyFlow ? (
+          {!isImageCard && !isLeadCopy && !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && hasRealExample && activeExample && !isCompactWriteCopyFlow ? (
             <div className="creationAppExampleActions">
               <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
                 查看案例
@@ -236,12 +286,94 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               <span className="creationAppCaseHint">{activeExample.title}</span>
             </div>
           ) : null}
-          {exampleSlug ? <div className="resultSavedHint">已载入案例思路，你可以按同款结构继续创作。</div> : null}
-          {isWriteCopy && !isCompactWriteCopyFlow ? (
+          {exampleSlug ? <div className="resultSavedHint">已从功能示例进入。系统只使用你本次提交的素材，不会复写示例内容。</div> : null}
+          {isGeneralContent && hasRealExample && activeExample ? (
+            <div className="creationAppExampleActions generalContentExampleActions">
+              <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
+                查看案例
+              </button>
+            </div>
+          ) : null}
+          {isLeadCopy ? <div className="leadCopyIntro">围绕引流转化目标，一次产出口播稿、小红书笔记和公众号文章。</div> : null}
+          {isLeadPackage ? (
+            <div className="leadPackageHeroBody">
+              <div className="leadPackageHeroIntro">
+                <strong>把一个保险主题扩成完整的引流资料包，不只写正文，还把领取动作和发布承接一起配齐。</strong>
+                <p>围绕资料主题、领取福利和目标人群，一次完成资料定位、交付内容和引流动作。</p>
+              </div>
+              <div className="leadPackageHeroChecklist">
+                <div>
+                  <span>适合输入</span>
+                  <strong>资料主题、福利钩子、目标人群</strong>
+                </div>
+                <div>
+                  <span>生成结果</span>
+                  <strong>资料正文、目录结构、领取话术、发布文案</strong>
+                </div>
+                <div>
+                  <span>推荐方式</span>
+                  <strong>主题越具体，福利越清楚，生成内容越像可直接发出的资料产品</strong>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {isLiveScript ? (
+            <div className="liveScriptHeroBody">
+              <div className="liveScriptHeroIntro">
+                <strong>按 10 段直播引导填信息，系统会帮你整理成更完整的直播流程稿</strong>
+                <p>把直播经验、客群、误区、案例、转化目标和产品信息讲清楚，系统再整理成可执行流程。</p>
+              </div>
+              <div className="liveScriptHeroChecklist">
+                <div>
+                  <span>适合输入</span>
+                  <strong>直播主题、目标客群、常见误区、真实案例、产品卖点、人设素材</strong>
+                </div>
+                <div>
+                  <span>生成结果</span>
+                  <strong>直播开场、节奏结构、重点讲解、互动承接和收口转化话术</strong>
+                </div>
+                <div>
+                  <span>推荐方式</span>
+                  <strong>先把你最熟的真实表达写出来，越像你平时会讲的话，结果越自然</strong>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {isTopicPicker ? (
+            <div className="topicPickerHeroBody">
+              <div className="topicPickerHeroIntro">
+                <strong>一次给你 6 个高质量选题，覆盖流量、信任、引流三个方向。</strong>
+                <p>围绕你的平台、主题和思维画像，拆出可继续创作并能说明事实来源的选题方向。</p>
+              </div>
+              <div className="topicPickerHeroChecklist">
+                <div>
+                  <span>适合输入</span>
+                  <strong>具体主题、主发平台、最近想重点讲的业务或活动</strong>
+                </div>
+                <div>
+                  <span>生成结果</span>
+                  <strong>6 个选题，兼顾流量、信任、引流三类内容任务</strong>
+                </div>
+                <div>
+                  <span>推荐方式</span>
+                  <strong>主题越具体，越容易得到更贴近你当前业务的选题切口</strong>
+                </div>
+              </div>
+              {hasRealExample && activeExample ? (
+                <div className="creationAppExampleActions topicPickerExampleActions">
+                  <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
+                    查看案例
+                  </button>
+                  <span className="creationAppCaseHint">{activeExample.title}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {isWriteCopy && !isCompactWriteCopyFlow && !isVoiceNoteSubpage ? (
             <div className="writeCopyHeroBody">
               <div className="writeCopyHeroIntro">
                 <strong>{isVoiceNoteEntry ? "把录音稿拆成多个独立内容和金句，直接拿去继续创作" : "一次搞定：口播稿、公众号文章、小红书笔记、朋友圈"}</strong>
-                <p>{isVoiceNoteEntry ? "这张页更接近源站的录音稿拆解整理，不是默认的多平台批量分发。重点是先把学习、分享或培训录音整理成多个可复用内容片段。" : "可输入观点录音、文章、口播稿、聊天记录等素材。系统会先提炼你的核心表达，再拆成更适合不同发布场景的版本。"}</p>
+                <p>{isVoiceNoteEntry ? "这里专门用于录音稿拆解整理，不是默认的多平台批量分发。系统会先把学习、分享或培训录音整理成多个可复用内容片段。" : "可输入观点录音、文章、口播稿、聊天记录等素材。系统会先提炼你的核心表达，再拆成更适合不同发布场景的版本。"}</p>
               </div>
               <div className="writeCopyHeroChecklist">
                 <div>
@@ -259,55 +391,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               </div>
             </div>
           ) : null}
-          {isRecruitScriptEntry ? (
-            <div className="polishHeroBody">
-              <div className="polishHeroIntro">
-                <strong>上传候选人简历后，先拿到一套完整的增员面谈准备包</strong>
-                <p>这个页面更偏“面谈前准备”，不是通用招募文案页。重点是候选人画像、完整面试流程、欢迎话术、应急话术和后续注意事项。</p>
-              </div>
-              <div className="polishHeroChecklist">
-                <div>
-                  <span>适合输入</span>
-                  <strong>候选人简历、履历摘要、经历亮点、转型动机</strong>
-                </div>
-                <div>
-                  <span>生成结果</span>
-                  <strong>画像分析、面谈流程、欢迎语、应急话术、跟进建议</strong>
-                </div>
-                <div>
-                  <span>推荐方式</span>
-                  <strong>先贴简历，再补团队亮点和本次最想重点聊的方向</strong>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {isRecruitFollowupEntry ? (
-            <div className="polishHeroBody">
-              <div className="polishHeroIntro">
-                <strong>把面谈录音文稿整理成后续跟进动作，而不是重写一篇普通招募文案</strong>
-                <p>这个页面更像源站里的“增员跟踪”页，重点是生成《给ta的一封信》《候选人信息跟踪表》《跟踪计划表》和一篇招募向公众号文章。</p>
-              </div>
-              <div className="polishHeroChecklist">
-                <div>
-                  <span>适合输入</span>
-                  <strong>候选人面谈录音稿、面谈纪要、顾虑点、当前跟进阶段</strong>
-                </div>
-                <div>
-                  <span>生成结果</span>
-                  <strong>跟踪计划、候选人画像、一封信、公众号承接内容</strong>
-                </div>
-                <div>
-                  <span>推荐方式</span>
-                  <strong>先贴完整面谈文稿，再补候选人当前最卡住的点</strong>
-                </div>
-              </div>
-            </div>
-          ) : null}
           {isIpPositioningEntry ? (
             <div className="polishHeroBody">
               <div className="polishHeroIntro">
                 <strong>一键生成专属 IP 定位方案，重点是调用你的思维画像，而不是重新写一堆需求说明</strong>
-                <p>源站这里更像思维驱动型定位页。包含定位分析、包装升级、个人传记文章，完成思维后可以直接开始创作。</p>
+                <p>这里更像思维驱动型定位页。包含定位分析、包装升级、个人传记文章，完成思维后可以直接开始创作。</p>
               </div>
               <div className="polishHeroChecklist">
                 <div>
@@ -329,12 +417,12 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             <div className="polishHeroBody">
               <div className="polishHeroIntro">
                 <strong>有业务瓶颈、有卡点，就先把问题诊断清楚，再拉出破局动作清单</strong>
-                <p>这页不是普通内容创作页，更像增长陪跑页面。源站强调先下载攻略文档、填好后上传，再围绕卡点给出破局路径。</p>
+                <p>这页不是普通内容创作页，而是一套增长陪跑流程。建议先下载攻略文档、填好后上传，再围绕卡点生成破局路径。</p>
               </div>
               <div className="polishHeroChecklist">
                 <div>
                   <span>适合输入</span>
-                  <strong>当前瓶颈、业务背景、最近动作、卡住环节、期望结果</strong>
+                  <strong>当前瓶颈、业务背景、最近动作、卡住环节、已经试过的方法</strong>
                 </div>
                 <div>
                   <span>生成结果</span>
@@ -342,16 +430,23 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 </div>
                 <div>
                   <span>推荐方式</span>
-                  <strong>先写真实卡点，再补你已经试过但没跑通的动作</strong>
+                  <strong>先下载攻略模板整理，再粘贴或上传，结果会更接近增长陪跑的分析方式</strong>
                 </div>
+              </div>
+              <div className="breakthroughActionRow">
+                <a className="breakthroughGuideLink" download href={breakthroughGuideHref}>
+                  下载破局攻略
+                </a>
+                <span className="breakthroughGuideHint">先按模板整理你的情况，再上传或粘贴，分析会更具体。</span>
               </div>
             </div>
           ) : null}
+          {isLetter ? null : null}
           {isPersonalityCardEntry ? (
             <div className="polishHeroBody">
               <div className="polishHeroIntro">
                 <strong>个性名片不是定位长文，而是一张让人一眼记住你的展示卡</strong>
-                <p>源站这张卡更偏个人介绍和形象展示。只需上传个人介绍和照片，再选风格，就能生成更适合传播和展示的个性名片。</p>
+                <p>这张卡更偏个人介绍和形象展示。只需上传个人介绍和照片，再选风格，就能生成更适合传播和展示的个性名片。</p>
               </div>
               <div className="polishHeroChecklist">
                 <div>
@@ -369,80 +464,88 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               </div>
             </div>
           ) : null}
-          {isVideoScriptPolish ? (
-            <div className="polishHeroBody">
-              <div className="polishHeroIntro">
-                <strong>把已有口播稿精修成更容易开口、更有节奏、也更像你自己的版本</strong>
-                <p>这类应用不是从零生成，而是保留原意后做深度改稿。重点会放在开头抓人、结构顺畅、情绪稳定和个人表达感上。</p>
+          {isVideoScriptPolish ? null : null}
+          {isWechatArticlePolish && !isCompactWechatFlow ? null : null}
+          {isWechatImages ? null : null}
+          {isXiaohongshuCheck ? (
+            <div className="xiaohongshuCheckHeroBody">
+              <div className="xiaohongshuCheckHeroIntro">
+                <strong>小红书发出去前，先把容易卡流量和容易踩线的表达筛一遍。</strong>
+                <p>这张二级页更偏“审核 + 修改建议”，不是从零重写一篇新笔记。输入现成文案后，会先指出潜在风险，再给更稳妥的替代表达方向。</p>
               </div>
-              <div className="polishHeroChecklist">
+              <div className="xiaohongshuCheckHeroChecklist">
                 <div>
                   <span>适合输入</span>
-                  <strong>已有口播稿、直播逐字稿、短视频底稿</strong>
+                  <strong>准备发布的小红书文案、封面文案、评论区引导话术</strong>
                 </div>
                 <div>
                   <span>生成结果</span>
-                  <strong>精修版主稿 + 改稿方向总结</strong>
+                  <strong>风险点说明、违规位置提示、修改建议和更安全的改写方向</strong>
                 </div>
                 <div>
                   <span>推荐方式</span>
-                  <strong>先贴原稿，再勾选最想优化的点</strong>
+                  <strong>先贴完整原文，再保留你最想表达的卖点，方便结果页逐段比对</strong>
                 </div>
               </div>
             </div>
           ) : null}
-          {isWechatArticlePolish && !isCompactWechatFlow ? (
-            <div className="polishHeroBody wechatArticlePolishHeroBody">
-              <div className="polishHeroIntro">
-                <strong>把已有公众号文章精修成更有阅读节奏、更有质感、也更利于转发的版本</strong>
-                <p>这里的重点不是完全重写，而是保留原文核心后，重做标题、段落推进、语言质感和结尾互动设计。</p>
+          {isPolicyDiagnosis ? (
+            <div className="policyDiagnosisHeroBody">
+              <div className="policyDiagnosisHeroIntro">
+                <strong>先把家庭保单结构梳理清楚，再看缺口、重复和利益风险，不急着直接动方案。</strong>
+                <p>这张二级页更接近工具型诊断页，而不是普通文案创作页。重点是把家庭成员、现有保单和你最担心的风险点说清楚，系统会按结构、责任边界、保费压力和保障缺口给出诊断。</p>
               </div>
-              <div className="polishHeroChecklist">
+              <div className="policyDiagnosisHeroChecklist">
                 <div>
                   <span>适合输入</span>
-                  <strong>已有成稿、长文初稿、历史爆文复改</strong>
+                  <strong>家庭成员阶段、保单摘要、险种责任、保额保费、特别担心的问题</strong>
                 </div>
                 <div>
                   <span>生成结果</span>
-                  <strong>精修版长文 + 标题结构方向</strong>
+                  <strong>结构诊断、重复责任提醒、保障缺口、缴费压力与优化建议</strong>
                 </div>
                 <div>
                   <span>推荐方式</span>
-                  <strong>先贴全文，再勾选标题/结构/语言/互动</strong>
+                  <strong>按家庭成员分行整理保单，写得越像保单清单，诊断越稳</strong>
                 </div>
-              </div>
-            </div>
-          ) : null}
-          {isWechatImages && !isCompactWechatFlow ? (
-            <div className="wechatImagesHeroBody">
-              <div className="wechatImagesHeroSummary">
-                <div>
-                  <span>适合输入</span>
-                  <strong>完整公众号文章、重点段落、专题连载内容</strong>
-                </div>
-                <div>
-                  <span>生成结果</span>
-                  <strong>更贴合阅读段落推进的公众号配图方案</strong>
-                </div>
-                <div>
-                  <span>推荐方式</span>
-                  <strong>先贴正文，再选风格，再看案例里的排版节奏</strong>
-                </div>
-              </div>
-              <div className="wechatImagesHeroNotes">
-                <p>适合输入完整公众号文章、重点段落、专题连载内容</p>
-                <p>生成结果更贴合阅读段落推进的公众号配图方案</p>
-                <p>推荐方式先贴正文，再选风格，再看案例里的排版节奏</p>
               </div>
             </div>
           ) : null}
         </section>
 
-        {isWriteCopy && !isCompactWriteCopyFlow ? (
-          <section className="writeCopyBriefingCard">
+        {isLeadPackage ? (
+          <section className="leadPackageBriefingCard">
+            <div className="leadPackageBriefingHeader">
+              <div>
+                <strong>怎么填，结果会更稳定</strong>
+                <p>资料包页的关键是让用户一眼明白“这份资料值不值得领、怎么领、适合谁”。不要只写宽泛主题，尽量把场景和福利说具体。</p>
+              </div>
+              <span className="leadPackageBriefingBadge">资料包攻略</span>
+            </div>
+            <div className="leadPackageBriefingGrid">
+              <article>
+                <span>1. 资料主题</span>
+                <strong>优先写具体问题或人群场景，比如宝妈医疗险避坑、家庭保单体检表</strong>
+              </article>
+              <article>
+                <span>2. 领取福利</span>
+                <strong>把评论词、私信词和可感知价值写清楚，方便系统补全承接动作</strong>
+              </article>
+              <article>
+                <span>3. 目标人群</span>
+                <strong>不要只写“客户”，最好写年龄、身份、家庭阶段或当前困扰</strong>
+              </article>
+            </div>
+          </section>
+        ) : null}
+
+        {isLetter ? null : null}
+
+          {isWriteCopy && !isCompactWriteCopyFlow && !isVoiceNoteSubpage ? (
+            <section className="writeCopyBriefingCard">
             <div className="writeCopyBriefingHeader">
               <div>
-                <strong>怎么写，效果更像目标站</strong>
+                <strong>怎么写，结果会更稳定</strong>
                 <p>先扔素材，再选想生成的平台。素材越像你平时会说的话，结果越自然。</p>
               </div>
               <span className="writeCopyBriefingBadge">推荐先看案例</span>
@@ -464,82 +567,130 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           </section>
         ) : null}
 
-        {isVideoScriptPolish ? (
-          <section className="polishBriefingCard">
-            <div className="polishBriefingHeader">
+        {isLiveScript ? (
+          <section className="liveScriptBriefingCard">
+            <div className="liveScriptBriefingHeader">
               <div>
-                <strong>精修口播稿时，怎样更像目标站的结果</strong>
-                <p>不要只写一个主题词，最好直接贴你现在会讲的原稿。越接近真实表达，精修后越自然，也越像“在原稿上升级”。</p>
+                <strong>怎么填，结果会更稳定</strong>
+                <p>直播稿最怕只有主题没有细节。尽量把直播经验、目标客群、误区观点、产品卖点和你的真人经历写具体，脚本才会更像你能直接开讲的版本。</p>
               </div>
-              <span className="polishBriefingBadge">建议先看案例</span>
+              <span className="liveScriptBriefingBadge">直播脚本攻略</span>
             </div>
-            <div className="polishBriefingGrid">
+            <div className="liveScriptBriefingGrid">
               <article>
-                <span>1. 保留原稿</span>
-                <strong>直接粘贴你现在准备讲的版本，而不是重写需求说明</strong>
+                <span>1. 主题具体</span>
+                <strong>不要只写“讲保险”，尽量写到具体险种、人群、场景或问题</strong>
               </article>
               <article>
-                <span>2. 重点明确</span>
-                <strong>优先勾选你最想优化的两到三个点，不要全选后失焦</strong>
+                <span>2. 客群写细</span>
+                <strong>年龄、身份、生活状态、认知和顾虑越清楚，脚本越有代入感</strong>
               </article>
               <article>
-                <span>3. 看开头节奏</span>
-                <strong>结果页里先看开头是否更容易开口，再看整体结构</strong>
+                <span>3. 误区和案例</span>
+                <strong>把你最常遇到的误区、盲区、案例和问题写出来，最容易形成直播记忆点</strong>
               </article>
             </div>
           </section>
         ) : null}
-        {isWechatArticlePolish && !isCompactWechatFlow ? (
-          <section className="polishBriefingCard">
-            <div className="polishBriefingHeader">
+
+        {isTopicPicker ? (
+          <section className="topicPickerBriefingCard">
+            <div className="topicPickerBriefingHeader">
               <div>
-                <strong>精修文章时，怎样更像目标站的结果</strong>
-                <p>这类应用最关键的是长文节奏，而不是单句润色。先保留原文，再把标题、结构推进和结尾互动重新抬起来。</p>
+                <strong>怎么填，选题会更贴近发布场景</strong>
+                <p>选题页最关键的是让系统知道你最近主讲什么、想在哪个平台发、这一轮更偏流量还是信任承接，而不是堆很多散碎素材。</p>
               </div>
-              <span className="polishBriefingBadge">建议先看案例</span>
+              <span className="topicPickerBriefingBadge">选题攻略</span>
             </div>
-            <div className="polishBriefingGrid">
+            <div className="topicPickerBriefingGrid">
               <article>
-                <span>1. 全文优先</span>
-                <strong>尽量贴完整文章，而不是只贴其中一段</strong>
+                <span>1. 主题别太空</span>
+                <strong>不要只写“保险”或“保障”，尽量细到高端医疗、儿童重疾、养老规划这类方向</strong>
               </article>
               <article>
-                <span>2. 优化点聚焦</span>
-                <strong>如果标题和结构最弱，就优先勾这两项</strong>
+                <span>2. 平台先定</span>
+                <strong>视频号、小红书、公众号的切口不同，平台明确后选题会更贴近真实发布场景</strong>
               </article>
               <article>
-                <span>3. 先看阅读感</span>
-                <strong>结果页里重点看是否更愿意继续读，而不是只看词藻</strong>
+                <span>3. 最近重点补一句</span>
+                <strong>如果你最近在做活动、主推某类服务或想吸引某类客户，补一句会更像你当前的真实内容策略</strong>
               </article>
             </div>
           </section>
         ) : null}
-        {isWechatImages && !isCompactWechatFlow ? (
-          <section className="wechatImagesBriefingCard">
-            <div className="wechatImagesBriefingHeader">
+
+        {isVideoScriptPolish ? null : null}
+        {isXiaohongshuCheck ? (
+          <section className="xiaohongshuCheckBriefingCard">
+            <div className="xiaohongshuCheckBriefingHeader">
               <div>
-                <strong>公众号配图页不是通用做图页</strong>
-                <p>它更强调“文章在读”的节奏感，所以输入最好是完整正文，结果也更偏段落间插图，而不是单张海报。</p>
+                <strong>怎么贴内容，检查结果会更稳定</strong>
+                <p>尽量贴完整的小红书文案，而不是只贴一句标题。这样系统才能同时检查绝对化表述、功效承诺、诱导动作和容易触发限流的敏感表达。</p>
               </div>
-              <span className="wechatImagesBriefingBadge">建议先看案例</span>
+              <span className="xiaohongshuCheckBriefingBadge">发布前自检</span>
             </div>
-            <div className="wechatImagesBriefingLead">
-              <p>适合输入完整公众号文章、重点段落、专题连载内容</p>
-              <p>生成结果更贴合阅读段落推进的公众号配图方案</p>
-              <p>推荐方式先贴正文，再选风格，再看案例里的排版节奏</p>
-            </div>
-            <div className="wechatImagesBriefingGrid">
+            <div className="xiaohongshuCheckBriefingGrid">
               <article>
-                <span>1. 文章优先</span>
-                <strong>尽量粘贴完整可读正文，系统才能判断段落节奏</strong>
+                <span>1. 贴完整文案</span>
+                <strong>标题、正文、结尾引导最好一起贴，审核才不会漏掉前后语境</strong>
               </article>
               <article>
-                <span>2. 风格收敛</span>
-                <strong>配图页更适合稳定、轻阅读感，不追求强海报感</strong>
+                <span>2. 保留原表达</span>
+                <strong>先不要自己改太多，保留原始版本更容易定位真正的风险词和风险句</strong>
               </article>
               <article>
-                <span>3. 看阅读插图</span>
-                <strong>重点检查配图是否真的服务文章，而不是只好看</strong>
+                <span>3. 重点看修改建议</span>
+                <strong>结果页不只看哪里有问题，更要看可直接替换的表达方向</strong>
+              </article>
+            </div>
+          </section>
+        ) : null}
+        {isPolicyDiagnosis ? (
+          <section className="policyDiagnosisBriefingCard">
+            <div className="policyDiagnosisBriefingHeader">
+              <div>
+                <strong>怎么填，诊断会更贴近真实需求</strong>
+                <p>诊断页不是让你写一段抽象描述，而是先把家庭结构和保单责任摆平。尽量写清楚谁保了什么、保额多少、年缴多少、缴多久，以及你当前最担心的地方。</p>
+              </div>
+              <span className="policyDiagnosisBriefingBadge">诊断攻略</span>
+            </div>
+            <div className="policyDiagnosisBriefingGrid">
+              <article>
+                <span>1. 先写家庭结构</span>
+                <strong>把家庭成员年龄、角色和当前保障状态写清楚，系统才知道风险应该落在谁身上</strong>
+              </article>
+              <article>
+                <span>2. 保单尽量列表化</span>
+                <strong>最好按“成员 / 险种 / 保额 / 年缴 / 缴费年限”整理，方便判断重复和缺口</strong>
+              </article>
+              <article>
+                <span>3. 担心的问题单独说</span>
+                <strong>如果你更担心现金流、重疾不足、寿险缺口或孩子保障，单独写出来会更贴近真实诊断场景</strong>
+              </article>
+            </div>
+          </section>
+        ) : null}
+        {isBreakthroughEntry ? (
+          <section className="polishBriefingCard breakthroughBriefingCard">
+            <div className="polishBriefingHeader breakthroughBriefingHeader">
+              <div>
+                <strong>怎么填，破局方案会更可执行</strong>
+                <p>不要只写一个笼统问题。把你最近的业务背景、做过的动作、最卡住的节点和希望先看到的结果讲清楚，系统才会更像一个陪跑顾问来拆问题。</p>
+              </div>
+              <span className="polishBriefingBadge">先下模板再填</span>
+            </div>
+            <div className="polishBriefingGrid breakthroughBriefingGrid">
+              <article>
+                <span>1. 卡点写具体</span>
+                <strong>不要只写“没流量”或“没转化”，尽量写到哪个环节断了，比如有私信但没约到咨询。</strong>
+              </article>
+              <article>
+                <span>2. 说清做过什么</span>
+                <strong>把最近已经试过的内容节奏、承接动作、直播或私域动作写出来，方便系统判断问题不只是表面现象。</strong>
+              </article>
+              <article>
+                <span>3. 结果先排优先级</span>
+                <strong>先写你最想在 2 到 4 周内看到的变化，比如私信承接、稳定更新、成交动作复盘，不要一次想解决所有问题。</strong>
               </article>
             </div>
           </section>
@@ -548,7 +699,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         <form className={isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
           {/* eslint-disable-next-line react-hooks/refs */}
           {visibleFields.map((field, index) => (
-            <label className={isImageCard ? "field-card creationField imageCardField" : "field-card creationField"} key={field.id}>
+            <label className={isImageCard ? "field-card creationField imageCardField" : isXiaohongshuCheck ? "field-card creationField xiaohongshuCheckField" : "field-card creationField"} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
                   <span className="step-number">{index + 1}</span>
@@ -556,7 +707,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 <strong className="field-title">
                   {field.label}
                   {field.required ? <em className="required-mark">*</em> : null}
-                  {supportsVoice(field.id) ? (
+                  {supportsVoice(field.id) && field.type !== "text_or_file" ? (
                     <>
                       <span className={isImageCard ? "imageCardInlineOr" : "creationFieldInlineOr"}>或</span>
                       <button
@@ -577,7 +728,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   field,
                   value: values[field.id],
                   onChange: (nextValue) => updateField(field.id, nextValue),
-                  isImageCard,
+                  isImageCard: isImageCard || isXiaohongshuCheck,
                   voiceActive: voiceFieldId === field.id,
                   voiceSupported,
                   onVoiceInput: () => startVoiceInput(field.id),
@@ -587,9 +738,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   uploading: Boolean(uploadingFields[field.id]),
                   onFileChange: (fileList) => handleFileChange(field.id, fileList),
                 })}
-                {field.helper ? <span className="field-help">{field.helper}</span> : null}
+                {field.helper && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，暂不支持图片</span> : null}
-                {(isImageCard || isWechatImages) && field.id === "reference_image" ? <span className="imageCardMinorTip">AI会看心情，在图片上发挥...</span> : null}
+                {(isImageCard || isWechatImages) && field.id === "reference_image" ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
               </span>
             </label>
           ))}
@@ -642,7 +793,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   <span className="step-number">{visibleFields.length + 1}</span>
                 </span>
                 <strong className="field-title">
-                  选择生成内容
+                  {isVoiceNoteSubpage ? "生成类型" : "选择生成内容"}
                   <em className="required-mark">*</em>
                 </strong>
               </div>
@@ -679,19 +830,34 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           {pageApp.requiresThinking ? (
             <div className="resultSavedHint submit-alert">这个应用需要先创建你的思维，完成后生成内容会更像你。</div>
           ) : null}
-          {isWriteCopy ? (
+          {isWriteCopy && !isVoiceNoteSubpage ? (
             <div className="resultSavedHint submit-alert">尚未提交思维问卷，将使用资深创作者风格创作，若想打造自己的个性化风格，请填写思维问卷 →</div>
+          ) : null}
+          {isTopicPicker ? (
+            <div className="resultSavedHint submit-alert">这类选题更依赖你的思维画像来判断人设和内容重心。如果还没完成思维，建议先补齐，结果会更像你本人。</div>
+          ) : null}
+          {isXiaohongshuCheck ? (
+            <div className="resultSavedHint submit-alert">这类应用更偏审核和修改建议。结果页会先标出潜在风险点，再给更稳妥的替代表达方向。</div>
+          ) : null}
+          {isPolicyDiagnosis ? (
+            <div className="resultSavedHint submit-alert">这类应用更偏结构诊断。结果页会优先给你看家庭保障缺口、责任重复、缴费压力和建议的调整顺序。</div>
           ) : null}
 
           <section className="submit-section submitSection">
             <button className="primaryButton submit-button submitButton" disabled={loading} onClick={() => void handleSubmit()} type="button">
-              {loading ? "创作中..." : isWriteCopy ? `开始创作（${app.points}积分）` : isImageCard || isWechatImages || isWechatArticlePolish ? `开始创作（${app.points}积分）` : isVideoScriptPolish ? `开始精修（${app.points}积分）` : `立即创作（${app.points}积分）`}
+              {loading ? (isPolicyDiagnosis ? "诊断中..." : "创作中...") : isXiaohongshuCheck ? `开始检测（${app.points}积分）` : isPolicyDiagnosis ? `开始诊断（${app.points}积分）` : isLeadCopy || isWriteCopy || isGeneralContent || isCompactRecruitPage || isLetter ? `开始创作（${app.points}积分）` : isImageCard || isWechatImages || isWechatArticlePolish || isVideoScriptPolish || isLeadPackage || isTopicPicker ? `开始创作（${app.points}积分）` : `立即创作（${app.points}积分）`}
             </button>
-            {isImageCard ? <div className="imageCardRemakeHint">已填入【同款作品】的选项与文案，可直接开始创作体验；也可修改成自己的内容再创作。</div> : null}
+            {isImageCard || isLetter ? <div className="imageCardRemakeHint">已载入功能示例的输入方式。请替换为自己的真实内容后开始创作。</div> : null}
             {isWechatImages ? <div className="wechatImagesSubmitHint">生成后会进入作品详情页，重点查看图片是否贴合文章段落节奏与阅读场景。</div> : null}
             {isWriteCopy && !isCompactWriteCopyFlow ? <div className="writeCopySubmitHint">生成后会直接进入作品详情页，支持复制、导出、改写和继续保存。</div> : null}
-            {isVideoScriptPolish ? <div className="polishSubmitHint">生成后会进入作品详情页，优先查看精修后的主稿、开头节奏和整体顺滑度。</div> : null}
-            {isWechatArticlePolish ? <div className="polishSubmitHint">生成后会进入作品详情页，优先查看标题、段落推进和结尾互动是否更顺。</div> : null}
+            {isLeadCopy ? <div className="leadCopySubmitHint">生成后会进入作品详情页，重点查看首屏钩子、评论承接和私信转化动作。</div> : null}
+            {isLeadPackage ? <div className="leadPackageSubmitHint">生成后会进入作品详情页，重点查看资料目录、领取动作和朋友圈/私信承接是否完整。</div> : null}
+            {isTopicPicker ? <div className="topicPickerSubmitHint">生成后会进入作品详情页，重点看 6 个选题是否同时覆盖流量、信任、引流，以及是否真的适合你当前的平台和客户人群。</div> : null}
+            {isGeneralContent ? <div className="generalContentSubmitHint">生成后会进入作品详情页，重点查看口播稿和公众号版本是否都围绕同一个核心观点展开。</div> : null}
+            {isVideoScriptPolish ? <div className="polishSubmitHint">生成后会进入作品详情页，重点查看批改报告、逐句修改建议和新的精修主稿。</div> : null}
+            {isBreakthroughEntry ? <div className="polishSubmitHint">生成后会进入作品详情页，重点看问题诊断是否抓准、短期动作是否能立刻执行，以及复盘指标是否足够具体。</div> : null}
+            {isXiaohongshuCheck ? <div className="xiaohongshuCheckSubmitHint">检测后会进入作品详情页，重点查看高风险句子、触发原因和可直接替换的安全表达。</div> : null}
+            {isPolicyDiagnosis ? <div className="policyDiagnosisSubmitHint">诊断后会进入作品详情页，重点查看家庭保障缺口、重复责任、现金流压力和可优先优化的顺序。</div> : null}
           </section>
         </form>
       </div>
@@ -707,17 +873,35 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
       {guideOpen ? (
         <div className="creationExampleModalOverlay" onClick={() => setGuideOpen(false)} role="presentation">
-          <div className="creationExampleModalShell imageGuideModal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="必看攻略">
+          <div className="creationExampleModalShell imageGuideModal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="创作规范">
             <div className="imageGuideModalContent">
               <div className="imageGuideModalHeader">
-                <h2>必看攻略</h2>
+                <h2>创作规范</h2>
                 <button className="creationExampleClose" onClick={() => setGuideOpen(false)} type="button">×</button>
               </div>
               <div className="imageGuideModalBody">
-                <p>1. 先选风格，再决定图片比例，这样更容易稳定出图。</p>
-                <p>2. 图片内容建议直接粘贴可读性强的正文、要点或标题，不要只给太短的关键词。</p>
-                <p>3. 如果要让图片更像你的内容，优先补充署名、参考图和人物形象设置。</p>
-                <p>4. 点击开始创作后，本地会先创建作品，再进入作品详情页承接后续生成。</p>
+                {isVideoScriptPolish ? (
+                  <>
+                    <p>1. 直接粘贴你准备讲的原稿，不要只写一个主题或方向。</p>
+                    <p>2. 原稿越接近你真实会说的话，精修后的节奏和人味越自然。</p>
+                    <p>3. 结果页里先看批改报告和开头改法，再看整篇是否更顺口。</p>
+                    <p>4. 点击开始创作后，会先创建作品，再进入详情页承接精修结果。</p>
+                  </>
+                ) : isGeneralContent ? (
+                  <>
+                    <p>1. 直接粘贴你想表达的原始内容，不要只写一个抽象主题。</p>
+                    <p>2. 这类应用更适合普通观点、分享型素材和非强销售内容，原话越完整，改写后的共鸣感越自然。</p>
+                    <p>3. 先勾选想要的生成类型，重点看口播稿和公众号版本是否围绕同一个核心观点展开。</p>
+                    <p>4. 点击开始创作后，会先创建作品，再进入详情页承接生成结果。</p>
+                  </>
+                ) : (
+                  <>
+                    <p>1. 先选风格，再决定图片比例，这样更容易稳定出图。</p>
+                    <p>2. 图片内容建议直接粘贴可读性强的正文、要点或标题，不要只给太短的关键词。</p>
+                    <p>3. 如果要让图片更像你的内容，优先补充署名、参考图和人物形象设置。</p>
+                    <p>4. 点击开始创作后，系统会先创建作品，再进入作品详情页承接后续生成。</p>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -743,11 +927,29 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
       style: "realistic",
     };
   }
+  if (app.slug === "general-content") {
+    return {
+      ...base,
+      targets: ["video_script", "wechat_article"],
+    };
+  }
+  if (app.slug === "letter") {
+    return {
+      ...base,
+      theme: activeExample?.title
+        ? "我想给小谷创作平台的用户写一封年终感谢信。背景是平台上线后，很多保险人开始用它写公众号、口播文案和客户经营内容，也陆续产生了自媒体突破、客户咨询和成交反馈。今天是2025年12月31日，明天就是2026年，希望这封信能感谢大家一直以来的信任和陪伴，也表达平台未来会持续升级AI智能体、让大家体验更好、正反馈来得更早更多。最后祝大家新年快乐，业绩长虹，也身体健康、家庭幸福。"
+        : "",
+      targets: ["wechat_article"],
+    };
+  }
   if (app.slug === "wechat-article-polish") {
     return {
       ...base,
       target: ["wechat_article"],
     };
+  }
+  if (app.slug === "ip-positioning" && app.name === "个性名片") {
+    return { ...base, style: "professional", ratio: "3:4" };
   }
   if (app.slug !== "image-card" || !fromWorkspace) return base;
 
@@ -760,171 +962,27 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
   };
 }
 
-function getEntryAdjustedApp(app: CreationApp, entry: string): CreationApp {
-  if (app.slug === "write-copy" && entry === "voice-note-copy") {
-    return {
-      ...app,
-      name: "录音稿拆解整理",
-      description: "把学习、分享的录音稿拆成多个独立内容+金句，直接复制，即可创作内容",
-      exampleTitle: undefined,
-      fields: [
-        {
-          id: "source",
-          label: "录音稿内容",
-          type: "text_or_file",
-          required: true,
-          placeholder: "请粘贴完整录音稿、学习分享逐字稿或聊天复盘内容",
-          helper: "也可上传 txt、docx、pdf、md 文件",
-        },
-        {
-          id: "tone",
-          label: "拆解倾向",
-          type: "radio",
-          required: true,
-          options: [
-            { label: "偏像自己", value: "self" },
-            { label: "偏还原整理", value: "raw" },
-            { label: "偏提炼金句", value: "traffic" },
-            { label: "偏稳定逻辑", value: "trust" },
-          ],
-        },
-        {
-          id: "targets",
-          label: "选择生成内容",
-          type: "multiselect",
-          required: true,
-          options: [
-            { label: "独立内容片段", value: "video_script" },
-            { label: "金句摘录", value: "moments" },
-            { label: "可继续扩写的长内容", value: "wechat_article" },
-          ],
-        },
-      ],
-    };
-  }
-
-  if (app.slug === "team-recruit" && entry === "recruit-script") {
-    return {
-      ...app,
-      name: "增员面谈逐字稿",
-      description: "只需上传候选人简历，就能生成一套完整的面试内容，包括：1、候选人画像，2、完整面试流程和话题，3、个性化欢迎、4、应急话术、5、注意事项、6、跟进内容",
-      exampleTitle: undefined,
-      fields: [
-        {
-          id: "resume",
-          label: "候选人简历",
-          type: "text_or_file",
-          required: true,
-          placeholder: "请粘贴候选人简历、背景经历、转型动机，或直接上传简历文件",
-          helper: "尽量补充工作经历、优势、顾虑和你最想重点聊的方向",
-        },
-        {
-          id: "team_offer",
-          label: "团队亮点",
-          type: "textarea",
-          required: true,
-          placeholder: "例如培训体系、陪跑支持、客户资源、主打赛道、团队氛围",
-        },
-        {
-          id: "focus",
-          label: "本次面谈重点",
-          type: "textarea",
-          placeholder: "例如重点判断稳定性、沟通转化能力、是否适合长期培养",
-        },
-      ],
-    };
-  }
-
-  if (app.slug === "team-recruit" && entry === "recruit-followup") {
-    return {
-      ...app,
-      name: "增员跟踪",
-      description: "招募利器！上传和候选人的面谈录音文稿，得到《给ta的一封信》、《候选人信息跟踪表》、《跟踪计划表》、《一篇招募向公众号文章》",
-      exampleTitle: undefined,
-      fields: [
-        {
-          id: "followup_notes",
-          label: "面谈录音文稿",
-          type: "text_or_file",
-          required: true,
-          placeholder: "请粘贴和候选人的面谈录音稿、会议纪要或沟通复盘",
-          helper: "越完整越好，方便系统提取顾虑点、兴趣点和下一步承接动作",
-        },
-        {
-          id: "candidate_stage",
-          label: "候选人当前阶段",
-          type: "radio",
-          required: true,
-          options: [
-            { label: "刚聊完首次面谈", value: "first_meeting" },
-            { label: "有兴趣但在犹豫", value: "hesitating" },
-            { label: "准备进入下一步", value: "ready_next_step" },
-          ],
-        },
-        {
-          id: "focus",
-          label: "当前最想推进的问题",
-          type: "textarea",
-          placeholder: "例如增强信任、消除顾虑、推进二次面谈、安排试岗",
-        },
-      ],
-    };
-  }
-
-  if (app.slug === "ip-positioning" && entry === "personality-card") {
-    return {
-      ...app,
-      name: "个性名片",
-      description: "个性名片生成，人群之中记住你！只需上传个人介绍+照片，选风格即可~",
-      requiresThinking: false,
-      exampleTitle: undefined,
-      fields: [
-        {
-          id: "current_state",
-          label: "个人介绍",
-          type: "textarea",
-          required: true,
-          placeholder: "请介绍你是谁、服务谁、擅长什么、最希望别人记住你的哪一点",
-        },
-        {
-          id: "target_client",
-          label: "想吸引的人群",
-          type: "text",
-          required: true,
-          placeholder: "例如宝妈家庭、高净值客户、企业主、自由职业者",
-        },
-      ],
-    };
-  }
-
-  return app;
-}
-
-function shouldShowRealExample(appSlug: string, entry: string) {
-  if (entry === "voice-note-copy") return false;
-  if (entry === "recruit-script" || entry === "recruit-followup") return false;
-  if (entry === "personality-card") return false;
-  if (appSlug === "lead-copy") return false;
-  if (appSlug === "live-script") return false;
-  if (appSlug === "xiaohongshu-check") return false;
-  if (appSlug === "policy-diagnosis") return false;
-  if (appSlug === "ip-positioning") return false;
-  if (appSlug === "breakthrough") return false;
-  if (appSlug === "team-recruit") return false;
-  return true;
-}
-
 function supportsVoice(fieldId: string) {
-  return fieldId === "source" || fieldId === "article" || fieldId === "signature" || fieldId === "theme" || fieldId === "offer" || fieldId === "audience" || fieldId === "resume" || fieldId === "followup_notes";
+  return fieldId === "source" || fieldId === "article" || fieldId === "signature" || fieldId === "theme" || fieldId === "offer" || fieldId === "audience" || fieldId === "resume" || fieldId === "followup_notes" || fieldId === "draft" || fieldId === "policy_info" || fieldId === "insured_overview" || fieldId === "concerns";
 }
 
-function buildAppPageClassName(appFamily: CreationAppFamily) {
+function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, entry?: string) {
   const classes = ["application-create-page", "creationAppPage"];
+  if (appSlug === "general-content") classes.push("generalContentAppPage");
+  if (appSlug === "policy-diagnosis") classes.push("policyDiagnosisAppPage");
+  if (appSlug === "team-recruit") classes.push("teamRecruitAppPage");
   if (appFamily === "write-copy") classes.push("writeCopyAppPage");
+  if (appSlug === "write-copy") classes.push("writeCopyBaseAppPage");
+  if (appSlug === "lead-copy") classes.push("leadCopyAppPage");
+  if (appSlug === "lead-package") classes.push("leadPackageAppPage");
+  if (appFamily === "topic-picker") classes.push("topicPickerAppPage");
   if (appFamily === "polish-video" || appFamily === "polish-wechat-article") classes.push("polishAppPage");
   if (appFamily === "polish-video") classes.push("videoPolishAppPage");
   if (appFamily === "polish-wechat-article") classes.push("wechatPolishAppPage");
   if (appFamily === "wechat-images") classes.push("wechatImagesAppPage");
+  if (appFamily === "xiaohongshu-check") classes.push("xiaohongshuCheckAppPage");
+  if (entry === "recruit-script") classes.push("recruitScriptAppPage");
+  if (entry === "recruit-followup") classes.push("recruitFollowupAppPage");
   return classes.join(" ");
 }
 
@@ -993,7 +1051,7 @@ function renderField({
         className="creationTextarea el-textarea__inner"
         onChange={(event) => onChange(event.target.value)}
         placeholder={field.placeholder}
-        rows={field.id === "signature" ? 4 : field.id === "article" ? 6 : 8}
+        rows={field.id === "signature" ? 4 : field.id === "article" ? 6 : field.id === "draft" ? 4 : 8}
         value={typeof value === "string" ? value : ""}
       />
     );
@@ -1026,7 +1084,7 @@ function renderField({
             <div className="unified-upload-wrapper">
               <button className="creationUploadButton" onClick={() => openFilePicker(field.id)} type="button">{uploading ? "解析中..." : "选择文件"}</button>
               <input
-                accept=".txt,.docx,.pdf,.md"
+                accept={field.accept ?? ".txt,.docx,.pdf,.md"}
                 className="imageCardHiddenInput"
                 id={`image-upload-${field.id}`}
                 onChange={(event) => onFileChange(event.target.files)}
@@ -1041,7 +1099,7 @@ function renderField({
             ) : null}
             {uploadError ? <span className="imageCardUploadError">{uploadError}</span> : null}
             </div>
-          <div className="field-tip">上传资料（文件暂只支持.txt, .docx, .pdf, .md，大小不超过10MB）</div>
+          <div className="field-tip">{field.uploadHint ?? "上传资料（文件暂只支持.txt, .docx, .pdf, .md，大小不超过10MB）"}</div>
         </div>
       </div>
     );
@@ -1135,25 +1193,16 @@ function renderField({
 
   return (
     <div className={isImageCard ? "imageCardFileField" : "fileFieldPlaceholder"}>
-      {isImageCard ? (
-        <>
-          <button className="imageCardUploadButton" onClick={() => openFilePicker(field.id)} type="button">{uploading ? "上传中..." : "选择文件"}</button>
-          <input
-            accept={field.accept}
-            className="imageCardHiddenInput"
-            id={`image-upload-${field.id}`}
-            onChange={(event) => onFileChange(event.target.files)}
-            type="file"
-          />
-          {uploadName ? <span className="imageCardUploadName">{uploadName}</span> : null}
-          {uploadError ? <span className="imageCardUploadError">{uploadError}</span> : null}
-        </>
-      ) : (
-        <>
-          <span>支持上传文档、图片或参考资料。</span>
-          <input disabled type="file" />
-        </>
-      )}
+      <button className="imageCardUploadButton" onClick={() => openFilePicker(field.id)} type="button">{uploading ? "上传中..." : "选择文件"}</button>
+      <input
+        accept={field.accept}
+        className="imageCardHiddenInput"
+        id={`image-upload-${field.id}`}
+        onChange={(event) => onFileChange(event.target.files)}
+        type="file"
+      />
+      {uploadName ? <span className="imageCardUploadName">{uploadName}</span> : null}
+      {uploadError ? <span className="imageCardUploadError">{uploadError}</span> : null}
     </div>
   );
 }
@@ -1191,7 +1240,7 @@ function getSpeechRecognitionConstructor() {
 
 function buildWriteCopySourceSeed(exampleTitle?: string, fromWorkspace?: boolean) {
   if (!fromWorkspace) return "";
-  if (!exampleTitle) return "我最近发现，很多客户买保险时，第一反应还是先问价格。\n\n但真正应该先想清楚的，是你买这份保障到底要解决什么风险。";
+  if (!exampleTitle) return "";
   return `${exampleTitle}\n\n请围绕这个观点，保留接地气、像真人说话的表达方式，生成适合不同平台直接发布的内容。`;
 }
 

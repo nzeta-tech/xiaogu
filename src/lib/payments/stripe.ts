@@ -56,6 +56,18 @@ export async function createStripeCheckoutSession(input: {
   });
 }
 
+export async function refundStripeCheckoutSession(sessionId: string) {
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  const paymentIntent = typeof session.payment_intent === "string"
+    ? session.payment_intent
+    : session.payment_intent?.id;
+  if (!paymentIntent) {
+    throw new Error("该订单没有可退款的 Stripe 支付记录");
+  }
+  return stripe.refunds.create({ payment_intent: paymentIntent });
+}
+
 export function constructStripeWebhookEvent(payload: string, signature: string) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {

@@ -27,14 +27,18 @@ export function BenefitsPageClient() {
   const [busy, setBusy] = useState(false);
 
   async function loadAll(signal?: AbortSignal) {
-    const [announcementsResponse, giftsResponse] = await Promise.all([
-      fetch(apiPath("/api/announcements"), { signal }),
-      fetch(apiPath("/api/gifts"), { signal }),
-    ]);
-    const announcementsPayload = (await announcementsResponse.json()) as { announcements?: Announcement[] };
-    const giftsPayload = (await giftsResponse.json()) as { gifts?: Gift[] };
-    setAnnouncements(announcementsPayload.announcements ?? []);
-    setGifts(giftsPayload.gifts ?? []);
+    try {
+      const [announcementsResponse, giftsResponse] = await Promise.all([
+        fetch(apiPath("/api/announcements"), { signal }),
+        fetch(apiPath("/api/gifts"), { signal }),
+      ]);
+      const announcementsPayload = (await announcementsResponse.json()) as { announcements?: Announcement[] };
+      const giftsPayload = (await giftsResponse.json()) as { gifts?: Gift[] };
+      setAnnouncements(announcementsPayload.announcements ?? []);
+      setGifts(giftsPayload.gifts ?? []);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
+    }
   }
 
   useEffect(() => {

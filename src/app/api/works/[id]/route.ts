@@ -103,6 +103,15 @@ function normalizeWorkDetail<T extends {
   content_json?: { batches?: unknown[] } | null;
 }>(work: T): T {
   if (!shouldRebuildContentJson(work.platform)) return work;
+  if (work.platform === "general-content") {
+    return {
+      ...work,
+      content_json: parseCreationOutput(work.content),
+    };
+  }
+  if (Array.isArray(work.content_json?.batches) && work.content_json.batches.length > 0) {
+    return work;
+  }
   return {
     ...work,
     content_json: parseCreationOutput(work.content),
@@ -110,5 +119,5 @@ function normalizeWorkDetail<T extends {
 }
 
 function shouldRebuildContentJson(platform?: string) {
-  return platform === "write-copy" || platform === "lead-copy" || platform === "video-script-polish" || platform === "wechat-article-polish";
+  return platform === "write-copy" || platform === "general-content" || platform === "lead-copy" || platform === "video-script-polish" || platform === "wechat-article-polish" || platform === "topic-picker";
 }

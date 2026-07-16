@@ -31,8 +31,8 @@ export function CreationExamplePageClient({
     ? {
         ...example,
         ...catalogExample,
-        sections: example.sections.length ? example.sections : catalogExample.sections,
-        outputs: example.outputs?.length ? example.outputs : catalogExample.outputs,
+        sections: example.slug === "video-script-polish-case" ? catalogExample.sections : example.sections.length ? example.sections : catalogExample.sections,
+        outputs: example.slug === "video-script-polish-case" ? catalogExample.outputs : example.outputs?.length ? example.outputs : catalogExample.outputs,
         linkedExamples: example.linkedExamples?.length ? example.linkedExamples : catalogExample.linkedExamples,
         imageResults: example.imageResults?.length ? example.imageResults : catalogExample.imageResults,
       }
@@ -63,16 +63,39 @@ export function CreationExamplePageClient({
       })),
     })),
   ];
-  const imageNavItems: ExampleNavItem[] = imageResults.map((item, index) => ({
-    id: item.id ?? `image-result-${index + 1}`,
-    title: item.title,
-  }));
   const appFamily = getCreationAppFamily(app.slug);
   const isWriteCopy = appFamily === "write-copy";
+  const isLiveScript = app.slug === "live-script";
   const isImageCard = appFamily === "image-card";
   const isWechatImages = appFamily === "wechat-images";
   const isVideoScriptPolish = appFamily === "polish-video";
   const isWechatArticlePolish = appFamily === "polish-wechat-article";
+  const isGeneralContent = app.slug === "general-content";
+  const isLetter = app.slug === "letter";
+  const imageNavItems: ExampleNavItem[] = isWechatImages
+    ? [
+        { id: "wechat-images-instance-info", title: "实例信息" },
+        { id: "wechat-images-generated-results", title: "生成的图片" },
+      ]
+    : imageResults.map((item, index) => ({
+        id: item.id ?? `image-result-${index + 1}`,
+        title: item.title,
+      }));
+  const wechatImagesArticlePreview = "🎤 你以为是在聊客户，其实是在聊自己。\n\n很多人做内容时，习惯先想我要讲什么产品、讲什么专业、讲什么观点。但真正让别人愿意继续看下去的，往往不是你讲得多完整，而是读者会不会在某一句里突然觉得：这说的就是我。\n\n所以公众号配图也不是简单找几张好看的图。它更像是在帮一篇文章安排呼吸点，让读者在情绪推进、观点切换和故事停顿的地方，都能自然停一下、再继续读下去。";
+  const videoPolishBlocks = [
+    ...sections.map((section) => ({
+      id: section.id,
+      title: section.title,
+      body: section.body,
+      accent: false,
+    })),
+    ...outputs.map((output) => ({
+      id: output.id,
+      title: output.title,
+      body: output.body,
+      accent: true,
+    })),
+  ];
 
   function adjustFontScale(delta: number) {
     setFontScale((current) => Math.min(130, Math.max(90, current + delta)));
@@ -97,8 +120,8 @@ export function CreationExamplePageClient({
   }
 
   const content = (
-    <div className={buildExamplePageClassName(appFamily)}>
-      <div className="page-content creationExampleCloneContent">
+    <div className={buildExamplePageClassName(appFamily, app.slug)}>
+      <div className="page-content creationExampleStudioContent">
         {mode === "page" ? (
           <div className="page-back-bar">
             <a className="back-btn backLink" href={appPath("/workspace")}>返回广场</a>
@@ -122,8 +145,8 @@ export function CreationExamplePageClient({
           <div className="creationExampleHeroHeader">
             <div className="creationExampleHeroTitle">
               <h1>{activeExample.title}</h1>
-              <a className="creationExampleCloneAction" href={appPath(`/apps/${app.slug}?example=${activeExample.slug}`)}>
-                {activeExample.ctaLabel ?? "做同款"}
+              <a className="creationExampleStudioAction" href={appPath(`/apps/${app.slug}?example=${activeExample.slug}`)}>
+                {activeExample.ctaLabel ?? "使用此功能"}
               </a>
             </div>
             <button aria-label="关闭案例" className="creationExampleClose" onClick={() => onClose?.()} type="button">
@@ -135,11 +158,13 @@ export function CreationExamplePageClient({
               <p>{activeExample.intro}</p>
             </div>
           ) : null}
-          <div className="creationExampleHeroMeta">
-            <span>{app.name}</span>
-            <strong>{app.points} 积分/次</strong>
-            {activeExample.highlight ? <em>{activeExample.highlight}</em> : null}
-          </div>
+          {isVideoScriptPolish ? null : (
+            <div className="creationExampleHeroMeta">
+              <span>{app.name}</span>
+              <strong>{app.points} 积分/次</strong>
+              {activeExample.highlight ? <em>{activeExample.highlight}</em> : null}
+            </div>
+          )}
           {isWriteCopy ? (
             <div className="writeCopyExampleSummary">
               <div>
@@ -151,8 +176,8 @@ export function CreationExamplePageClient({
                 <strong>先短内容，再长内容，再延展选题</strong>
               </div>
               <div>
-                <span>克隆目标</span>
-                <strong>更接近目标站的案例阅读页节奏</strong>
+                <span>阅读重点</span>
+                <strong>观察一份素材如何适配不同渠道，同时保持事实和观点一致</strong>
               </div>
             </div>
           ) : null}
@@ -167,8 +192,8 @@ export function CreationExamplePageClient({
                 <strong>不同标签页切换不同风格与结果图</strong>
               </div>
               <div>
-                <span>当前目标</span>
-                <strong>更接近目标站图片结果页阅读方式</strong>
+                <span>阅读重点</span>
+                <strong>确认图片主题、信息层级、尺寸与素材来源</strong>
               </div>
             </div>
           ) : null}
@@ -183,27 +208,12 @@ export function CreationExamplePageClient({
                 <strong>重点是文章阅读节奏，而不是单张海报展示</strong>
               </div>
               <div>
-                <span>当前目标</span>
-                <strong>更接近目标站公众号配图案例页的阅读方式</strong>
+                <span>阅读重点</span>
+                <strong>观察四张图片如何分别支撑开篇、方法、转折和总结</strong>
               </div>
             </div>
           ) : null}
-          {isVideoScriptPolish ? (
-            <div className="polishExampleSummary">
-              <div>
-                <span>案例类型</span>
-                <strong>已有口播稿的精修案例</strong>
-              </div>
-              <div>
-                <span>核心变化</span>
-                <strong>先把开头拉住，再把结构和语气顺平</strong>
-              </div>
-              <div>
-                <span>当前目标</span>
-                <strong>更接近目标站的“改稿型案例页”阅读节奏</strong>
-              </div>
-            </div>
-          ) : null}
+          {isVideoScriptPolish ? null : null}
           {isWechatArticlePolish ? (
             <div className="polishExampleSummary">
               <div>
@@ -215,14 +225,126 @@ export function CreationExamplePageClient({
                 <strong>标题、结构、语言和结尾互动都重新提一层</strong>
               </div>
               <div>
-                <span>当前目标</span>
-                <strong>更接近目标站长文精修案例页的阅读方式</strong>
+                <span>阅读重点</span>
+                <strong>对照标题、段落推进、术语解释和事实边界</strong>
+              </div>
+            </div>
+          ) : null}
+          {isGeneralContent ? (
+            <div className="generalContentExampleSummary">
+              <div>
+                <span>案例类型</span>
+                <strong>热点泛选题案例</strong>
+              </div>
+              <div>
+                <span>输出结构</span>
+                <strong>萃取逻辑 + 选题标题 + 文案</strong>
+              </div>
+              <div>
+                <span>阅读重点</span>
+                <strong>从已核实事实提炼与普通人相关的生活议题</strong>
+              </div>
+            </div>
+          ) : null}
+          {isLiveScript ? (
+            <div className="liveScriptExampleSummary">
+              <div>
+                <span>案例类型</span>
+                <strong>直播流程稿案例</strong>
+              </div>
+              <div>
+                <span>核心模块</span>
+                <strong>输入思路、节奏拆解、完整脚本、互动承接</strong>
+              </div>
+              <div>
+                <span>阅读重点</span>
+                <strong>查看开场、讲解、互动、核验提醒和收尾如何组成完整流程</strong>
+              </div>
+            </div>
+          ) : null}
+          {isLetter ? (
+            <div className="letterExampleSummary">
+              <div>
+                <span>案例类型</span>
+                <strong>情绪表达型信件案例</strong>
+              </div>
+              <div>
+                <span>核心重点</span>
+                <strong>对象明确、情绪克制、语气自然，不像模板祝福</strong>
+              </div>
+              <div>
+                <span>阅读重点</span>
+                <strong>先了解功能边界，再使用自己的真实素材开始创作</strong>
               </div>
             </div>
           ) : null}
         </section>
 
-        <section className="creationExampleCloneLayout">
+        {isVideoScriptPolish ? (
+          <section className="videoPolishExampleCanvas">
+            <aside className="videoPolishExampleSidebarCard">
+              <div className="creationExampleSidebarHeader">
+                <strong>内容导航</strong>
+              </div>
+              <div className="creationExampleZoomRow">
+                <span>内容缩放</span>
+                <div className="creationExampleZoomControls">
+                  <button onClick={() => adjustFontScale(-10)} type="button">−</button>
+                  <span>{fontScale}%</span>
+                  <button onClick={() => adjustFontScale(10)} type="button">+</button>
+                </div>
+              </div>
+              <div className="creationExampleCatalog">
+                <div className="creationExampleCatalogGroup">
+                  <a className="creationExampleCatalogItem" href="#video-polish-generated" onClick={() => setActiveAnchorId("video-polish-generated")}>
+                    <span className={activeAnchorId === "video-polish-generated" ? "creationExampleCatalogDot active" : "creationExampleCatalogDot"} aria-hidden="true">✓</span>
+                    <span>生成结果</span>
+                  </a>
+                </div>
+                {videoPolishBlocks.map((item) => (
+                  <div className="creationExampleCatalogGroup" key={item.id}>
+                    <a className="creationExampleCatalogItem" href={`#${item.id}`} onClick={() => setActiveAnchorId(item.id ?? "")}>
+                      <span className={activeAnchorId === item.id ? "creationExampleCatalogDot active" : "creationExampleCatalogDot"} aria-hidden="true">✓</span>
+                      <span>{item.title}</span>
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </aside>
+
+            <main className="videoPolishExampleMain" style={{ fontSize: `${fontScale}%` }}>
+              <article className="creationExampleContentCard videoPolishExampleContentCard" id="video-polish-generated">
+                <section className="creationExampleBlock creationExampleBlockAccent">
+                  <div className="creationExampleBlockHeader">
+                    <div className="creationExampleBlockTitle">
+                      <span className="creationExampleDocIcon" aria-hidden="true">📋</span>
+                      <h2>生成结果</h2>
+                    </div>
+                    <div className="creationExampleBlockActions">
+                      <button onClick={() => void copyText(videoPolishBlocks.map((item) => `${item.title}\n${item.body}`).join("\n\n"))} type="button">复制</button>
+                      <button onClick={() => exportWord(activeExample.title, videoPolishBlocks.map((item) => `${item.title}\n\n${item.body}`).join("\n\n"))} type="button">导出Word</button>
+                    </div>
+                  </div>
+
+                  {videoPolishBlocks.map((item) => (
+                    <div className="videoPolishExampleSection" id={item.id} key={item.id}>
+                      <div className="creationExampleBlockHeader">
+                        <div className="creationExampleBlockTitle">
+                          <span className="creationExampleDocIcon" aria-hidden="true">{item.accent ? "🪄" : "📄"}</span>
+                          <h2>{item.title}</h2>
+                        </div>
+                      </div>
+                      <div className="creationExampleBlockBody">
+                        <MarkdownContent text={item.body} />
+                      </div>
+                    </div>
+                  ))}
+                </section>
+              </article>
+            </main>
+          </section>
+        ) : (
+        <section className="creationExampleStudioLayout">
           <aside className="creationExampleSidebar">
             <div className="creationExampleSidebarCard">
               <div className="creationExampleSidebarHeader">
@@ -266,45 +388,109 @@ export function CreationExamplePageClient({
 
           <div className="creationExampleMain">
             {isImageExample ? (
-              <article className={isImageCard ? "creationExampleContentCard creationExampleImageCard imageCardExampleContentCard" : isWechatImages ? "creationExampleContentCard creationExampleImageCard wechatImagesExampleContentCard" : "creationExampleContentCard creationExampleImageCard"}>
-                {imageResults.map((item, index) => (
-                  <section className={isImageCard ? "creationExampleImageSection imageCardExampleImageSection" : isWechatImages ? "creationExampleImageSection wechatImagesExampleImageSection" : "creationExampleImageSection"} id={item.id ?? `image-result-${index + 1}`} key={item.id ?? item.imageUrl}>
+              isWechatImages ? (
+                <article className="creationExampleContentCard creationExampleImageCard wechatImagesExampleContentCard wechatImagesSharedWorkCard">
+                  <section className="creationExampleImageSection wechatImagesExampleImageSection" id="wechat-images-instance-info">
+                    <div className="creationExampleImageHeader">
+                      <div className="creationExampleImageHeaderTitle">
+                        <span className="creationExampleImageIcon" aria-hidden="true">🧾</span>
+                        <h2>实例信息</h2>
+                      </div>
+                      <div className="creationExampleImageMeta">
+                        <span className="creationExampleImageBadge">本地原创示例</span>
+                      </div>
+                    </div>
+                    <div className="wechatImagesExampleInfoGrid">
+                      <div className="wechatImagesExampleInfoCard">
+                        <span>图片风格</span>
+                        <strong>温暖手绘</strong>
+                      </div>
+                      <div className="wechatImagesExampleInfoCard">
+                        <span>输出类型</span>
+                        <strong>多张文章配图</strong>
+                      </div>
+                      <div className="wechatImagesExampleInfoCard">
+                        <span>结果状态</span>
+                        <strong>已完成</strong>
+                      </div>
+                    </div>
+                    <div className="wechatImagesExampleArticleCard">
+                      <div className="wechatImagesExampleArticleHeader">
+                        <strong>文章内容</strong>
+                        <button onClick={() => void copyText(wechatImagesArticlePreview)} type="button">复制内容</button>
+                      </div>
+                      <div className="wechatImagesExampleArticleBody">
+                        <MarkdownContent text={wechatImagesArticlePreview} />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="creationExampleImageSection wechatImagesExampleImageSection" id="wechat-images-generated-results">
                     <div className="creationExampleImageHeader">
                       <div className="creationExampleImageHeaderTitle">
                         <span className="creationExampleImageIcon" aria-hidden="true">🖼️</span>
-                        <h2>{item.title}</h2>
+                        <h2>生成的图片</h2>
                       </div>
                       <div className="creationExampleImageMeta">
-                        {item.badge ? <span className="creationExampleImageBadge">{item.badge}</span> : null}
+                        <span className="creationExampleImageBadge">已生成 {imageResults.length} 张图片</span>
                       </div>
                     </div>
 
-                    <div className="creationExampleSignatureRow">
-                      <div>
-                        <strong>添加签名水印</strong>
-                        <p>目标站这里是图片结果区，本地先保留同款信息架构，不在案例页里启用真实签名交互。</p>
-                      </div>
-                      <span className="creationExampleSignatureSwitch" aria-hidden="true" />
+                    <div className="wechatImagesExampleResultActions">
+                      <a className="creationExampleImageAction" href={appPath(`/apps/${app.slug}?example=${activeExample.slug}`)}>
+                        使用此功能
+                      </a>
+                      <button onClick={() => void copyText(imageResults.map((item) => item.imageUrl).join("\n"))} type="button">复制全部图片链接</button>
                     </div>
 
-                    <div className="creationExampleImageGrid">
-                      <article className="creationExampleImageTile">
-                        <div className="creationExampleImageFrame" style={item.ratio ? { aspectRatio: item.ratio } : undefined}>
-                          <img alt={activeExample.title} className="creationExamplePreviewImage" src={item.imageUrl} />
-                        </div>
-                        <div className="creationExampleImageActions">
-                          <a className="creationExampleImageAction" download href={item.imageUrl} target="_blank" rel="noreferrer">
-                            下载
-                          </a>
-                          <button onClick={() => void copyText(item.imageUrl)} type="button">复制图片链接</button>
-                        </div>
-                      </article>
+                    <div className="wechatImagesExampleGallery">
+                      {imageResults.map((item, index) => (
+                        <article className="wechatImagesExampleGalleryCard" id={item.id ?? `image-result-${index + 1}`} key={item.id ?? item.imageUrl}>
+                          <div className="creationExampleImageFrame" style={item.ratio ? { aspectRatio: item.ratio } : undefined}>
+                            <img alt={`${activeExample.title} ${index + 1}`} className="creationExamplePreviewImage" src={item.imageUrl} />
+                          </div>
+                          <div className="wechatImagesExampleGalleryMeta">
+                            <strong>{item.title}</strong>
+                            <span>{index === 0 ? "推荐先看" : "备选结果"}</span>
+                          </div>
+                        </article>
+                      ))}
                     </div>
                   </section>
-                ))}
-              </article>
+                </article>
+              ) : (
+                <article className={isImageCard ? "creationExampleContentCard creationExampleImageCard imageCardExampleContentCard" : "creationExampleContentCard creationExampleImageCard"}>
+                  {imageResults.map((item, index) => (
+                    <section className={isImageCard ? "creationExampleImageSection imageCardExampleImageSection" : "creationExampleImageSection"} id={item.id ?? `image-result-${index + 1}`} key={item.id ?? item.imageUrl}>
+                      <div className="creationExampleImageHeader">
+                        <div className="creationExampleImageHeaderTitle">
+                          <span className="creationExampleImageIcon" aria-hidden="true">🖼️</span>
+                          <h2>{item.title}</h2>
+                        </div>
+                        <div className="creationExampleImageMeta">
+                          {item.badge ? <span className="creationExampleImageBadge">{item.badge}</span> : null}
+                        </div>
+                      </div>
+
+                      <div className="creationExampleImageGrid">
+                        <article className="creationExampleImageTile">
+                          <div className="creationExampleImageFrame" style={item.ratio ? { aspectRatio: item.ratio } : undefined}>
+                            <img alt={activeExample.title} className="creationExamplePreviewImage" src={item.imageUrl} />
+                          </div>
+                          <div className="creationExampleImageActions">
+                            <a className="creationExampleImageAction" download href={item.imageUrl} target="_blank" rel="noreferrer">
+                              下载
+                            </a>
+                            <button onClick={() => void copyText(item.imageUrl)} type="button">复制图片链接</button>
+                          </div>
+                        </article>
+                      </div>
+                    </section>
+                  ))}
+                </article>
+              )
             ) : (
-              <article className={isWriteCopy ? "creationExampleContentCard writeCopyExampleContentCard" : "creationExampleContentCard"} style={{ fontSize: `${fontScale}%` }}>
+              <article className={isWriteCopy ? "creationExampleContentCard writeCopyExampleContentCard" : isLiveScript ? "creationExampleContentCard liveScriptExampleContentCard" : "creationExampleContentCard"} style={{ fontSize: `${fontScale}%` }}>
                 {sections.map((section) => (
                   <section className={isWriteCopy ? "creationExampleBlock writeCopyExampleBlock" : "creationExampleBlock"} id={section.id} key={section.id ?? section.title}>
                     <div className="creationExampleBlockHeader">
@@ -325,13 +511,17 @@ export function CreationExamplePageClient({
                 ))}
 
                 {outputs.map((item) => (
-                  <section className={isWriteCopy ? "creationExampleBlock creationExampleBlockAccent writeCopyExampleBlock writeCopyExampleBlockAccent" : "creationExampleBlock creationExampleBlockAccent"} id={item.id} key={item.id ?? item.title}>
+                  <section className={isWriteCopy ? "creationExampleBlock creationExampleBlockAccent writeCopyExampleBlock writeCopyExampleBlockAccent" : isGeneralContent ? "creationExampleBlock creationExampleBlockAccent generalContentExampleBlock" : "creationExampleBlock creationExampleBlockAccent"} id={item.id} key={item.id ?? item.title}>
                     <div className="creationExampleBlockHeader">
                       <div className="creationExampleBlockTitle">
                         <span className="creationExampleDocIcon" aria-hidden="true">🪄</span>
                         <h2>{item.title}</h2>
                       </div>
-                      {item.tag ? <span className="creationExampleTag">{item.tag}</span> : null}
+                      <div className="creationExampleBlockActions">
+                        {item.tag ? <span className="creationExampleTag">{item.tag}</span> : null}
+                        <button onClick={() => void copyText([item.body, ...(item.children ?? []).map((child) => `${child.title}\n${child.body}`)].filter(Boolean).join("\n\n"))} type="button">复制</button>
+                        <button onClick={() => exportWord(item.title, [item.body, ...(item.children ?? []).map((child) => `${child.title}\n\n${child.body}`)].filter(Boolean).join("\n\n"))} type="button">导出Word</button>
+                      </div>
                     </div>
                     <div className="creationExampleBlockBody">
                       <MarkdownContent text={item.body} />
@@ -354,7 +544,10 @@ export function CreationExamplePageClient({
                           </button>
                         </div>
                       ) : null}
-                      {(currentViewMode(item.id, item.viewMode, viewModes) === "wechat" ? (item.children ?? []) : []).map((child) => (
+                      {(item.viewMode === "wechat"
+                        ? currentViewMode(item.id, item.viewMode, viewModes) === "wechat" ? (item.children ?? []) : []
+                        : (item.children ?? [])
+                      ).map((child) => (
                         <article className="creationExampleArticleCard" id={child.id} key={child.id ?? child.title}>
                           <div className="creationExampleArticleHeader">
                             <span className="creationExampleArticleMarker" aria-hidden="true">📄</span>
@@ -373,6 +566,7 @@ export function CreationExamplePageClient({
             )}
           </div>
         </section>
+        )}
       </div>
     </div>
   );
@@ -390,11 +584,13 @@ export function CreationExamplePageClient({
   return content;
 }
 
-function buildExamplePageClassName(appFamily: ReturnType<typeof getCreationAppFamily>) {
-  const classes = ["target-subpage", "creationExamplePage", "creationExampleClonePage"];
+function buildExamplePageClassName(appFamily: ReturnType<typeof getCreationAppFamily>, appSlug: string) {
+  const classes = ["product-subpage", "creationExamplePage", "creationExampleStudioPage"];
   if (appFamily === "write-copy") classes.push("writeCopyExamplePage");
   if (appFamily === "image-card") classes.push("imageCardExamplePage");
   if (appFamily === "wechat-images") classes.push("wechatImagesExamplePage");
+  if (appSlug === "general-content") classes.push("generalContentExamplePage");
+  if (appSlug === "letter") classes.push("letterExamplePage");
   if (appFamily === "polish-video" || appFamily === "polish-wechat-article") classes.push("polishExamplePage");
   if (appFamily === "polish-video") classes.push("videoPolishExamplePage");
   if (appFamily === "polish-wechat-article") classes.push("wechatPolishExamplePage");
@@ -414,28 +610,29 @@ function MarkdownContent({ text }: { text: string }) {
 
   return (
     <>
-      {blocks.map((block) => {
+      {blocks.map((block, index) => {
+        const key = `${index}-${block}`;
         if (block === "---") {
-          return <hr className="creationExampleDivider" key={block} />;
+          return <hr className="creationExampleDivider" key={key} />;
         }
 
         if (block.startsWith("### ")) {
-          return <h4 className="creationExampleHeading creationExampleHeading4" key={block}>{block.slice(4)}</h4>;
+          return <h4 className="creationExampleHeading creationExampleHeading4" key={key}>{block.slice(4)}</h4>;
         }
 
         if (block.startsWith("## ")) {
-          return <h3 className="creationExampleHeading creationExampleHeading3" key={block}>{block.slice(3)}</h3>;
+          return <h3 className="creationExampleHeading creationExampleHeading3" key={key}>{block.slice(3)}</h3>;
         }
 
         if (block.startsWith("# ")) {
-          return <h2 className="creationExampleHeading creationExampleHeading2" key={block}>{block.slice(2)}</h2>;
+          return <h2 className="creationExampleHeading creationExampleHeading2" key={key}>{block.slice(2)}</h2>;
         }
 
         if (block.startsWith(">")) {
-          return <blockquote key={block}>{block.replace(/^>\s?/, "")}</blockquote>;
+          return <blockquote key={key}>{block.replace(/^>\s?/, "")}</blockquote>;
         }
 
-        return <p key={block}>{block}</p>;
+        return <p key={key}>{block}</p>;
       })}
     </>
   );

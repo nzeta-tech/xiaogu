@@ -1,5 +1,7 @@
 import {
   hasMeteringConfig,
+  hasImageModelConfig,
+  hasLiveStripeConfig,
   hasModelConfig,
   hasStripeConfig,
   isDemoModeEnabled,
@@ -28,6 +30,12 @@ export async function GET() {
       required: true,
     },
     {
+      key: "image_model",
+      label: "Image generation model",
+      ok: hasImageModelConfig(),
+      required: true,
+    },
+    {
       key: "metering",
       label: "OpenMeter quota billing",
       ok: hasMeteringConfig(),
@@ -37,6 +45,12 @@ export async function GET() {
       key: "stripe",
       label: "Stripe payment",
       ok: hasStripeConfig(),
+      required: true,
+    },
+    {
+      key: "stripe_live",
+      label: "Stripe live mode",
+      ok: !isProductionRuntime() || hasLiveStripeConfig(),
       required: true,
     },
     {

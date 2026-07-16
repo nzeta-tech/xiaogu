@@ -5,22 +5,27 @@ import { usePathname } from "next/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
 
 const menuNavItems = [
-  { id: "workbench", href: "/workspace", label: "工作台", shortLabel: "工作台", icon: "home" },
+  { id: "workbench", href: "/dashboard", label: "工作台", shortLabel: "经营概览", icon: "home" },
   { id: "creation", href: "/workspace", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
-  { id: "crm", href: "/thinking", label: "客户经营", shortLabel: "客户经营", icon: "users" },
-  { id: "growth", href: "/benefits", label: "成长", shortLabel: "成长", icon: "sprout" },
+  { id: "crm", href: "/thinking", label: "思维画像", shortLabel: "个性设置", icon: "users" },
+  { id: "growth", href: "/benefits", label: "活动兑换", shortLabel: "积分权益", icon: "sprout" },
+  { id: "feedback", href: "/feedback", label: "反馈支持", shortLabel: "问题与建议", icon: "✉" },
+  { id: "account", href: "/account", label: "账号与安全", shortLabel: "密码与注销", icon: "⚙️" },
 ];
 
 const platformNavItems = [
-  { id: "workbench", href: "/workspace", label: "工作台", shortLabel: "工作台", icon: "home" },
+  { id: "workbench", href: "/dashboard", label: "工作台", shortLabel: "经营概览", icon: "home" },
   { id: "creation", href: "/workspace", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
-  { id: "crm", href: "/thinking", label: "客户经营", shortLabel: "客户经营", icon: "users" },
-  { id: "growth", href: "/benefits", label: "成长", shortLabel: "成长", icon: "sprout" },
+  { id: "crm", href: "/thinking", label: "思维画像", shortLabel: "个性设置", icon: "users" },
+  { id: "growth", href: "/benefits", label: "活动兑换", shortLabel: "积分权益", icon: "sprout" },
 ];
+
+const adminNavItem = { id: "admin", href: "/admin", label: "管理后台", shortLabel: "运营管理", icon: "admin" };
 
 const legacyMenuNavItems = [
   { id: "billing", href: "/billing", label: "充值中心", shortLabel: "订单与额度", icon: "💳" },
   { id: "benefits", href: "/benefits", label: "权益奖励", shortLabel: "奖励与活动", icon: "🎁" },
+  { id: "feedback", href: "/feedback", label: "反馈支持", shortLabel: "问题与建议", icon: "✉" },
   { id: "thinking", href: "/thinking", label: "账户设置", shortLabel: "个人信息", icon: "⚙️" },
 ];
 
@@ -30,6 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [userName, setUserName] = useState("经纪人");
   const [quotaBalance, setQuotaBalance] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [siteConfig, setSiteConfig] = useState({ siteName: "小谷", siteSubtitle: "保险内容增长助手", supportContact: "" });
 
   useEffect(() => {
     async function loadUser() {
@@ -40,6 +46,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     void loadUser();
+  }, []);
+
+  useEffect(() => {
+    void fetch(apiPath("/api/system/public-config"))
+      .then((response) => response.json())
+      .then((payload: { site?: Partial<typeof siteConfig> }) => setSiteConfig((current) => ({ ...current, ...payload.site })))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -64,30 +77,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isCreationSurface =
+    pathname === "/dashboard" ||
     pathname === "/workspace" ||
     pathname === "/drafts" ||
     pathname === "/thinking" ||
     pathname === "/questionnaire" ||
+    pathname === "/feedback" ||
+    pathname === "/account" ||
     pathname.startsWith("/apps/") ||
     pathname.startsWith("/examples/") ||
     pathname.startsWith("/works/");
-  const creationBrandName = "小谷AI";
-  const creationBrandTagline = "围绕获客增长的全场景 AI 内容创作应用";
+  const creationBrandName = `${siteConfig.siteName}AI`;
+  const creationBrandTagline = siteConfig.siteSubtitle;
+  const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, adminNavItem] : platformNavItems;
 
   return (
     <div className={`shell ${isCreationSurface ? "creationShell" : ""}`}>
       {isCreationSurface && pathname !== "/questionnaire" ? (
         <a className="creationPromoStrip" href={appPath("/benefits")}>
           <span aria-hidden="true">🎁</span>
-          进交流群，领福利
-          <strong>点击领取</strong>
+          查看活动与积分权益
+          <strong>活动中心</strong>
         </a>
       ) : null}
       {pathname === "/questionnaire" ? (
         <a className="questionnairePromoStrip" href={appPath("/benefits")}>
           <span aria-hidden="true">🎁</span>
-          限时活动！推荐有奖~拿198元抵扣券
-          <strong>立即参与</strong>
+          完成内容画像，让每次创作更贴近你的真实表达
+          <strong>查看权益</strong>
         </a>
       ) : null}
       <header className="appHeader">
@@ -103,7 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {isCreationSurface ? (
             <nav className="topNav" aria-label="主导航">
-              {platformNavItems.map((item) => (
+              {visiblePlatformNavItems.map((item) => (
                 <a className={isNavItemActive(pathname, item.id) ? "active" : ""} href={appPath(item.href)} key={`${item.href}-${item.label}`}>
                   <span className="topNavIcon" aria-hidden="true"><NavIcon name={item.icon} /></span>
                   <div className="topNavCopy">
@@ -122,8 +139,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <strong>{isCreationSurface ? `${quotaBalance} 积分` : `${quotaBalance} 点`}</strong>
               </div>
             ) : null}
-            {isCreationSurface ? <a className="ghostAction" href={appPath("/benefits")}>邀请有奖</a> : null}
-            {isCreationSurface ? <a className="solidAction" href={appPath("/billing")}>购买会员</a> : null}
+            {isCreationSurface ? <a className="ghostAction" href={appPath("/benefits")}>活动兑换</a> : null}
+            {isCreationSurface ? <a className="solidAction" href={appPath("/billing")}>购买积分</a> : null}
             <div className="userMenuWrap" onClick={(event) => event.stopPropagation()}>
               <button
                 aria-expanded={menuOpen}
@@ -170,11 +187,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </a>
             ))}
           {isCreationSurface ? (
-            <a href={appPath("/benefits")} role="menuitem" onClick={() => setMenuOpen(false)}>
-              <strong>点击领取</strong>
-              <span>活动福利与会员权益</span>
+            <a href={appPath("/help")} role="menuitem" onClick={() => setMenuOpen(false)}>
+              <strong>使用帮助</strong>
+              <span>创作、积分与账号说明</span>
             </a>
           ) : null}
+          {siteConfig.supportContact ? <a href={`mailto:${siteConfig.supportContact}`} role="menuitem"><strong>联系客服</strong><span>{siteConfig.supportContact}</span></a> : null}
           {role === "admin" ? (
             <a href={appPath("/admin")} role="menuitem" onClick={() => setMenuOpen(false)}>
               <strong>管理后台</strong>
@@ -197,6 +215,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 }
+
 
 function NavIcon({ name }: { name: string }) {
   if (name === "home") {
@@ -224,6 +243,17 @@ function NavIcon({ name }: { name: string }) {
     );
   }
 
+  if (name === "admin") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 5.5h16" />
+        <path d="M7 9.5h10" />
+        <path d="M6 14h4v4H6z" />
+        <path d="M14 14h4v4h-4z" />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 24 24" fill="currentColor">
       <path d="M11 21h2V13.8l6.4-6.1a1 1 0 0 0-.7-1.7h-3.5L12 2 8.8 6H5.3a1 1 0 0 0-.7 1.7l6.4 6.1V21Z" />
@@ -245,12 +275,24 @@ function isNavItemActive(pathname: string, itemId?: string) {
     return pathname === "/workspace" || pathname === "/drafts" || pathname.startsWith("/apps/") || pathname.startsWith("/examples/") || pathname.startsWith("/works/");
   }
 
+  if (itemId === "workbench") {
+    return pathname === "/dashboard";
+  }
+
   if (itemId === "crm") {
     return pathname === "/thinking" || pathname === "/questionnaire";
   }
 
   if (itemId === "growth") {
     return pathname === "/benefits" || pathname === "/billing";
+  }
+
+  if (itemId === "admin") {
+    return pathname === "/admin";
+  }
+
+  if (itemId === "account") {
+    return pathname === "/account";
   }
 
   return false;

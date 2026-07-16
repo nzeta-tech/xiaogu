@@ -26,6 +26,8 @@ const targetLabels: Record<string, { label: string; viewMode: CreationOutputView
   "小红书笔记": { label: "小红书", viewMode: "xiaohongshu" },
   "公众号文章": { label: "公众号", viewMode: "wechat" },
   "朋友圈文案": { label: "朋友圈", viewMode: "plain" },
+  "一封信": { label: "一封信", viewMode: "plain" },
+  "跟踪表": { label: "跟踪表", viewMode: "plain" },
   "口播稿 1": { label: "口播稿 1", viewMode: "plain" },
   "口播稿 2": { label: "口播稿 2", viewMode: "plain" },
   "口播稿 3": { label: "口播稿 3", viewMode: "plain" },
@@ -194,7 +196,7 @@ function splitArticlePolishSections(result: string) {
 }
 
 function splitLeadCopySections(result: string) {
-  const headingRegex = /(?:^|\n)\**\s*([一二三四五六七八九十]+、(?:短视频引流口播|小红书笔记|公众号文章))\s*\**/g;
+  const headingRegex = /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*{1,2})?\s*([一二三四五六七八九十]+、(?:短视频引流口播|小红书笔记|公众号文章))\s*(?:\*{1,2})?\s*(?=\n|$)/g;
   const matches = Array.from(result.matchAll(headingRegex));
   if (matches.length === 0) return [];
 
@@ -214,28 +216,50 @@ function splitItems(body: string, viewMode: CreationOutputViewMode, fallbackLabe
   const numberedItems = splitNumberedItems(normalized, viewMode, fallbackLabel);
   if (numberedItems.length > 0) return numberedItems;
 
+  const splitPattern = getItemSplitPattern(viewMode);
   const blocks = normalized
-    .split(/\n(?=(?:标题[:：]|#\s|##\s|###\s|🎤|📌|一、|二、|三、|四、))/)
+    .split(splitPattern)
     .map((block) => block.trim())
     .filter(Boolean);
 
   if (blocks.length <= 1) {
+    const normalizedBody = normalizeItemBody(normalized);
+    if (!normalizedBody || isTrivialItemBody(normalizedBody)) {
+      return [];
+    }
     return [
       {
         title: inferItemTitle(normalized, fallbackLabel, 1),
-        body: normalized,
+        body: normalizedBody,
         viewMode,
-        summary: inferSummary(normalized),
+        summary: inferSummary(normalizedBody),
       },
     ];
   }
 
-  return blocks.map((block, index) => ({
-    title: inferItemTitle(block, fallbackLabel, index + 1),
-    body: block,
-    viewMode,
-    summary: inferSummary(block),
-  })).filter((item) => !isTrivialItemBody(item.body));
+  return blocks
+    .map((block, index) => {
+      const normalizedBlock = normalizeItemBody(block);
+      return {
+        title: inferItemTitle(block, fallbackLabel, index + 1),
+        body: normalizedBlock,
+        viewMode,
+        summary: inferSummary(normalizedBlock),
+      };
+    })
+    .filter((item) => !isTrivialItemBody(item.body));
+}
+
+function getItemSplitPattern(viewMode: CreationOutputViewMode) {
+  if (viewMode === "wechat") {
+    return /\n(?=(?:标题[:：]|#\s|##\s|###\s|版本[一二三四五六七八九十0-9]+\s*[|｜]\s*.+|文章\d+\s*[|｜]|第\d+篇\s*[|｜]|(?:A|B)\s*版\s*[·•|｜]))/u;
+  }
+
+  if (viewMode === "xiaohongshu") {
+    return /\n(?=(?:标题[:：]|#\s|##\s|###\s|版本[一二三四五六七八九十0-9]+\s*[|｜]\s*.+|笔记\d+\s*[|｜]|第\d+篇\s*[|｜]|(?:A|B)\s*版\s*[·•|｜]|🎤|📌))/u;
+  }
+
+  return /\n(?=(?:标题[:：]|#\s|##\s|###\s|版本[一二三四五六七八九十0-9]+\s*[|｜]\s*.+|🎤|📌))/u;
 }
 
 function splitNumberedItems(body: string, viewMode: CreationOutputViewMode, fallbackLabel: string) {
@@ -249,12 +273,13 @@ function splitNumberedItems(body: string, viewMode: CreationOutputViewMode, fall
     if (markerMatch) {
       if (currentMarker && currentLines.length > 0) {
         const block = currentLines.join("\n").trim();
-        if (block && !isTrivialItemBody(block)) {
+        const normalizedBlock = normalizeItemBody(block);
+        if (normalizedBlock && !isTrivialItemBody(normalizedBlock)) {
           items.push({
-            title: inferItemTitle(block, fallbackLabel, items.length + 1),
-            body: block,
+            title: inferItemTitle(normalizedBlock, fallbackLabel, items.length + 1),
+            body: normalizedBlock,
             viewMode,
-            summary: inferSummary(block),
+            summary: inferSummary(normalizedBlock),
           });
         }
       }
@@ -270,12 +295,13 @@ function splitNumberedItems(body: string, viewMode: CreationOutputViewMode, fall
 
   if (currentMarker && currentLines.length > 0) {
     const block = currentLines.join("\n").trim();
-    if (block && !isTrivialItemBody(block)) {
+    const normalizedBlock = normalizeItemBody(block);
+    if (normalizedBlock && !isTrivialItemBody(normalizedBlock)) {
       items.push({
-        title: inferItemTitle(block, fallbackLabel, items.length + 1),
-        body: block,
+        title: inferItemTitle(normalizedBlock, fallbackLabel, items.length + 1),
+        body: normalizedBlock,
         viewMode,
-        summary: inferSummary(block),
+        summary: inferSummary(normalizedBlock),
       });
     }
   }
@@ -284,10 +310,17 @@ function splitNumberedItems(body: string, viewMode: CreationOutputViewMode, fall
 }
 
 function inferItemTitle(body: string, fallbackLabel: string, index: number) {
-  const lines = body
+  const rawLines = body
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  const versionHeading = rawLines.find((line) => /^版本[一二三四五六七八九十0-9]+\s*[|｜]\s*.+$/u.test(line));
+  if (versionHeading) {
+    return versionHeading.replace(/^版本[一二三四五六七八九十0-9]+\s*[|｜]\s*/u, "").slice(0, 60);
+  }
+
+  const lines = rawLines
+    .filter((line) => !isWrapperHeading(line));
 
   if (lines.length === 0) return `${fallbackLabel}${index}`;
 
@@ -304,6 +337,10 @@ function inferItemTitle(body: string, fallbackLabel: string, index: number) {
   const cleaned = firstLine
     .replace(/^标题[:：]\s*/, "")
     .replace(/^#{1,3}\s*/, "")
+    .replace(/^版本[一二三四五六七八九十0-9]+\s*[|｜]\s*/u, "")
+    .replace(/^文章\d+\s*[|｜]\s*/g, "")
+    .replace(/^笔记\d+\s*[|｜]\s*/g, "")
+    .replace(/^第\d+[条篇版个则]\s*/g, "")
     .trim();
 
   return cleaned.slice(0, 60) || `${fallbackLabel}${index}`;
@@ -315,7 +352,32 @@ function isPureNumberMarker(value: string) {
 
 function isTrivialItemBody(value: string) {
   const compact = value.replace(/\s+/g, "").trim();
-  return compact.length === 0 || isPureNumberMarker(compact);
+  return compact.length === 0 || isPureNumberMarker(compact) || isWrapperHeading(compact);
+}
+
+function normalizeItemBody(value: string) {
+  const lines = value
+    .split("\n")
+    .map((line) => line.trimEnd());
+
+  while (lines.length > 0 && isWrapperHeading(lines[0]?.trim() ?? "")) {
+    lines.shift();
+    while (lines[0] && !lines[0].trim()) {
+      lines.shift();
+    }
+  }
+
+  return lines.join("\n").trim();
+}
+
+function isWrapperHeading(value: string) {
+  const compact = value.trim();
+  if (!compact) return false;
+
+  return [
+    /^版本[一二三四五六七八九十0-9]+\s*[|｜]\s*.+$/u,
+    /^第\d+[条篇版个则]\s*[|｜]\s*.+$/u,
+  ].some((pattern) => pattern.test(compact));
 }
 
 function inferSummary(body: string) {
@@ -338,6 +400,8 @@ function getTargetMetaByValue(value: string): { label: string; viewMode: Creatio
   if (value === "xiaohongshu") return targetLabels["小红书笔记"];
   if (value === "wechat_article") return targetLabels["公众号文章"];
   if (value === "moments") return targetLabels["朋友圈文案"];
+  if (value === "letter") return targetLabels["一封信"];
+  if (value === "tracker") return targetLabels["跟踪表"];
   return null;
 }
 

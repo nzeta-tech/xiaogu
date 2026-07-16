@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { jwtVerify, SignJWT } from "jose";
+import { query } from "@/lib/db/client";
 
 export type SessionUser = {
   id: string;
@@ -49,13 +50,39 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    return {
+    const sessionUser = {
       id: String(payload.id),
       email: String(payload.email),
       name: String(payload.name),
       role: String(payload.role),
       organizationId: payload.organizationId ? String(payload.organizationId) : null,
     };
+
+    try {
+      const fresh = await query<{
+        id: string;
+        organization_id: string | null;
+        name: string;
+        email: string;
+        role: string;
+      }>(
+        `select id, organization_id, name, email, role
+         from users
+         where id = $1 and status = 'active'`,
+        [sessionUser.id],
+      );
+      const user = fresh.rows[0];
+      if (!user) return null;
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        organizationId: user.organization_id,
+      };
+    } catch {
+      return null;
+    }
   } catch {
     return null;
   }

@@ -53,8 +53,8 @@ export function useThinkingEntryState() {
     hasThinking,
     title: hasThinking ? "查看我的思维设定" : "创建我的思维",
     description: hasThinking
-      ? "已完成专属思维设定，随时查看和调整，让创作更懂你、更像你、更爆款"
-      : "解锁更多爆款应用，让创作更懂你、更像你、更爆款",
+      ? "已完成内容画像，可随时查看和调整，让创作更贴近你的真实经验与表达"
+      : "建立内容画像，让选题、语气和专业边界更贴近你的实际工作",
     actionLabel: hasThinking ? "查看思维设定" : "创建思维",
     href: appPath("/thinking"),
   };

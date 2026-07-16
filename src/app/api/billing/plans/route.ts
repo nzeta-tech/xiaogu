@@ -1,5 +1,6 @@
-import { billingPlans } from "@/lib/billing/plans";
+import { tryListBillingPlans } from "@/lib/db/repositories";
 
 export async function GET() {
-  return Response.json({ plans: billingPlans });
+  const plans = await tryListBillingPlans();
+  return Response.json({ plans });
 }

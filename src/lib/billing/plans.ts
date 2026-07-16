@@ -8,7 +8,7 @@ export type BillingPlan = {
   recommended?: boolean;
 };
 
-export const billingPlans: BillingPlan[] = [
+export const defaultBillingPlans: BillingPlan[] = [
   {
     code: "starter_300",
     name: "基础包",
@@ -36,6 +36,8 @@ export const billingPlans: BillingPlan[] = [
   },
 ];
 
+export const billingPlans = defaultBillingPlans;
+
 export function getBillingPlan(code: string) {
-  return billingPlans.find((plan) => plan.code === code) ?? null;
+  return defaultBillingPlans.find((plan) => plan.code === code) ?? null;
 }

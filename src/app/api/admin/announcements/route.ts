@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryListAdminAnnouncements, tryUpsertAnnouncement } from "@/lib/db/repositories";
+import { tryCreateAdminAuditLog, tryDeleteAnnouncement, tryListAdminAnnouncements, tryUpdateAnnouncementStatus, tryUpsertAnnouncement } from "@/lib/db/repositories";
 
 const schema = z.object({
   id: z.string().uuid().optional(),
@@ -47,5 +47,50 @@ export async function POST(request: Request) {
   if (!announcement) {
     return Response.json({ error: "公告保存失败" }, { status: 503 });
   }
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: input.id ? "announcement.update" : "announcement.create",
+    targetType: "announcement",
+    targetId: announcement.id,
+    detail: { title: input.title, status: input.status, placement: input.placement },
+  });
   return Response.json({ announcement, mode: "server" });
+}
+
+export async function PATCH(request: Request) {
+  const user = await requireAdmin();
+  if (user instanceof Response) return user;
+
+  const input = z.object({ id: z.string().uuid(), status: z.enum(["draft", "published"]) }).parse(await request.json());
+  const announcement = await tryUpdateAnnouncementStatus(input);
+  if (!announcement) return Response.json({ error: "公告状态更新失败" }, { status: 503 });
+
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "announcement.update_status",
+    targetType: "announcement",
+    targetId: input.id,
+    detail: { status: input.status },
+  });
+
+  return Response.json({ announcement, mode: "server" });
+}
+
+export async function DELETE(request: Request) {
+  const user = await requireAdmin();
+  if (user instanceof Response) return user;
+
+  const { searchParams } = new URL(request.url);
+  const id = z.string().uuid().parse(searchParams.get("id"));
+  const ok = await tryDeleteAnnouncement(id);
+  if (!ok) return Response.json({ error: "公告删除失败" }, { status: 503 });
+
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "announcement.delete",
+    targetType: "announcement",
+    targetId: id,
+  });
+
+  return Response.json({ ok: true, mode: "server" });
 }

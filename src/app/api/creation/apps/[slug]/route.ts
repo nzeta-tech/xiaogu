@@ -12,6 +12,8 @@ import {
   type CreationFieldValue,
 } from "@/lib/creation/output";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
+import { buildLeadCopyPrompt } from "@/lib/creation/lead-copy";
+import { buildXiaohongshuCheckPrompt } from "@/lib/creation/xiaohongshu-check";
 import {
   tryCompleteAppRun,
   tryCreateAppRun,
@@ -74,7 +76,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const content = app.slug === "write-copy"
     ? buildWriteCopyPrompt(app.fields, values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
     : app.slug === "lead-copy"
-      ? buildLeadCopyPrompt(app.fields, values, app.promptHint)
+      ? buildLeadCopyPrompt(app.fields, values, app.promptHint, caseContext)
+      : app.slug === "xiaohongshu-check"
+        ? buildXiaohongshuCheckPrompt(values, caseContext, app.promptHint)
       : app.slug === "ip-positioning"
         ? buildIpPositioningPrompt(app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
         : buildPrompt(app.name, app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null);
@@ -87,13 +91,18 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
           style: stringifyValue(values.style) || app.name,
           ratio: stringifyValue(values.ratio) || "1:1",
           count: 1,
+          referenceImages: extractReferenceImages(values),
         })
       : null;
 
   const run = await tryCreateAppRun({
     userId: user.id,
     appCode: app.slug,
-    tone: app.slug === "write-copy" ? stringifyValue(values.tone) || "self" : "",
+    tone: app.slug === "write-copy"
+      ? stringifyValue(values.tone) || "self"
+      : app.slug === "lead-copy"
+        ? stringifyValue(values.tone)
+        : "",
     targetChannels: Array.isArray(values.targets) ? values.targets : [],
     inputPayload: values,
     resolvedPrompt,
@@ -127,7 +136,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: error instanceof Error ? error.message : "内容生成失败，请稍后再试。" }, { status: 500 });
   }
 
-  const title = `${app.name}｜${summarizeTitle(values, app.fields.map((field) => field.id))}`;
+  const titleFields = app.slug === "lead-copy" ? ["source"] : app.fields.map((field) => field.id);
+  const title = `${app.name}｜${summarizeTitle(values, titleFields)}`;
   const contentJson = buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []);
   await tryCompleteAppRun({
     runId: run?.id ?? null,
@@ -391,66 +401,6 @@ function buildIpPositioningPrompt(
   return lines.join("\n");
 }
 
-function buildLeadCopyPrompt(
-  fields: CreationField[],
-  values: Record<string, FieldValue>,
-  hint: string,
-) {
-  const tone = stringifyValue(values.tone) || "";
-  const source = stringifyValue(values.source) || "";
-  const targets = Array.isArray(values.targets) ? values.targets.filter((item) => item.trim().length > 0) : [];
-  const targetBlocks = targets.map((target) => getLeadCopyTargetSpec(target)).filter((item): item is LeadCopyTargetSpec => Boolean(item));
-
-  const lines = [
-    "你现在在执行小谷应用：写引流文案。",
-    "这是一个更侧重引流文案创作的任务：口播稿、小红书笔记、公众号文章，一次搞定。",
-    "请严格围绕用户提供的原始素材进行创作，不要脱离素材编造新事实。",
-    hint,
-    "",
-    "核心原则：",
-    "1. 你的核心任务不是堆模板，而是基于用户提供的素材，产出让目标人群看完愿意停下来、产生信任、并留下联系方式的内容。",
-    "2. 所有内容都要遵循“点他-懂他-压他-破他-证他-接他”的引流骨架。",
-    "3. 不得编造具体个人、公司、年份、精确金额、精确百分比。",
-    "4. 不要写出 AI 味，不要用套话、口号和鸡汤。",
-    "5. 如果素材不支持具体案例，就用经验观察或逻辑推演，不得硬造故事。",
-    "",
-    "本轮输入：",
-    `- 表达倾向：${formatLeadCopyToneLabel(tone) || "未填写"}`,
-    `- 引流素材：${source || "未填写"}`,
-    `- 目标输出：${targetBlocks.map((item) => item.label).join("、") || "未填写"}`,
-    "",
-    "输出要求：",
-    "1. 直接输出成稿，不要解释思路。",
-    "2. 如果用户勾选了多个输出类型，按模块完整输出。",
-    "3. 每个模块都要保留该渠道自己的节奏和格式，不要只是同一篇内容换标题。",
-    "4. 结尾统一补一句：内容中的“福利资料”可自己调整，用平台【引流资料】制作智能体制作。",
-    "",
-  ];
-
-  for (const block of targetBlocks) {
-    lines.push(`【${block.label}】`);
-    lines.push(...block.instructions);
-    lines.push("");
-  }
-
-  const extraFields = fields
-    .filter((field) => !["angle", "source", "lead_magnet", "keyword", "cta", "targets"].includes(field.id))
-    .map((field) => {
-      const value = values[field.id];
-      if (isEmptyCreationFieldValue(value)) return null;
-      return `- ${field.label}：${Array.isArray(value) ? value.join("、") : value}`;
-    })
-    .filter((value): value is string => Boolean(value));
-
-  if (extraFields.length > 0) {
-    lines.push("补充信息：");
-    lines.push(...extraFields);
-    lines.push("");
-  }
-
-  return lines.join("\n");
-}
-
 function buildImagePlan(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string) {
   const style = stringifyValue(values.style) || "默认风格";
   const ratio = stringifyValue(values.ratio) || "1:1";
@@ -496,13 +446,75 @@ function buildImagePlan(appName: string, fields: CreationField[], values: Record
 
 function buildImagePrompt(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string) {
   const lines = [`你现在在执行小谷图片类应用：${appName}。请生成适合获客内容场景的视觉图。`, ...caseContext, caseContext.length > 0 ? "" : "", hint];
+  const styleValue = stringifyValue(values.style);
   for (const field of fields) {
     const value = values[field.id];
     if (isEmptyCreationFieldValue(value)) continue;
+    if (field.id === "reference_image") {
+      lines.push(`${field.label}：已上传参考图。请尽量贴近参考图的配色、材质、笔触、留白、主体关系与版式节奏，但不要照搬其中的文字内容。`);
+      continue;
+    }
     lines.push(`${field.label}：${Array.isArray(value) ? value.join("、") : value}`);
   }
-  lines.push("要求：突出标题可读性、层级清晰、适合知识卡片或公众号配图。避免夸张营销海报风，整体要像专业内容创作者的卡片。\n");
+  const styleDirective = getImageStyleDirective(styleValue, appName);
+  if (styleDirective) {
+    lines.push(`风格细化：${styleDirective}`);
+  }
+  lines.push("要求：突出标题可读性、层级清晰、适合知识卡片或公众号配图。避免夸张营销海报风，整体要像专业内容创作者的卡片。除非风格明确要求，否则不要做成 3D 渲染、商业海报、科技发布会大屏或过度写实电商物料。\n");
   return lines.join("\n");
+}
+
+function getImageStyleDirective(style: string, appName: string) {
+  if (!style) return "";
+
+  const directives: Record<string, string> = {
+    illustration: "暖米色纸张底，铅笔线稿加轻水彩晕染，手绘边框、星星、植物、书本、窗景等温暖小元素穿插。版式像手绘栏目页或知识海报，标题圆润醒目，信息模块有手工描边和轻微不规则感，整体亲和治愈，不要做成 3D 物件拼贴。",
+    whiteboard: "真实白板拍照感，白色板面带反光与边框，蓝红马克笔手写，方框、波浪线、圈画标注明显。像老师或顾问在白板上现场写出来的内容，不要做成数码平板字效。",
+    zen: "米白宣纸或墙面底，淡墨、浅褐、灰绿低饱和配色，山水、留白、云雾或植物点缀自然出现。版式安静克制，像东方意境海报，不要现代商务科技图表感。",
+    "line-illustration": "奶油纸底，黑色或深灰细线手绘，少量黄色点题。图标和人物用线稿表现，信息卡片偏窄长，像轻松杂志插画版面，不要厚重上色或真实渲染。",
+    luxury: "大理石、丝绒或高端材质背景，黑金或深蓝金主配色，标题有立体金属字感，卡片边框发光或鎏金。整体像高端品牌海报，精致奢华，但不要俗艳夜店风。",
+    magazine: "像编辑部专题跨页，留白多，照片或生活场景横幅穿插，字体细致克制，页码或栏线可适度出现。整体偏出版物质感，不要做成培训海报模板。",
+    graffiti: "墙面或街头场景做底，粉笔、喷漆、蜡笔质感混合，手写标题带粗糙颗粒感。信息区保留海报结构，但边缘更自由、更随性，避免过度整齐。",
+    "event-stage": "深蓝舞台大屏主视觉，顶部长标题居中，舞台灯光、观众剪影、会场空间感明确。文字和图标像演讲现场投屏内容，整体要像发布会或大会现场，而不是普通海报。",
+    "handwritten-notes": "真实纸张或墙面底，黑红双色手写，圈点批注、随手画的框线和小符号明显。像一页被认真整理过的手写提纲，排版略微不齐但信息完整，不要印刷体太强。",
+    clay: "软糯粘土材质，模块像手工捏制方块或立牌，颜色偏莫兰迪暖色。图标和标题有立体起伏感，整体像桌面上的粘土陈列，不要金属或玻璃质感。",
+    "minimal-drawing": "纸张底，黑色线稿为主，少量橙粉色高亮。留白多，元素少，但要有手绘花边、小图标和胶带便签感，像简洁版手账页，不要复杂满版。",
+    business: "深色商务海报，黑底或极深灰底，金色标题和细线分隔，图标规整、人物专业可信。整体像高净值客户顾问用的品牌展示页，稳重、克制、可信。",
+    blackboard: "黑板粉笔报风格，黑底带粉尘颗粒，彩色粉笔分栏，手绘箭头、山线、太阳、星号等课堂板报元素明显。内容要像一整块板报，而不是普通深色卡片。",
+    "flat-knowledge": "米白底配青绿、蓝绿和深蓝信息卡，2D 扁平图标配圆角模块，大面积纯色块和浅色几何背景。像清爽的知识信息图，层级明确，不要真实纹理太重。",
+    morandi: "低饱和米黄、灰绿、浅棕配色，远山、叶片、淡纹理背景自然出现。卡片柔和、边框轻，整体安静温柔，像带山水底纹的高级平面海报。",
+    "science-sketch": "像科普板书或知识栏目页，米白纸底，红棕色手绘标题，模块框线圆润，图示、数字编号、箭头和小插画并重。重点是知识拆解的步骤感和手绘说明感。",
+    "dark-pro": "深蓝黑底，金色标题与描边，窄长信息卡分栏清晰，像专业机构深色主视觉。整体沉稳、精英、夜间大屏质感强，但不能花哨。",
+    "fresh-card": "浅米白或奶油底，淡蓝、淡粉、浅绿点缀，圆角卡片柔和，图标可爱轻盈。整体像轻松、治愈、干净的内容卡片页，适合亲和表达。",
+    "daily-sign": "像一张氛围日签，主标题和一句副标题最重要，背景要有纸感或柔和光影，元素少但精致。不要做成多模块信息图。",
+    study: "学霸笔记和复习资料感，编号明显，模块像知识点总结卡，标注、重点线、荧光笔或手写注释自然出现。整体像好看的学习总结页。",
+    "large-sign": "超大中文主标题占画面主体，其他信息极少，适合一句观点或一句提醒。背景简洁，局部有手绘或纸感点缀，重点在字的气质和留白。",
+    "black-white": "黑白灰单色或接近单色，强对比版式，复古摄影、报刊、印刷或极简海报感都可以。尽量不用彩色，只靠字重、留白和对比建立风格。",
+    scrapbook: "手账拼贴风，便签、贴纸、纸胶带、剪裁边、虚线箭头和小贴图丰富。版式像一本打开的手账页或拼贴海报，层次多但仍然清晰。",
+    "white-orange-blue": "白底主画面，橙蓝双色点题，模块干净规整，像简洁现代的信息卡。留白充足，强调轻量、专业、可读，不要太花。",
+    daily: "像日报或简报信息图，模块化排版明确，标题和数字感强，色彩更正式。信息结构要像每天更新的一页简报，但不要新闻客户端截图感。",
+  };
+
+  if (style === "custom") {
+    return appName === "做图"
+      ? "用户选择了自定义风格。优先执行用户自己的视觉描述；如果用户没有写清楚，也要至少明确配色、材质、构图和字体气质，再生成。"
+      : "用户选择了自定义风格，请优先遵从用户提供的风格说明。";
+  }
+
+  return directives[style] ?? "";
+}
+
+function extractReferenceImages(values: Record<string, FieldValue>) {
+  const references: string[] = [];
+  const candidateValues = [values.reference_image];
+
+  for (const candidate of candidateValues) {
+    if (typeof candidate === "string" && candidate.startsWith("data:image/")) {
+      references.push(candidate);
+    }
+  }
+
+  return references;
 }
 
 function getWriteCopyToneLabel(tone: string) {
@@ -589,6 +601,12 @@ function getWriteCopyTargetSpec(target: string) {
         "5. 如果是观点型内容，至少要有一个真实例子托住观点。",
         "6. 结尾不要硬卖产品，要像成熟顾问留下一个开放式承接。",
         "7. 默认 900-1800 字，可自然分成 4-6 段。",
+        "8. 必须直接输出自然型 markdown 成稿：主标题用 # ，正文里的小标题用 ## ，如有更细的拆解可用 ### 。",
+        "9. 如果正文中出现并列观点、步骤或提醒，请优先用 markdown 列表，不要只靠换行硬分段。",
+        "10. 如果有一句特别值得强调的判断，可使用 > 引用格式单独提出来。",
+        "11. 不要写“标题：”“正文：”“第一类：”“最后想说：”这类标签式提示词，要像一篇能直接发布的公众号文章，自然地用 markdown 标题组织结构。",
+        "12. 推荐结构：# 主标题 -> 1-2 段导语 -> 3-5 个 ## 小标题章节 -> 自然结尾。",
+        "13. 输出前自检：全文里至少要出现 1 个 # 主标题和 3 个以上 ## 小标题；如果你写出了‘标题：’‘一、二、三’这类格式，说明不合格，需要改写成 markdown 后再输出。",
       ],
     };
   }
@@ -612,51 +630,4 @@ function getWriteCopyTargetSpec(target: string) {
 
 function stringifyValue(value: FieldValue | undefined) {
   return stringifyCreationFieldValue(value);
-}
-
-type LeadCopyTargetSpec = {
-  label: string;
-  instructions: string[];
-};
-
-function getLeadCopyTargetSpec(target: string): LeadCopyTargetSpec | null {
-  if (target === "video_batch") {
-    return {
-      label: "口播稿x3",
-      instructions: [
-        "1. 输出 3 篇口播稿，分别是反常识版、直击痛点版、故事共鸣版。",
-        "2. 三篇都要有完整引流闭环，但切入角度、证他路径和关键词不能重复。",
-        "3. 口播稿要像能直接录制的视频文案，节奏自然、句子可说。",
-      ],
-    };
-  }
-  if (target === "redbook_batch") {
-    return {
-      label: "小红书x2",
-      instructions: [
-        "1. 输出 2 篇小红书笔记：A版 情绪洞察型，B版 干货拆解型。",
-        "2. 两版都要完整走完六步法，但开头方式、气质和节奏必须不同。",
-        "3. 保留平台语感，注意标签、加粗提示和评论区引导格式。",
-      ],
-    };
-  }
-  if (target === "wechat_batch") {
-    return {
-      label: "公众号x2",
-      instructions: [
-        "1. 输出 2 篇公众号文章：洞察型 + 温度型。",
-        "2. 两版都必须重新组织语言和结构，不能只是素材整理版。",
-        "3. 必须保留引流闭环，并在文末自然承接留言或私信关键词。",
-      ],
-    };
-  }
-  return null;
-}
-
-function formatLeadCopyToneLabel(value: string) {
-  if (value === "sharp_insight") return "犀利洞察";
-  if (value === "gentle_empathy") return "温和共鸣";
-  if (value === "analogy_thinking") return "类比思维";
-  if (value === "raw_restore") return "原汁原味（还原整理）";
-  return value;
 }

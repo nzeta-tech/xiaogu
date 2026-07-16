@@ -1,0 +1,526 @@
+:root {
+  --bg: #f3f5f2;
+  --panel: #ffffff;
+  --panel-strong: #eef4f0;
+  --text: #202522;
+  --muted: #67716b;
+  --line: #d7ded9;
+  --brand: #16705d;
+  --brand-strong: #0f5648;
+  --accent: #d85d43;
+  --warning: #a85c10;
+  --danger: #b53a32;
+  --soft: #edf2ee;
+  --shadow: 0 8px 24px rgba(30, 48, 39, 0.07);
+  --shadow-strong: 0 14px 36px rgba(30, 48, 39, 0.12);
+}
+
+* {
+  letter-spacing: 0 !important;
+}
+
+body {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+.creationShell {
+  min-height: 100vh;
+  background: var(--bg) !important;
+}
+
+.creationPromoStrip,
+.questionnairePromoStrip {
+  min-height: 34px !important;
+  padding: 7px 20px !important;
+  border: 0 !important;
+  background: #24332d !important;
+  color: #fff !important;
+  font-size: 12px !important;
+  box-shadow: none !important;
+}
+
+.creationPromoStrip strong,
+.questionnairePromoStrip strong {
+  color: #f5c66f !important;
+}
+
+.creationShell .appHeader {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 0 !important;
+  border-bottom: 1px solid var(--line) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(12px);
+}
+
+.creationShell .appHeaderBar {
+  width: min(1440px, 100%);
+  min-height: 66px !important;
+  margin: 0 auto !important;
+  padding: 8px 24px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.creationShell .brandMark {
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 7px !important;
+}
+
+.creationShell .creationBrandCopy strong {
+  font-size: 18px !important;
+  color: var(--text) !important;
+}
+
+.creationShell .creationBrandCopy span {
+  color: var(--muted) !important;
+  font-size: 11px !important;
+}
+
+.creationShell .topNav {
+  gap: 2px !important;
+  align-items: stretch !important;
+}
+
+.creationShell .topNav a {
+  min-width: 92px !important;
+  min-height: 48px !important;
+  padding: 7px 10px !important;
+  border: 0 !important;
+  border-bottom: 3px solid transparent !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.creationShell .topNav a:hover,
+.creationShell .topNav a.active {
+  color: var(--brand) !important;
+  border-bottom-color: var(--brand) !important;
+  background: #f0f5f2 !important;
+}
+
+.creationShell .topNavCopy strong {
+  font-size: 13px !important;
+}
+
+.creationShell .topNavCopy span {
+  display: none !important;
+}
+
+.creationShell .topNavIcon {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.creationShell .headerActions {
+  gap: 8px !important;
+}
+
+.creationShell .quotaChip,
+.creationShell .ghostAction,
+.creationShell .solidAction,
+.creationShell .userPill {
+  min-height: 36px !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.creationShell .quotaChip {
+  border: 1px solid var(--line) !important;
+  background: #fff !important;
+}
+
+.creationShell .quotaChip span {
+  color: var(--muted) !important;
+}
+
+.creationShell .quotaChip strong {
+  color: var(--text) !important;
+}
+
+.creationShell .ghostAction {
+  border: 1px solid #e1b767 !important;
+  background: #fff8e9 !important;
+  color: #7a5011 !important;
+}
+
+.creationShell .solidAction,
+.creationShell .primaryButton,
+.creationShell .submitButton,
+.creationShell .workspaceHubUseButton {
+  border: 1px solid var(--brand-strong) !important;
+  border-radius: 6px !important;
+  background: var(--brand) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.creationShell .main {
+  width: min(1280px, calc(100vw - 40px)) !important;
+  margin: 0 auto !important;
+  padding: 24px 0 48px !important;
+}
+
+.workspaceHubPage {
+  gap: 28px !important;
+}
+
+.workspaceHubHero {
+  display: grid !important;
+  grid-template-columns: 48px minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  min-height: 112px !important;
+  padding: 22px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.workspaceHubHeroIcon {
+  display: grid !important;
+  width: 42px !important;
+  height: 42px !important;
+  place-items: center !important;
+  border-radius: 6px !important;
+  background: #f5c66f !important;
+  font-size: 21px !important;
+}
+
+.workspaceHubHeroCopy strong {
+  color: var(--text) !important;
+  font-size: 22px !important;
+}
+
+.workspaceHubHeroCopy p {
+  max-width: 760px !important;
+  margin-top: 5px !important;
+  color: var(--muted) !important;
+}
+
+.workspaceHubSummary,
+.workspaceHubSection {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.workspaceHubSummaryHeader h2 {
+  font-size: 20px !important;
+}
+
+.workspaceHubWorksStrip {
+  min-height: 68px !important;
+  padding: 14px 16px !important;
+  border: 1px solid var(--line) !important;
+  border-left: 4px solid var(--accent) !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.workspaceHubTabsHeader {
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+
+.workspaceHubTabs {
+  gap: 4px !important;
+}
+
+.workspaceHubTab {
+  min-height: 36px !important;
+  padding: 7px 12px !important;
+  border: 1px solid transparent !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+}
+
+.workspaceHubTab.active {
+  border-color: var(--line) !important;
+  background: #fff !important;
+  color: var(--brand-strong) !important;
+}
+
+.workspaceHubGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin-top: 16px !important;
+}
+
+.workspaceHubCard,
+.workspaceHubCard[class*="theme-"] {
+  min-height: 214px !important;
+  padding: 18px !important;
+  border: 1px solid var(--line) !important;
+  border-top: 3px solid var(--brand) !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+
+.workspaceHubCard:nth-child(3n + 2) {
+  border-top-color: var(--accent) !important;
+}
+
+.workspaceHubCard:nth-child(3n) {
+  border-top-color: #d5a23d !important;
+}
+
+.workspaceHubCardIcon {
+  display: grid !important;
+  width: 38px !important;
+  height: 38px !important;
+  place-items: center !important;
+  border-radius: 6px !important;
+  background: var(--soft) !important;
+  font-size: 20px !important;
+}
+
+.workspaceHubCardBody strong {
+  color: var(--text) !important;
+  font-size: 17px !important;
+}
+
+.workspaceHubCardBody p {
+  color: var(--muted) !important;
+  line-height: 1.65 !important;
+}
+
+.workspaceHubGhostButton,
+.workspaceHubUseButton {
+  min-height: 34px !important;
+  padding: 7px 12px !important;
+  border-radius: 4px !important;
+}
+
+.workspaceHubGhostButton {
+  border: 1px solid var(--line) !important;
+  background: #fff !important;
+  color: var(--text) !important;
+}
+
+.application-create-page.creationAppPage,
+.product-subpage,
+.workDetailPage,
+.creationExamplePage {
+  width: min(1120px, 100%) !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.pageBackBar {
+  min-height: 36px !important;
+  margin-bottom: 10px !important;
+}
+
+.backLink {
+  color: var(--brand-strong) !important;
+}
+
+.app-info-card,
+.field-card,
+.instanceSectionCard,
+.creationExampleHero,
+.creationExampleContentCard,
+.question-item {
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.app-info-card {
+  padding: 22px !important;
+  border-left: 5px solid var(--brand) !important;
+}
+
+.app-icon,
+.creationToolEmoji {
+  border-radius: 6px !important;
+  background: #e7f1ec !important;
+}
+
+.app-name {
+  color: var(--text) !important;
+  font-size: 25px !important;
+}
+
+.app-description {
+  color: var(--muted) !important;
+}
+
+.creationForm {
+  gap: 12px !important;
+}
+
+.field-card {
+  padding: 18px 20px !important;
+}
+
+.creationInput,
+.creationTextarea,
+.creationSelect,
+.question-content textarea {
+  border: 1px solid #bbc7c0 !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  color: var(--text) !important;
+}
+
+.choiceButton,
+.batch-checkbox-item {
+  border-radius: 4px !important;
+}
+
+.choiceButton.active,
+.batch-checkbox-item.active {
+  border-color: var(--brand) !important;
+  background: #e9f3ee !important;
+  color: var(--brand-strong) !important;
+}
+
+.creationExampleHero,
+.instanceStudioHero,
+.letterResultHero,
+.topicPickerResultHero {
+  border-radius: 6px !important;
+  background: #24332d !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.creationExampleStudioAction,
+.creationExampleCaseButton,
+.creationAppCaseButton {
+  border-radius: 4px !important;
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+
+.creationExampleImageCard img,
+.stylePreviewImage,
+.imageResultCard img {
+  border-radius: 4px !important;
+}
+
+.instanceStudioLayout,
+.topicPickerResultCanvas,
+.letterResultCanvas {
+  gap: 16px !important;
+}
+
+.instanceStudioSidebarCard,
+.topicPickerResultSidebarCard,
+.letterResultSidebarCard {
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.questionnaire-page .questionnaire-container {
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.questionnaire-sidebar {
+  background: #eef3ef !important;
+  border-right: 1px solid var(--line) !important;
+}
+
+.questionnaire-title,
+.section-title,
+.question-title {
+  color: var(--text) !important;
+}
+
+.questionnaire-page .submit-btn,
+.questionnaire-page .section-nav-btns button:last-child {
+  background: var(--brand) !important;
+  color: #fff !important;
+}
+
+.userMenuPanel {
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  box-shadow: var(--shadow-strong) !important;
+}
+
+@media (max-width: 980px) {
+  .creationShell .appHeaderBar {
+    flex-wrap: wrap !important;
+    padding: 8px 14px !important;
+  }
+
+  .creationShell .topNav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .creationShell .main {
+    width: min(100% - 24px, 760px) !important;
+    padding-top: 16px !important;
+  }
+
+  .workspaceHubGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .creationShell .creationBrandCopy span,
+  .creationShell .quotaChip,
+  .creationShell .ghostAction {
+    display: none !important;
+  }
+
+  .creationShell .appHeader {
+    position: static;
+  }
+
+  .creationShell .topNav a {
+    min-width: 74px !important;
+  }
+
+  .workspaceHubHero {
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+  }
+
+  .workspaceHubHeroActions {
+    grid-column: 1 / -1;
+  }
+
+  .workspaceHubGrid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .workspaceHubTabsHeader {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+
+  .workspaceHubCard {
+    min-height: 190px !important;
+  }
+
+  .app-info-card,
+  .field-card {
+    padding: 16px !important;
+  }
+}

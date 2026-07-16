@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryGetSystemSettings, tryUpdateSystemSettings } from "@/lib/db/repositories";
+import { tryCreateAdminAuditLog, tryGetSystemSettings, tryUpdateSystemSettings } from "@/lib/db/repositories";
 
 const schema = z.object({
   site: z.record(z.string(), z.unknown()).optional(),
@@ -32,5 +32,11 @@ export async function PATCH(request: Request) {
   if (!settings) {
     return Response.json({ error: "系统配置保存失败" }, { status: 503 });
   }
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "settings.update",
+    targetType: "system_settings",
+    detail: input,
+  });
   return Response.json({ settings, mode: "server" });
 }

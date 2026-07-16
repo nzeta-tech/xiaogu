@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryGrantGiftCredits } from "@/lib/db/repositories";
+import { tryCreateAdminAuditLog, tryGrantGiftCredits } from "@/lib/db/repositories";
 
 const schema = z.object({
   userId: z.string().uuid(),
@@ -23,5 +23,14 @@ export async function POST(request: Request) {
   });
 
   if (!gift) return Response.json({ error: "赠送额度失败" }, { status: 503 });
+
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "user.grant_credits",
+    targetType: "user",
+    targetId: input.userId,
+    detail: { quotaAmount: input.quotaAmount, note: input.note },
+  });
+
   return Response.json({ gift, mode: "server" });
 }

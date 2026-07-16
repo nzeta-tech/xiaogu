@@ -52,11 +52,11 @@ const workspaceCards: WorkspaceCard[] = [
     name: "写文案",
     emoji: "🎨",
     category: "content",
-    pointsLabel: "100",
+    pointsLabel: "5",
     badge: "火",
-    description: "一次搞定：口播稿、公众号文章、小红书笔记、朋友圈，有你的风格又有网感，量大管饱~可输入：观点录音（推荐）、文章、口播稿等。",
-    hint: "更适合把一份素材拆成多个平台版本，直接进入案例、创作和结果页。",
-    caseSlug: "advisor-brand-copy",
+    description: "把一份真实素材整理成口播、公众号、小红书和朋友圈版本，保持观点一致并适配渠道。",
+    hint: "系统会区分事实、观点和待核验信息，再完成多渠道表达。",
+    caseSlug: "multi-channel-family-review",
     actionLabel: "使用",
   },
   {
@@ -65,11 +65,11 @@ const workspaceCards: WorkspaceCard[] = [
     name: "做图",
     emoji: "🪄",
     category: "content",
-    pointsLabel: "100",
+    pointsLabel: "5",
     badge: "火",
-    description: "把文章、口述稿等内容，变成知识卡片，多种样式、一键搞定",
-    hint: "图片型应用，进入后按风格、内容和比例生成配图结果。",
-    caseSlug: "wechat-image-pack",
+    description: "把文章或口述稿整理成原创知识卡片，支持多种通用视觉风格和比例。",
+    hint: "优先保证中文可读性、信息层级和内容来源清晰。",
+    caseSlug: "knowledge-card-path",
     actionLabel: "使用",
   },
   {
@@ -78,11 +78,11 @@ const workspaceCards: WorkspaceCard[] = [
     name: "口播文案精修",
     emoji: "🔮",
     category: "content",
-    pointsLabel: "100",
+    pointsLabel: "5",
     badge: "推荐",
-    description: "精修你的口播文案，高级又有流量，也让你更懂文案。",
-    hint: "已有底稿时直接精修，保留原意同时提升节奏和流量感。",
-    caseSlug: "video-script-polish-case",
+    description: "诊断口播底稿的开头、逻辑和口语节奏，在不新增事实的前提下完成精修。",
+    hint: "每条修改建议都对应原稿证据，便于对照采用。",
+    caseSlug: "spoken-script-review",
     actionLabel: "使用",
   },
   {
@@ -91,10 +91,11 @@ const workspaceCards: WorkspaceCard[] = [
     name: "公众号文章精修",
     emoji: "🖊️",
     category: "content",
-    pointsLabel: "100",
+    pointsLabel: "5",
     badge: "推荐",
-    description: "精修你的公众号文章，高级又有流量，也让你更懂文案。",
-    hint: "适合已有公众号成稿，重点优化标题、结构和质感。",
+    description: "在不改变事实与立场的前提下，优化公众号文章的标题、层级、段落和结尾。",
+    hint: "信息缺口会被标记，不用流畅表达掩盖不确定性。",
+    caseSlug: "wechat-article-clarity",
     actionLabel: "使用",
   },
   {
@@ -103,9 +104,10 @@ const workspaceCards: WorkspaceCard[] = [
     name: "写引流文案",
     emoji: "🌱",
     category: "content",
-    pointsLabel: "100",
-    description: "更侧重引流文案的创作：口播稿、小红书笔记、公众号文章，一次搞定。可输入：观点录音（推荐）、文章、口播稿等。",
-    hint: "围绕引流转化目标，一次产出口播稿、小红书笔记和公众号文章。",
+    pointsLabel: "5",
+    description: "从真实素材中提炼可交付价值，生成口播、小红书和公众号引流内容。",
+    hint: "互动动作保持克制，不使用焦虑、虚假稀缺或收益承诺。",
+    caseSlug: "consultation-checklist-lead",
     actionLabel: "使用",
   },
   {
@@ -114,9 +116,10 @@ const workspaceCards: WorkspaceCard[] = [
     name: "【引流资料】制作",
     emoji: "🎁",
     category: "content",
-    pointsLabel: "100",
-    description: "输入一个主题，一次性产出可直接发布的保险福利引流物料包： 科普正文 · 朋友圈 3 条 · 自媒体选题 3 个 · 公众号 & 朋友圈留资文案 · 种草配图提示词。 拿来就能发，不用二次加工。",
-    hint: "资料包类应用，会把正文、留资话术和发布文案一起配齐。",
+    pointsLabel: "5",
+    description: "围绕一个真实问题生成资料定位、目录、正文、领取说明和发布内容。",
+    hint: "资料用于帮助用户整理问题，不替代正式保险建议。",
+    caseSlug: "family-risk-workbook",
     actionLabel: "使用",
   },
   {
@@ -125,9 +128,9 @@ const workspaceCards: WorkspaceCard[] = [
     name: "录音稿拆解整理",
     emoji: "🎙️",
     category: "content",
-    pointsLabel: "100",
-    description: "把学习、分享的录音稿拆成多个独立内容+金句，直接复制，即可创作内容",
-    hint: "更适合把录音转写稿拆成多个可直接继续创作的内容版本。",
+    pointsLabel: "5",
+    description: "忠实整理录音原意，拆出独立观点、原话亮点和后续创作素材。",
+    hint: "不会把未经确认的口误或推测改写成确定事实。",
     actionLabel: "使用",
   },
   {
@@ -136,9 +139,10 @@ const workspaceCards: WorkspaceCard[] = [
     name: "写直播稿",
     emoji: "🎬",
     category: "content",
-    pointsLabel: "100",
-    description: "按引导说情况，拿走你的专属直播搞！ 1：做过直播吗？没做过/做过效果一般/做过还可以 2：这次直播讲什么主题？越具体越好。3：目标客群：年龄、性别、生活状态、认知等。4：是否有自己的直播特点、框架，具体是？5：直播的核心观点、常见误区、盲区、要解答的问题等。6：是否有真实案例，没有说\"没有案例\"。7：希望观众买课？咨询？8：重点讲理念？产品？混合？9：产品卖点、案例（如果涉及，越详细越好）10：直播可以说的人设内容，比如从业时间、服务客户数、保费、优势、荣誉等",
-    hint: "按照直播主题、客群和转化目标，生成一版完整直播流程稿。",
+    pointsLabel: "5",
+    description: "根据直播主题、受众、事实材料和互动目标，整理开场、讲解、问答与收尾流程。",
+    hint: "涉及产品和案例的内容必须可核验，并在脚本中标记合规边界。",
+    caseSlug: "medical-cost-live",
     actionLabel: "使用",
   },
   {
@@ -147,10 +151,10 @@ const workspaceCards: WorkspaceCard[] = [
     name: "找选题",
     emoji: "✨",
     category: "content",
-    pointsLabel: "100",
-    description: "一次6个高质量选题！覆盖流量、信任、引流三个方向，还有超详细文案思路。有流量又有人设。",
-    hint: "依赖思维画像，先完成思维后更适合进入选题创作。",
-    caseSlug: "topic-picker-growth",
+    pointsLabel: "5",
+    description: "结合内容画像生成 6 个选题，覆盖触达、解释和信任三个内容目标。",
+    hint: "每个选题包含事实来源要求、写作角度和不应越过的表达边界。",
+    caseSlug: "topic-matrix-30-days",
     actionLabel: "需完成思维",
   },
   {
@@ -159,10 +163,10 @@ const workspaceCards: WorkspaceCard[] = [
     name: "泛内容创作",
     emoji: "📝",
     category: "content",
-    pointsLabel: "100",
+    pointsLabel: "5",
     description: "把输入的内容，变成更有共鸣、容易破圈的口播文案+公众号文章。",
     hint: "适合普通观点、分享型素材和非强销售内容。",
-    caseSlug: "general-content-case",
+    caseSlug: "retirement-public-topic",
     actionLabel: "使用",
   },
   {
@@ -171,10 +175,10 @@ const workspaceCards: WorkspaceCard[] = [
     name: "公众号配图",
     emoji: "🖼️",
     category: "content",
-    pointsLabel: "100",
-    description: "调性拉满！输入你的公众号文稿，选择一个风格，会生成多张提高文章质感的配图",
-    hint: "更强调公众号阅读节奏，生成多张适合段落配图的图片结果。",
-    caseSlug: "wechat-images-case",
+    pointsLabel: "5",
+    description: "根据公众号文章的章节节奏，生成承担开篇、方法、转折和总结作用的配图。",
+    hint: "图片不复制文章全文，只承担章节定位和阅读停顿。",
+    caseSlug: "article-image-rhythm",
     actionLabel: "使用",
   },
   {
@@ -183,11 +187,11 @@ const workspaceCards: WorkspaceCard[] = [
     name: "走心一封信",
     emoji: "📝",
     category: "content",
-    pointsLabel: "100",
-    description: "根据你的思维与风格，生成一篇符合你调性信，在一些纪念、特别时间节点，情绪价值拉满。",
-    hint: "更依赖个人思维和表达风格，未完成思维前先补齐画像更贴近目标站。",
-    caseSlug: "letter-case",
-    actionLabel: "需完成思维",
+    pointsLabel: "5",
+    description: "根据真实主题、背景和关系，生成适合纪念节点发布的长信与精简版本。",
+    hint: "不编造人数、成交、评价或共同经历。",
+    caseSlug: "anniversary-letter",
+    actionLabel: "使用",
   },
   {
     slug: "xiaohongshu-check",
@@ -195,21 +199,23 @@ const workspaceCards: WorkspaceCard[] = [
     name: "小红书违规检测",
     emoji: "🧐",
     category: "content",
-    pointsLabel: "剩余免费 5 次",
-    description: "小红书卡流量？有违规？用我!输入文章，给检查、给修改建议",
-    hint: "更偏审核和修改建议，不是重新从零创作。",
+    pointsLabel: "5",
+    description: "检查绝对化、收益暗示、焦虑营销、隐私和缺少依据的数字，并提供改写建议。",
+    hint: "检测用于发布前辅助复核，不代表平台官方审核结论。",
+    caseSlug: "platform-copy-check",
     actionLabel: "使用",
   },
   {
     slug: "policy-diagnosis",
     appSlug: "policy-diagnosis",
-    name: "保单架构诊断",
+    name: "保单结构复核",
     emoji: "🛡️",
     category: "content",
-    pointsLabel: "剩余免费 30 次",
+    pointsLabel: "5",
     badge: "新！工具",
-    description: "帮你自动识别保单架构、利益风险，助力客户信任和成交。",
-    hint: "先看家庭保单结构，再输出缺口、风险和优化建议。",
+    description: "整理现有保单的责任、期限、保额与待确认信息，不自动给出购买结论。",
+    hint: "缺少正式合同信息时明确列出待确认项，结果不构成保险建议。",
+    caseSlug: "policy-structure-review",
     actionLabel: "使用",
   },
   {
@@ -218,7 +224,7 @@ const workspaceCards: WorkspaceCard[] = [
     name: "IP定位",
     emoji: "🎯",
     category: "ip",
-    pointsLabel: "100",
+    pointsLabel: "5",
     badge: "必用！",
     description: "根据你的思维和业务现状，生成专属 IP 定位、账号标签和内容主线。",
     hint: "从人设、客群、差异化和表达风格四个角度输出定位方案。",
@@ -230,7 +236,7 @@ const workspaceCards: WorkspaceCard[] = [
     name: "陪你破局增长",
     emoji: "🚀",
     category: "ip",
-    pointsLabel: "100",
+    pointsLabel: "5",
     description: "把当前卡点拆成问题诊断、破局路径和可执行动作清单。",
     hint: "更偏增长陪跑视角，帮助梳理卡点、动作和复盘指标。",
     actionLabel: "使用",
@@ -241,7 +247,7 @@ const workspaceCards: WorkspaceCard[] = [
     name: "个性名片",
     emoji: "🪪",
     category: "ip",
-    pointsLabel: "100",
+    pointsLabel: "5",
     description: "个性名片生成，人群之中记住你！只需上传个人介绍+照片，选风格即可~",
     hint: "更适合做个人形象展示卡，一眼让人记住你是谁、擅长什么。",
     actionLabel: "使用",
@@ -252,7 +258,7 @@ const workspaceCards: WorkspaceCard[] = [
     name: "增员面谈逐字稿",
     emoji: "📋",
     category: "growth",
-    pointsLabel: "100",
+    pointsLabel: "5",
     description: "只需上传候选人简历，就能生成一套完整的面试内容，包括：1、候选人画像，2、完整面试流程和话题，3、个性化欢迎、4、应急话术、5、注意事项、6、跟进内容",
     hint: "更适合增员面谈前的准备，快速生成逐字稿和跟进话术。",
     actionLabel: "使用",
@@ -263,7 +269,7 @@ const workspaceCards: WorkspaceCard[] = [
     name: "增员跟踪",
     emoji: "🌱",
     category: "growth",
-    pointsLabel: "100",
+    pointsLabel: "5",
     description: "招募利器！上传和候选人的面谈录音文稿，得到《给ta的一封信》、《候选人信息跟踪表》、《跟踪计划表》、《一篇招募向公众号文章》",
     hint: "更适合面谈后的二次承接和持续跟踪。",
     actionLabel: "使用",
@@ -302,9 +308,7 @@ export function CreationHubPageClient() {
     return () => controller.abort();
   }, []);
 
-  const categories = useMemo(() => hubData?.categories ?? [], [hubData]);
   const apps = useMemo(() => hubData?.apps ?? [], [hubData]);
-  const announcement = hubData?.hub.announcements?.[0];
   const appMap = useMemo(() => new Map(apps.map((app) => [app.slug, app])), [apps]);
   const visibleApps = useMemo(
     () => workspaceCards.filter((app) => app.category === activeCategory),
@@ -318,12 +322,6 @@ export function CreationHubPageClient() {
     () => (openExample ? appMap.get(openExample.appSlug) ?? null : null),
     [appMap, openExample],
   );
-
-  const categoryLabelMap: Record<string, string> = {
-    content: "内容创作",
-    ip: "IP&破局",
-    growth: "帮你增员",
-  };
 
   const workspaceCategories = useMemo(
     () => ([
@@ -371,7 +369,7 @@ export function CreationHubPageClient() {
             <div>
               <h2>围绕获客增长的全场景 AI 内容创作应用</h2>
             </div>
-            <a className="workspaceHubGuideLink" href={appPath("/benefits")}>使用攻略</a>
+            <a className="workspaceHubGuideLink" href={appPath("/help")}>使用攻略</a>
           </div>
           <div className="workspaceHubWorksStrip">
             <div className="workspaceHubWorksCopy">
@@ -428,8 +426,8 @@ export function CreationHubPageClient() {
                 ) : (
                   <span className="workspaceHubCardSpacer" aria-hidden="true" />
                 )}
-                <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card, thinkingEntry.hasThinking)}>
-                  {resolveWorkspaceActionLabel(card, thinkingEntry.hasThinking)}
+                <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>
+                  {resolveWorkspaceActionLabel(card)}
                 </a>
               </div>
             </article>
@@ -458,16 +456,14 @@ function getCardThemeClass(badge?: string) {
   return "theme-default";
 }
 
-function resolveWorkspaceActionLabel(card: WorkspaceCard, hasThinking: boolean) {
-  if (card.actionLabel === "需完成思维" && hasThinking) {
-    return "使用";
+function resolveWorkspaceActionLabel(card: WorkspaceCard) {
+  if (card.actionLabel === "需完成思维") {
+    return "先创建思维";
   }
   return card.actionLabel;
 }
 
-function resolveWorkspaceHref(card: WorkspaceCard, hasThinking: boolean) {
-  if (card.actionLabel === "需完成思维" && !hasThinking) {
-    return appPath("/thinking");
-  }
+function resolveWorkspaceHref(card: WorkspaceCard) {
+  if (card.actionLabel === "需完成思维") return appPath("/thinking");
   return appPath(`/apps/${card.appSlug}?from=workspace&entry=${card.slug}`);
 }

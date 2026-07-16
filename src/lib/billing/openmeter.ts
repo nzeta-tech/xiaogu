@@ -145,6 +145,7 @@ export async function grantCredits(input: {
   customerId: string;
   amount: number;
   reason: string;
+  eventId?: string;
   metadata?: Record<string, unknown>;
 }) {
   const { baseUrl, apiKey, featureKey } = getConfig();
@@ -169,7 +170,7 @@ export async function grantCredits(input: {
     },
     body: JSON.stringify({
       specversion: "1.0",
-      id: crypto.randomUUID(),
+      id: input.eventId ?? crypto.randomUUID(),
       type: "ai.content.quota.granted",
       source: getConfig().namespace,
       subject: input.customerId,
@@ -185,6 +186,24 @@ export async function grantCredits(input: {
   });
 
   return { ok: response.ok, mode: "openmeter" as const };
+}
+
+export async function revokeCredits(input: {
+  customerId: string;
+  amount: number;
+  reason: string;
+  metadata?: Record<string, unknown>;
+}) {
+  return reportUsage({
+    customerId: input.customerId,
+    action: "write_script",
+    amount: input.amount,
+    metadata: {
+      adjustment: "credit_revocation",
+      reason: input.reason,
+      ...input.metadata,
+    },
+  });
 }
 
 async function ensureCustomer(customerId: string) {

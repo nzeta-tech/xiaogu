@@ -38,6 +38,10 @@ export function getBackgroundWorkRunSnapshot(workId: string) {
   return activeWorkRuns.get(workId)?.snapshot ?? null;
 }
 
+export function getBackgroundWorkRunPromise(workId: string) {
+  return activeWorkRuns.get(workId)?.promise ?? null;
+}
+
 export function subscribeToBackgroundWorkRun(workId: string, listener: (event: WorkRunEvent) => void) {
   const entry = activeWorkRuns.get(workId);
   if (!entry) return null;

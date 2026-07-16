@@ -101,7 +101,7 @@ export function ProfilePageClient() {
     <div className="user-thinking-page thinkingPage">
       <section className="page-description">
         <p className="description-title">创建你的思维，自动分析专属写作风格</p>
-        <p className="description-subtitle">让AI创作内容更懂你、更像你、更爆款</p>
+        <p className="description-subtitle">让 AI 创作更贴近你的真实经验、服务对象和表达边界</p>
       </section>
 
       <div className="main-content">

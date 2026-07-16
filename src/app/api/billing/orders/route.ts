@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { getBillingPlan } from "@/lib/billing/plans";
 import { grantCredits } from "@/lib/billing/openmeter";
-import { tryCreateOrder, tryListOrders, tryUpdateOrderCheckout } from "@/lib/db/repositories";
+import { tryCreateOrder, tryGetBillingPlan, tryGetSystemSettings, tryListOrders, tryUpdateOrderCheckout } from "@/lib/db/repositories";
 import { createStripeCheckoutSession, isStripeConfigured } from "@/lib/payments/stripe";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 
@@ -36,6 +35,10 @@ export async function POST(request: Request) {
   if (user instanceof Response) return user;
 
   const input = createOrderSchema.parse(await request.json());
+  const settings = await tryGetSystemSettings();
+  if (input.provider === "stripe" && settings.payment.enableStripe === false) {
+    return Response.json({ error: "在线支付暂未开放" }, { status: 403 });
+  }
   if (input.provider === "demo" && !isDemoModeEnabled()) {
     return Response.json({ error: "生产模式已关闭 demo 充值，请使用真实支付通道" }, { status: 403 });
   }
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "微信/支付宝通道尚未接入真实支付网关" }, { status: 501 });
   }
 
-  const plan = getBillingPlan(input.planCode);
+  const plan = await tryGetBillingPlan(input.planCode);
 
   if (!plan) {
     return Response.json({ error: "套餐不存在" }, { status: 404 });

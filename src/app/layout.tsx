@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./product.css";
 import { bootstrapBackgroundWorkRecovery } from "@/lib/creation/background-run-bootstrap";
 
 export const metadata: Metadata = {

@@ -3,8 +3,8 @@ import { promisify } from "node:util";
 
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 
-const IMAGE_REQUEST_TIMEOUT_MS = Number(process.env.IMAGE_REQUEST_TIMEOUT_MS ?? 500000);
-const IMAGE_GENERATION_BUDGET_MS = Number(process.env.IMAGE_GENERATION_BUDGET_MS ?? 500000);
+const IMAGE_REQUEST_TIMEOUT_MS = Math.min(Number(process.env.IMAGE_REQUEST_TIMEOUT_MS ?? 30000), 30000);
+const IMAGE_GENERATION_BUDGET_MS = Math.min(Number(process.env.IMAGE_GENERATION_BUDGET_MS ?? 70000), 70000);
 const IMAGE_REQUEST_MAX_ATTEMPTS = 1;
 const IMAGE_SAFE_SIZE = "1024x1024";
 const IMAGE_RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
@@ -15,6 +15,7 @@ export async function generateImageSet(input: {
   style: string;
   ratio: string;
   count?: number;
+  referenceImages?: string[];
 }) {
   const apiKey =
     process.env.OPENAI_IMAGE_API_KEY ??
@@ -29,8 +30,9 @@ export async function generateImageSet(input: {
     if (!isDemoModeEnabled()) {
       return {
         mode: "fallback" as const,
-        images: buildMockImages(input.prompt, input.style, input.ratio, desiredCount),
-        summary: buildFallbackSummary(input.prompt, input.style, input.ratio, desiredCount),
+        images: [],
+        summary: "图片模型未配置，无法生成真实图片。",
+        retryable: false,
       };
     }
 
@@ -48,12 +50,13 @@ export async function generateImageSet(input: {
     prompt: input.prompt,
     ratio: input.ratio,
     desiredCount,
+    referenceImages: input.referenceImages ?? [],
   });
 
   if (images.length === 0) {
     return {
       mode: "rate_limited" as const,
-      images: buildMockImages(input.prompt, input.style, input.ratio, desiredCount),
+      images: [],
       summary: buildRateLimitedSummary(input.prompt, input.style, input.ratio, desiredCount),
       retryable: true,
     };
@@ -74,8 +77,8 @@ async function requestCompatibleImages(input: {
   prompt: string;
   ratio: string;
   desiredCount: number;
+  referenceImages: string[];
 }) {
-  const endpoint = `${input.baseUrl.replace(/\/$/, "")}/images/generations`;
   const singles: Array<{ id: string; url: string }> = [];
   const deadlineAt = Date.now() + IMAGE_GENERATION_BUDGET_MS;
   const sizeCandidates = buildPreferredSizeCandidates(input.ratio);
@@ -90,20 +93,67 @@ async function requestCompatibleImages(input: {
       break;
     }
 
-    const image = await requestSingleImageWithFallbackSizes({
-      endpoint,
-      apiKey: input.apiKey,
-      model: input.model,
-      prompt: input.prompt,
-      sizeCandidates,
-      deadlineAt,
-    });
+    const image =
+      input.referenceImages.length > 0
+        ? await requestSingleImageWithReferenceImages({
+            endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/edits`,
+            apiKey: input.apiKey,
+            model: input.model,
+            prompt: input.prompt,
+            sizeCandidates,
+            deadlineAt,
+            referenceImages: input.referenceImages,
+          })
+        : await requestSingleImageWithFallbackSizes({
+            endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/generations`,
+            apiKey: input.apiKey,
+            model: input.model,
+            prompt: input.prompt,
+            sizeCandidates,
+            deadlineAt,
+          });
     if (image) singles.push({ ...image, id: `image-${index + 1}` });
     if (image && index < input.desiredCount - 1) {
       await sleep(1500);
     }
   }
   return singles;
+}
+
+async function requestSingleImageWithReferenceImages(input: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  sizeCandidates: string[];
+  deadlineAt: number;
+  referenceImages: string[];
+}) {
+  const validReferences = input.referenceImages
+    .filter((item) => item.startsWith("data:image/"))
+    .slice(0, 4);
+
+  if (validReferences.length === 0) {
+    return null;
+  }
+
+  for (const size of input.sizeCandidates) {
+    if (Date.now() >= input.deadlineAt) {
+      return null;
+    }
+    const batch = await requestImageEditBatch({
+      endpoint: input.endpoint,
+      apiKey: input.apiKey,
+      model: input.model,
+      prompt: input.prompt,
+      size,
+      deadlineAt: input.deadlineAt,
+      referenceImages: validReferences,
+    });
+    if (batch[0]) return batch[0];
+  }
+
+  return null;
 }
 
 async function requestSingleImageWithFallbackSizes(input: {
@@ -263,6 +313,80 @@ async function requestImageBatch(input: {
   return [];
 }
 
+async function requestImageEditBatch(input: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  size: string;
+  deadlineAt: number;
+  referenceImages: string[];
+}) {
+  const remainingMs = input.deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    return [];
+  }
+
+  const timeoutMs = Math.min(IMAGE_REQUEST_TIMEOUT_MS, remainingMs);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const form = new FormData();
+    form.append("model", input.model);
+    form.append("prompt", input.prompt);
+    form.append("size", input.size);
+    form.append("quality", "low");
+    form.append("output_format", "jpeg");
+
+    for (const [index, reference] of input.referenceImages.entries()) {
+      const blob = dataUrlToBlob(reference);
+      if (!blob) continue;
+      form.append("image", blob, `reference-${index + 1}.${pickExtensionFromMime(blob.type)}`);
+    }
+
+    const response = await fetch(input.endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${input.apiKey}`,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      console.warn("image generation edit request failed", {
+        status: response.status,
+        size: input.size,
+        message: message.slice(0, 240),
+      });
+      return [];
+    }
+
+    const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    return (payload.data ?? [])
+      .map((item, index) => ({
+        id: `image-${index + 1}`,
+        url: item.url ?? (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ""),
+      }))
+      .filter((item) => item.url);
+  } catch (error) {
+    console.warn(timedOut ? "image generation edit request timed out" : "image generation edit request crashed", {
+      size: input.size,
+      timeoutMs,
+      error,
+    });
+    return [];
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function requestImageBatchWithCurl(input: {
   endpoint: string;
   apiKey: string;
@@ -276,7 +400,7 @@ async function requestImageBatchWithCurl(input: {
     return [];
   }
 
-  const maxTimeSeconds = Math.max(15, Math.floor(Math.min(remainingMs, IMAGE_GENERATION_BUDGET_MS) / 1000));
+  const maxTimeSeconds = Math.max(10, Math.floor(Math.min(remainingMs, IMAGE_REQUEST_TIMEOUT_MS, IMAGE_GENERATION_BUDGET_MS) / 1000));
   const requestBody = JSON.stringify({
     model: input.model,
     prompt: input.prompt,
@@ -356,9 +480,24 @@ function parseImagePayload(raw: string) {
     .filter((item) => item.url);
 }
 
+function dataUrlToBlob(value: string) {
+  const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+
+  const [, mime, body] = match;
+  return new Blob([Buffer.from(body, "base64")], { type: mime });
+}
+
+function pickExtensionFromMime(mime: string) {
+  if (mime.includes("png")) return "png";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("gif")) return "gif";
+  return "jpg";
+}
+
 function buildFallbackSummary(prompt: string, style: string, ratio: string, count: number) {
   return [
-    `当前环境未接通真实图片生成，先返回本地占位预览。`,
+    `当前为演示模式，仅返回演示占位预览。`,
     `风格：${style}`,
     `比例：${ratio}`,
     `建议张数：${count}`,
@@ -370,7 +509,7 @@ function buildFallbackSummary(prompt: string, style: string, ratio: string, coun
 
 function buildRateLimitedSummary(prompt: string, style: string, ratio: string, count: number) {
   return [
-    `图片服务当前繁忙，正在等待可用并发窗口，先返回本地占位预览。`,
+    `图片服务当前繁忙，本次未生成图片，请稍后重试。`,
     `风格：${style}`,
     `比例：${ratio}`,
     `建议张数：${count}`,
@@ -434,7 +573,7 @@ function buildMockImageDataUrl(input: {
   <text x="120" y="250" fill="#1f2937" font-size="64" font-family="Arial, sans-serif" font-weight="800">${escapeXml(input.title)}</text>
   <text x="120" y="340" fill="#475569" font-size="30" font-family="Arial, sans-serif">${escapeXml(`风格 ${input.style}`)}</text>
   <text x="120" y="390" fill="#475569" font-size="30" font-family="Arial, sans-serif">${escapeXml(`比例 ${input.ratio}`)}</text>
-  <text x="120" y="${input.height - 120}" fill="#64748b" font-size="26" font-family="Arial, sans-serif">本地占位预览</text>
+  <text x="120" y="${input.height - 120}" fill="#64748b" font-size="26" font-family="Arial, sans-serif">演示占位预览</text>
 </svg>`.trim();
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

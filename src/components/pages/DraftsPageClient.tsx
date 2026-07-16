@@ -139,7 +139,7 @@ export function DraftsPageClient() {
       <div className="page-top-block creationWorksTopBlock">
         <header className="creation-page-header creationWorksPageHeaderReset">
           <p className="creation-page-subtitle">围绕获客增长的全场景 AI 内容创作应用</p>
-          <a className="creation-guide-link creationWorksGuideReset" href={appPath("/benefits")}>使用攻略</a>
+          <a className="creation-guide-link creationWorksGuideReset" href={appPath("/help")}>使用攻略</a>
         </header>
 
         <div className="works-entry-banner works-entry-banner--active creationWorksBannerReset">

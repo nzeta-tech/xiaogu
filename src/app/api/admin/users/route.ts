@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryListAdminUsers, tryUpdateAdminUser } from "@/lib/db/repositories";
+import { tryCreateAdminAuditLog, tryListAdminUsers, tryUpdateAdminUser } from "@/lib/db/repositories";
 
 const updateUserSchema = z.object({
   userId: z.string().uuid(),
@@ -29,6 +29,14 @@ export async function PATCH(request: Request) {
 
   const updated = await tryUpdateAdminUser(input);
   if (!updated) return Response.json({ error: "用户更新失败" }, { status: 503 });
+
+  await tryCreateAdminAuditLog({
+    adminUserId: user.id,
+    action: "user.update",
+    targetType: "user",
+    targetId: input.userId,
+    detail: input,
+  });
 
   return Response.json({ user: updated, mode: "server" });
 }

@@ -1,6 +1,6 @@
 import { grantCredits } from "@/lib/billing/openmeter";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
-import { tryMarkOrderPaidByProvider } from "@/lib/db/repositories";
+import { tryGetOrderByProvider, tryMarkOrderPaidByProvider } from "@/lib/db/repositories";
 import { constructStripeWebhookEvent } from "@/lib/payments/stripe";
 
 export async function POST(request: Request) {
@@ -13,22 +13,27 @@ export async function POST(request: Request) {
 
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
-        const order = await tryMarkOrderPaidByProvider({
+        const orderInput = {
           provider: "stripe",
           providerOrderId: session.id,
-        });
+        };
+        const order = await tryMarkOrderPaidByProvider(orderInput) ?? await tryGetOrderByProvider(orderInput);
 
         if (order) {
           const grant = await grantCredits({
             customerId: order.user_id,
             amount: order.quota_amount,
             reason: "stripe_checkout_completed",
+            eventId: event.id,
             metadata: {
               orderId: order.id,
               stripeSessionId: session.id,
             },
           });
 
+          if (!grant.ok) {
+            return Response.json({ error: "积分发放失败，等待支付平台重试" }, { status: 502 });
+          }
           return Response.json({ received: true, eventType: event.type, order, grant });
         }
       }

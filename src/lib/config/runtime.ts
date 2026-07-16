@@ -13,12 +13,20 @@ export function hasModelConfig() {
   return Boolean(process.env.MODEL_API_BASE && process.env.MODEL_API_KEY);
 }
 
+export function hasImageModelConfig() {
+  return Boolean(process.env.OPENAI_IMAGE_API_KEY || process.env.IMAGE_MODEL_API_KEY);
+}
+
 export function hasMeteringConfig() {
   return Boolean(process.env.OPENMETER_BASE_URL && process.env.OPENMETER_API_KEY);
 }
 
 export function hasStripeConfig() {
   return Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET);
+}
+
+export function hasLiveStripeConfig() {
+  return Boolean(process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_") && process.env.STRIPE_WEBHOOK_SECRET);
 }
 
 export function assertCommercialServiceConfigured(service: "model" | "metering" | "stripe") {

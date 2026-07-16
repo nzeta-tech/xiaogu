@@ -1,5 +1,15 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { AuthGuard } from "@/components/AuthGuard";
+import { AppShell } from "@/components/layout/AppShell";
+import { WorkbenchPageClient } from "@/components/pages/WorkbenchPageClient";
 
 export default function DashboardPage() {
-  redirect("/workspace");
+  return (
+    <AuthGuard>
+      <AppShell>
+        <WorkbenchPageClient />
+      </AppShell>
+    </AuthGuard>
+  );
 }
