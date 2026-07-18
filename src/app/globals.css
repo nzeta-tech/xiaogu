@@ -15915,6 +15915,13 @@ a {
   text-align: center;
 }
 
+.creationAppPage .imageCardUploadSuccess {
+  color: #0f766e;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .instanceImageResultStack {
   display: grid;
   gap: 18px;

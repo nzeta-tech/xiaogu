@@ -87,6 +87,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [voiceFieldId, setVoiceFieldId] = useState<string | null>(null);
   const [uploadNames, setUploadNames] = useState<Record<string, string>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const [uploadSuccess, setUploadSuccess] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
   const [showAllWechatStyles, setShowAllWechatStyles] = useState(false);
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
@@ -244,6 +245,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
     setUploadNames((current) => ({ ...current, [fieldId]: file.name }));
     setUploadErrors((current) => ({ ...current, [fieldId]: "" }));
+    setUploadSuccess((current) => ({ ...current, [fieldId]: "" }));
 
     if (fieldId === "reference_image") {
       if (!file.type.startsWith("image/")) {
@@ -253,6 +255,47 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       const encoded = await readFileAsDataUrl(file).catch(() => "");
       updateField(fieldId, encoded || file.name);
       return;
+    }
+
+    if (fieldId === "policy_document") {
+      setUploadingFields((current) => ({ ...current, [fieldId]: true }));
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch(apiPath("/api/creation/policy-renewal-extract"), {
+          method: "POST",
+          body: formData,
+        });
+        const payload = (await response.json().catch(() => ({ error: "保单解析失败，请换一个文件重试。" }))) as {
+          fields?: Record<string, string>;
+          missing?: string[];
+          error?: string;
+        };
+        if (!response.ok) {
+          setUploadErrors((current) => ({ ...current, [fieldId]: payload.error ?? "保单解析失败，请换一个文件重试。" }));
+          return;
+        }
+        const parsedFields = Object.fromEntries(
+          Object.entries(payload.fields ?? {}).filter(([, fieldValue]) => typeof fieldValue === "string" && fieldValue.trim()),
+        );
+        setValues((current) => ({
+          ...current,
+          policy_document: file.name,
+          ...parsedFields,
+        }));
+        const parsedCount = Object.keys(parsedFields).length;
+        const missingCount = Array.isArray(payload.missing) ? payload.missing.length : 0;
+        setUploadSuccess((current) => ({
+          ...current,
+          [fieldId]:
+            parsedCount > 0
+              ? `已识别 ${parsedCount} 项${missingCount > 0 ? `，还有 ${missingCount} 项需手动补充` : "，表单已自动回填"}。`
+              : "已完成解析，但暂未识别出标准字段，请手动补充。",
+        }));
+        return;
+      } finally {
+        setUploadingFields((current) => ({ ...current, [fieldId]: false }));
+      }
     }
 
     setUploadingFields((current) => ({ ...current, [fieldId]: true }));
@@ -279,6 +322,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         ...current,
         [fieldId]: appendTextValue(current[fieldId], payload.text ?? ""),
       }));
+      setUploadSuccess((current) => ({ ...current, [fieldId]: "文件内容已导入。" }));
     } finally {
       setUploadingFields((current) => ({ ...current, [fieldId]: false }));
     }
@@ -837,6 +881,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   openFilePicker,
                   uploadName: uploadNames[field.id] ?? "",
                   uploadError: uploadErrors[field.id] ?? "",
+                  uploadSuccess: uploadSuccess[field.id] ?? "",
                   uploading: Boolean(uploadingFields[field.id]),
                   onFileChange: (fileList) => handleFileChange(field.id, fileList),
                   styleOptionLimit: isWechatImages && field.id === "style" ? 6 : undefined,
@@ -1349,6 +1394,7 @@ function renderField({
   openFilePicker,
   uploadName,
   uploadError,
+  uploadSuccess,
   uploading,
   onFileChange,
   styleOptionLimit,
@@ -1365,6 +1411,7 @@ function renderField({
   openFilePicker: (fieldId: string) => void;
   uploadName: string;
   uploadError: string;
+  uploadSuccess: string;
   uploading: boolean;
   onFileChange: (fileList: FileList | null) => void;
   styleOptionLimit?: number;
@@ -1584,6 +1631,7 @@ function renderField({
       />
       {uploadName ? <span className="imageCardUploadName">{uploadName}</span> : null}
       {uploadError ? <span className="imageCardUploadError">{uploadError}</span> : null}
+      {uploadSuccess ? <span className="imageCardUploadSuccess">{uploadSuccess}</span> : null}
     </div>
   );
 }

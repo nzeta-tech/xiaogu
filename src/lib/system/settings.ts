@@ -135,7 +135,7 @@ export const defaultSystemSettings: SystemSettings = {
   site: {
     siteName: "小谷",
     siteSubtitle: "保险内容增长助手",
-    supportContact: "support@xiaogu.ai",
+    supportContact: "support@nzeta.ai",
     footerNote: "让保险内容生产更稳定、更易运营。",
     maintenanceMode: false,
     maintenanceMessage: "系统正在维护，请稍后再试。",
