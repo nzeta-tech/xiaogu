@@ -30,6 +30,7 @@ const actionSchema = z.discriminatedUnion("action", [
     behaviorLearningEnabled: z.boolean(),
     customerMemoryEnabled: z.boolean(),
     autoInferenceEnabled: z.boolean(),
+    visualCreationEnabled: z.boolean(),
   }),
   z.object({
     action: z.literal("feedback"),
@@ -115,13 +116,14 @@ export async function POST(request: Request) {
 
     if (input.action === "privacy") {
       await query(
-        `insert into avatar_privacy_settings(user_id, learning_enabled, behavior_learning_enabled, customer_memory_enabled, auto_inference_enabled)
-         values ($1, $2, $3, $4, $5)
+        `insert into avatar_privacy_settings(user_id, learning_enabled, behavior_learning_enabled, customer_memory_enabled, auto_inference_enabled, visual_creation_enabled)
+         values ($1, $2, $3, $4, $5, $6)
          on conflict (user_id) do update set learning_enabled = excluded.learning_enabled,
            behavior_learning_enabled = excluded.behavior_learning_enabled,
            customer_memory_enabled = excluded.customer_memory_enabled,
-           auto_inference_enabled = excluded.auto_inference_enabled, updated_at = now()`,
-        [user.id, input.learningEnabled, input.behaviorLearningEnabled, input.customerMemoryEnabled, input.autoInferenceEnabled],
+           auto_inference_enabled = excluded.auto_inference_enabled,
+           visual_creation_enabled = excluded.visual_creation_enabled, updated_at = now()`,
+        [user.id, input.learningEnabled, input.behaviorLearningEnabled, input.customerMemoryEnabled, input.autoInferenceEnabled, input.visualCreationEnabled],
       );
       return Response.json({ ok: true });
     }

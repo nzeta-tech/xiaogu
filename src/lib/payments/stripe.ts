@@ -24,6 +24,7 @@ export async function createStripeCheckoutSession(input: {
   userId: string;
   userEmail: string;
   plan: BillingPlan;
+  productName?: string;
 }) {
   const stripe = getStripe();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -47,7 +48,7 @@ export async function createStripeCheckoutSession(input: {
           currency: input.plan.currency.toLowerCase(),
           unit_amount: input.plan.amountCents,
           product_data: {
-            name: `小谷 - ${input.plan.name}`,
+            name: `${input.productName || "小谷创作积分"} - ${input.plan.name}`,
             description: `${input.plan.quotaAmount} 创作点数`,
           },
         },

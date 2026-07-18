@@ -2,13 +2,14 @@ import { getQuotaCost } from "@/lib/billing/quota";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getMeteringMode, reportUsage } from "@/lib/billing/openmeter";
 import { checkCompliance } from "@/lib/compliance/check";
-import { trySaveComplianceReport, trySaveUsageLog } from "@/lib/db/repositories";
+import { tryGetSystemSettings, trySaveComplianceReport, trySaveUsageLog } from "@/lib/db/repositories";
 import { requireQuota } from "@/lib/billing/enforce";
 
 export async function POST(request: Request) {
   const body = (await request.json()) as { text?: string; content?: string; draftId?: string };
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
+  if (!(await tryGetSystemSettings()).features.complianceEnabled) return Response.json({ error: "合规预检功能当前已关闭" }, { status: 403 });
 
   const quota = await requireQuota(user, "compliance_check");
   if (!quota.ok) return quota.response;

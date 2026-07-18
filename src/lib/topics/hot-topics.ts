@@ -44,9 +44,11 @@ type FreejkItem = {
 };
 
 export async function getHotTopics(options: { refresh?: boolean; topicPreference?: string } = {}): Promise<HotTopic[]> {
-  const searchTopics = await discoverTopicsWithSearch(options);
-  const rebangTopics = await fetchRebangTopics(options);
-  const freejkTopics = await fetchFreejkTopics(options);
+  const [searchTopics, rebangTopics, freejkTopics] = await Promise.all([
+    discoverTopicsWithSearch(options),
+    fetchRebangTopics(options),
+    fetchFreejkTopics(options),
+  ]);
   const baseUrl = process.env.DAILY_HOT_API_BASE;
   if (!baseUrl) {
     const fallbackTopics = rankAndDiversifyTopics(dedupeTopics([...freejkTopics, ...rebangTopics, ...searchTopics]), options.topicPreference);
@@ -61,6 +63,7 @@ export async function getHotTopics(options: { refresh?: boolean; topicPreference
       const response = await fetch(`${baseUrl.replace(/\/$/, "")}/${platform}`, {
         cache: options.refresh ? "no-store" : undefined,
         next: options.refresh ? undefined : { revalidate: 1800 },
+        signal: AbortSignal.timeout(Number(process.env.TOPIC_SOURCE_TIMEOUT_MS ?? 8000)),
       });
       if (!response.ok) return [];
       const payload = (await response.json()) as {
@@ -113,6 +116,7 @@ async function fetchRebangTopics(options: { refresh?: boolean }) {
       const response = await fetch(`https://api.rebang.today/v1/items?${query.toString()}`, {
         cache: options.refresh ? "no-store" : undefined,
         next: options.refresh ? undefined : { revalidate: 600 },
+        signal: AbortSignal.timeout(Number(process.env.TOPIC_SOURCE_TIMEOUT_MS ?? 8000)),
         headers: {
           "user-agent": "Mozilla/5.0 (compatible; XiaoguTopicBot/1.0)",
           origin: "https://rebang.today",
@@ -167,6 +171,7 @@ async function fetchFreejkTopics(options: { refresh?: boolean }) {
       const response = await fetch(`https://api.freejk.com/shuju/hotlist/${source.key}`, {
         cache: options.refresh ? "no-store" : undefined,
         next: options.refresh ? undefined : { revalidate: 600 },
+        signal: AbortSignal.timeout(Number(process.env.TOPIC_SOURCE_TIMEOUT_MS ?? 8000)),
         headers: { "user-agent": "Mozilla/5.0 (compatible; XiaoguTopicBot/1.0)" },
       });
       if (!response.ok) return [];

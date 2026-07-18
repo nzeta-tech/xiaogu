@@ -3,6 +3,8 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { grantCredits, revokeCredits } from "@/lib/billing/openmeter";
 import { refundStripeCheckoutSession } from "@/lib/payments/stripe";
 import { tryCreateAdminAuditLog, tryListAdminOrders, tryReleaseDiscountRedemption, tryUpdateAdminOrderStatus } from "@/lib/db/repositories";
+import { accrueAffiliateCredits, reverseAffiliateCredits } from "@/lib/affiliate/service";
+import { filterAndPaginateAdminRows, parseAdminListQuery } from "@/lib/admin/list-query";
 
 const updateSchema = z.object({
   orderId: z.string().uuid(),
@@ -16,12 +18,13 @@ async function requireAdmin() {
   return user;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await requireAdmin();
   if (user instanceof Response) return user;
 
-  const orders = await tryListAdminOrders();
-  return Response.json({ orders, mode: "server" });
+  const orders = await tryListAdminOrders(500);
+  const result = filterAndPaginateAdminRows(orders, parseAdminListQuery(request, { defaultLimit: 20, maxLimit: 500 }), (item) => `${item.id} ${item.user_email} ${item.user_name} ${item.provider}`, (item) => item.status);
+  return Response.json({ orders: result.rows, pagination: result.pagination, mode: "server" });
 }
 
 export async function PATCH(request: Request) {
@@ -60,6 +63,7 @@ export async function PATCH(request: Request) {
       await tryUpdateAdminOrderStatus({ orderId: current.id, status: current.status, expectedStatus: "paid" });
       return Response.json({ error: "积分发放失败，订单状态已回滚" }, { status: 502 });
     }
+    await accrueAffiliateCredits({ orderId: current.id, inviteeUserId: current.user_id, purchasedCredits: current.quota_amount });
     await tryCreateAdminAuditLog({ adminUserId: user.id, action: "order.mark_paid", targetType: "order", targetId: current.id, detail: { from: current.status } });
     return Response.json({ order: paidOrder, mode: "server" });
   }
@@ -80,12 +84,13 @@ export async function PATCH(request: Request) {
       reason: "order_refunded",
       metadata: { orderId: current.id, provider: current.provider },
     });
+    const affiliateReversal = await reverseAffiliateCredits(current.id);
     await tryCreateAdminAuditLog({
       adminUserId: user.id,
       action: "order.refund",
       targetType: "order",
       targetId: input.orderId,
-      detail: { provider: current.provider, creditsRevoked: revocation.ok },
+      detail: { provider: current.provider, creditsRevoked: revocation.ok, affiliateReversal },
     });
     if (!revocation.ok) return Response.json({ error: "退款已完成，但远程积分回收失败，请人工核对", order: refundedOrder }, { status: 502 });
     return Response.json({ order: refundedOrder, mode: "server" });

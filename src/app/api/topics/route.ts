@@ -2,12 +2,13 @@ import { getHotTopics } from "@/lib/topics/hot-topics";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getMeteringMode, reportUsage } from "@/lib/billing/openmeter";
 import { requireQuota } from "@/lib/billing/enforce";
-import { tryGetLatestThinkingProfileSnapshot, tryListLatestTopicSnapshots, trySaveTopicSnapshots, trySaveUsageLog } from "@/lib/db/repositories";
+import { tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, tryListLatestTopicSnapshots, trySaveTopicSnapshots, trySaveUsageLog } from "@/lib/db/repositories";
 import { extractTopicPreferenceFromSnapshot } from "@/lib/thinking/profile-snapshot";
 
 export async function GET(request: Request) {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
+  if (!(await tryGetSystemSettings()).features.hotTopicsEnabled) return Response.json({ error: "热点服务当前已关闭" }, { status: 403 });
 
   const quota = await requireQuota(user, "hot_topics");
   if (!quota.ok) return quota.response;

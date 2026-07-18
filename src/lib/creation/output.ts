@@ -37,13 +37,6 @@ const targetLabels: Record<string, { label: string; viewMode: CreationOutputView
   "文章风格**：温度型": { label: "公众号 温度型", viewMode: "wechat" },
 };
 
-export function summarizeTitle(values: Record<string, CreationFieldValue>, fieldIds: string[]) {
-  const firstFilled = fieldIds
-    .map((fieldId) => stringifyCreationFieldValue(values[fieldId]))
-    .find((value) => value.trim().length > 0);
-  return (firstFilled || "新的创作").slice(0, 18);
-}
-
 export function stringifyCreationFieldValue(value: CreationFieldValue | undefined) {
   if (Array.isArray(value)) return value.join("、");
   return value ?? "";

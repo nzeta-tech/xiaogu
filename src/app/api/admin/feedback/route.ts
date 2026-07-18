@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { tryCreateAdminAuditLog, tryListAdminFeedbackTickets, tryUpdateAdminFeedbackTicket } from "@/lib/db/repositories";
+import { filterAndPaginateAdminRows, parseAdminListQuery } from "@/lib/admin/list-query";
 
 const updateSchema = z.object({
   id: z.string().uuid(),
@@ -16,12 +17,13 @@ async function requireAdmin() {
   return user;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await requireAdmin();
   if (user instanceof Response) return user;
 
-  const tickets = await tryListAdminFeedbackTickets();
-  return Response.json({ tickets, mode: "server" });
+  const tickets = await tryListAdminFeedbackTickets(300);
+  const result = filterAndPaginateAdminRows(tickets, parseAdminListQuery(request, { defaultLimit: 20, maxLimit: 300 }), (item) => `${item.title} ${item.content} ${item.user_email ?? ""} ${item.category}`, (item) => item.status);
+  return Response.json({ tickets: result.rows, pagination: result.pagination, mode: "server" });
 }
 
 export async function PATCH(request: Request) {

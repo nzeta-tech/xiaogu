@@ -31,6 +31,9 @@ type ThinkingPayload = {
   summary?: { ready?: boolean; completion?: number; styleSummary?: string };
   questionnaire?: { completionPercent?: number; updatedAt?: string } | null;
 };
+type LoginEvent = { id: string; success: boolean; client_ip: string; user_agent: string; failure_reason: string; created_at: string };
+type TotpState = { available: boolean; enabled: boolean; setupPending: boolean };
+type TotpSetup = { secret: string; uri: string; qrCodeDataUrl: string };
 
 const serviceLinks = [
   { href: "/thinking", label: "个人画像", detail: "管理定位与表达风格", icon: "profile" },
@@ -52,22 +55,32 @@ function AccountCenter() {
   const [user, setUser] = useState<AccountUser>({});
   const [overview, setOverview] = useState<AccountOverview>({});
   const [thinking, setThinking] = useState<ThinkingPayload>({});
+  const [loginEvents, setLoginEvents] = useState<LoginEvent[]>([]);
+  const [totp, setTotp] = useState<TotpState>({ available: false, enabled: false, setupPending: false });
+  const [totpSetup, setTotpSetup] = useState<TotpSetup | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
     async function loadAccount() {
       try {
-        const [meResponse, overviewResponse, thinkingResponse] = await Promise.all([
+        const [meResponse, overviewResponse, thinkingResponse, sessionsResponse, totpResponse] = await Promise.all([
           fetch(apiPath("/api/auth/me"), { signal: controller.signal }),
           fetch(apiPath("/api/workbench/overview"), { signal: controller.signal }),
           fetch(apiPath("/api/thinking"), { signal: controller.signal }),
+          fetch(apiPath("/api/account/sessions"), { signal: controller.signal }),
+          fetch(apiPath("/api/account/totp"), { signal: controller.signal }),
         ]);
         const mePayload = await meResponse.json() as { user?: AccountUser };
         const overviewPayload = await overviewResponse.json() as { overview?: AccountOverview };
         const thinkingPayload = await thinkingResponse.json() as ThinkingPayload;
+        const sessionsPayload = await sessionsResponse.json() as { events?: LoginEvent[] };
+        const totpPayload = await totpResponse.json() as TotpState;
         setUser(mePayload.user ?? {});
         setOverview(overviewPayload.overview ?? {});
         setThinking(thinkingResponse.ok ? thinkingPayload : {});
+        setLoginEvents(sessionsPayload.events ?? []);
+        if (totpResponse.ok) setTotp(totpPayload);
       } catch (cause) {
         if (!(cause instanceof DOMException && cause.name === "AbortError")) setError("用户中心数据暂时无法加载，请稍后重试。");
       } finally {
@@ -95,8 +108,8 @@ function AccountCenter() {
     });
     const payload = await response.json() as { error?: string };
     setError(response.ok ? "" : payload.error ?? "密码修改失败");
-    setMessage(response.ok ? "密码已更新。" : "");
-    if (response.ok) event.currentTarget.reset();
+    setMessage(response.ok ? "密码已更新，请重新登录。" : "");
+    if (response.ok) { event.currentTarget.reset(); window.setTimeout(() => { location.href = appPath("/login"); }, 800); }
   }
 
   async function closeAccount(event: FormEvent<HTMLFormElement>) {
@@ -111,6 +124,40 @@ function AccountCenter() {
     const payload = await response.json() as { error?: string };
     if (response.ok) location.href = appPath("/login");
     else setError(payload.error ?? "账号注销失败");
+  }
+
+  async function logoutAllSessions() {
+    if (!confirm("确认退出所有设备上的登录？")) return;
+    const response = await fetch(apiPath("/api/account/sessions"), { method: "DELETE" });
+    if (response.ok) location.href = appPath("/login");
+    else setError("退出所有设备失败");
+  }
+
+  async function setupTotp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setMessage("");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch(apiPath("/api/account/totp"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "setup", password: form.get("password") }) });
+    const payload = await response.json() as { setup?: TotpSetup; error?: string };
+    if (!response.ok || !payload.setup) return setError(payload.error ?? "无法创建二次验证配置");
+    setTotpSetup(payload.setup); setTotp((current) => ({ ...current, setupPending: true })); event.currentTarget.reset();
+  }
+
+  async function enableTotp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch(apiPath("/api/account/totp"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "enable", token: form.get("token") }) });
+    const payload = await response.json() as { recoveryCodes?: string[]; error?: string };
+    if (!response.ok) return setError(payload.error ?? "二次验证启用失败");
+    setRecoveryCodes(payload.recoveryCodes ?? []); setTotp({ available: true, enabled: true, setupPending: false }); setTotpSetup(null); setMessage("二次验证已启用，请保存恢复码并重新登录。");
+  }
+
+  async function disableTotp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch(apiPath("/api/account/totp"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "disable", password: form.get("password"), token: form.get("token") }) });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) return setError(payload.error ?? "二次验证关闭失败");
+    setTotp({ available: true, enabled: false, setupPending: false }); setMessage("二次验证已关闭，请重新登录。");
   }
 
   return (
@@ -182,7 +229,7 @@ function AccountCenter() {
                 <h2>账号安全</h2>
                 <p>定期更新密码，保护作品与客户资料。</p>
               </div>
-              <span className="accountSafeBadge">安全状态正常</span>
+              <span className="accountSafeBadge">密码登录已启用</span>
             </div>
 
             <form className="accountPasswordForm" onSubmit={submitPassword}>
@@ -190,6 +237,19 @@ function AccountCenter() {
               <label>新密码<input name="newPassword" type="password" autoComplete="new-password" minLength={8} placeholder="至少 8 位" required /></label>
               <button className="primaryButton" type="submit">更新密码</button>
             </form>
+            {totp.available ? <div className="accountTotpPanel">
+              <div><h3>身份验证器</h3><p>{totp.enabled ? "登录时需要验证码或一次性恢复码。" : "使用身份验证器为账号增加第二层保护。"}</p></div>
+              {!totp.enabled && !totpSetup ? <form className="accountPasswordForm" onSubmit={setupTotp}><label>当前密码<input name="password" type="password" autoComplete="current-password" required /></label><button className="secondaryButton" type="submit">开始设置</button></form> : null}
+              {totpSetup ? <div className="accountTotpSetup"><img src={totpSetup.qrCodeDataUrl} alt="身份验证器二维码" /><code>{totpSetup.secret}</code><form className="accountPasswordForm" onSubmit={enableTotp}><label>6 位验证码<input name="token" inputMode="numeric" autoComplete="one-time-code" required /></label><button className="primaryButton" type="submit">确认启用</button></form></div> : null}
+              {totp.enabled ? <form className="accountPasswordForm" onSubmit={disableTotp}><label>当前密码<input name="password" type="password" required /></label><label>验证码或恢复码<input name="token" autoComplete="one-time-code" required /></label><button className="secondaryButton" type="submit">关闭二次验证</button></form> : null}
+              {recoveryCodes.length ? <div className="accountRecoveryCodes" role="status"><strong>恢复码只显示一次</strong>{recoveryCodes.map((code) => <code key={code}>{code}</code>)}</div> : null}
+            </div> : null}
+            <div className="accountSessionActions"><button className="secondaryButton" type="button" onClick={() => void logoutAllSessions()}>退出所有设备</button></div>
+            <div className="accountLoginHistory">
+              <h3>最近登录记录</h3>
+              {loginEvents.slice(0, 8).map((event) => <div key={event.id}><span>{event.success ? "登录成功" : "登录失败"}</span><small>{event.client_ip || "未知地址"} · {formatDateTime(event.created_at)}</small></div>)}
+              {loginEvents.length === 0 ? <p className="subtleText">暂无登录记录。</p> : null}
+            </div>
 
             <details className="accountDangerDetails">
               <summary>账号注销与危险操作</summary>
@@ -228,7 +288,7 @@ function AccountCenter() {
             </div>
             <div className="accountRecentWorks">
               {(overview.recentDrafts ?? []).slice(0, 3).map((draft) => (
-                <a href={appPath(`/works/${draft.id}`)} key={draft.id}>
+                <a href={appPath(`/works/${draft.id}?from=creation-works&entry=${draft.platform}`)} key={draft.id}>
                   <span>{draft.platform}</span>
                   <strong>{draft.title}</strong>
                   <small>{formatDate(draft.updated_at)}</small>
@@ -271,4 +331,8 @@ function AccountServiceIcon({ name }: { name: string }) {
 function formatDate(value?: string) {
   if (!value) return "最近更新";
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }

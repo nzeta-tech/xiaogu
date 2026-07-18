@@ -2,7 +2,7 @@ import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { ensureBackgroundWorkRun } from "@/lib/creation/background-run-registry";
 import { parseCreationOutput } from "@/lib/creation/output";
-import { tryGetWorkDetail, tryUpdateWorkContent, tryUpdateWorkStatus } from "@/lib/db/repositories";
+import { tryGetWorkDetail, tryUpdateWorkContent, tryUpdateWorkMetadata } from "@/lib/db/repositories";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireSessionUser();
@@ -58,17 +58,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const { id } = await context.params;
   const body = await request.json();
   const editSchema = z.object({
-    status: z.string().trim().optional(),
+    status: z.enum(["draft", "used", "archived"]).optional(),
     title: z.string().trim().optional(),
     content: z.string().optional(),
     contentJson: z.record(z.string(), z.unknown()).optional(),
+    note: z.string().trim().max(500).optional(),
+    isFavorite: z.boolean().optional(),
+    isUsed: z.boolean().optional(),
   });
   const parsed = editSchema.safeParse(body);
   if (!parsed.success) {
     return Response.json({ error: "请求参数不合法" }, { status: 400 });
   }
 
-  const { status, title, content, contentJson } = parsed.data;
+  const { status, title, content, contentJson, note, isFavorite, isUsed } = parsed.data;
   if (typeof content === "string") {
     const updated = await tryUpdateWorkContent({
       userId: user.id,
@@ -85,15 +88,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return Response.json({ ok: true, work });
   }
 
-  if (!status) {
-    return Response.json({ error: "缺少状态字段" }, { status: 400 });
+  if (status === undefined && note === undefined && isFavorite === undefined && isUsed === undefined) {
+    return Response.json({ error: "没有可更新的作品字段" }, { status: 400 });
   }
 
-  const updated = await tryUpdateWorkStatus({ userId: user.id, workId: id, status });
+  const updated = await tryUpdateWorkMetadata({ userId: user.id, workId: id, status, note, isFavorite, isUsed });
   if (!updated) {
     return Response.json({ error: "作品状态更新失败" }, { status: 404 });
   }
 
+  return Response.json({ ok: true, work: updated });
+}
+
+export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const user = await requireSessionUser();
+  if (user instanceof Response) return user;
+  const { id } = await context.params;
+  const updated = await tryUpdateWorkMetadata({ userId: user.id, workId: id, status: "archived" });
+  if (!updated) return Response.json({ error: "作品不存在或归档失败" }, { status: 404 });
   return Response.json({ ok: true, work: updated });
 }
 

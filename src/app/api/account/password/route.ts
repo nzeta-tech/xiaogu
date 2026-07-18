@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { requireSessionUser } from "@/lib/auth/session";
+import { clearSession, requireSessionUser } from "@/lib/auth/session";
 import { query } from "@/lib/db/client";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 
@@ -18,6 +18,7 @@ export async function POST(request: Request) {
   const valid = result.rows[0] && await bcrypt.compare(parsed.data.currentPassword, result.rows[0].password_hash);
   if (!valid) return Response.json({ error: "当前密码不正确" }, { status: 403 });
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
-  await query("update users set password_hash = $2, updated_at = now() where id = $1", [user.id, passwordHash]);
-  return Response.json({ ok: true });
+  await query("update users set password_hash = $2, session_version = session_version + 1, updated_at = now() where id = $1", [user.id, passwordHash]);
+  await clearSession();
+  return Response.json({ ok: true, reauthenticate: true });
 }

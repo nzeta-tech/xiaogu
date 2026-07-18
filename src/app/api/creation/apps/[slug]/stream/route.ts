@@ -1,16 +1,17 @@
-import { getCreationAppBySlug } from "@/lib/apps/catalog";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
 import { executeCreationAppRun } from "@/lib/creation/execute-app-run";
-import { tryGetCreationAppBySlug, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { tryGetCreationAppBySlug, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   await trySyncCreationCatalog();
-  const app = (await tryGetCreationAppBySlug(slug)) ?? getCreationAppBySlug(slug);
+  const app = await tryGetCreationAppBySlug(slug);
   if (!app) {
     return Response.json({ error: "应用不存在" }, { status: 404 });
   }
+  const settings = await tryGetSystemSettings();
+  if (!settings.features.imageGenerationEnabled && (app.resultType === "image" || app.resultType === "image-plan")) return Response.json({ error: "图片生成功能当前已关闭" }, { status: 403 });
 
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
@@ -19,7 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const values = body.values ?? {};
   const workId = body.workId?.trim();
 
-  const quota = await requireQuota(user, "write_script");
+  const quota = await requireQuota(user, "write_script", app.points);
   if (!quota.ok) return quota.response;
 
   const encoder = new TextEncoder();
@@ -28,12 +29,13 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const stream = new ReadableStream({
     async start(controller) {
       let result = "";
-      let resultJson: Record<string, unknown> | undefined;
       let streamClosed = false;
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
 
       const safeClose = () => {
         if (streamClosed) return;
         streamClosed = true;
+        if (heartbeat) clearInterval(heartbeat);
         controller.close();
       };
 
@@ -53,6 +55,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
       try {
         safeEnqueue(encoder.encode(": stream\n\n"));
+        heartbeat = setInterval(() => {
+          safeEnqueue(encoder.encode(": heartbeat\n\n"));
+        }, 15000);
         await executeCreationAppRun({
           slug: app.slug,
           userId: user.id,
@@ -80,11 +85,6 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
             }
             if (payload.type === "done") {
               result = payload.content ?? result;
-              resultJson = {
-                images: payload.images ?? [],
-                imageMode: payload.imageMode ?? null,
-                retryable: payload.retryable ?? false,
-              };
               safeEnqueue(encodeEvent({
                 type: "done",
                 work: payload.work ?? (workId ? { id: workId, title: app.name } : null),
@@ -101,7 +101,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
             }
           },
         });
-      } catch (error) {
+      } catch {
         safeClose();
         return;
       }

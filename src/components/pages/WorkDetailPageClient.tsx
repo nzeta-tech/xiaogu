@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
+import { usePageMeta } from "@/lib/client/page-meta";
 import { parseCreationOutput, type CreationOutputBatch, type CreationOutputItem, type CreationOutputViewMode } from "@/lib/creation/output";
 
 type WorkDetail = {
@@ -69,6 +70,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [imageNotice, setImageNotice] = useState("");
   const [watermarkText, setWatermarkText] = useState("");
   const [watermarkEnabled, setWatermarkEnabled] = useState(false);
+  const [selectedImageId, setSelectedImageId] = useState("");
+  const [showResultDetails, setShowResultDetails] = useState(false);
+  const [selectedTopicId, setSelectedTopicId] = useState("");
   const [retryingImages, setRetryingImages] = useState(false);
   const [previewField, setPreviewField] = useState<PreviewField | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
@@ -81,6 +85,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     error: "",
   });
   const [streamRetryKey, setStreamRetryKey] = useState(0);
+  const workReturnHref = searchParams.get("from") === "dashboard" ? appPath("/dashboard") : appPath("/drafts");
+  const workReturnLabel = searchParams.get("from") === "dashboard" ? "返回今日工作台" : "返回创作历史";
+  usePageMeta({
+    title: work ? `${formatWorkTitle(work)} · 作品` : "作品详情",
+    description: work ? `${formatAppLabel(work.platform)} / 审阅、优化与复用` : "正在加载作品",
+    status: work?.app_run?.status === "running" ? "生成中" : work?.app_run?.status === "succeeded" ? "已完成" : "",
+  });
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const copyTimerRef = useRef<number | null>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -291,10 +302,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   const storedBatches = useMemo(() => {
     if (!work) return [];
-    if (Array.isArray(work.content_json?.batches) && work.content_json.batches.length > 0) {
-      return work.content_json.batches;
-    }
-    return [];
+    return readCreationOutputBatches(work.content_json);
+  }, [work]);
+
+  const resultJsonBatches = useMemo(() => {
+    if (!work?.app_run?.result_json) return [];
+    const contentJson = work.app_run.result_json.contentJson ?? work.app_run.result_json.content_json;
+    return readCreationOutputBatches(contentJson);
   }, [work]);
 
   const expectedCopyBatches = useMemo(() => {
@@ -307,11 +321,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const parsedBatches = parseCreationOutput(work.content).batches;
 
     if (work.platform === "write-copy") {
-      const baseBatches = storedBatches.length > 0
-        ? storedBatches
-        : parsedBatches.length > 0
-          ? parsedBatches
-          : expectedCopyBatches;
+      const baseBatches = chooseBatchSource([
+        storedBatches,
+        resultJsonBatches,
+        parsedBatches,
+        expectedCopyBatches,
+      ]);
       if (streamedBatches.length > 0) {
         return mergeStreamedBatches(baseBatches, streamedBatches);
       }
@@ -320,22 +335,22 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
     if (work.platform === "lead-copy") {
       const storedLeadBatches = storedBatches.filter(isLeadCopyBatch);
+      const resultLeadBatches = resultJsonBatches.filter(isLeadCopyBatch);
       const parsedLeadBatches = parsedBatches.filter(isLeadCopyBatch);
       const streamedLeadBatches = streamedBatches.filter(isLeadCopyBatch);
-      const baseBatches = storedLeadBatches.length > 0
-        ? storedLeadBatches
-        : parsedLeadBatches.length > 0
-          ? parsedLeadBatches
-          : expectedCopyBatches;
+      const baseBatches = chooseBatchSource([
+        storedLeadBatches,
+        resultLeadBatches,
+        parsedLeadBatches,
+        expectedCopyBatches,
+      ]);
       return streamedLeadBatches.length > 0
         ? mergeStreamedBatches(baseBatches, streamedLeadBatches)
         : baseBatches;
     }
 
     if (work.platform === "general-content") {
-      const baseBatches = parsedBatches.length > 0
-        ? parsedBatches
-        : storedBatches;
+      const baseBatches = chooseBatchSource([parsedBatches, storedBatches, resultJsonBatches]);
       if (streamedBatches.length > 0) {
         return mergeStreamedBatches(baseBatches, streamedBatches);
       }
@@ -344,23 +359,21 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
     if (work.platform === "video-script-polish") {
       if (streamedBatches.length > 0) return streamedBatches;
-      if (storedBatches.length > 0) return storedBatches;
-      return parsedBatches;
+      return chooseBatchSource([storedBatches, resultJsonBatches, parsedBatches]);
     }
 
     if (work.platform === "wechat-article-polish") {
-      if (storedBatches.length > 0) return storedBatches;
-      return parsedBatches;
+      return chooseBatchSource([storedBatches, resultJsonBatches, parsedBatches]);
     }
 
-    if (storedBatches.length > 0) return storedBatches;
-    return parsedBatches;
-  }, [expectedCopyBatches, storedBatches, streamedBatches, work]);
+    return chooseBatchSource([storedBatches, resultJsonBatches, parsedBatches]);
+  }, [expectedCopyBatches, resultJsonBatches, storedBatches, streamedBatches, work]);
 
   const isMalformedLeadCopyResult = work?.platform === "lead-copy"
     && work.app_run?.status === "succeeded"
-    && !storedBatches.some(isLeadCopyBatch)
-    && !parseCreationOutput(work.content).batches.some(isLeadCopyBatch);
+    && !storedBatches.some((batch) => isLeadCopyBatch(batch) && hasRenderableBatch(batch))
+    && !resultJsonBatches.some((batch) => isLeadCopyBatch(batch) && hasRenderableBatch(batch))
+    && !parseCreationOutput(work.content).batches.some((batch) => isLeadCopyBatch(batch) && hasRenderableBatch(batch));
 
   const imageResults = useMemo(() => {
     if (streamState.images.length > 0) return streamState.images;
@@ -395,7 +408,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       : ""
   );
   const imageRetryable = streamState.retryable || Boolean(work?.app_run?.result_json?.retryable);
-  const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images";
+  const isPolicyRenewalCardWork = work?.platform === "policy-renewal-card";
+  const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || isPolicyRenewalCardWork;
   const defaultWatermark = typeof work?.app_run?.input_payload?.signature === "string" ? work.app_run.input_payload.signature.trim() : "";
   const effectiveWatermark = watermarkEnabled ? (watermarkText.trim() || defaultWatermark) : "";
   const imageScale = isImageWork ? Math.max(90, Math.min(140, fontScale)) : fontScale;
@@ -425,10 +439,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const topicPickerSections = useMemo(() => parseTopicPickerSections(streamState.content || work?.content || ""), [streamState.content, work?.content]);
   const topicPickerNavItems = topicPickerSections.length > 0 ? topicPickerSections : buildTopicPickerFallbackSections(work?.content || "");
 
-  const resolvedBatchId = batches.some((batch) => batch.id === activeBatchId)
-    ? activeBatchId
-    : batches[0]?.id || "";
-  const activeBatch = batches.find((batch) => batch.id === resolvedBatchId) ?? batches[0] ?? null;
+  const preferredBatch = choosePreferredBatch(batches, work?.platform);
+  const requestedBatch = batches.find((batch) => batch.id === activeBatchId);
+  const activeBatch = requestedBatch && (hasRenderableBatch(requestedBatch) || !batches.some(hasRenderableBatch))
+    ? requestedBatch
+    : preferredBatch;
+  const resolvedBatchId = activeBatch?.id ?? "";
+  const hasRenderableBatches = batches.some(hasRenderableBatch);
+  const plainResultContent = streamState.content || work?.content || (
+    work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
+  );
   const getActiveItemId = (batch: CreationOutputBatch) => (
     batch.items.some((item) => item.id === activeItemIds[batch.id])
       ? activeItemIds[batch.id]
@@ -461,6 +481,18 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     copyTimerRef.current = window.setTimeout(() => {
       setCopied((current) => ({ ...current, [key]: false }));
     }, 1400);
+  }
+
+  function editPolicyRenewalCard() {
+    const payload = work?.app_run?.input_payload;
+    if (!payload) return;
+    const draftKey = "creation-draft:policy-renewal-card";
+    try {
+      window.sessionStorage.setItem(draftKey, JSON.stringify(payload));
+    } catch {
+      window.sessionStorage.setItem(draftKey, JSON.stringify({ ...payload, reference_image: "" }));
+    }
+    window.location.href = appPath("/apps/policy-renewal-card?from=workspace&entry=policy-renewal-card");
   }
 
   function handleExport(title: string, body: string, options?: { viewMode?: CreationOutputViewMode; theme?: WechatTheme }) {
@@ -582,6 +614,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const imageInputEntries = buildImageInputEntries(work);
     const generatedCount = imageResults.length;
     const recommendedImageIndex = generatedCount > 0 ? 0 : -1;
+    const selectedImageIndex = Math.max(0, imageResults.findIndex((image) => image.id === selectedImageId));
+    const selectedImage = imageResults[selectedImageIndex] ?? imageResults[0] ?? null;
     const generationNotice = formatImageGenerationNotice(imageMode);
     const showImagePlaceholders = imageResults.length === 0 && work.app_run?.status === "running";
     const imageFieldMissingHint = !imageMeta.hasPayload
@@ -593,9 +627,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
         ? `本次共生成 ${generatedCount} 张图片，建议先看推荐图，再决定下载或继续微调。`
         : "结果区会优先承载选图、下载和继续生成动作，输入信息保留在下方供核对。";
 
+    function moveSelectedImage(offset: number) {
+      if (imageResults.length < 2) return;
+      const nextIndex = (selectedImageIndex + offset + imageResults.length) % imageResults.length;
+      setSelectedImageId(imageResults[nextIndex].id);
+    }
+
     return (
-      <div className="workDetailPage imageInstancePage">
+      <div className={`workDetailPage imageInstancePage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content imageInstanceShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={imageMeta.title} />
           <section className="imageInstanceHero">
             <div className="imageInstanceHeroCopy">
               <div className="imageInstanceHeroTitleRow">
@@ -649,7 +690,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             <aside className="imageInstanceSidebar">
               <div className="imageInstanceSidebarCard">
                 <div className="sidebarBackRow">
-                  <a className="back-btn backLink imageInstanceBack" href={appPath("/drafts")}>返回作品列表</a>
+                  <a className="back-btn backLink imageInstanceBack" href={workReturnHref}>← {workReturnLabel}</a>
                 </div>
                 <div className="imageSidebarSection">
                   <strong>内容导航</strong>
@@ -789,6 +830,118 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                 </div>
 
+                <div className="imageStudioWorkspace">
+                  <div className="imageStudioCanvasColumn">
+                    <div
+                      aria-label="图片结果预览"
+                      className="imageStudioCanvas"
+                      onKeyDown={(event) => {
+                        if (event.key === "ArrowLeft") moveSelectedImage(-1);
+                        if (event.key === "ArrowRight") moveSelectedImage(1);
+                      }}
+                      tabIndex={0}
+                    >
+                      {selectedImage ? (
+                        <img alt={`当前图片结果 ${selectedImageIndex + 1}`} src={selectedImage.url} />
+                      ) : (
+                        <div className="imageStudioEmpty">
+                          <strong>{showImagePlaceholders ? "图片生成中..." : "当前还没有图片结果"}</strong>
+                          <span>{showImagePlaceholders ? "生成完成后会自动显示在这里" : "可以返回应用调整参数后再次生成"}</span>
+                        </div>
+                      )}
+                      {selectedImage ? <span className="imageStudioCounter">{selectedImageIndex + 1} / {generatedCount}</span> : null}
+                    </div>
+
+                    {imageResults.length > 1 ? (
+                      <div className="imageStudioThumbnails" aria-label="切换图片结果">
+                        {imageResults.map((image, index) => (
+                          <button
+                            aria-label={`查看图片结果 ${index + 1}`}
+                            aria-pressed={selectedImage?.id === image.id}
+                            className={selectedImage?.id === image.id ? "active" : ""}
+                            key={image.id}
+                            onClick={() => setSelectedImageId(image.id)}
+                            type="button"
+                          >
+                            <img alt="" src={image.url} />
+                            <span>{index + 1}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <aside className="imageStudioInspector">
+                    <div className="imageStudioInspectorHeader">
+                      <div>
+                        <span>当前选择</span>
+                        <strong>{selectedImage ? `图片 ${selectedImageIndex + 1}` : "等待生成"}</strong>
+                      </div>
+                      <em>{imageMeta.ratio}</em>
+                    </div>
+
+                    <dl className="imageStudioMeta">
+                      <div><dt>视觉风格</dt><dd>{imageMeta.style}</dd></div>
+                      <div><dt>{work.platform === "wechat-images" ? "配图类型" : "人物形象"}</dt><dd>{imageMeta.drawPortrait}</dd></div>
+                      <div><dt>生成模式</dt><dd>{formatImageModeLabel(imageMode)}</dd></div>
+                    </dl>
+
+                    <div className="imageStudioWatermark">
+                      <div>
+                        <span>签名水印</span>
+                        <button
+                          aria-label={watermarkEnabled ? "关闭签名水印" : "开启签名水印"}
+                          aria-pressed={watermarkEnabled}
+                          className={watermarkEnabled ? "signatureSwitch active" : "signatureSwitch"}
+                          onClick={() => setWatermarkEnabled((current) => !current)}
+                          type="button"
+                        ><span /></button>
+                      </div>
+                      <input
+                        disabled={!watermarkEnabled}
+                        maxLength={50}
+                        onChange={(event) => setWatermarkText(event.target.value)}
+                        placeholder="输入水印文字"
+                        value={watermarkText}
+                      />
+                    </div>
+
+                    <div className="imageStudioPrimaryActions">
+                      <button
+                        className="instancePrimaryAction"
+                        disabled={!selectedImage}
+                        onClick={() => selectedImage && void handleImageDownload(selectedImage.url, `图片结果-${selectedImageIndex + 1}.png`)}
+                        type="button"
+                      >下载所选</button>
+                      <button
+                        className="instanceActionButton"
+                        disabled={!selectedImage}
+                        onClick={() => selectedImage && void handleImageCopy(selectedImage.url)}
+                        type="button"
+                      >复制图片</button>
+                    </div>
+
+                    {isPolicyRenewalCardWork ? (
+                      <div className="renewalMessageCard">
+                        <span>配套微信文案</span>
+                        <p>{work.content}</p>
+                        <div>
+                          <button onClick={() => void handleCopy("renewal-message", work.content)} type="button">
+                            {copied["renewal-message"] ? "已复制" : "复制文案"}
+                          </button>
+                          <button onClick={editPolicyRenewalCard} type="button">修改信息</button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="imageStudioSecondaryActions">
+                      <button disabled={!selectedImage} onClick={() => selectedImage && void handleImageOpen(selectedImage.url)} type="button">查看原图</button>
+                      <button disabled={imageResults.length === 0} onClick={() => void handleBatchDownload(imageResults)} type="button">下载全部</button>
+                      {imageRetryable ? <button disabled={retryingImages} onClick={() => void retryImageGeneration()} type="button">{retryingImages ? "排队中..." : "重试生成"}</button> : null}
+                    </div>
+                  </aside>
+                </div>
+
                 <div className="imageNotices">
                   {generationNotice ? (
                     <div className="imageModeNotice">{generationNotice}</div>
@@ -903,17 +1056,19 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   if (isWriteCopyWork) {
     const sourceText = typeof work.app_run?.input_payload?.source === "string" ? work.app_run.input_payload.source : "";
     return (
-      <div className="workDetailPage instanceOriginPage writeCopyOriginPage">
+      <div className={`workDetailPage instanceOriginPage writeCopyOriginPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceOriginShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} />
           <section className="instanceOriginLayout">
             <aside className="instanceOriginSidebar">
               <div className="instanceOriginSidebarCard">
                 <div className="sidebarBackRow">
-                  <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                  <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
                 </div>
 
                 <div className="instanceSidebarSection">
                   <strong>内容导航</strong>
+                  {showResultDetails ? <>
                   <button
                     className={activeSection === "run-info" ? "instanceNavButton active" : "instanceNavButton"}
                     onClick={() => jumpToSection("run-info")}
@@ -928,6 +1083,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   >
                     实例信息
                   </button>
+                  </> : null}
                   <button
                     className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
                     onClick={() => jumpToSection("generated-content")}
@@ -1044,9 +1200,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   <div className="imageModeNotice">{streamState.error}</div>
                 ) : null}
 
-                {batches.length > 0 ? (
+                {hasRenderableBatches ? (
                   <div className="instanceBatchStack writeCopyBatchStack instanceOriginBatchStack" style={{ fontSize: `${fontScale}%` }}>
-                    {batches.map((batch) => (
+                    {batches.filter((batch) => batch.id === resolvedBatchId).map((batch) => (
                       <section
                         className="instanceBatchGroup writeCopyBatchGroup instanceOriginBatchGroup"
                         key={batch.id}
@@ -1108,7 +1264,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                 ) : (
                   <div className="instancePlainResult" style={{ fontSize: `${fontScale}%` }}>
-                    <MarkdownContent content={streamState.content || work.content} />
+                    <MarkdownContent content={plainResultContent} />
                   </div>
                 )}
               </section>
@@ -1126,17 +1282,19 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const targetLabels = formatChannelLabels(work.app_run?.target_channels ?? []) || "口播稿、公众号";
     const generalContentReport = streamState.content || work.content || "内容生成中，结果会在这里持续回填。";
     return (
-      <div className="workDetailPage instanceOriginPage generalContentWorkDetailPage">
+      <div className={`workDetailPage instanceOriginPage generalContentWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceOriginShell generalContentResultShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} />
           <section className="instanceOriginLayout generalContentResultLayout">
             <aside className="instanceOriginSidebar">
               <div className="instanceOriginSidebarCard generalContentResultSidebarCard">
                 <div className="sidebarBackRow">
-                  <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                  <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
                 </div>
 
                 <div className="instanceSidebarSection">
                   <strong>内容导航</strong>
+                  {showResultDetails ? <>
                   <button
                     className={activeSection === "run-info" ? "instanceNavButton active" : "instanceNavButton"}
                     onClick={() => jumpToSection("run-info")}
@@ -1151,6 +1309,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   >
                     实例信息
                   </button>
+                  </> : null}
                   <button
                     className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
                     onClick={() => jumpToSection("generated-content")}
@@ -1278,8 +1437,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const letterContent = streamState.content || work.content;
 
     return (
-      <div className="workDetailPage instanceStudioPage letterWorkDetailPage">
+      <div className={`workDetailPage instanceStudioPage letterWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content letterResultShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} />
           <section className="letterResultHero">
             <div className="letterResultHeroHeader">
               <div className="letterResultTitleBlock">
@@ -1300,7 +1460,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
           <section className="letterResultCanvas">
             <aside className="letterResultSidebarCard">
               <div className="sidebarBackRow">
-                <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
               </div>
               <div className="instanceSidebarSection">
                 <strong>内容导航</strong>
@@ -1313,13 +1473,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               </div>
               <div className="instanceSidebarSection">
                 <strong>目录</strong>
-                <button
+                {showResultDetails ? <button
                   className={activeSection === "input-info" ? "instanceNavButton active" : "instanceNavButton"}
                   onClick={() => jumpToSection("input-info")}
                   type="button"
                 >
                   主题
-                </button>
+                </button> : null}
                 <button
                   className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
                   onClick={() => jumpToSection("generated-content")}
@@ -1382,10 +1542,15 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   if (isTopicPickerWork) {
     const topicContent = streamState.content || work.content;
     const topicSections = topicPickerNavItems;
+    const selectedTopicSection = topicSections.find((section) => section.id === selectedTopicId)
+      ?? topicSections.find((section) => section.id === "topic-picker-list")
+      ?? topicSections[0];
+    const topicHandoffPrompt = selectedTopicSection ? `${selectedTopicSection.title}\n\n${selectedTopicSection.body}` : topicContent;
 
     return (
-      <div className="workDetailPage instanceStudioPage topicPickerWorkDetailPage">
+      <div className={`workDetailPage instanceStudioPage topicPickerWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content topicPickerResultShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryHref={appPath(`/apps/write-copy?from=topic-picker&prompt=${encodeURIComponent(topicHandoffPrompt)}`)} primaryLabel="继续写文案" />
           <section className="topicPickerResultHero">
             <div className="topicPickerResultHeroHeader">
               <div className="topicPickerResultTitleBlock">
@@ -1406,7 +1571,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
           <section className="topicPickerResultCanvas">
             <aside className="topicPickerResultSidebarCard">
               <div className="sidebarBackRow">
-                <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
               </div>
               <div className="instanceSidebarSection">
                 <strong>内容导航</strong>
@@ -1472,14 +1637,21 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
                 {topicSections.length > 0 ? topicSections.map((section) => (
                   <section
-                    className={section.id === "topic-picker-list" ? "topicPickerReportSection topicPickerListSection" : "topicPickerReportSection"}
+                    className={`${section.id === "topic-picker-list" ? "topicPickerReportSection topicPickerListSection" : "topicPickerReportSection"} ${selectedTopicSection?.id === section.id ? "selected" : ""}`}
                     id={section.id}
                     key={section.id}
                     ref={(node) => { sectionRefs.current[section.id] = node; }}
                   >
-                    <div className="creationExampleBlockTitle">
-                      <span className="creationExampleDocIcon" aria-hidden="true">{section.id === "topic-picker-list" ? "✨" : "📄"}</span>
-                      <h2>{section.title}</h2>
+                    <div className="topicPickerSectionHeading">
+                      <div className="creationExampleBlockTitle">
+                        <span className="creationExampleDocIcon" aria-hidden="true">{section.id === "topic-picker-list" ? "✨" : "📄"}</span>
+                        <h2>{section.title}</h2>
+                      </div>
+                      <button
+                        aria-pressed={selectedTopicSection?.id === section.id}
+                        onClick={() => setSelectedTopicId(section.id)}
+                        type="button"
+                      >{selectedTopicSection?.id === section.id ? "已选用" : "选用此方向"}</button>
                     </div>
                     <div className="creationExampleBlockBody">
                       <MarkdownContent content={section.body} />
@@ -1512,8 +1684,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const statusLabel = work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status);
 
     return (
-      <div className="workDetailPage instanceStudioPage xiaohongshuCheckResultPage">
+      <div className={`workDetailPage instanceStudioPage xiaohongshuCheckResultPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content xiaohongshuCheckResultShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel="重新检测" />
           <section
             className="xiaohongshuCheckHero"
             id="basic-info"
@@ -1534,12 +1707,14 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
           <section className="xiaohongshuCheckCanvas">
             <aside className="xiaohongshuCheckSidebar">
               <div className="sidebarBackRow">
-                <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
               </div>
               <div className="instanceSidebarSection">
                 <strong>内容导航</strong>
-                <button className={activeSection === "basic-info" ? "instanceNavButton active" : "instanceNavButton"} onClick={() => jumpToSection("basic-info")} type="button">基本信息</button>
-                <button className={activeSection === "instance-info" ? "instanceNavButton active" : "instanceNavButton"} onClick={() => jumpToSection("instance-info")} type="button">实例信息</button>
+                {showResultDetails ? <>
+                  <button className={activeSection === "basic-info" ? "instanceNavButton active" : "instanceNavButton"} onClick={() => jumpToSection("basic-info")} type="button">基本信息</button>
+                  <button className={activeSection === "instance-info" ? "instanceNavButton active" : "instanceNavButton"} onClick={() => jumpToSection("instance-info")} type="button">实例信息</button>
+                </> : null}
                 <button className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"} onClick={() => jumpToSection("generated-content")} type="button">生成结果</button>
               </div>
               <div className="instanceSidebarSection">
@@ -1593,6 +1768,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     <h2>生成结果</h2>
                   </div>
                   <div className="creationExampleBlockActions">
+                    {report?.revisedBody ? <button onClick={() => void handleCopy("xiaohongshu-check-revised", report.revisedBody)} type="button">{copied["xiaohongshu-check-revised"] ? "安全稿已复制" : "复制安全稿"}</button> : null}
                     <button disabled={!reportContent.trim()} onClick={() => void handleCopy("xiaohongshu-check-report", reportContent)} type="button">{copied["xiaohongshu-check-report"] ? "已复制" : "复制"}</button>
                     <button disabled={!reportContent.trim()} onClick={() => handleExport("小红书违规检测报告", reportContent)} type="button">导出Word</button>
                   </div>
@@ -1653,14 +1829,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   if (isVideoScriptPolishWork) {
     const videoPolishResultContent = streamState.content || work.content;
     const reportSections = parseVideoPolishReportSections(videoPolishResultContent);
+    const finalPolishSection = reportSections.find((section) => section.kind === "final");
     const polishNavItems = [
-      ...(polishSourceText ? [{ id: "input-info", label: "原始口播稿" }] : []),
+      ...(showResultDetails && polishSourceText ? [{ id: "input-info", label: "原始口播稿" }] : []),
       ...reportSections.map((section) => ({ id: section.id, label: section.title })),
     ];
 
     return (
-      <div className="workDetailPage instanceStudioPage polishWorkDetailPage videoPolishResultPage">
+      <div className={`workDetailPage instanceStudioPage polishWorkDetailPage videoPolishResultPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceStudioShell videoPolishResultShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel="再次精修" />
           <section className="instanceStudioHero polishInstanceHero videoPolishResultHero">
             <div className="instanceStudioHeroHeader videoPolishResultHeroHeader">
               <div className="instanceStudioTitleBlock videoPolishResultTitleBlock">
@@ -1681,7 +1859,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
           <section className="videoPolishResultCanvas">
             <aside className="videoPolishResultSidebarCard">
               <div className="sidebarBackRow">
-                <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
               </div>
               <div className="instanceSidebarSection">
                 <strong>内容导航</strong>
@@ -1727,6 +1905,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       <h2>生成结果</h2>
                     </div>
                     <div className="creationExampleBlockActions">
+                      {finalPolishSection ? <button onClick={() => void handleCopy("polish-final", finalPolishSection.body)} type="button">{copied["polish-final"] ? "成稿已复制" : "复制精修成稿"}</button> : null}
                       <button onClick={() => void handleCopy("polish-all", videoPolishResultContent)} type="button">{copied["polish-all"] ? "已复制" : "复制"}</button>
                       <button onClick={() => handleExport("生成结果", videoPolishResultContent)} type="button">导出Word</button>
                     </div>
@@ -1738,6 +1917,14 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       <h2>专业口播文案批改报告</h2>
                     </div>
                   </div>
+
+                  {finalPolishSection ? (
+                    <VideoPolishReportSection
+                      key={finalPolishSection.id}
+                      section={finalPolishSection}
+                      registerSection={(node) => { sectionRefs.current[finalPolishSection.id] = node; }}
+                    />
+                  ) : null}
 
                   {polishSourceText ? (
                     <div className="videoPolishEmbeddedSection" id="input-info" ref={(node) => { sectionRefs.current["input-info"] = node; }}>
@@ -1753,7 +1940,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     </div>
                   ) : null}
 
-                  {reportSections.length > 0 ? reportSections.map((section) => (
+                  {reportSections.length > 0 ? reportSections.filter((section) => section.id !== finalPolishSection?.id).map((section) => (
                     <VideoPolishReportSection
                       key={section.id}
                       section={section}
@@ -1785,8 +1972,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   }
 
   return (
-    <div className={isStructuredCopyWork ? "workDetailPage instanceStudioPage writeCopyWorkDetailPage" : isSimpleCopyWork ? "workDetailPage instanceStudioPage simpleCopyWorkDetailPage" : isPolishWork ? "workDetailPage instanceStudioPage polishWorkDetailPage" : "workDetailPage instanceStudioPage"}>
+    <div className={`${isStructuredCopyWork ? "workDetailPage instanceStudioPage writeCopyWorkDetailPage" : isSimpleCopyWork ? "workDetailPage instanceStudioPage simpleCopyWorkDetailPage" : isPolishWork ? "workDetailPage instanceStudioPage polishWorkDetailPage" : "workDetailPage instanceStudioPage"} ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
       <div className="page-content instanceStudioShell">
+        <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel={isPolishWork ? "再次精修" : "再次创作"} />
         <section className={isStructuredCopyWork ? "instanceStudioHero writeCopyInstanceHero" : isPolishWork ? "instanceStudioHero polishInstanceHero" : "instanceStudioHero"}>
           <div className="instanceStudioHeroHeader">
             <div className="instanceStudioTitleBlock">
@@ -1837,10 +2025,11 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
           <aside className="instanceStudioSidebar">
             <div className="instanceStudioSidebarCard instanceSummarySidebarCard">
               <div className="sidebarBackRow">
-                <a className="back-btn backLink instanceTextBack" href={appPath("/drafts")}>返回作品列表</a>
+                <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
               </div>
               <div className="instanceSidebarSection">
                 <strong>内容导航</strong>
+                {showResultDetails ? <>
                 <button
                   className={activeSection === "run-info" ? "instanceNavButton active" : "instanceNavButton"}
                   onClick={() => jumpToSection("run-info")}
@@ -1857,6 +2046,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     输入内容
                   </button>
                 ) : null}
+                </> : null}
                 <button
                   className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
                   onClick={() => jumpToSection("generated-content")}
@@ -1988,7 +2178,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
             {!isImageWork && inputEntries.length > 0 ? (
               <section
-                className={isStructuredCopyWork ? "instanceSectionCard writeCopyInputSectionCard" : isPolishWork ? "instanceSectionCard polishInputSectionCard" : "instanceSectionCard"}
+                className={isStructuredCopyWork ? "instanceSectionCard instanceInputSectionCard writeCopyInputSectionCard" : isPolishWork ? "instanceSectionCard instanceInputSectionCard polishInputSectionCard" : "instanceSectionCard instanceInputSectionCard"}
                 ref={(node) => { sectionRefs.current["input-info"] = node; }}
               >
                 <div className="instanceSectionHeader">
@@ -2117,9 +2307,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     {streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
                   </div>
                 </article>
-              ) : batches.length > 0 ? (
+              ) : hasRenderableBatches ? (
                 <div className={isStructuredCopyWork ? "instanceBatchStack writeCopyBatchStack" : isPolishWork ? "instanceBatchStack polishBatchStack" : "instanceBatchStack"} style={{ fontSize: `${fontScale}%` }}>
-                  {batches.map((batch) => (
+                  {(isStructuredCopyWork || isPolishWork ? batches.filter((batch) => batch.id === resolvedBatchId) : batches).map((batch) => (
                     <section
                       className={isStructuredCopyWork ? "instanceBatchGroup writeCopyBatchGroup" : isPolishWork ? "instanceBatchGroup polishBatchGroup" : "instanceBatchGroup"}
                       key={batch.id}
@@ -2184,7 +2374,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
               ) : (
                 <div className={isPolishWork ? "instancePlainResult polishPlainResult" : "instancePlainResult"} style={{ fontSize: `${fontScale}%` }}>
-                  <MarkdownContent content={work.content} />
+                  <MarkdownContent content={plainResultContent} />
                 </div>
               )}
             </section>
@@ -2195,6 +2385,45 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       {previewField ? <PreviewFieldModal previewField={previewField} onClose={() => setPreviewField(null)} /> : null}
       {previewImage ? <PreviewImageModal previewImage={previewImage} onClose={() => setPreviewImage(null)} /> : null}
     </div>
+  );
+}
+
+function ResultWorkspaceBar({
+  detailsOpen,
+  onToggleDetails,
+  work,
+  returnHref,
+  returnLabel,
+  title,
+  primaryHref,
+  primaryLabel = "再次创作",
+}: {
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
+  work: WorkDetail;
+  returnHref?: string;
+  returnLabel?: string;
+  title?: string;
+  primaryHref?: string;
+  primaryLabel?: string;
+}) {
+  return (
+    <header className="resultWorkspaceBar">
+      <a className="resultWorkspaceBack" href={returnHref || appPath("/drafts")} aria-label={returnLabel || "返回创作历史"}>←</a>
+      <div className="resultWorkspaceIdentity">
+        <span>{formatAppLabel(work.platform)}</span>
+        <h1>{title || formatWorkTitle(work)}</h1>
+      </div>
+      <div className="resultWorkspaceStatus">
+        <span className={work.app_run?.status === "succeeded" ? "complete" : ""} />
+        <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+        <time dateTime={work.updated_at}>{formatDate(work.updated_at)}</time>
+      </div>
+      <button className={detailsOpen ? "resultWorkspaceDetails active" : "resultWorkspaceDetails"} onClick={onToggleDetails} type="button">
+        {detailsOpen ? "收起参数" : "生成参数"}
+      </button>
+      <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)}>{primaryLabel}</a>
+    </header>
   );
 }
 
@@ -3323,6 +3552,67 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "") || "batch";
 }
 
+function readCreationOutputBatches(value: unknown): CreationOutputBatch[] {
+  if (!value || typeof value !== "object") return [];
+  const batches = (value as { batches?: unknown }).batches;
+  if (!Array.isArray(batches)) return [];
+
+  return batches.flatMap((candidate, batchIndex) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const batch = candidate as { id?: unknown; label?: unknown; items?: unknown };
+    const label = typeof batch.label === "string" && batch.label.trim()
+      ? batch.label.trim()
+      : `生成内容 ${batchIndex + 1}`;
+    const rawItems = Array.isArray(batch.items) ? batch.items : [];
+    const items = rawItems.flatMap((rawItem, itemIndex) => {
+      if (!rawItem || typeof rawItem !== "object") return [];
+      const item = rawItem as {
+        id?: unknown;
+        title?: unknown;
+        body?: unknown;
+        viewMode?: unknown;
+        summary?: unknown;
+      };
+      if (typeof item.body !== "string") return [];
+      const viewMode: CreationOutputViewMode = item.viewMode === "wechat" || item.viewMode === "xiaohongshu"
+        ? item.viewMode
+        : "plain";
+      return [{
+        id: typeof item.id === "string" && item.id ? item.id : `${slugify(label)}-${batchIndex + 1}-${itemIndex + 1}`,
+        title: typeof item.title === "string" && item.title.trim() ? item.title : `${label} ${itemIndex + 1}`,
+        body: item.body,
+        viewMode,
+        summary: typeof item.summary === "string" ? item.summary : inferSummary(item.body),
+      } satisfies CreationOutputItem];
+    });
+
+    return [{
+      id: typeof batch.id === "string" && batch.id ? batch.id : `${slugify(label)}-${batchIndex + 1}`,
+      label,
+      items,
+    } satisfies CreationOutputBatch];
+  });
+}
+
+function hasRenderableBatch(batch: CreationOutputBatch) {
+  return batch.items.some((item) => item.body.trim().length > 0);
+}
+
+function chooseBatchSource(sources: CreationOutputBatch[][]) {
+  return sources.find((source) => source.some(hasRenderableBatch))
+    ?? sources.find((source) => source.length > 0)
+    ?? [];
+}
+
+function choosePreferredBatch(batches: CreationOutputBatch[], platform?: string | null) {
+  const populatedBatches = batches.filter(hasRenderableBatch);
+  if (platform === "write-copy" || platform === "lead-copy") {
+    const oralBatch = populatedBatches.find((batch) => batch.label.includes("口播"));
+    if (oralBatch) return oralBatch;
+  }
+  return populatedBatches[0] ?? batches[0] ?? null;
+}
+
 function buildExpectedWriteCopyBatches(targetChannels: string[]) {
   const labels = targetChannels
     .map((channel) => {
@@ -3358,6 +3648,7 @@ function supportsWorkStreaming(platform: string) {
     "general-content",
     "image-card",
     "wechat-images",
+    "policy-renewal-card",
     "video-script-polish",
     "xiaohongshu-check",
     "topic-picker",
@@ -3436,6 +3727,21 @@ function formatInputLabel(key: string) {
   if (key === "ratio") return "宽高比";
   if (key === "signature") return "签名";
   if (key === "reference_image") return "参考图";
+  if (key === "customer_salutation") return "客户称呼";
+  if (key === "insurer") return "保险公司";
+  if (key === "product_name") return "产品名称";
+  if (key === "policy_number") return "保单号";
+  if (key === "renewal_date") return "续费日期";
+  if (key === "premium_amount") return "本期保费";
+  if (key === "currency") return "币种";
+  if (key === "privacy_mode") return "保单号展示";
+  if (key === "advisor_name") return "顾问姓名";
+  if (key === "advisor_company") return "公司或团队";
+  if (key === "contact_text") return "联系提示";
+  if (key === "confirmation") return "信息确认";
+  if (key === "portrait_treatment") return "头像处理";
+  if (key === "avatar_visual_asset_ids") return "数字分身形象";
+  if (key === "avatar_visual_mode") return "人物形象模式";
   if (key === "angle") return "引流角度";
   if (key === "lead_magnet") return "承接资料";
   if (key === "keyword") return "互动关键词";
@@ -3456,6 +3762,11 @@ function formatInputValue(key: string, value: unknown) {
   if (key === "ratio" && typeof value === "string") return formatRatioLabel(value);
   if (key === "style" && typeof value === "string") return formatImageStyleLabel(value);
   if (key === "reference_image" && typeof value === "string") return value ? "已上传参考图" : "-";
+  if (key === "privacy_mode" && typeof value === "string") return value === "full" ? "显示完整号码" : "自动脱敏";
+  if (key === "confirmation" && typeof value === "string") return value === "confirmed" ? "已核对关键信息" : "未确认";
+  if (key === "portrait_treatment" && typeof value === "string") return value === "original" ? "保留清晰原照" : "柔和手绘感";
+  if (key === "avatar_visual_asset_ids" && Array.isArray(value)) return value.length ? `使用 ${value.length} 张形象照` : "未使用";
+  if (key === "avatar_visual_mode" && typeof value === "string") return value === "yes" ? "使用数字分身形象" : "不使用人物形象";
   if (key === "angle" && typeof value === "string") return formatLeadAngleLabel(value);
   if (key === "cta" && typeof value === "string") return formatLeadCtaLabel(value);
   if (Array.isArray(value)) return value.map(String).join(" / ");
@@ -3507,6 +3818,7 @@ function formatAppLabel(value?: string | null) {
   if (value === "write-copy") return "写文案";
   if (value === "image-card") return "做图";
   if (value === "wechat-images") return "公众号配图";
+  if (value === "policy-renewal-card") return "保单续保提醒卡";
   if (value === "lead-copy") return "写引流文案";
   if (value === "traffic-copy") return "流量文案";
   if (value === "marketing-copy") return "营销文案";
@@ -3593,7 +3905,7 @@ function formatWorkTitle(work: WorkDetail) {
   const title = work.title?.trim() ?? "";
   if (!title) return `${formatAppLabel(work.platform)}作品`;
 
-  if (work.platform === "image-card" || work.platform === "wechat-images") {
+  if (work.platform === "image-card" || work.platform === "wechat-images" || work.platform === "policy-renewal-card") {
     return buildImageWorkMeta(work).title;
   }
 
@@ -3753,6 +4065,10 @@ const xhsFontSizeOptions: Array<{ label: string; value: XhsFontSize }> = [
 
 function buildImageWorkMeta(work: WorkDetail) {
   const payload = work.app_run?.input_payload ?? {};
+  const isPolicyRenewalCard = work.platform === "policy-renewal-card";
+  const avatarVisualAssetIds = Array.isArray(work.app_run?.result_json?.avatarVisualAssetIds)
+    ? work.app_run.result_json.avatarVisualAssetIds.filter((item): item is string => typeof item === "string")
+    : [];
   const source = typeof payload.article === "string" && payload.article.trim()
     ? payload.article.trim()
     : typeof payload.source === "string" && payload.source.trim()
@@ -3760,13 +4076,21 @@ function buildImageWorkMeta(work: WorkDetail) {
     : inferImageSourceFromPayload(work);
   const fallbackTitle = stripImageWorkTitle(work.title);
   const styleFromTitle = inferImageStyleFromTitle(work.title);
-  const title = source ? source.replace(/\s+/g, " ").slice(0, 38) : stripImageWorkTitle(work.title);
+  const title = isPolicyRenewalCard
+    ? `${stringifySingleInputValue(payload.customer_salutation)} · ${stringifySingleInputValue(payload.renewal_date)}`
+    : source ? source.replace(/\s+/g, " ").slice(0, 38) : stripImageWorkTitle(work.title);
   const isWechatImages = work.platform === "wechat-images";
   return {
     title: title || "图片生成结果",
     source,
     style: formatInputValue("style", payload.style) !== "-" ? formatInputValue("style", payload.style) : styleFromTitle,
-    drawPortrait: isWechatImages
+    drawPortrait: isPolicyRenewalCard
+      ? avatarVisualAssetIds.length > 0
+        ? `数字分身形象（${avatarVisualAssetIds.length}张）`
+        : payload.reference_image
+          ? "已合成临时顾问形象照"
+          : "未使用顾问形象照"
+      : isWechatImages
       ? "不涉及人物形象"
       : formatInputValue("draw_portrait", payload.draw_portrait) !== "-"
         ? formatInputValue("draw_portrait", payload.draw_portrait)
@@ -3783,14 +4107,18 @@ function buildImageWorkMeta(work: WorkDetail) {
 
 function buildImageInputEntries(work: WorkDetail) {
   const payload = work.app_run?.input_payload ?? {};
-  const orderedKeys = work.platform === "wechat-images"
-    ? ["style", "article"]
-    : ["draw_portrait", "ratio", "style", "source", "signature", "reference_image"];
+  const orderedKeys = work.platform === "policy-renewal-card"
+    ? ["customer_salutation", "insurer", "product_name", "policy_number", "renewal_date", "premium_amount", "currency", "privacy_mode", "advisor_name", "advisor_company", "contact_text", "style", "avatar_visual_mode", "avatar_visual_asset_ids", "ratio", "reference_image", "portrait_treatment", "confirmation"]
+    : work.platform === "wechat-images"
+    ? ["style", "article", "avatar_visual_mode", "avatar_visual_asset_ids"]
+    : ["draw_portrait", "avatar_visual_asset_ids", "ratio", "style", "source", "signature", "reference_image"];
   const seen = new Set<string>();
   const entries: Array<{ key: string; label: string; value?: string; actionLabel?: string; previewValue?: string }> = [];
 
   for (const key of orderedKeys) {
-    const raw = payload[key];
+    const raw = key === "policy_number" && payload.privacy_mode !== "full" && typeof payload[key] === "string"
+      ? maskPolicyNumberForDisplay(payload[key])
+      : payload[key];
     if (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim())) continue;
     seen.add(key);
     if (key === "source" || key === "article") {
@@ -3862,13 +4190,24 @@ function stripImageWorkTitle(title?: string | null) {
   const cleaned = String(title ?? "")
     .replace(/^做图[｜|]/, "")
     .replace(/^公众号配图[｜|]/, "")
+    .replace(/^保单续保提醒卡[｜|]/, "")
     .replace(/\billustration\b/gi, "手绘插画")
     .trim();
   return cleaned || "图片生成结果";
 }
 
+function maskPolicyNumberForDisplay(value: string) {
+  const normalized = value.replace(/\s+/g, "");
+  if (normalized.length <= 4) return `${normalized.slice(0, 1)}***`;
+  if (normalized.length <= 7) return `${normalized.slice(0, 2)}***${normalized.slice(-2)}`;
+  return `${normalized.slice(0, 3)}****${normalized.slice(-3)}`;
+}
+
 function formatImageStyleLabel(value?: string | null) {
   if (!value) return "-";
+  if (value === "renewal-handwritten") return "手写服务单";
+  if (value === "renewal-warm") return "温暖顾问版";
+  if (value === "renewal-business") return "简洁商务版";
   if (value === "illustration") return "手绘插画";
   if (value === "flat") return "扁平海报";
   if (value === "realistic") return "写实质感";

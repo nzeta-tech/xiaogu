@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getCreationAppFamily, type CreationApp, type CreationExample } from "@/lib/apps/catalog";
 import { appPath } from "@/lib/client/url";
 import { creationExamples } from "@/lib/apps/catalog";
+import { usePageMeta } from "@/lib/client/page-meta";
 
 type ExampleNavItem = {
   id: string;
@@ -45,6 +46,10 @@ export function CreationExamplePageClient({
   const [viewModes, setViewModes] = useState<Record<string, "plain" | "wechat">>({});
   const [activeAnchorId, setActiveAnchorId] = useState<string>("");
   const activeExample = linkedExamples.find((item) => item.slug === activeExampleSlug) ?? hydratedExample;
+  usePageMeta({
+    title: `${app.name} · 功能案例`,
+    description: `获客创作 / ${app.name} / 案例`,
+  });
   const sections = activeExample.sections ?? [];
   const outputs = activeExample.outputs ?? [];
   const imageResults = activeExample.imageResults ?? [];
@@ -124,7 +129,8 @@ export function CreationExamplePageClient({
       <div className="page-content creationExampleStudioContent">
         {mode === "page" ? (
           <div className="page-back-bar">
-            <a className="back-btn backLink" href={appPath("/workspace")}>返回广场</a>
+            <a className="back-btn backLink" href={appPath(`/apps/${app.slug}`)}>← 返回{app.name}</a>
+            <span className="subpageBreadcrumb">获客创作 / {app.name} / 功能案例</span>
           </div>
         ) : null}
 
@@ -150,7 +156,7 @@ export function CreationExamplePageClient({
               </a>
             </div>
             <button aria-label="关闭案例" className="creationExampleClose" onClick={() => onClose?.()} type="button">
-              {mode === "modal" ? "×" : <a href={appPath("/workspace")}>×</a>}
+              {mode === "modal" ? "×" : <a href={appPath(`/apps/${app.slug}`)}>×</a>}
             </button>
           </div>
           {activeExample.intro ? (

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiPath, appPath } from "@/lib/client/url";
+import { usePageMeta } from "@/lib/client/page-meta";
 import {
   createEmptyQuestionnaireAnswers,
   localQuestionnaireTemplate,
@@ -49,6 +50,7 @@ export function QuestionnairePageClient() {
   const [notice, setNotice] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [autoSavePulse, setAutoSavePulse] = useState(false);
+  usePageMeta({ title: "数字分身 · 人设问卷", description: `数字分身 / 第 ${activeSectionIndex + 1} 部分`, status: submitting ? "提交中" : saving ? "保存中" : lastSaved ? "已保存" : "" });
 
   const activeSection = template.structure.sections[activeSectionIndex];
 

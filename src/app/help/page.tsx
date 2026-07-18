@@ -10,7 +10,7 @@ export default function HelpPage() {
       </header>
       <section>
         <h2>开始创作</h2>
-        <p>在创作广场选择应用，填写必填信息后提交。每次成功创作扣除 5 积分；失败任务不记录成功用量。</p>
+        <p>在创作广场选择应用，填写必填信息后提交。不同应用按页面标注的积分扣费；失败任务不记录成功用量。</p>
         <p>需要个性化思维的应用会先引导完成思维问卷，完成后再开放提交。</p>
       </section>
       <section>
@@ -23,7 +23,7 @@ export default function HelpPage() {
       </section>
       <section>
         <h2>内容责任</h2>
-        <p>AI 结果仅作为创作和结构分析辅助。保险内容发布前请核对事实、条款、收益表述和所属机构的合规要求。</p>
+        <p>AI 结果仅作为创作和结构分析辅助。系统提供的是基础敏感词预检，不等同于机构正式合规审核。保险内容发布前请核对事实、条款、收益表述和所属机构的合规要求。</p>
       </section>
       <footer className="legalFooter"><Link href="/privacy">隐私政策</Link><Link href="/terms">用户协议</Link></footer>
     </main>

@@ -26,9 +26,15 @@ type BackgroundWorkRunEntry = {
   snapshot: BackgroundWorkRunSnapshot;
 };
 
-const activeWorkRuns = new Map<string, BackgroundWorkRunEntry>();
+const backgroundRunRegistryKey = Symbol.for("xiaogu.background-work-runs");
+const backgroundRunGlobal = globalThis as typeof globalThis & {
+  [backgroundRunRegistryKey]?: Map<string, BackgroundWorkRunEntry>;
+};
+const activeWorkRuns =
+  backgroundRunGlobal[backgroundRunRegistryKey] ??
+  (backgroundRunGlobal[backgroundRunRegistryKey] = new Map<string, BackgroundWorkRunEntry>());
 const BACKGROUND_RETRY_DELAY_MS = 3000;
-const MAX_BACKGROUND_RETRIES = 1;
+const MAX_BACKGROUND_RETRIES = 0;
 
 export function isWorkRunActive(workId: string) {
   return activeWorkRuns.has(workId);

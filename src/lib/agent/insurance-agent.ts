@@ -3,6 +3,7 @@ import { formatAvatarMemoriesForPrompt, tryListActiveAvatarMemories, tryLogAvata
 import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt } from "@/lib/thinking/profile-snapshot";
 import { getHotTopics } from "@/lib/topics/hot-topics";
+import { getModelRuntime, isTimeoutError, modelTimeoutSignal, recordModelRuntime } from "@/lib/agent/model-runtime";
 
 export type AgentMessage = {
   role: "user" | "assistant";
@@ -137,15 +138,24 @@ async function callModel(
 ) {
   const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
-
-  if (provider === "google") return callGoogleGemini(system, messages);
-  if (provider === "groq") return callOpenAICompatible(system, messages, getGroqConfig());
-
-  return callOpenAICompatible(system, messages, {
-    baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1",
-    apiKey: process.env.MODEL_API_KEY,
-    model: process.env.MODEL_NAME ?? "gpt-4o-mini",
-  });
+  const runtime = await getModelRuntime();
+  const started = Date.now();
+  if (!runtime.circuitOpen) {
+    try {
+      const output = provider === "google"
+        ? await callGoogleGemini(system, messages, runtime.settings.requestTimeoutSeconds)
+        : await callOpenAICompatible(system, messages, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, runtime.settings.requestTimeoutSeconds);
+      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
+      return output;
+    } catch (error) {
+      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
+      if (!runtime.fallback) throw error;
+    }
+  }
+  if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
+  const output = await callOpenAICompatible(system, messages, runtime.fallback, undefined, runtime.settings.requestTimeoutSeconds);
+  await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
+  return output;
 }
 
 async function* streamModel(
@@ -157,24 +167,30 @@ async function* streamModel(
 ) {
   const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
-
-  if (provider === "google") {
-    yield* streamGoogleGemini(system, messages);
-    return;
-  }
-
+  const runtime = await getModelRuntime();
   const normalized = normalizeOpenAICompatibleMessages(messages);
-  const config =
-    provider === "groq"
-      ? getGroqConfig()
-      : {
-          baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1",
-          apiKey: process.env.MODEL_API_KEY,
-          model: process.env.MODEL_NAME ?? "gpt-4o-mini",
-        };
-  // Keep the chat path truly streaming: no pre-generation or quality-gate buffering
-  // before the first token. Style control is handled by system prompt in streaming mode.
-  yield* streamOpenAICompatible(system, normalized, config);
+  const started = Date.now();
+  let yielded = false;
+  if (!runtime.circuitOpen) {
+    try {
+      const stream = provider === "google"
+        ? streamGoogleGemini(system, messages, runtime.settings.requestTimeoutSeconds)
+        : streamOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), runtime.settings.requestTimeoutSeconds);
+      for await (const chunk of stream) { yielded = true; yield chunk; }
+      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
+      return;
+    } catch (error) {
+      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
+      if (yielded || !runtime.fallback) throw error;
+    }
+  }
+  if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
+  for await (const chunk of streamOpenAICompatible(system, normalized, runtime.fallback, runtime.settings.requestTimeoutSeconds)) yield chunk;
+  await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
+}
+
+function primaryOpenAIConfig() {
+  return { baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1", apiKey: process.env.MODEL_API_KEY, model: process.env.MODEL_NAME ?? "gpt-4o-mini" };
 }
 
 function normalizeOpenAICompatibleMessages(messages: AgentMessage[]) {
@@ -223,6 +239,7 @@ async function callOpenAICompatible(
   messages: AgentMessage[],
   config: { baseUrl: string; apiKey?: string; model: string },
   options?: { temperature?: number },
+  timeoutSeconds = 120,
 ) {
   if (!config.apiKey) throw new Error("大模型 API key 未配置");
 
@@ -238,11 +255,11 @@ async function callOpenAICompatible(
       messages: [{ role: "system", content: system }, ...messages],
     }),
   } satisfies RequestInit;
-  let response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, requestInit);
+  let response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, { ...requestInit, signal: modelTimeoutSignal(timeoutSeconds) });
 
   if (response.status === 429 || response.status >= 500) {
     await new Promise((resolve) => setTimeout(resolve, response.status === 429 ? 1600 : 900));
-    response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, requestInit);
+    response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, { ...requestInit, signal: modelTimeoutSignal(timeoutSeconds) });
   }
 
   if (!response.ok) {
@@ -262,6 +279,7 @@ async function* streamOpenAICompatible(
   system: string,
   messages: AgentMessage[],
   config: { baseUrl: string; apiKey?: string; model: string },
+  timeoutSeconds = 120,
 ) {
   if (!config.apiKey) throw new Error("大模型 API key 未配置");
 
@@ -277,6 +295,7 @@ async function* streamOpenAICompatible(
       stream: true,
       messages: [{ role: "system", content: system }, ...messages.map(toOpenAIMessage)],
     }),
+    signal: modelTimeoutSignal(timeoutSeconds),
   });
 
   if (!response.ok || !response.body) {
@@ -307,7 +326,7 @@ async function* streamOpenAICompatible(
   }
 }
 
-async function callGoogleGemini(system: string, messages: AgentMessage[]) {
+async function callGoogleGemini(system: string, messages: AgentMessage[], timeoutSeconds = 120) {
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Google Gemini API key 未配置");
 
@@ -330,10 +349,10 @@ async function callGoogleGemini(system: string, messages: AgentMessage[]) {
     }),
   };
   const url = `${baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  let response = await fetch(url, request);
+  let response = await fetch(url, { ...request, signal: modelTimeoutSignal(timeoutSeconds) });
   if (response.status === 429 || response.status >= 500) {
     await new Promise((resolve) => setTimeout(resolve, 900));
-    response = await fetch(url, request);
+    response = await fetch(url, { ...request, signal: modelTimeoutSignal(timeoutSeconds) });
   }
 
   if (!response.ok) {
@@ -351,7 +370,7 @@ async function callGoogleGemini(system: string, messages: AgentMessage[]) {
   );
 }
 
-async function* streamGoogleGemini(system: string, messages: AgentMessage[]) {
+async function* streamGoogleGemini(system: string, messages: AgentMessage[], timeoutSeconds = 120) {
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Google Gemini API key 未配置");
 
@@ -370,6 +389,7 @@ async function* streamGoogleGemini(system: string, messages: AgentMessage[]) {
         temperature: 0.65,
       },
     }),
+    signal: modelTimeoutSignal(timeoutSeconds),
   });
 
   if (!response.ok || !response.body) throw new Error(`Google Gemini 调用失败：${response.status}`);

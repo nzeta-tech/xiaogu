@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiPath } from "@/lib/client/url";
+import { usePageMeta } from "@/lib/client/page-meta";
 
 type Plan = {
   code: string;
@@ -50,6 +51,7 @@ type Gift = {
 type BillingAnnouncement = { id: string; title: string; content: string; link_url?: string | null };
 
 export function BillingPageClient() {
+  usePageMeta({ title: "会员与积分 · 充值中心", description: "用户中心 / 额度、订单与用量" });
   const searchParams = useSearchParams();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -64,6 +66,9 @@ export function BillingPageClient() {
     enableStripe: true,
     displayCreditPackages: true,
     purchaseNotice: "充值成功后积分会自动到账，可在本页查看订单和用量明细。",
+    feeRatePercent: 0,
+    productName: "小谷创作积分",
+    helpImageUrl: "",
   });
 
   const paidOrders = orders.filter((order) => order.status === "paid");
@@ -185,11 +190,12 @@ export function BillingPageClient() {
                 {plan.recommended ? <em>推荐</em> : null}
               </div>
               <div className="planPrice">
-                ¥{(plan.amountCents / 100).toFixed(0)}
+                ¥{((plan.amountCents + Math.ceil(plan.amountCents * commerceConfig.feeRatePercent / 100)) / 100).toFixed(2)}
                 <small>{plan.currency}</small>
               </div>
               <strong>{plan.quotaAmount.toLocaleString("zh-CN")} 点额度</strong>
               <p>{plan.description}</p>
+              {commerceConfig.feeRatePercent > 0 ? <small>含 {commerceConfig.feeRatePercent}% 支付服务费</small> : null}
               <ul>
                 <li>热点发现与话题拆解</li>
                 <li>短视频口播稿生成</li>
@@ -201,6 +207,7 @@ export function BillingPageClient() {
             </article>
           ))}
         </div>
+        {commerceConfig.helpImageUrl ? <div className="billingHelpMedia"><img src={commerceConfig.helpImageUrl} alt="支付帮助" /><p>{commerceConfig.purchaseNotice}</p></div> : null}
       </section> : null}
 
       <div className="billingTwoColumn">

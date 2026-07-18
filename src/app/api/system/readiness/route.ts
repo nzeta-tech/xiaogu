@@ -37,9 +37,9 @@ export async function GET() {
     },
     {
       key: "metering",
-      label: "OpenMeter quota billing",
-      ok: hasMeteringConfig(),
-      required: true,
+      label: "OpenMeter telemetry",
+      ok: hasMeteringConfig() && await canReachMetering(),
+      required: false,
     },
     {
       key: "stripe",
@@ -51,7 +51,7 @@ export async function GET() {
       key: "stripe_live",
       label: "Stripe live mode",
       ok: !isProductionRuntime() || hasLiveStripeConfig(),
-      required: true,
+      required: process.env.APP_ENV === "production",
     },
     {
       key: "topic_source",
@@ -84,6 +84,21 @@ async function canQueryDatabase() {
   try {
     await query("select 1");
     return true;
+  } catch {
+    return false;
+  }
+}
+
+async function canReachMetering() {
+  const baseUrl = process.env.OPENMETER_BASE_URL?.replace(/\/$/, "");
+  const apiKey = process.env.OPENMETER_API_KEY;
+  if (!baseUrl || !apiKey) return false;
+  try {
+    const response = await fetch(`${baseUrl}/customers?limit=1`, {
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    return response.ok;
   } catch {
     return false;
   }

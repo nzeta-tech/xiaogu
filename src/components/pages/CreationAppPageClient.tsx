@@ -11,7 +11,9 @@ import {
 } from "@/lib/apps/catalog";
 import { getEntryAdjustedApp, shouldShowRealExample } from "@/lib/apps/entry-app";
 import { apiPath, appPath } from "@/lib/client/url";
+import { usePageMeta } from "@/lib/client/page-meta";
 import { CreationExamplePageClient } from "@/components/pages/CreationExamplePageClient";
+import type { AvatarVisualAsset } from "@/lib/avatar/types";
 
 type FieldValue = string | string[];
 
@@ -47,11 +49,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isGeneralContent = app.slug === "general-content";
   const isTopicPicker = appFamily === "topic-picker";
   const isWechatImages = appFamily === "wechat-images";
+  const isPolicyRenewalCard = app.slug === "policy-renewal-card";
   const isXiaohongshuCheck = appFamily === "xiaohongshu-check";
   const isPolicyDiagnosis = app.slug === "policy-diagnosis";
   const isVideoScriptPolish = appFamily === "polish-video";
   const isWechatArticlePolish = appFamily === "polish-wechat-article";
-  const isLetter = app.slug === "letter";
   const isVoiceNoteEntry = app.slug === "write-copy" && workspaceEntry === "voice-note-copy";
   const isVoiceNoteSubpage = isWriteCopy && isVoiceNoteEntry;
   const isRecruitScriptEntry = app.slug === "team-recruit" && workspaceEntry === "recruit-script";
@@ -66,7 +68,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isCompactWriteCopyFlow = isWriteCopy;
   const exampleSlug = searchParams.get("example");
   const activeExample = (exampleSlug ? getCreationExampleBySlug(exampleSlug) : null) ?? getCreationExampleForApp(app.slug, pageApp.exampleTitle);
-  const visibleFields = pageApp.fields.filter((field) => {
+  const filteredFields = pageApp.fields.filter((field) => {
     if ((isLeadCopy || isWriteCopy) && field.id === "targets") return false;
     return true;
   });
@@ -81,32 +83,119 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [loading, setLoading] = useState(false);
   const [showExample, setShowExample] = useState(false);
   const [error, setError] = useState("");
-  const [guideOpen, setGuideOpen] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<"restored" | "saving" | "saved" | "">("");
   const [voiceFieldId, setVoiceFieldId] = useState<string | null>(null);
   const [uploadNames, setUploadNames] = useState<Record<string, string>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
+  const [showAllWechatStyles, setShowAllWechatStyles] = useState(false);
+  const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
+  const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceSupported = useMemo(() => Boolean(getSpeechRecognitionConstructor()), []);
-  const guideUrl = typeof (app as CreationApp & { guide_url?: string }).guide_url === "string"
-    ? (app as CreationApp & { guide_url?: string }).guide_url ?? ""
-    : "";
+  const draftKey = `creation-draft:${workspaceEntry || app.slug}`;
+  const requiredFields = pageApp.fields.filter((field) => field.required);
+  const completedRequiredFields = requiredFields.filter((field) => !isEmpty(values[field.id]));
+  const missingRequiredFields = requiredFields.filter((field) => isEmpty(values[field.id]));
+  const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
+  const creationReturnHref = searchParams.get("from") === "dashboard" ? appPath("/dashboard") : appPath("/workspace");
+  const creationReturnLabel = searchParams.get("from") === "dashboard" ? "返回今日工作台" : "返回获客创作";
+  const experienceCopy = getAppExperienceCopy(app.slug, workspaceEntry);
   const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
+  const wechatArticle = typeof values.article === "string" ? values.article : "";
+  const wechatArticleAnalysis = useMemo(() => analyzeWechatArticle(wechatArticle), [wechatArticle]);
+  const wechatStyleRecommendation = useMemo(() => recommendWechatImageStyle(wechatArticle), [wechatArticle]);
+  const wechatStyleOptions = pageApp.fields.find((field) => field.id === "style")?.options ?? [];
+  const visibleFields = (isWechatImages
+    ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
+    : filteredFields
+  ).filter((field) => !isPolicyRenewalCard || values.avatar_visual_mode === "yes" || !["reference_image", "portrait_treatment"].includes(field.id));
+
+  usePageMeta({
+    title: `${pageApp.name} · 新建创作`,
+    description: `获客创作 / ${pageApp.name}`,
+    status: loading ? "生成中" : draftStatus === "saved" ? "已保存" : "",
+  });
 
   useEffect(() => {
     return () => recognitionRef.current?.stop();
   }, []);
 
+  useEffect(() => {
+    if (!showAllWechatStyles) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowAllWechatStyles(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showAllWechatStyles]);
+
+  useEffect(() => {
+    if (!isImageCard && !isPersonalityCardEntry && !isWechatImages && !isPolicyRenewalCard) return;
+    const controller = new AbortController();
+    void fetch(apiPath("/api/avatar/photos"), { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ photos?: AvatarVisualAsset[] }> : { photos: [] })
+      .then((payload) => {
+        const photos = payload.photos ?? [];
+        setAvatarPhotos(photos);
+        if (isPersonalityCardEntry) {
+          const primary = photos.find((photo) => photo.is_primary && photo.status === "active" && photo.allow_creation);
+          if (primary) setValues((current) => Array.isArray(current.avatar_visual_asset_ids) && current.avatar_visual_asset_ids.length > 0 ? current : { ...current, avatar_visual_asset_ids: [primary.id], avatar_visual_mode: "yes" });
+        }
+      })
+      .catch((fetchError) => {
+        if (fetchError instanceof Error && fetchError.name === "AbortError") return;
+        setAvatarPhotos([]);
+      })
+      .finally(() => { if (!controller.signal.aborted) setAvatarPhotosLoading(false); });
+    return () => controller.abort();
+  }, [isImageCard, isPersonalityCardEntry, isWechatImages, isPolicyRenewalCard]);
+
+  useEffect(() => {
+    const saved = window.sessionStorage.getItem(draftKey);
+    if (!saved) return;
+    try {
+      const restored = JSON.parse(saved) as Record<string, FieldValue>;
+      const frame = window.requestAnimationFrame(() => {
+        setValues((current) => ({ ...current, ...restored }));
+        setDraftStatus("restored");
+      });
+      return () => window.cancelAnimationFrame(frame);
+    } catch {
+      window.sessionStorage.removeItem(draftKey);
+    }
+  }, [draftKey]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      window.sessionStorage.setItem(draftKey, JSON.stringify(values));
+      setDraftStatus("saved");
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [draftKey, values]);
+
   async function handleSubmit() {
     const missingField = pageApp.fields.find((field) => field.required && isEmpty(values[field.id]));
     if (missingField) {
       setError(`${missingField.label}还没有填写。`);
+      window.requestAnimationFrame(() => document.getElementById(`creation-field-${missingField.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return;
+    }
+    const selectedVisualIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids : [];
+    const needsAvatarPhoto = isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || (isWechatImages || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+    if (needsAvatarPhoto && selectedVisualIds.length === 0 && isEmpty(values.reference_image)) {
+      setError("请选择数字分身形象照，或临时上传一张形象照。");
+      window.requestAnimationFrame(() => document.getElementById("creation-avatar-visual-picker")?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
     }
 
     setLoading(true);
     setError("");
-    const draftKey = `creation-draft:${workspaceEntry || app.slug}`;
     window.sessionStorage.setItem(draftKey, JSON.stringify(values));
 
     const response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
@@ -130,7 +219,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }
 
   function updateField(fieldId: string, nextValue: FieldValue) {
-    setValues((current) => ({ ...current, [fieldId]: nextValue }));
+    setDraftStatus("saving");
+    setValues((current) => {
+      if (fieldId === "draw_portrait" && nextValue === "yes" && (!Array.isArray(current.avatar_visual_asset_ids) || current.avatar_visual_asset_ids.length === 0)) {
+        const primary = avatarPhotos.find((photo) => photo.is_primary && photo.status === "active" && photo.allow_creation);
+        return { ...current, [fieldId]: nextValue, ...(primary ? { avatar_visual_asset_ids: [primary.id], avatar_visual_mode: "yes" } : {}) };
+      }
+      return { ...current, [fieldId]: nextValue };
+    });
   }
 
   function openFilePicker(fieldId: string) {
@@ -226,23 +322,12 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     recognitionRef.current = recognition;
   }
 
-  function handleGuideAction() {
-    if (isGeneralContent) {
-      setGuideOpen(true);
-      return;
-    }
-    if ((isWechatArticlePolish || isVideoScriptPolish) && guideUrl) {
-      window.open(guideUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
-    setGuideOpen(true);
-  }
-
   return (
     <div className={buildAppPageClassName(appFamily, app.slug, workspaceEntry)}>
         <div className="page-content">
         <div className="page-back-bar pageBackBar">
-          <a className="back-btn backLink" href={appPath("/workspace")}>{isCompactWechatFlow || isCompactWriteCopyFlow || (isLeadCopy && !isMultiChannelPolishLayout) || isCompactRecruitPage ? "返回" : "返回广场"}</a>
+          <a className="back-btn backLink" href={creationReturnHref}>← {creationReturnLabel}</a>
+          <span className="subpageBreadcrumb">获客创作 / {pageApp.name}</span>
         </div>
 
         <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : "app-info-card"}>
@@ -252,12 +337,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               <h1 className="app-name">{pageApp.name}</h1>
               <p className="app-description">{pageApp.description}</p>
             </div>
-            {isImageCard || isWechatArticlePolish || isVideoScriptPolish || isGeneralContent || isMultiChannelPolishLayout ? (
-              <button className="imageCardGuideButton" onClick={handleGuideAction} type="button">
-                <span className="imageCardGuideFire" aria-hidden="true">✓</span>
-                <span>创作规范</span>
-              </button>
-            ) : null}
+            <div className="subpageTaskState" aria-label={`必填项完成 ${completedRequiredFields.length} / ${requiredFields.length}`}>
+              <span>{completionPercent}%</span>
+              <strong>{missingRequiredFields.length ? `还差 ${missingRequiredFields.length} 项` : "可以开始"}</strong>
+            </div>
           </div>
           {isLeadCopy && !isMultiChannelPolishLayout ? (
             <div className="app-meta leadCopyMeta">
@@ -291,6 +374,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             </div>
           ) : null}
           {exampleSlug ? <div className="resultSavedHint">已从功能示例进入。系统只使用你本次提交的素材，不会复写示例内容。</div> : null}
+          <div className="creationOutcomeStrip">
+            <div><span>建议准备</span><strong>{experienceCopy.input}</strong></div>
+            <div><span>本次产出</span><strong>{experienceCopy.output}</strong></div>
+          </div>
           {isGeneralContent && hasRealExample && activeExample ? (
             <div className="creationAppExampleActions generalContentExampleActions">
               <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
@@ -380,7 +467,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           {isWriteCopy && !isCompactWriteCopyFlow && !isVoiceNoteSubpage ? (
             <div className="writeCopyHeroBody">
               <div className="writeCopyHeroIntro">
-                <strong>{isVoiceNoteEntry ? "把录音稿拆成多个独立内容和金句，直接拿去继续创作" : "一次搞定：口播稿、公众号文章、小红书笔记、朋友圈"}</strong>
+                <strong>{isVoiceNoteEntry ? "整理出独立观点、可引用金句和后续创作素材" : "分别生成口播稿、公众号、小红书和朋友圈内容"}</strong>
                 <p>{isVoiceNoteEntry ? "这里专门用于录音稿拆解整理，不是默认的多平台批量分发。系统会先把学习、分享或培训录音整理成多个可复用内容片段。" : "可输入观点录音、文章、口播稿、聊天记录等素材。系统会先提炼你的核心表达，再拆成更适合不同发布场景的版本。"}</p>
               </div>
               <div className="writeCopyHeroChecklist">
@@ -402,7 +489,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           {isIpPositioningEntry ? (
             <div className="polishHeroBody">
               <div className="polishHeroIntro">
-                <strong>一键生成专属 IP 定位方案，重点是调用你的人设画像，而不是重新写一堆需求说明</strong>
+                <strong>结合数字分身和当前业务情况，梳理定位、标签与内容主线</strong>
                 <p>这里更像思维驱动型定位页。包含定位分析、包装升级、个人传记文章，完成思维后可以直接开始创作。</p>
               </div>
               <div className="polishHeroChecklist">
@@ -449,12 +536,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               </div>
             </div>
           ) : null}
-          {isLetter ? null : null}
           {isPersonalityCardEntry ? (
             <div className="polishHeroBody">
               <div className="polishHeroIntro">
                 <strong>个性名片不是定位长文，而是一张让人一眼记住你的展示卡</strong>
-                <p>这张卡更偏个人介绍和形象展示。只需上传个人介绍和照片，再选风格，就能生成更适合传播和展示的个性名片。</p>
+                <p>填写个人介绍、目标客户并上传清晰形象照，生成用于个人展示和传播的名片。</p>
               </div>
               <div className="polishHeroChecklist">
                 <div>
@@ -474,7 +560,16 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           ) : null}
           {isVideoScriptPolish ? null : null}
           {isWechatArticlePolish && !isCompactWechatFlow ? null : null}
-          {isWechatImages ? null : null}
+          {isWechatImages ? (
+            <div className="wechatImagesHeroBody">
+              <div className="wechatImagesWorkflow" aria-label="公众号配图流程">
+                <span className="active"><i>1</i>导入文章</span>
+                <span><i>2</i>预览配图节点</span>
+                <span><i>3</i>统一视觉风格</span>
+                <span><i>4</i>生成 4 张配图</span>
+              </div>
+            </div>
+          ) : null}
           {isXiaohongshuCheck ? (
             <div className="xiaohongshuCheckHeroBody">
               <div className="xiaohongshuCheckHeroIntro">
@@ -547,7 +642,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           </section>
         ) : null}
 
-        {isLetter ? null : null}
 
           {isWriteCopy && !isCompactWriteCopyFlow && !isVoiceNoteSubpage ? (
             <section className="writeCopyBriefingCard">
@@ -704,10 +798,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           </section>
         ) : null}
 
-        <form className={isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
+        <form className={isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
           {/* eslint-disable-next-line react-hooks/refs */}
           {visibleFields.map((field, index) => (
-            <label className={isImageCard ? "field-card creationField imageCardField" : isXiaohongshuCheck ? "field-card creationField xiaohongshuCheckField" : "field-card creationField"} key={field.id}>
+            <label className={isImageCard ? "field-card creationField imageCardField" : isXiaohongshuCheck ? "field-card creationField xiaohongshuCheckField" : "field-card creationField"} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
                   <span className="step-number">{index + 1}</span>
@@ -745,13 +839,34 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   uploadError: uploadErrors[field.id] ?? "",
                   uploading: Boolean(uploadingFields[field.id]),
                   onFileChange: (fileList) => handleFileChange(field.id, fileList),
+                  styleOptionLimit: isWechatImages && field.id === "style" ? 6 : undefined,
+                  styleRecommendation: isWechatImages && field.id === "style" ? wechatStyleRecommendation : undefined,
+                  onShowAllStyles: isWechatImages && field.id === "style" ? () => setShowAllWechatStyles(true) : undefined,
                 })}
                 {field.helper && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，暂不支持图片</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "reference_image" ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
+                {isWechatImages && field.id === "article" ? (
+                  <WechatArticleAnalysis analysis={wechatArticleAnalysis} />
+                ) : null}
               </span>
             </label>
           ))}
+
+          {(isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || isWechatImages || isPolicyRenewalCard) ? (
+            <AvatarVisualPicker
+              appScope={isPersonalityCardEntry ? "personality-card" : isWechatImages ? "wechat-images" : isPolicyRenewalCard ? "policy-renewal-card" : "image-card"}
+              enabled={isPersonalityCardEntry || isImageCard ? true : values.avatar_visual_mode === "yes"}
+              loading={avatarPhotosLoading}
+              maxSelection={isPolicyRenewalCard ? 1 : 4}
+              photos={avatarPhotos}
+              selectedIds={Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids : []}
+              showEnableToggle={isWechatImages || isPolicyRenewalCard}
+              toggleTitle={isPolicyRenewalCard ? "卡片是否显示顾问形象" : "封面是否出现本人"}
+              onEnabledChange={(enabled) => updateField("avatar_visual_mode", enabled ? "yes" : "no")}
+              onSelectionChange={(ids) => updateField("avatar_visual_asset_ids", ids)}
+            />
+          ) : null}
 
           {isLeadCopy ? (
             <section className="field-card creationField batchCardLeadCopy">
@@ -801,7 +916,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   <span className="step-number">{visibleFields.length + 1}</span>
                 </span>
                 <strong className="field-title">
-                  {isVoiceNoteSubpage ? "生成类型" : "选择生成内容"}
+                  {isVoiceNoteSubpage ? "选择要整理成什么内容" : "选择要生成的渠道"}
                   <em className="required-mark">*</em>
                 </strong>
               </div>
@@ -836,43 +951,32 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
           {error ? <div className="formError submit-alert">{error}</div> : null}
           {pageApp.requiresThinking ? (
-            <div className="resultSavedHint submit-alert">这个应用需要先创建你的思维，完成后生成内容会更像你。</div>
+            <div className="resultSavedHint submit-alert">本应用会结合你的数字分身判断内容重点。<a href={appPath("/thinking")}>查看或完善数字分身</a></div>
           ) : null}
           {isWriteCopy && !isVoiceNoteSubpage ? (
-            <div className="resultSavedHint submit-alert">尚未提交思维问卷，将使用资深创作者风格创作，若想打造自己的个性化风格，请填写思维问卷 →</div>
+            <div className="resultSavedHint submit-alert">需要更贴近你的表达习惯？<a href={appPath("/thinking")}>完善数字分身</a>，也可以直接按本次选择生成。</div>
           ) : null}
           {isTopicPicker ? (
-            <div className="resultSavedHint submit-alert">这类选题更依赖你的人设画像来判断内容重心。如果还没完善人设，建议先补齐，结果会更像你本人。</div>
+            <div className="resultSavedHint submit-alert">选题会参考你的定位和目标客户。生成前可先<a href={appPath("/thinking")}>检查数字分身信息</a>。</div>
           ) : null}
           {isXiaohongshuCheck ? (
-            <div className="resultSavedHint submit-alert">这类应用更偏审核和修改建议。结果页会先标出潜在风险点，再给更稳妥的替代表达方向。</div>
+            <div className="resultSavedHint submit-alert">检测结果用于发布前辅助复核，不代表小红书官方审核结论。</div>
           ) : null}
           {isPolicyDiagnosis ? (
-            <div className="resultSavedHint submit-alert">这类应用更偏结构诊断。结果页会优先给你看家庭保障缺口、责任重复、缴费压力和建议的调整顺序。</div>
+            <div className="resultSavedHint submit-alert">结果基于你提供的摘要信息，不替代正式保单条款解读或个性化保险建议。</div>
           ) : null}
 
-          <section className="submit-section submitSection">
+          <section className="submit-section submitSection creationStickyAction">
+            <div className="creationSubmitSummary">
+              <strong>{missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
+              <span>{draftStatus === "saving" ? "正在保存草稿…" : draftStatus === "restored" ? "已恢复上次草稿" : "草稿已自动保存"} · 本次消耗 {app.points} 积分</span>
+              <i aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></i>
+            </div>
             <button className="primaryButton submit-button submitButton" disabled={loading} onClick={() => void handleSubmit()} type="button">
-              {loading ? (isPolicyDiagnosis ? "诊断中..." : "创作中...") : isXiaohongshuCheck ? `开始检测（${app.points}积分）` : isPolicyDiagnosis ? `开始诊断（${app.points}积分）` : isLeadCopy || isWriteCopy || isGeneralContent || isMultiChannelPolishLayout || isCompactRecruitPage || isLetter ? `开始创作（${app.points}积分）` : isImageCard || isWechatImages || isWechatArticlePolish || isVideoScriptPolish || isLeadPackage || isTopicPicker ? `开始创作（${app.points}积分）` : `立即创作（${app.points}积分）`}
+              {loading
+                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成 2 张提醒卡..." : "创作中..."
+                : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成 2 张提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
-            {isImageCard || isLetter ? <div className="imageCardRemakeHint">已载入功能示例的输入方式。请替换为自己的真实内容后开始创作。</div> : null}
-            {isWechatImages ? <div className="wechatImagesSubmitHint">生成后会进入作品详情页，重点查看图片是否贴合文章段落节奏与阅读场景。</div> : null}
-            {isWriteCopy && !isCompactWriteCopyFlow ? <div className="writeCopySubmitHint">生成后会直接进入作品详情页，支持复制、导出、改写和继续保存。</div> : null}
-            {isLeadCopy && !isMultiChannelPolishLayout ? <div className="leadCopySubmitHint">生成后会进入作品详情页，按口播、小红书和公众号分组查看与继续编辑。</div> : null}
-            {isMultiChannelPolishLayout ? (
-              <div className="polishSubmitHint">
-                {app.slug === "traffic-copy"
-                  ? "生成后会进入作品详情页，重点查看开头钩子、主体逻辑、结尾总结和标题建议。"
-                  : "生成后会进入作品详情页，分别查看讲产品、讲方案、讲案例和讲观念四篇成稿。"}
-              </div>
-            ) : null}
-            {isLeadPackage ? <div className="leadPackageSubmitHint">生成后会进入作品详情页，重点查看资料目录、领取动作和朋友圈/私信承接是否完整。</div> : null}
-            {isTopicPicker ? <div className="topicPickerSubmitHint">生成后会进入作品详情页，重点看 6 个选题是否同时覆盖流量、信任、引流，以及是否真的适合你当前的平台和客户人群。</div> : null}
-            {isGeneralContent ? <div className="generalContentSubmitHint">生成后会进入作品详情页，重点查看口播稿和公众号版本是否都围绕同一个核心观点展开。</div> : null}
-            {isVideoScriptPolish ? <div className="polishSubmitHint">生成后会进入作品详情页，重点查看批改报告、逐句修改建议和新的精修主稿。</div> : null}
-            {isBreakthroughEntry ? <div className="polishSubmitHint">生成后会进入作品详情页，重点看问题诊断是否抓准、短期动作是否能立刻执行，以及复盘指标是否足够具体。</div> : null}
-            {isXiaohongshuCheck ? <div className="xiaohongshuCheckSubmitHint">检测后会进入作品详情页，重点查看高风险句子、触发原因和可直接替换的安全表达。</div> : null}
-            {isPolicyDiagnosis ? <div className="policyDiagnosisSubmitHint">诊断后会进入作品详情页，重点查看家庭保障缺口、重复责任、现金流压力和可优先优化的顺序。</div> : null}
           </section>
         </form>
       </div>
@@ -886,55 +990,38 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         />
       ) : null}
 
-      {guideOpen ? (
-        <div className="creationExampleModalOverlay" onClick={() => setGuideOpen(false)} role="presentation">
-          <div className="creationExampleModalShell imageGuideModal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="创作规范">
-            <div className="imageGuideModalContent">
-              <div className="imageGuideModalHeader">
-                <h2>创作规范</h2>
-                <button className="creationExampleClose" onClick={() => setGuideOpen(false)} type="button">×</button>
-              </div>
-              <div className="imageGuideModalBody">
-                {isMultiChannelPolishLayout ? (
-                  <>
-                    <p>1. 直接粘贴完整素材或上传资料，不要只输入一个抽象主题。</p>
-                    <p>2. 先确认表达倾向，再勾选本轮真正需要的发布渠道。</p>
-                    <p>3. 流量文案重点核对事实与观点，营销文案还要补充产品规则和适用边界。</p>
-                    <p>4. 生成后会按口播、小红书和公众号分组进入作品详情页。</p>
-                  </>
-                ) : isVideoScriptPolish ? (
-                  <>
-                    <p>1. 直接粘贴你准备讲的原稿，不要只写一个主题或方向。</p>
-                    <p>2. 原稿越接近你真实会说的话，精修后的节奏和人味越自然。</p>
-                    <p>3. 结果页里先看批改报告和开头改法，再看整篇是否更顺口。</p>
-                    <p>4. 点击开始创作后，会先创建作品，再进入详情页承接精修结果。</p>
-                  </>
-                ) : isGeneralContent ? (
-                  <>
-                    <p>1. 直接粘贴你想表达的原始内容，不要只写一个抽象主题。</p>
-                    <p>2. 这类应用更适合普通观点、分享型素材和非强销售内容，原话越完整，改写后的共鸣感越自然。</p>
-                    <p>3. 先勾选想要的生成类型，重点看口播稿和公众号版本是否围绕同一个核心观点展开。</p>
-                    <p>4. 点击开始创作后，会先创建作品，再进入详情页承接生成结果。</p>
-                  </>
-                ) : (
-                  <>
-                    <p>1. 先选风格，再决定图片比例，这样更容易稳定出图。</p>
-                    <p>2. 图片内容建议直接粘贴可读性强的正文、要点或标题，不要只给太短的关键词。</p>
-                    <p>3. 如果要让图片更像你的内容，优先补充署名、参考图和人物形象设置。</p>
-                    <p>4. 点击开始创作后，系统会先创建作品，再进入作品详情页承接后续生成。</p>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+      {isWechatImages && showAllWechatStyles ? (
+        <WechatStyleLibrary
+          options={wechatStyleOptions}
+          recommendation={wechatStyleRecommendation}
+          selectedValue={typeof values.style === "string" ? values.style : ""}
+          onClose={() => setShowAllWechatStyles(false)}
+          onSelect={(nextValue) => {
+            updateField("style", nextValue);
+            setShowAllWechatStyles(false);
+          }}
+        />
       ) : null}
+
     </div>
   );
 }
 
 function createInitialValues(app: CreationApp, activeExample: { title?: string } | null, fromWorkspace: boolean) {
   const base = Object.fromEntries(app.fields.map((field) => [field.id, field.type === "multiselect" ? [] : ""])) as Record<string, FieldValue>;
+  if (app.slug === "policy-renewal-card") {
+    return {
+      ...base,
+      style: "renewal-handwritten",
+      currency: "人民币",
+      privacy_mode: "masked",
+      contact_text: "如需协助了解续费流程，请随时联系我。",
+      portrait_treatment: "soft-illustration",
+      ratio: "3:4",
+      avatar_visual_mode: "no",
+      avatar_visual_asset_ids: [],
+    };
+  }
   if (app.slug === "write-copy") {
     return {
       ...base,
@@ -946,7 +1033,9 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
   if (app.slug === "wechat-images") {
     return {
       ...base,
-      style: "realistic",
+      style: "documentary",
+      avatar_visual_mode: "no",
+      avatar_visual_asset_ids: [],
     };
   }
   if (app.slug === "general-content") {
@@ -958,9 +1047,7 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
   if (app.slug === "letter") {
     return {
       ...base,
-      theme: activeExample?.title
-        ? "我想给小谷创作平台的用户写一封年终感谢信。背景是平台上线后，很多保险人开始用它写公众号、口播文案和客户经营内容，也陆续产生了自媒体突破、客户咨询和成交反馈。今天是2025年12月31日，明天就是2026年，希望这封信能感谢大家一直以来的信任和陪伴，也表达平台未来会持续升级AI智能体、让大家体验更好、正反馈来得更早更多。最后祝大家新年快乐，业绩长虹，也身体健康、家庭幸福。"
-        : "",
+      theme: "",
       targets: ["wechat_article"],
     };
   }
@@ -971,7 +1058,7 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
     };
   }
   if (app.slug === "ip-positioning" && app.name === "个性名片") {
-    return { ...base, style: "professional", ratio: "3:4" };
+    return { ...base, style: "professional", ratio: "3:4", avatar_visual_mode: "yes", avatar_visual_asset_ids: [] };
   }
   if (app.slug !== "image-card" || !fromWorkspace) return base;
 
@@ -984,8 +1071,250 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
   };
 }
 
+type WechatArticleAnalysis = {
+  title: string;
+  characterCount: number;
+  paragraphCount: number;
+  readingMinutes: number;
+  nodes: Array<{ id: string; role: string; summary: string }>;
+};
+
+type WechatStyleRecommendation = {
+  value: string;
+  label: string;
+  reason: string;
+};
+
+function WechatArticleAnalysis({ analysis }: { analysis: WechatArticleAnalysis }) {
+  if (!analysis.characterCount) {
+    return (
+      <div className="wechatArticleEmptyAnalysis">
+        <strong>文章导入后，这里会生成配图方案</strong>
+        <span>自动识别文章标题、段落节奏和适合插图的位置，再统一选择视觉风格。</span>
+      </div>
+    );
+  }
+
+  return (
+    <section className="wechatArticleAnalysis" aria-label="文章配图分析">
+      <header>
+        <div>
+          <span>文章解析</span>
+          <strong>{analysis.title}</strong>
+        </div>
+        <em>建议 4 张</em>
+      </header>
+      <div className="wechatArticleMetrics">
+        <div><strong>{analysis.characterCount}</strong><span>正文字符</span></div>
+        <div><strong>{analysis.paragraphCount}</strong><span>有效段落</span></div>
+        <div><strong>{analysis.readingMinutes} 分钟</strong><span>预计阅读</span></div>
+      </div>
+      <div className="wechatImagePlanList">
+        {analysis.nodes.map((node, index) => (
+          <article key={node.id}>
+            <i>{String(index + 1).padStart(2, "0")}</i>
+            <div><strong>{node.role}</strong><span>{node.summary}</span></div>
+            <em>建议</em>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WechatStyleLibrary({
+  options,
+  selectedValue,
+  recommendation,
+  onSelect,
+  onClose,
+}: {
+  options: NonNullable<CreationApp["fields"][number]["options"]>;
+  selectedValue: string;
+  recommendation: WechatStyleRecommendation;
+  onSelect: (value: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="wechatStyleLibraryBackdrop">
+      <section aria-label="全部视觉风格" aria-modal="true" className="wechatStyleLibrary" role="dialog">
+        <header>
+          <div>
+            <span>视觉风格库</span>
+            <h2>选择整篇文章的统一风格</h2>
+          </div>
+          <button aria-label="关闭风格库" onClick={onClose} title="关闭" type="button">×</button>
+        </header>
+        <div className="wechatStyleLibraryGrid">
+          {options.map((option) => {
+            const active = selectedValue === option.value;
+            const recommended = recommendation.value === option.value;
+            return (
+              <button className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => onSelect(option.value)} type="button">
+                {option.previewUrl ? <img alt={option.label} src={option.previewUrl} /> : <span className="wechatStyleLibraryPlaceholder" />}
+                <strong>{option.label}</strong>
+                {recommended ? <em>推荐</em> : null}
+                {active ? <i>✓</i> : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AvatarVisualPicker({
+  photos,
+  selectedIds,
+  appScope,
+  enabled,
+  loading,
+  showEnableToggle,
+  toggleTitle,
+  maxSelection,
+  onEnabledChange,
+  onSelectionChange,
+}: {
+  photos: AvatarVisualAsset[];
+  selectedIds: string[];
+  appScope: string;
+  enabled: boolean;
+  loading: boolean;
+  showEnableToggle: boolean;
+  toggleTitle: string;
+  maxSelection: number;
+  onEnabledChange: (enabled: boolean) => void;
+  onSelectionChange: (ids: string[]) => void;
+}) {
+  const availablePhotos = photos.filter((photo) => photo.status === "active" && photo.allow_creation && photo.usage_scopes.includes(appScope));
+  return (
+    <section className="creationAvatarVisualPicker" id="creation-avatar-visual-picker">
+      <header>
+        <div><span>数字分身形象</span><strong>{showEnableToggle ? toggleTitle : "选择本次使用的形象照"}</strong></div>
+        {showEnableToggle ? <input checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} type="checkbox" /> : null}
+      </header>
+      {enabled ? (
+        loading ? <p>正在读取形象库...</p> : availablePhotos.length ? (
+          <div className="creationAvatarPhotoGrid">
+            {availablePhotos.map((photo) => {
+              const selected = selectedIds.includes(photo.id);
+              return (
+                <button className={selected ? "active" : ""} key={photo.id} onClick={() => onSelectionChange(selected ? selectedIds.filter((id) => id !== photo.id) : maxSelection === 1 ? [photo.id] : selectedIds.length < maxSelection ? [...selectedIds, photo.id] : selectedIds)} type="button">
+                  <img alt={photo.label || "数字分身形象照"} src={photo.content_url} />
+                  <span>{photo.is_primary ? "主形象" : avatarPhotoRoleLabel(photo.role)}</span>
+                  {selected ? <i>✓</i> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : <p>暂无可用于此应用的形象照。<a href={appPath("/thinking")}>前往数字分身添加</a></p>
+      ) : <p>本次只生成场景配图，不使用人物形象。</p>}
+      {enabled && availablePhotos.length ? <small>{maxSelection === 1 ? "本次最多选择 1 张顾问形象照。" : "可选择 1–4 张；多角度照片有助于保持人物特征一致。"}</small> : null}
+    </section>
+  );
+}
+
+function avatarPhotoRoleLabel(role: AvatarVisualAsset["role"]) {
+  return ({ portrait: "正面形象", professional: "职业半身", lifestyle: "自然生活", full_body: "全身照片", side_profile: "侧面形象" } as const)[role];
+}
+
+function analyzeWechatArticle(article: string): WechatArticleAnalysis {
+  const normalized = article.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return { title: "", characterCount: 0, paragraphCount: 0, readingMinutes: 0, nodes: [] };
+  }
+
+  const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+  const paragraphs = normalized
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const characterCount = normalized.replace(/\s/g, "").length;
+  const title = normalizeWechatArticleTitle(lines[0] ?? "") || "未识别标题的公众号文章";
+  const sourceParagraphs = paragraphs.length >= 4 ? paragraphs : lines;
+  const nodeIndexes = [0, Math.floor(sourceParagraphs.length * 0.33), Math.floor(sourceParagraphs.length * 0.66), sourceParagraphs.length - 1];
+  const roles = ["封面主题", "核心观点", "内容转折", "结尾收束"];
+
+  return {
+    title,
+    characterCount,
+    paragraphCount: sourceParagraphs.length,
+    readingMinutes: Math.max(1, Math.ceil(characterCount / 400)),
+    nodes: nodeIndexes.map((paragraphIndex, index) => ({
+      id: `${index}-${paragraphIndex}`,
+      role: roles[index],
+      summary: summarizeWechatParagraph(sourceParagraphs[Math.max(0, paragraphIndex)] ?? title),
+    })),
+  };
+}
+
+function normalizeWechatArticleTitle(value: string) {
+  return value
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/^(?:标题|文章标题)[：:]\s*/, "")
+    .replace(/[“”"《》]/g, "")
+    .trim()
+    .slice(0, 36);
+}
+
+function summarizeWechatParagraph(value: string) {
+  const normalized = value
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized.length <= 42) return normalized;
+  return `${normalized.slice(0, 41)}…`;
+}
+
+function recommendWechatImageStyle(article: string): WechatStyleRecommendation {
+  const text = article.toLowerCase();
+  if (/数据|比例|结构|步骤|清单|方法|逻辑|对比/.test(text)) {
+    return { value: "abstract", label: "几何抽象", reason: "文章偏知识拆解，几何画面更容易承接结构和观点。" };
+  }
+  if (/家庭|孩子|父母|陪伴|温暖|成长|生活/.test(text)) {
+    return { value: "warm-drawing", label: "温暖手绘", reason: "文章包含家庭与生活场景，手绘表达更亲和，也更适合正文阅读。" };
+  }
+  if (/城市|职场|创业|商业|房产|资产/.test(text)) {
+    return { value: "landscape", label: "城市风景", reason: "文章包含城市或商业议题，场景化画面更容易建立真实感。" };
+  }
+  if (/情绪|焦虑|选择|改变|故事|人生/.test(text)) {
+    return { value: "cinematic-light", label: "电影光影", reason: "文章偏故事和情绪推进，光影画面更适合承接转折。" };
+  }
+  return { value: "documentary", label: "自然纪实", reason: "适配大多数公众号正文，画面克制、真实，不会抢正文信息。" };
+}
+
 function supportsVoice(fieldId: string) {
   return fieldId === "source" || fieldId === "article" || fieldId === "signature" || fieldId === "theme" || fieldId === "offer" || fieldId === "audience" || fieldId === "resume" || fieldId === "followup_notes" || fieldId === "draft" || fieldId === "policy_info" || fieldId === "insured_overview" || fieldId === "concerns";
+}
+
+function getAppExperienceCopy(appSlug: string, entry: string) {
+  if (entry === "voice-note-copy") return { input: "完整录音逐字稿或会议纪要", output: "清晰观点、金句和多平台内容" };
+  if (entry === "recruit-script") return { input: "候选人简历与团队优势", output: "面谈流程、问题清单和跟进话术" };
+  if (entry === "recruit-followup") return { input: "完整面谈记录或沟通纪要", output: "候选人判断、跟进计划和沟通内容" };
+  if (entry === "personality-card") return { input: "个人介绍、目标客户和清晰形象照", output: "可展示和传播的个人名片" };
+  const copy: Record<string, { input: string; output: string }> = {
+    "write-copy": { input: "一份有事实和观点的真实素材", output: "口播、小红书、公众号和朋友圈版本" },
+    "image-card": { input: "文章、口播稿或清晰主题", output: "按指定风格和比例生成知识卡片" },
+    "policy-renewal-card": { input: "已核对的客户称呼、续保日期、保费与顾问信息", output: "两套可直接发送的续保提醒图片与微信文案" },
+    "lead-copy": { input: "客户问题、个人观点或参考内容", output: "适合引流承接的多平台文案" },
+    "traffic-copy": { input: "热点事实、出处和你的判断", output: "有钩子、有逻辑的传播型内容" },
+    "marketing-copy": { input: "客户画像、产品规则和真实案例", output: "四个营销角度的可信内容" },
+    "lead-package": { input: "具体主题、目标人群和领取福利", output: "资料正文、目录和领取发布话术" },
+    "topic-picker": { input: "你的定位；也可补充近期方向", output: "兼顾触达、信任和转化的 6 个选题" },
+    "ip-positioning": { input: "账号现状、目标客户和业务优势", output: "定位主张、账号标签和内容主线" },
+    breakthrough: { input: "当前卡点、已做动作和期望结果", output: "问题判断、优先动作和复盘指标" },
+    "team-recruit": { input: "团队优势和明确的招募对象", output: "招募文案、海报标题和私信话术" },
+    "live-script": { input: "直播主题、观众问题和可核验材料", output: "从开场到收尾的完整直播脚本" },
+    "general-content": { input: "一份完整观点或分享素材", output: "口播稿和公众号文章" },
+    "wechat-images": { input: "结构完整的公众号文章", output: "适配文章节奏的多张配图" },
+    "video-script-polish": { input: "准备发布的完整口播原稿", output: "问题诊断、修改建议和精修稿" },
+    letter: { input: "人物关系、真实背景和想表达的情绪", output: "适合重要节点发布的一封信" },
+    "xiaohongshu-check": { input: "准备发布的小红书完整文案", output: "风险定位、原因和替换表达" },
+    "policy-diagnosis": { input: "家庭情况与每份保单的关键数据", output: "保障缺口、重复责任和待确认事项" },
+    "wechat-article-polish": { input: "准备发布的完整公众号原稿", output: "标题建议、结构诊断和精修文章" },
+  };
+  return copy[appSlug] ?? { input: "完成页面中的必填信息", output: "一份可继续编辑和保存的作品" };
 }
 
 function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, entry?: string) {
@@ -1022,6 +1351,9 @@ function renderField({
   uploadError,
   uploading,
   onFileChange,
+  styleOptionLimit,
+  styleRecommendation,
+  onShowAllStyles,
 }: {
   field: CreationApp["fields"][number];
   value: FieldValue;
@@ -1035,6 +1367,9 @@ function renderField({
   uploadError: string;
   uploading: boolean;
   onFileChange: (fileList: FileList | null) => void;
+  styleOptionLimit?: number;
+  styleRecommendation?: WechatStyleRecommendation;
+  onShowAllStyles?: () => void;
 }) {
   if (field.type === "textarea") {
     if ((isImageCard || field.id === "article") && field.id === "source") {
@@ -1072,9 +1407,10 @@ function renderField({
     return (
       <textarea
         className="creationTextarea el-textarea__inner"
+        maxLength={field.maxLength}
         onChange={(event) => onChange(event.target.value)}
         placeholder={field.placeholder}
-        rows={field.id === "signature" ? 4 : field.id === "article" ? 6 : field.id === "draft" ? 4 : 8}
+        rows={field.id === "signature" ? 4 : field.id === "contact_text" ? 3 : field.id === "article" ? 6 : field.id === "draft" ? 4 : 8}
         value={typeof value === "string" ? value : ""}
       />
     );
@@ -1122,7 +1458,7 @@ function renderField({
             ) : null}
             {uploadError ? <span className="imageCardUploadError">{uploadError}</span> : null}
             </div>
-          <div className="field-tip">{field.uploadHint ?? "上传资料（文件暂只支持.txt, .docx, .pdf, .md，大小不超过10MB）"}</div>
+          {!field.helper ? <div className="field-tip">{field.uploadHint ?? "可上传 TXT、DOCX、PDF 或 Markdown 文件，单个文件不超过 10MB。"}</div> : null}
         </div>
       </div>
     );
@@ -1154,23 +1490,45 @@ function renderField({
 
   if (field.type === "radio") {
     if ((isImageCard || field.id === "style") && field.id === "style") {
+      const styleOptions = field.options ?? [];
+      const selectedStyle = styleOptions.find((option) => option.value === value);
+      const initialStyleOptions = typeof styleOptionLimit === "number" ? styleOptions.slice(0, styleOptionLimit) : styleOptions;
+      const visibleStyleOptions = styleOptionLimit && selectedStyle && !initialStyleOptions.some((option) => option.value === selectedStyle.value)
+        ? [...initialStyleOptions.slice(0, -1), selectedStyle]
+        : initialStyleOptions;
       return (
-        <div className="imageStyleGrid">
-          {(field.options ?? []).map((option) => {
-            const active = value === option.value;
-            return (
-              <button
-                className={active ? "imageStyleCard active" : "imageStyleCard"}
-                key={option.value}
-                onClick={() => onChange(option.value)}
-                type="button"
-              >
-                {option.previewUrl ? <img alt={option.label} className="imageStylePreview" src={option.previewUrl} /> : <div className="imageStylePreview imageStylePreviewPlaceholder" />}
-                <span className="imageStyleLabel">{option.label}</span>
-                {active ? <span className="imageStyleSelected">✓</span> : null}
-              </button>
-            );
-          })}
+        <div className="imageStylePicker">
+          {styleRecommendation ? (
+            <div className="wechatStyleRecommendation">
+              <span>智能推荐</span>
+              <strong>{styleRecommendation.label}</strong>
+              <p>{styleRecommendation.reason}</p>
+            </div>
+          ) : null}
+          <div className="imageStyleGrid">
+            {visibleStyleOptions.map((option) => {
+              const active = value === option.value;
+              const recommended = styleRecommendation?.value === option.value;
+              return (
+                <button
+                  className={active ? "imageStyleCard active" : "imageStyleCard"}
+                  key={option.value}
+                  onClick={() => onChange(option.value)}
+                  type="button"
+                >
+                  {option.previewUrl ? <img alt={option.label} className="imageStylePreview" src={option.previewUrl} /> : <div className="imageStylePreview imageStylePreviewPlaceholder" />}
+                  <span className="imageStyleLabel">{option.label}</span>
+                  {recommended ? <span className="wechatStyleRecommended">推荐</span> : null}
+                  {active ? <span className="imageStyleSelected">✓</span> : null}
+                </button>
+              );
+            })}
+          </div>
+          {styleOptionLimit && styleOptions.length > visibleStyleOptions.length && onShowAllStyles ? (
+            <button className="wechatStylesMoreButton" onClick={onShowAllStyles} type="button">
+              查看全部 {styleOptions.length} 种风格
+            </button>
+          ) : null}
         </div>
       );
     }

@@ -1,5 +1,4 @@
-import { trySaveTopicSnapshots } from "@/lib/db/repositories";
-import { getHotTopics } from "@/lib/topics/hot-topics";
+import { refreshTopicCache } from "@/lib/topics/cache-refresh";
 
 export async function POST(request: Request) {
   const secret = process.env.TOPIC_REFRESH_SECRET;
@@ -15,12 +14,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const topics = await getHotTopics({ refresh: true });
-    await trySaveTopicSnapshots({ userId: null, topics });
+    const result = await refreshTopicCache({ force: true });
     return Response.json({
       ok: true,
       refreshedAt: new Date().toISOString(),
-      topicCount: topics.length,
+      ...result,
     });
   } catch (error) {
     return Response.json(

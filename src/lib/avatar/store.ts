@@ -6,9 +6,10 @@ import type {
   AvatarPrivacySettings,
   AvatarVersion,
 } from "@/lib/avatar/types";
+import { listAvatarVisualAssets } from "@/lib/avatar/visual-assets";
 
 export async function getAvatarWorkspace(userId: string) {
-  const [memories, sources, proposals, versions, privacy, usage] = await Promise.all([
+  const [memories, sources, proposals, versions, privacy, usage, photos] = await Promise.all([
     query<AvatarMemoryItem>(
       `select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, created_at, updated_at
        from avatar_memory_items where user_id = $1 and status <> 'archived' order by status desc, updated_at desc limit 200`,
@@ -30,7 +31,7 @@ export async function getAvatarWorkspace(userId: string) {
       [userId],
     ),
     query<AvatarPrivacySettings>(
-      `select learning_enabled, behavior_learning_enabled, customer_memory_enabled, auto_inference_enabled
+      `select learning_enabled, behavior_learning_enabled, customer_memory_enabled, auto_inference_enabled, visual_creation_enabled
        from avatar_privacy_settings where user_id = $1`,
       [userId],
     ),
@@ -38,6 +39,7 @@ export async function getAvatarWorkspace(userId: string) {
       `select count(*)::text as usage_count, max(created_at)::text as last_used_at from avatar_usage_logs where user_id = $1`,
       [userId],
     ),
+    listAvatarVisualAssets(userId),
   ]);
 
   return {
@@ -50,7 +52,9 @@ export async function getAvatarWorkspace(userId: string) {
       behavior_learning_enabled: true,
       customer_memory_enabled: false,
       auto_inference_enabled: true,
+      visual_creation_enabled: true,
     },
+    photos,
     usage: {
       count: Number(usage.rows[0]?.usage_count ?? 0),
       lastUsedAt: usage.rows[0]?.last_used_at ?? null,

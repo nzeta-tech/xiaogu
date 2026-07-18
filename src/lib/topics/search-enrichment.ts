@@ -47,21 +47,25 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
     .filter((result) => result.title && result.url && isProfessionalInsuranceResult(result.title, result.url));
 
   const seen = new Set<string>();
-  const topics: HotTopic[] = [];
+  const candidates: Array<{ result: TavilyResult; title: string }> = [];
   for (const result of results) {
     if (!result.title || !result.url) continue;
     const title = normalizeTitle(result.title);
     if (!title || seen.has(title)) continue;
     seen.add(title);
+    candidates.push({ result, title });
+    if (candidates.length >= 12) break;
+  }
 
+  return Promise.all(candidates.map(async ({ result, title }, index): Promise<HotTopic> => {
     const readerText = await readUrl(result.url ?? "");
     const evidence = summarizeEvidence(readerText || result.content || title);
-    topics.push({
+    return {
       id: `search-${encodeURIComponent(title).slice(0, 48)}`,
       title,
       summary: evidence || result.content || "来自实时搜索结果，建议发布前再次核验来源。",
       source: "实时搜索 · Tavily/Jina",
-      heat: topics.length < 3 ? "高" : "中",
+      heat: index < 3 ? "高" : "中",
       category: inferSearchCategory(title),
       insuranceRelevance: inferSearchRelevance(title),
       recommendedAngle: buildSearchAngle(title),
@@ -70,11 +74,8 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
       sourceTitle: result.title,
       sourcePublishedAt: result.published_date,
       evidence,
-    });
-    if (topics.length >= 12) break;
-  }
-
-  return topics;
+    };
+  }));
 }
 
 async function enrichTopic(topic: HotTopic, tavilyKey: string, options: { refresh?: boolean }) {
@@ -125,6 +126,7 @@ async function tavilySearch(query: string, tavilyKey: string, options: { refresh
       include_raw_content: false,
       days: 30,
     }),
+    signal: AbortSignal.timeout(Number(process.env.TOPIC_SEARCH_TIMEOUT_MS ?? 8000)),
   });
 
   if (!response.ok) return [];

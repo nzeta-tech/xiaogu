@@ -1,6 +1,6 @@
 import { generateImageSet } from "@/lib/agent/image-generator";
 import { runInsuranceContentAgent, streamInsuranceContentAgent } from "@/lib/agent/insurance-agent";
-import { getCreationAppBySlug, type CreationField } from "@/lib/apps/catalog";
+import { type CreationField } from "@/lib/apps/catalog";
 import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
 import { reportUsage } from "@/lib/billing/openmeter";
 import { checkCompliance } from "@/lib/compliance/check";
@@ -8,10 +8,11 @@ import {
   buildCreationOutputJson,
   isEmptyCreationFieldValue,
   stringifyCreationFieldValue,
-  summarizeTitle,
   type CreationFieldValue,
 } from "@/lib/creation/output";
+import { buildWorkTitle } from "@/lib/creation/work-title";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
+import { renderPolicyRenewalCards } from "@/lib/creation/policy-renewal-card";
 import {
   buildLeadCopyPrompt,
   getMultiChannelCopyStyleMode,
@@ -29,6 +30,7 @@ import {
   tryUpdateWorkContent,
 } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
+import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 
 type FieldValue = CreationFieldValue;
 
@@ -59,7 +61,7 @@ export async function executeCreationAppRun(input: {
   }) => void | Promise<void>;
 }) {
   await trySyncCreationCatalog();
-  const app = (await tryGetCreationAppBySlug(input.slug)) ?? getCreationAppBySlug(input.slug);
+  const app = await tryGetCreationAppBySlug(input.slug);
   if (!app) {
     throw new Error("应用不存在");
   }
@@ -72,14 +74,25 @@ export async function executeCreationAppRun(input: {
   }
 
   const values = input.values ?? {};
+  const isPolicyRenewalCard = app.slug === "policy-renewal-card";
   const missingField = effectiveApp.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
   if (missingField) {
     throw new Error(`${missingField.label}还没有填写。`);
   }
+  if (isPolicyRenewalCard && stringifyCreationFieldValue(values.confirmation) !== "confirmed") {
+    throw new Error("请先确认已经核对日期、金额、币种和保单号。");
+  }
+  const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
+  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+  if (needsAvatarPhoto && visualAssetIds.length === 0 && isEmptyCreationFieldValue(values.reference_image)) {
+    throw new Error("请选择数字分身形象照，或临时上传一张形象照。");
+  }
 
   const caseContext = buildCreationPromptContext(app, entry);
 
-  const prompt = app.slug === "write-copy"
+  const prompt = isPolicyRenewalCard
+    ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
+    : app.slug === "write-copy"
     ? buildWriteCopyPrompt(values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
     : isMultiChannelCopyAppSlug(app.slug)
       ? buildLeadCopyPrompt(effectiveApp.fields, values, effectiveApp.promptHint, caseContext, getMultiChannelCopyVariant(app.slug))
@@ -101,7 +114,9 @@ export async function executeCreationAppRun(input: {
           ].filter(Boolean).join("\n\n")
         : `${effectiveApp.name}\n${caseContext.join("\n")}${caseContext.length > 0 ? "\n" : ""}${effectiveApp.promptHint}\n${effectiveApp.fields.map((field) => `${field.label}：${stringifyCreationFieldValue(values[field.id])}`).join("\n")}`;
   const imagePrompt = effectiveApp.resultType === "image" || effectiveApp.resultType === "image-plan"
-    ? buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint)
+    ? isPolicyRenewalCard
+      ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
+      : buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint)
     : null;
   const resolvedPrompt = imagePrompt ?? prompt;
 
@@ -119,7 +134,11 @@ export async function executeCreationAppRun(input: {
         inputPayload: values,
         resolvedPrompt,
         quotaCost: input.quotaCost,
-        model: process.env.MODEL_NAME ?? "configured-model",
+        model: isPolicyRenewalCard
+          ? "local-sharp-template"
+          : effectiveApp.resultType === "image"
+          ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1"
+          : process.env.MODEL_NAME ?? "configured-model",
       });
 
   if (!input.existingRunId && input.workId && run?.id) {
@@ -140,14 +159,24 @@ export async function executeCreationAppRun(input: {
 
   try {
     if (effectiveApp.resultType === "image" || effectiveApp.resultType === "image-plan") {
+      const visualReferences = await resolveAvatarVisualReferences({
+        userId: input.userId,
+        assetIds: visualAssetIds,
+        appSlug: entry === "personality-card" ? "personality-card" : app.slug,
+      });
+      if (needsAvatarPhoto && visualAssetIds.length > 0 && visualReferences.length === 0) {
+        throw new Error("数字分身形象照当前不可用，请检查隐私设置、照片状态和使用范围。");
+      }
       const imageResult =
         effectiveApp.resultType === "image"
-          ? await generateImageSet({
+          ? isPolicyRenewalCard
+            ? await renderPolicyRenewalCards({ ...values, reference_image: visualReferences[0]?.dataUrl ?? values.reference_image })
+            : await generateImageSet({
               prompt: imagePrompt ?? "",
               style: stringifyCreationFieldValue(values.style) || app.name,
               ratio: stringifyCreationFieldValue(values.ratio) || (app.slug === "wechat-images" ? "3:4" : "1:1"),
               count: app.slug === "wechat-images" ? 4 : 1,
-              referenceImages: extractReferenceImages(values),
+              referenceImages: [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
             })
           : null;
 
@@ -160,6 +189,7 @@ export async function executeCreationAppRun(input: {
         images: imageResult?.images ?? [],
         imageMode: imageResult?.mode ?? null,
         retryable: imageResult?.retryable ?? false,
+        avatarVisualAssetIds: visualReferences.map((item) => item.id),
       };
 
       await input.onEvent?.({ type: "delta", content: result });
@@ -218,19 +248,37 @@ export async function executeCreationAppRun(input: {
     throw new Error("本次生成没有返回有效内容，请稍后重试。");
   }
 
-  const titleFields = isMultiChannelCopyAppSlug(app.slug) ? ["source"] : effectiveApp.fields.map((field) => field.id);
-  const title = `${effectiveApp.name}｜${summarizeTitle(values, titleFields)}`;
+  const title = buildWorkTitle({
+    appName: effectiveApp.name,
+    appSlug: app.slug,
+    values,
+    result: effectiveApp.resultType === "text" ? result : null,
+  });
   const contentJson =
     (resultJson?.contentJson as Record<string, unknown> | undefined) ??
     buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []);
   const complianceRisk = checkCompliance(result).riskLevel;
 
-  await tryCompleteAppRun({
+  const completedRun = await tryCompleteAppRun({
     runId: run?.id ?? null,
     status: "succeeded",
     resultText: result,
     resultJson,
   });
+
+  // Another worker may have completed the same recovered run first. In that
+  // case its persisted result and usage record are authoritative.
+  if (run?.id && !completedRun) {
+    await input.onEvent?.({
+      type: "done",
+      work: input.workId ? { id: input.workId, title } : null,
+      content: result,
+      images: Array.isArray(resultJson?.images) ? resultJson.images as Array<{ id: string; url: string }> : [],
+      imageMode: typeof resultJson?.imageMode === "string" ? resultJson.imageMode : null,
+      retryable: Boolean(resultJson?.retryable),
+    });
+    return { runId: run.id, work: null, result, resultJson, title };
+  }
 
   const work = input.workId
     ? await tryUpdateWorkContent({
@@ -260,7 +308,11 @@ export async function executeCreationAppRun(input: {
     userId: input.userId,
     actionType: "creation_app_run",
     quotaCost: input.quotaCost,
-    model: process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard
+      ? "local-sharp-template"
+      : effectiveApp.resultType === "image"
+      ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1"
+      : process.env.MODEL_NAME ?? "configured-model",
     metadata: {
       appId: app.id,
       appSlug: app.slug,
@@ -269,6 +321,17 @@ export async function executeCreationAppRun(input: {
       workId: work?.id ?? input.workId ?? null,
       appRunId: run?.id ?? null,
     },
+  });
+
+  const usedVisualAssetIds = Array.isArray(resultJson?.avatarVisualAssetIds)
+    ? resultJson.avatarVisualAssetIds.filter((item): item is string => typeof item === "string")
+    : [];
+  await logAvatarVisualUsage({
+    userId: input.userId,
+    assetIds: usedVisualAssetIds,
+    workId: work?.id ?? input.workId ?? null,
+    appRunId: run?.id ?? null,
+    contextType: entry === "personality-card" ? "personality-card" : app.slug,
   });
 
   await input.onEvent?.({

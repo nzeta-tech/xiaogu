@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiPath } from "@/lib/client/url";
+import { apiPath, appPath } from "@/lib/client/url";
 
 export function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    const loginPath = () => {
+      const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      return appPath(`/login?next=${encodeURIComponent(next)}`);
+    };
+
     async function check() {
       try {
         const response = await fetch(apiPath("/api/auth/me"));
@@ -23,11 +28,11 @@ export function AuthGuard({ children, requireAdmin = false }: { children: React.
           return;
         }
       } catch {
-        router.replace("/login");
+        router.replace(loginPath());
         return;
       }
 
-      router.replace("/login");
+      router.replace(loginPath());
     }
 
     void check();

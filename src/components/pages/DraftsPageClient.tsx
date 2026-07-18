@@ -1,20 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiPath, appPath } from "@/lib/client/url";
 
-type WorksPayload = {
-  works: {
-    totals: {
-      all: number;
-      favorite: number;
-      used: number;
-      unused: number;
-      noted: number;
-    };
-    items: DraftItem[];
-  };
-};
+type StatusFilter = "all" | "favorite" | "published" | "unpublished" | "noted" | "avatar";
+type SortMode = "updated-desc" | "updated-asc" | "created-desc";
+type ViewMode = "list" | "grid";
+type LoadState = "loading" | "ready" | "error";
 
 type DraftItem = {
   id: string;
@@ -22,239 +15,401 @@ type DraftItem = {
   content: string;
   platform: string;
   status: string;
+  complianceRisk?: string;
+  createdAt?: string;
   updatedAt?: string;
   note?: string;
   isFavorite?: boolean;
   isUsed?: boolean;
+  quotaCost?: number;
+  imageUrl?: string;
+  usesAvatarVisual?: boolean;
 };
 
-type StatusFilter = "all" | "favorite" | "used" | "unused" | "noted";
-type AppFilter = "all" | "write-copy" | "image-card";
-type LoadState = "loading" | "ready" | "error";
-type CalendarDay = {
-  date: string;
-  day: number;
-  count: number;
-};
-type CalendarMonth = {
-  key: string;
-  label: string;
-  offset: number;
-  days: CalendarDay[];
+type WorksData = {
+  totals: { all: number; favorite: number; used: number; unused: number; noted: number; avatar: number };
+  pagination: { page: number; pageSize: number; total: number; hasMore: boolean };
+  platforms: Array<{ platform: string; count: number }>;
+  activity: Array<{ date: string; count: number }>;
+  items: DraftItem[];
 };
 
-const weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"];
+type WorksPayload = { works: WorksData };
 
-const appTabs: Array<{ value: AppFilter; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "write-copy", label: "写文案" },
-  { value: "image-card", label: "做图" },
+const statusOptions: Array<{ value: StatusFilter; label: string; totalKey?: keyof WorksData["totals"] }> = [
+  { value: "all", label: "全部", totalKey: "all" },
+  { value: "favorite", label: "已收藏", totalKey: "favorite" },
+  { value: "published", label: "已发布", totalKey: "used" },
+  { value: "unpublished", label: "待发布", totalKey: "unused" },
+  { value: "noted", label: "有备注", totalKey: "noted" },
+  { value: "avatar", label: "含本人形象", totalKey: "avatar" },
 ];
 
 export function DraftsPageClient() {
-  const [payload, setPayload] = useState<WorksPayload | null>(null);
+  const [data, setData] = useState<WorksData | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [appFilter, setAppFilter] = useState<AppFilter>("all");
+  const [platformFilter, setPlatformFilter] = useState("all");
+  const [sort, setSort] = useState<SortMode>("updated-desc");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [noteItem, setNoteItem] = useState<DraftItem | null>(null);
+  const [noteValue, setNoteValue] = useState("");
+  const [undoItem, setUndoItem] = useState<DraftItem | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadWorks() {
-      try {
-        const response = await fetch(apiPath("/api/creation/hub?view=works"), {
-          credentials: "include",
-          cache: "no-store",
-        });
-        const next = (await response.json()) as WorksPayload;
-        if (cancelled) return;
-        setPayload(response.ok ? next : null);
-        setLoadState(response.ok ? "ready" : "error");
-      } catch {
-        if (cancelled) return;
-        setPayload(null);
-        setLoadState("error");
-      }
-    }
-
-    void loadWorks();
-
-    return () => {
-      cancelled = true;
-    };
+    const frame = window.requestAnimationFrame(() => setIsMounted(true));
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const items = payload?.works.items ?? [];
-  const filteredItems = items.filter((item) => {
-    const matchesStatus =
-      statusFilter === "all" ? true
-        : statusFilter === "favorite" ? Boolean(item.isFavorite)
-          : statusFilter === "used" ? Boolean(item.isUsed)
-            : statusFilter === "unused" ? !item.isUsed
-              : Boolean(item.note?.trim());
-    const matchesApp = appFilter === "all" ? true : item.platform === appFilter;
-    return matchesStatus && matchesApp;
-  });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
-  const appCounts = {
-    all: items.length,
-    "write-copy": items.filter((item) => item.platform === "write-copy").length,
-    "image-card": items.filter((item) => item.platform === "image-card").length,
-  };
+  const loadWorks = useCallback(async (page: number, append = false) => {
+    if (append) setLoadingMore(true);
+    else setLoadState("loading");
+    setActionError("");
+    const params = new URLSearchParams({
+      view: "works",
+      page: String(page),
+      pageSize: "20",
+      state: statusFilter,
+      platform: platformFilter,
+      sort,
+    });
+    if (search) params.set("search", search);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
 
-  const statusTabs = payload ? [
-    { key: "all", label: "全部", value: payload.works.totals.all },
-    { key: "favorite", label: "收藏", value: payload.works.totals.favorite },
-    { key: "used", label: "已用", value: payload.works.totals.used },
-    { key: "unused", label: "未用", value: payload.works.totals.unused },
-    { key: "noted", label: "已备注", value: payload.works.totals.noted },
-  ] satisfies Array<{ key: StatusFilter; label: string; value: number }> : [];
+    try {
+      const response = await fetch(apiPath(`/api/creation/hub?${params.toString()}`), {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = await response.json() as WorksPayload & { error?: string };
+      if (!response.ok || !payload.works) throw new Error(payload.error || "作品数据暂不可用");
+      setData((current) => append && current
+        ? { ...payload.works, items: [...current.items, ...payload.works.items] }
+        : payload.works);
+      setSelectedIds(new Set());
+      setLoadState("ready");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "作品数据暂不可用");
+      if (!append) setLoadState("error");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [dateFrom, dateTo, platformFilter, search, sort, statusFilter]);
 
-  const lastSevenDaysCount = countRecentWorks(items, 7);
-  const calendarMonths = buildCalendarMonths(items, 3);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => void loadWorks(1));
+    return () => window.cancelAnimationFrame(frame);
+  }, [loadWorks]);
 
-  if (loadState === "loading") {
-    return <div className="pageStack"><section className="panel emptyState">正在加载作品页...</section></div>;
+  async function patchWork(item: DraftItem, body: Record<string, unknown>) {
+    setActionError("");
+    const response = await fetch(apiPath(`/api/works/${item.id}`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      setActionError(result.error ?? "作品更新失败");
+      return false;
+    }
+    setData((current) => {
+      if (!current) return current;
+      const existing = current.items.find((work) => work.id === item.id);
+      if (!existing) return current;
+      const nextItem = { ...existing, ...body };
+      return {
+        ...current,
+        totals: adjustTotals(current.totals, existing, nextItem),
+        items: current.items.map((work) => work.id === item.id ? nextItem : work),
+      };
+    });
+    return true;
   }
 
-  if (loadState === "error" || !payload) {
-    return <div className="pageStack"><section className="panel emptyState">作品数据暂不可用，请刷新后重试。</section></div>;
+  async function archiveWork(item: DraftItem) {
+    setOpenMenuId(null);
+    setActionError("");
+    const response = await fetch(apiPath(`/api/works/${item.id}`), { method: "DELETE" });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      setActionError(result.error ?? "作品归档失败");
+      return false;
+    }
+    setData((current) => current ? {
+      ...current,
+      totals: subtractItemFromTotals(current.totals, item),
+      platforms: current.platforms
+        .map((entry) => entry.platform === item.platform ? { ...entry, count: Math.max(0, entry.count - 1) } : entry)
+        .filter((entry) => entry.count > 0),
+      pagination: { ...current.pagination, total: Math.max(0, current.pagination.total - 1) },
+      items: current.items.filter((work) => work.id !== item.id),
+    } : current);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      next.delete(item.id);
+      return next;
+    });
+    setUndoItem(item);
+    return true;
   }
+
+  async function undoArchive() {
+    if (!undoItem) return;
+    const item = undoItem;
+    setUndoItem(null);
+    const restored = await patchWork(item, { status: item.isUsed ? "used" : "draft", isUsed: Boolean(item.isUsed) });
+    if (restored) await loadWorks(1);
+  }
+
+  function openNoteEditor(item: DraftItem) {
+    setOpenMenuId(null);
+    setNoteItem(item);
+    setNoteValue(item.note ?? "");
+  }
+
+  async function saveNote() {
+    if (!noteItem) return;
+    if (await patchWork(noteItem, { note: noteValue.trim() })) setNoteItem(null);
+  }
+
+  async function runBatch(action: "publish" | "unpublish" | "archive") {
+    if (!data || selectedIds.size === 0) return;
+    setBatchBusy(true);
+    const selected = data.items.filter((item) => selectedIds.has(item.id));
+    if (action === "archive") {
+      for (const item of selected) await archiveWork(item);
+    } else {
+      const isUsed = action === "publish";
+      await Promise.all(selected.map((item) => patchWork(item, { isUsed, status: isUsed ? "used" : "draft" })));
+    }
+    setSelectedIds(new Set());
+    setBatchBusy(false);
+    await loadWorks(1);
+  }
+
+  const recentCount = useMemo(() => countRecentActivity(data?.activity ?? [], 7), [data?.activity]);
+  const calendarMonths = useMemo(() => buildCalendarMonths(data?.activity ?? [], 3), [data?.activity]);
+  const allVisibleSelected = Boolean(data?.items.length) && data!.items.every((item) => selectedIds.has(item.id));
+
+  if (loadState === "loading" && !data) {
+    return <div className="creationHistoryPage"><div className="creationHistoryLoading">正在整理创作历史...</div></div>;
+  }
+
+  if (loadState === "error" || !data) {
+    return (
+      <div className="creationHistoryPage">
+        <div className="creationHistoryEmpty"><strong>暂时无法加载作品</strong><span>{actionError || "请稍后重试"}</span><button type="button" onClick={() => void loadWorks(1)}>重新加载</button></div>
+      </div>
+    );
+  }
+
+  const filterPanel = (
+    <div className={filtersOpen ? "creationHistoryFilterDrawer open" : "creationHistoryFilterDrawer"} onClick={(event) => event.stopPropagation()}>
+      <div className="creationHistoryDrawerHeader"><strong>筛选作品</strong><button type="button" aria-label="关闭筛选" onClick={() => setFiltersOpen(false)}>×</button></div>
+      <div className="creationHistoryStatusFilters">
+        {statusOptions.map((option) => (
+          <button className={statusFilter === option.value ? "active" : ""} key={option.value} type="button" onClick={() => setStatusFilter(option.value)}>
+            {option.label}<span>{option.totalKey ? data.totals[option.totalKey] : 0}</span>
+          </button>
+        ))}
+      </div>
+      <div className="creationHistoryAdvancedFilters">
+        <label><span>创作应用</span><select value={platformFilter} onChange={(event) => setPlatformFilter(event.target.value)}><option value="all">全部应用</option>{data.platforms.map((item) => <option value={item.platform} key={item.platform}>{formatPlatformLabel(item.platform)} ({item.count})</option>)}</select></label>
+        <label><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as SortMode)}><option value="updated-desc">最近更新</option><option value="updated-asc">最早更新</option><option value="created-desc">最近创建</option></select></label>
+        <label><span>开始日期</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
+        <label><span>结束日期</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+      </div>
+      <div className="creationHistoryDrawerFooter"><button type="button" onClick={() => { setPlatformFilter("all"); setStatusFilter("all"); setSort("updated-desc"); setDateFrom(""); setDateTo(""); }}>重置</button><button type="button" onClick={() => setFiltersOpen(false)}>查看结果</button></div>
+    </div>
+  );
 
   return (
-    <div className="pageStack creationWorksPageReset">
-      <div className="page-top-block creationWorksTopBlock">
-        <header className="creation-page-header creationWorksPageHeaderReset">
-          <p className="creation-page-subtitle">围绕获客增长的全场景 AI 内容创作应用</p>
-          <a className="creation-guide-link creationWorksGuideReset" href={appPath("/help")}>使用攻略</a>
-        </header>
-
-        <div className="works-entry-banner works-entry-banner--active creationWorksBannerReset">
-          <div className="works-entry-banner-left">
-            <div className="works-entry-banner-icon" aria-hidden="true">✦</div>
-            <div className="works-entry-banner-text-wrap">
-              <span className="works-entry-banner-title">我的作品</span>
-              <span className="works-entry-banner-desc">
-                {items.length > 0 ? `共 ${payload.works.totals.all} 篇创作记录` : "还没有创作记录"}
-              </span>
-            </div>
-          </div>
-          <a className="works-switch-to-apps creationWorksBannerActionReset" href={appPath("/workspace")}>浏览创作应用</a>
+    <div className="creationHistoryPage" onClick={() => openMenuId && setOpenMenuId(null)}>
+      <header className="creationHistoryHeader">
+        <div>
+          <h1>创作历史 <span>· {data.totals.all} 个作品</span></h1>
+          <p>集中查找、整理和发布你的创作内容</p>
         </div>
-      </div>
+        <a className="creationHistoryPrimary" href={appPath("/workspace")}><span aria-hidden="true">＋</span> 新建内容</a>
+      </header>
 
-      <div className="creationWorksContentReset">
-        <aside className="creationWorksAsideReset">
-          <section className="creation-stats-card creationWorksStatsCardReset">
-            <div className="card-header creationWorksStatsHeaderReset">
-              <div className="header-icon" aria-hidden="true">🏆</div>
-              <div className="header-text">
-                {lastSevenDaysCount > 0 ? (
-                  <p className="stats-text">最近7天创作 <span className="highlight-number">{lastSevenDaysCount}</span> 次</p>
-                ) : (
-                  <p className="stats-text-empty">最近7天还没有创作，赶快开始吧~</p>
-                )}
-              </div>
-            </div>
-
-            <div className="creation-calendar creationWorksCalendarReset">
-              {calendarMonths.map((month) => (
-                <section className="month-container creationWorksMonthReset" key={month.key}>
-                  <div className="month-title">{month.label}</div>
-                  <div className="weekday-labels">
-                    {weekdayLabels.map((day) => <span className="weekday-label" key={`${month.key}-${day}`}>{day}</span>)}
-                  </div>
-                  <div className="calendar-grid">
-                    {Array.from({ length: month.offset }).map((_, index) => (
-                      <div className="calendar-cell empty" key={`${month.key}-empty-${index}`} />
-                    ))}
-                    {month.days.map((day) => (
-                      <div className={`calendar-cell ${calendarLevelClass(day.count)}`} data-date={day.date} key={day.date} title={`${day.date} 创作了 ${day.count} 篇`}>
-                        <span>{day.day}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </section>
-        </aside>
-
-        <section className="creationWorksMainReset">
-          <div className="status-search-row creationWorksFiltersReset">
-            <div className="status-tabs-line">
-              <div className="status-filter-tabs creationWorksStatusTabsReset">
-                {statusTabs.map((tab) => (
-                  <button
-                    className={statusFilter === tab.key ? "status-tab active" : "status-tab"}
-                    key={tab.key}
-                    onClick={() => setStatusFilter(tab.key)}
-                    type="button"
-                  >
-                    <span>{tab.label}</span>
-                    <strong>{tab.value}</strong>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="app-filter-tags creationWorksAppTagsReset">
-              {appTabs.map((tab) => (
-                <button
-                  className={appFilter === tab.value ? "filter-tag active" : "filter-tag"}
-                  key={tab.value}
-                  onClick={() => setAppFilter(tab.value)}
-                  type="button"
-                >
-                  {tab.label} ({appCounts[tab.value]})
-                </button>
-              ))}
-            </div>
+      <section className="creationHistoryToolbar" aria-label="作品筛选">
+        <div className="creationHistorySearchRow">
+          <label className="creationHistorySearch">
+            <span aria-hidden="true">⌕</span>
+            <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="搜索标题、正文或备注" aria-label="搜索作品" />
+            {searchInput ? <button type="button" aria-label="清空搜索" title="清空搜索" onClick={() => setSearchInput("")}>×</button> : null}
+          </label>
+          <button className="creationHistoryFilterButton" type="button" onClick={() => setFiltersOpen(true)}><span aria-hidden="true">☷</span> 筛选</button>
+          <div className="creationHistoryViewSwitch" aria-label="视图方式">
+            <button className={viewMode === "list" ? "active" : ""} type="button" title="列表视图" aria-label="列表视图" onClick={() => setViewMode("list")}>☰</button>
+            <button className={viewMode === "grid" ? "active" : ""} type="button" title="网格视图" aria-label="网格视图" onClick={() => setViewMode("grid")}>▦</button>
           </div>
+        </div>
+      </section>
 
-          {filteredItems.length === 0 ? (
-            <div className="empty-state creationWorksEmptyReset">当前筛选下还没有作品，先去创作一条吧。</div>
-          ) : (
-            <div className="instances-container creationWorksInstancesReset">
-              {filteredItems.map((item) => (
-                <a className="instance-card creationWorksInstanceCardReset" href={appPath(`/works/${item.id}?from=creation-works&entry=${item.platform}`)} key={item.id}>
-                  <div className="instance-main">
-                    <div className="instance-row-1">
-                      <div className={`status-badge status-${normalizeStatus(item.status)}`}>
-                        <span className="status-text">{formatStatusLabel(item.status)}</span>
-                      </div>
-                      <div className="instance-title">{formatWorkTitle(item)}</div>
-                    </div>
+      {filtersOpen && isMounted ? createPortal(<>{filterPanel}<button className="creationHistoryDrawerBackdrop" type="button" aria-label="关闭筛选" onClick={() => setFiltersOpen(false)} /></>, document.body) : filterPanel}
 
-                    {item.note?.trim() ? (
-                      <div className="instance-remark">
-                        <span className="remark-text">{item.note.trim()}</span>
-                      </div>
-                    ) : null}
+      <details className="creationHistoryStats" open={statsOpen} onToggle={(event) => setStatsOpen(event.currentTarget.open)}>
+        <summary><span><strong>创作统计</strong> 最近 7 天创作 {recentCount} 次</span><span aria-hidden="true">⌄</span></summary>
+        <div className="creationHistoryCalendar">
+          {calendarMonths.map((month) => <CalendarMonthView key={month.key} month={month} />)}
+        </div>
+      </details>
 
-                    <p className="creationWorksInstancePreviewReset">{buildWorkPreview(item)}</p>
+      {actionError ? <div className="creationHistoryAlert">{actionError}</div> : null}
 
-                    <div className="instance-row-2 creationWorksInstanceMetaReset">
-                      <div className="meta-item">{formatDate(item.updatedAt)}</div>
-                      <div className="meta-item app-icon">{platformEmoji(item.platform)} {formatPlatformLabel(item.platform)}</div>
-                      <div className="meta-item credit-item">{platformPoints(item.platform)}</div>
-                      {item.isFavorite ? <div className="meta-item">收藏</div> : null}
-                      {item.isUsed ? <div className="meta-item">已用</div> : null}
-                    </div>
-                  </div>
-                </a>
-              ))}
-            </div>
-          )}
-        </section>
+      <div className="creationHistoryListBar">
+        <label><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? new Set() : new Set(data.items.map((item) => item.id)))} /> 选择本页</label>
+        <span>找到 {data.pagination.total} 个作品</span>
       </div>
+
+      {selectedIds.size > 0 ? (
+        <div className="creationHistoryBatchBar">
+          <strong>已选 {selectedIds.size} 项</strong>
+          <button type="button" disabled={batchBusy} onClick={() => void runBatch("publish")}>标为已发布</button>
+          <button type="button" disabled={batchBusy} onClick={() => void runBatch("unpublish")}>标为待发布</button>
+          <button className="danger" type="button" disabled={batchBusy} onClick={() => void runBatch("archive")}>归档</button>
+          <button type="button" aria-label="取消选择" title="取消选择" onClick={() => setSelectedIds(new Set())}>×</button>
+        </div>
+      ) : null}
+
+      {data.items.length === 0 ? (
+        <div className="creationHistoryEmpty"><strong>没有找到匹配的作品</strong><span>调整搜索或筛选条件后再试试</span><button type="button" onClick={() => { setSearchInput(""); setStatusFilter("all"); setPlatformFilter("all"); setDateFrom(""); setDateTo(""); }}>清除筛选</button></div>
+      ) : (
+        <div className={`creationHistoryItems ${viewMode}`}>
+          {data.items.map((item) => (
+            <WorkCard
+              item={item}
+              key={item.id}
+              selected={selectedIds.has(item.id)}
+              menuOpen={openMenuId === item.id}
+              onSelect={() => setSelectedIds((current) => toggleSetValue(current, item.id))}
+              onFavorite={() => void patchWork(item, { isFavorite: !item.isFavorite })}
+              onMenu={() => setOpenMenuId(openMenuId === item.id ? null : item.id)}
+              onNote={() => openNoteEditor(item)}
+              onPublish={() => { setOpenMenuId(null); void patchWork(item, { isUsed: !item.isUsed, status: item.isUsed ? "draft" : "used" }); }}
+              onArchive={() => void archiveWork(item)}
+            />
+          ))}
+        </div>
+      )}
+
+      {data.pagination.hasMore ? <button className="creationHistoryLoadMore" type="button" disabled={loadingMore} onClick={() => void loadWorks(data.pagination.page + 1, true)}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
+
+      {noteItem ? (
+        <div className="creationHistoryModalBackdrop" role="presentation" onMouseDown={() => setNoteItem(null)}>
+          <section className="creationHistoryNoteModal" role="dialog" aria-modal="true" aria-labelledby="note-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><div><strong id="note-dialog-title">作品备注</strong><span>{formatWorkTitle(noteItem)}</span></div><button type="button" aria-label="关闭" onClick={() => setNoteItem(null)}>×</button></header>
+            <textarea autoFocus maxLength={500} value={noteValue} onChange={(event) => setNoteValue(event.target.value)} placeholder="记录发布渠道、修改建议或后续计划..." />
+            <footer><span>{noteValue.length}/500</span><button type="button" onClick={() => setNoteItem(null)}>取消</button><button className="primary" type="button" onClick={() => void saveNote()}>保存备注</button></footer>
+          </section>
+        </div>
+      ) : null}
+
+      {undoItem ? <div className="creationHistoryToast" role="status"><span>作品已归档</span><button type="button" onClick={() => void undoArchive()}>撤销</button><button type="button" aria-label="关闭提示" onClick={() => setUndoItem(null)}>×</button></div> : null}
     </div>
   );
 }
 
+function WorkCard(props: {
+  item: DraftItem;
+  selected: boolean;
+  menuOpen: boolean;
+  onSelect: () => void;
+  onFavorite: () => void;
+  onMenu: () => void;
+  onNote: () => void;
+  onPublish: () => void;
+  onArchive: () => void;
+}) {
+  const { item } = props;
+  const href = appPath(`/works/${item.id}?from=creation-works&entry=${item.platform}`);
+  const openItem = (event: React.MouseEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest("a,button,input")) return;
+    window.location.href = href;
+  };
+  return (
+    <article className={props.selected ? "creationHistoryItem selected" : "creationHistoryItem"} onClick={openItem}>
+      <div className="creationHistorySelect"><input type="checkbox" checked={props.selected} onChange={props.onSelect} aria-label={`选择 ${formatWorkTitle(item)}`} /></div>
+      <div className={item.imageUrl ? "creationHistoryThumb image" : "creationHistoryThumb"}>
+        {item.imageUrl ? <span className="creationHistoryThumbImage" style={{ backgroundImage: `url(${JSON.stringify(item.imageUrl).slice(1, -1)})` }} aria-hidden="true" /> : <span aria-hidden="true">{platformSymbol(item.platform)}</span>}
+      </div>
+      <div className="creationHistoryItemBody">
+        <div className="creationHistoryItemTitleRow"><a href={href}>{formatWorkTitle(item)}</a><span className={item.isUsed ? "published" : "pending"}>{item.isUsed ? "已发布" : "待发布"}</span></div>
+        <div className="creationHistoryItemMeta"><span>{formatPlatformLabel(item.platform)}</span><span>{formatRelativeDate(item.updatedAt)}</span>{item.quotaCost ? <span>{item.quotaCost} 积分</span> : null}</div>
+        <p>{buildWorkPreview(item)}</p>
+        <div className="creationHistoryItemTags">
+          {item.usesAvatarVisual ? <span>本人形象</span> : null}
+          {formatRisk(item.complianceRisk) ? <span className={`risk ${normalizeRisk(item.complianceRisk)}`}>{formatRisk(item.complianceRisk)}</span> : null}
+          {item.note?.trim() ? <button type="button" onClick={props.onNote}>备注：{item.note.trim()}</button> : null}
+        </div>
+      </div>
+      <div className="creationHistoryItemActions">
+        <button className={item.isFavorite ? "favorite active" : "favorite"} type="button" aria-label={item.isFavorite ? "取消收藏" : "收藏"} title={item.isFavorite ? "取消收藏" : "收藏"} onClick={props.onFavorite}>{item.isFavorite ? "★" : "☆"}</button>
+        <div className="creationHistoryMore">
+          <button type="button" aria-label="更多操作" title="更多操作" onClick={(event) => { event.stopPropagation(); props.onMenu(); }}>⋯</button>
+          {props.menuOpen ? <div className="creationHistoryMoreMenu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={props.onNote}>编辑备注</button><button type="button" onClick={props.onPublish}>{item.isUsed ? "标为待发布" : "标为已发布"}</button><button className="danger" type="button" onClick={props.onArchive}>归档作品</button></div> : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+type CalendarMonth = { key: string; label: string; offset: number; days: Array<{ date: string; day: number; count: number }> };
+
+function CalendarMonthView({ month }: { month: CalendarMonth }) {
+  return <section><strong>{month.label}</strong><div className="weekdays">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}</div><div className="days">{Array.from({ length: month.offset }).map((_, index) => <i key={`empty-${index}`} />)}{month.days.map((day) => <i className={`level-${Math.min(3, day.count)}`} title={`${day.date} 创作 ${day.count} 次`} key={day.date}>{day.day}</i>)}</div></section>;
+}
+
+function toggleSetValue(current: Set<string>, value: string) {
+  const next = new Set(current);
+  if (next.has(value)) next.delete(value); else next.add(value);
+  return next;
+}
+
+function adjustTotals(totals: WorksData["totals"], before: DraftItem, after: DraftItem) {
+  return {
+    ...totals,
+    favorite: totals.favorite + Number(Boolean(after.isFavorite)) - Number(Boolean(before.isFavorite)),
+    used: totals.used + Number(Boolean(after.isUsed)) - Number(Boolean(before.isUsed)),
+    unused: totals.unused + Number(!after.isUsed) - Number(!before.isUsed),
+    noted: totals.noted + Number(Boolean(after.note?.trim())) - Number(Boolean(before.note?.trim())),
+  };
+}
+
+function subtractItemFromTotals(totals: WorksData["totals"], item: DraftItem) {
+  return {
+    all: Math.max(0, totals.all - 1),
+    favorite: Math.max(0, totals.favorite - Number(Boolean(item.isFavorite))),
+    used: Math.max(0, totals.used - Number(Boolean(item.isUsed))),
+    unused: Math.max(0, totals.unused - Number(!item.isUsed)),
+    noted: Math.max(0, totals.noted - Number(Boolean(item.note?.trim()))),
+    avatar: Math.max(0, totals.avatar - Number(Boolean(item.usesAvatarVisual))),
+  };
+}
+
 function buildWorkPreview(item: DraftItem) {
-  const compact = item.content.replace(/\s+/g, " ").trim();
-  return compact.slice(0, 120) || "这条作品暂时还没有可展示内容。";
+  return item.content.replace(/[#*_>`~\[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180) || "这条作品暂时还没有可展示内容。";
 }
 
 function formatWorkTitle(item: DraftItem) {
@@ -262,148 +417,70 @@ function formatWorkTitle(item: DraftItem) {
 }
 
 function formatPlatformLabel(platform: string) {
-  if (platform === "write-copy") return "写文案";
-  if (platform === "image-card") return "做图";
-  if (platform === "lead-copy") return "写引流文案";
-  if (platform === "traffic-copy") return "流量文案";
-  if (platform === "marketing-copy") return "营销文案";
-  if (platform === "video-script-polish") return "口播文案精修";
-  if (platform === "wechat-article-polish") return "公众号文章精修";
-  return platform;
-}
-
-function platformEmoji(platform: string) {
-  if (platform === "write-copy") return "🎨";
-  if (platform === "image-card") return "🪄";
-  if (platform === "lead-copy") return "🌱";
-  if (platform === "traffic-copy") return "⚡";
-  if (platform === "marketing-copy") return "📣";
-  if (platform === "video-script-polish") return "🔮";
-  if (platform === "wechat-article-polish") return "🖊️";
-  return "📝";
-}
-
-function platformPoints(platform: string) {
-  if (platform === "write-copy" || platform === "image-card" || platform === "lead-copy" || platform === "traffic-copy" || platform === "marketing-copy" || platform === "video-script-polish" || platform === "wechat-article-polish") {
-    return "100 积分";
-  }
-  return "作品";
-}
-
-function formatStatusLabel(value?: string) {
-  if (value === "succeeded") return "已完成";
-  if (value === "published") return "已发布";
-  if (value === "draft") return "草稿";
-  return value || "作品";
-}
-
-function normalizeStatus(value?: string) {
-  if (value === "succeeded" || value === "published") return "completed";
-  if (value === "draft") return "pending";
-  return "pending";
-}
-
-function formatDate(value?: string) {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
-function countRecentWorks(items: DraftItem[], days: number) {
-  const todayParts = getShanghaiTodayParts();
-  const threshold = new Date(Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day));
-  threshold.setUTCDate(threshold.getUTCDate() - (days - 1));
-
-  return items.filter((item) => {
-    if (!item.updatedAt) return false;
-    const key = toShanghaiDateKey(new Date(item.updatedAt));
-    if (!key) return false;
-    return key >= toDateKey(threshold);
-  }).length;
-}
-
-function buildCalendarMonths(items: DraftItem[], monthCount: number): CalendarMonth[] {
-  const countsByDate = new Map<string, number>();
-  for (const item of items) {
-    if (!item.updatedAt) continue;
-    const key = toShanghaiDateKey(new Date(item.updatedAt));
-    if (!key) continue;
-    countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
-  }
-
-  const today = getShanghaiTodayParts();
-  const months: CalendarMonth[] = [];
-
-  for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
-    const current = new Date(Date.UTC(today.year, today.month - 1 - offset, 1));
-    const year = current.getUTCFullYear();
-    const month = current.getUTCMonth();
-    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-    const startDay = normalizeWeekday(new Date(Date.UTC(year, month, 1)).getUTCDay());
-
-    const days: CalendarDay[] = [];
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const date = new Date(Date.UTC(year, month, day));
-      const key = toDateKey(date);
-      days.push({ date: key, day, count: countsByDate.get(key) ?? 0 });
-    }
-
-    months.push({
-      key: `${year}-${month + 1}`,
-      label: `${month + 1}月`,
-      offset: startDay,
-      days,
-    });
-  }
-
-  return months;
-}
-
-function normalizeWeekday(day: number) {
-  return day === 0 ? 6 : day - 1;
-}
-
-function toDateKey(date: Date) {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
-}
-
-function toShanghaiDateKey(date: Date) {
-  if (Number.isNaN(date.getTime())) return null;
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return formatter.format(date);
-}
-
-function getShanghaiTodayParts() {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = formatter.formatToParts(new Date());
-  const map = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
+  const labels: Record<string, string> = {
+    "write-copy": "写文案", "image-card": "做图", "wechat-images": "公众号配图", "policy-renewal-card": "续保提醒卡", "lead-copy": "引流文案",
+    "traffic-copy": "流量文案", "marketing-copy": "营销文案", "video-script-polish": "口播精修",
+    "wechat-article-polish": "公众号精修", "topic-picker": "热点选题", "general-content": "通用创作",
+    "xiaohongshu-check": "小红书合规检测", letter: "信件创作",
   };
+  return labels[platform] || "其他创作";
 }
 
-function calendarLevelClass(count: number) {
-  if (count >= 3) return "level-3";
-  if (count === 2) return "level-2";
-  if (count === 1) return "level-1";
-  return "level-0";
+function platformSymbol(platform: string) {
+  if (platform === "policy-renewal-card") return "续";
+  if (platform.includes("image")) return "图";
+  if (platform.includes("check")) return "检";
+  if (platform.includes("topic")) return "题";
+  return "文";
+}
+
+function formatRelativeDate(value?: string) {
+  if (!value) return "时间未知";
+  const date = new Date(value);
+  const diff = Date.now() - date.getTime();
+  if (diff >= 0 && diff < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 60000))} 分钟前`;
+  if (diff >= 0 && diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)} 小时前`;
+  if (diff >= 0 && diff < 7 * 24 * 60 * 60 * 1000) return `${Math.floor(diff / 86400000)} 天前`;
+  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function normalizeRisk(value?: string) {
+  if (value === "high" || value === "blocked") return "high";
+  if (value === "medium" || value === "warning") return "medium";
+  return "low";
+}
+
+function formatRisk(value?: string) {
+  if (!value || value === "unchecked") return "";
+  if (value === "high" || value === "blocked") return "高风险";
+  if (value === "medium" || value === "warning") return "需复核";
+  if (value === "low" || value === "passed" || value === "safe") return "合规通过";
+  return "";
+}
+
+function countRecentActivity(activity: WorksData["activity"], days: number) {
+  const threshold = new Date();
+  threshold.setHours(0, 0, 0, 0);
+  threshold.setDate(threshold.getDate() - (days - 1));
+  return activity.filter((item) => new Date(`${item.date}T00:00:00+08:00`) >= threshold).reduce((total, item) => total + item.count, 0);
+}
+
+function buildCalendarMonths(activity: WorksData["activity"], monthCount: number): CalendarMonth[] {
+  const counts = new Map(activity.map((item) => [item.date, item.count]));
+  const now = new Date();
+  const months: CalendarMonth[] = [];
+  for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
+    const current = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const year = current.getFullYear();
+    const month = current.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const start = current.getDay() === 0 ? 6 : current.getDay() - 1;
+    const days = Array.from({ length: daysInMonth }, (_, index) => {
+      const day = index + 1;
+      const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      return { date, day, count: counts.get(date) ?? 0 };
+    });
+    months.push({ key: `${year}-${month}`, label: `${year} 年 ${month + 1} 月`, offset: start, days });
+  }
+  return months;
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryCreateFeedbackTicket, tryListUserFeedbackTickets } from "@/lib/db/repositories";
+import { tryCreateFeedbackTicket, tryGetSystemSettings, tryListUserFeedbackTickets } from "@/lib/db/repositories";
 
 const schema = z.object({
   title: z.string().trim().min(1).max(120),
@@ -12,6 +12,7 @@ const schema = z.object({
 export async function GET() {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
+  if (!(await tryGetSystemSettings()).features.feedbackEnabled) return Response.json({ error: "反馈功能当前已关闭" }, { status: 403 });
 
   const tickets = await tryListUserFeedbackTickets(user.id);
   return Response.json({ tickets, mode: "server" });
@@ -20,6 +21,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
+  if (!(await tryGetSystemSettings()).features.feedbackEnabled) return Response.json({ error: "反馈功能当前已关闭" }, { status: 403 });
 
   const input = schema.parse(await request.json());
   const ticket = await tryCreateFeedbackTicket({ userId: user.id, ...input });

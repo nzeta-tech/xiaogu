@@ -1,14 +1,10 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 
-const IMAGE_REQUEST_TIMEOUT_MS = Math.min(Number(process.env.IMAGE_REQUEST_TIMEOUT_MS ?? 30000), 30000);
-const IMAGE_GENERATION_BUDGET_MS = Math.min(Number(process.env.IMAGE_GENERATION_BUDGET_MS ?? 70000), 70000);
+const IMAGE_REQUEST_TIMEOUT_MS = clampDuration(process.env.IMAGE_REQUEST_TIMEOUT_MS, 240000, 60000, 300000);
+const IMAGE_GENERATION_BUDGET_MS = clampDuration(process.env.IMAGE_GENERATION_BUDGET_MS, 600000, IMAGE_REQUEST_TIMEOUT_MS, 900000);
 const IMAGE_REQUEST_MAX_ATTEMPTS = 1;
 const IMAGE_SAFE_SIZE = "1024x1024";
 const IMAGE_RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
-const execFileAsync = promisify(execFile);
 
 export async function generateImageSet(input: {
   prompt: string;
@@ -189,17 +185,6 @@ async function requestImageBatch(input: {
   size: string;
   deadlineAt: number;
 }) {
-  const primaryCurlResult = await requestImageBatchWithCurl(input).catch((error) => {
-    console.warn("image generation primary curl request failed", {
-      size: input.size,
-      error,
-    });
-    return [];
-  });
-  if (primaryCurlResult.length > 0) {
-    return primaryCurlResult;
-  }
-
   const maxAttempts = IMAGE_REQUEST_MAX_ATTEMPTS;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -247,18 +232,6 @@ async function requestImageBatch(input: {
           message: message.slice(0, 240),
         });
 
-        const curlFallback = await requestImageBatchWithCurl(input).catch((error) => {
-          console.warn("image generation curl fallback failed", {
-            size: input.size,
-            attempt,
-            error,
-          });
-          return [];
-        });
-        if (curlFallback.length > 0) {
-          return curlFallback;
-        }
-
         if (attempt < maxAttempts) {
           await sleep(2000 * attempt);
           continue;
@@ -276,7 +249,7 @@ async function requestImageBatch(input: {
       return (payload.data ?? [])
         .map((item, index) => ({
           id: `image-${index + 1}`,
-          url: item.url ?? (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ""),
+          url: item.url ?? (item.b64_json ? `data:image/jpeg;base64,${item.b64_json}` : ""),
         }))
         .filter((item) => item.url);
     } catch (error) {
@@ -286,19 +259,6 @@ async function requestImageBatch(input: {
         timeoutMs,
         error,
       });
-
-      const curlFallback = await requestImageBatchWithCurl(input).catch((curlError) => {
-        console.warn("image generation curl fallback crashed", {
-          size: input.size,
-          attempt,
-          timeoutMs,
-          error: curlError,
-        });
-        return [];
-      });
-      if (curlFallback.length > 0) {
-        return curlFallback;
-      }
 
       if (attempt < maxAttempts) {
         await sleep(1000 * attempt);
@@ -372,7 +332,7 @@ async function requestImageEditBatch(input: {
     return (payload.data ?? [])
       .map((item, index) => ({
         id: `image-${index + 1}`,
-        url: item.url ?? (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ""),
+        url: item.url ?? (item.b64_json ? `data:image/jpeg;base64,${item.b64_json}` : ""),
       }))
       .filter((item) => item.url);
   } catch (error) {
@@ -385,69 +345,6 @@ async function requestImageEditBatch(input: {
   } finally {
     clearTimeout(timeoutId);
   }
-}
-
-async function requestImageBatchWithCurl(input: {
-  endpoint: string;
-  apiKey: string;
-  model: string;
-  prompt: string;
-  size: string;
-  deadlineAt: number;
-}) {
-  const remainingMs = input.deadlineAt - Date.now();
-  if (remainingMs <= 0) {
-    return [];
-  }
-
-  const maxTimeSeconds = Math.max(10, Math.floor(Math.min(remainingMs, IMAGE_REQUEST_TIMEOUT_MS, IMAGE_GENERATION_BUDGET_MS) / 1000));
-  const requestBody = JSON.stringify({
-    model: input.model,
-    prompt: input.prompt,
-    size: input.size,
-    quality: "low",
-    output_format: "jpeg",
-  });
-  const marker = "__CODE__:";
-
-  const { stdout } = await execFileAsync("curl", [
-    "-sS",
-    "--connect-timeout",
-    "10",
-    "--max-time",
-    String(maxTimeSeconds),
-    "-X",
-    "POST",
-    input.endpoint,
-    "-H",
-    "content-type: application/json",
-    "-H",
-    `authorization: Bearer ${input.apiKey}`,
-    "--data",
-    requestBody,
-    "-w",
-    `\\n${marker}%{http_code}`,
-  ], {
-    maxBuffer: 20 * 1024 * 1024,
-  });
-
-  const markerIndex = stdout.lastIndexOf(marker);
-  if (markerIndex < 0) {
-    return [];
-  }
-
-  const body = stdout.slice(0, markerIndex).trim();
-  const statusCode = Number.parseInt(stdout.slice(markerIndex + marker.length).trim(), 10);
-  if (!Number.isFinite(statusCode) || statusCode < 200 || statusCode >= 300) {
-    console.warn("image generation curl fallback non-success", {
-      size: input.size,
-      status: statusCode,
-      message: body.slice(0, 240),
-    });
-    return [];
-  }
-
-  return parseImagePayload(body);
 }
 
 function buildPreferredSizeCandidates(ratio: string) {
@@ -464,20 +361,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function clampDuration(rawValue: string | undefined, fallback: number, minimum: number, maximum: number) {
+  const parsed = Number(rawValue ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.round(parsed), minimum), maximum);
+}
+
 function normalizeRatioToSize(ratio: string) {
   if (["3:4", "4:5", "2:3", "9:16"].includes(ratio)) return "1024x1536";
   if (["4:3", "5:4", "3:2", "16:9"].includes(ratio)) return "1536x1024";
   return "1024x1024";
-}
-
-function parseImagePayload(raw: string) {
-  const payload = JSON.parse(raw) as { data?: Array<{ b64_json?: string; url?: string }> };
-  return (payload.data ?? [])
-    .map((item, index) => ({
-      id: `image-${index + 1}`,
-      url: item.url ?? (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ""),
-    }))
-    .filter((item) => item.url);
 }
 
 function dataUrlToBlob(value: string) {

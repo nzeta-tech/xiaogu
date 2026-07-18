@@ -16,6 +16,7 @@ type UserRow = {
   email: string;
   password_hash: string;
   role: string;
+  session_version?: number;
 };
 
 export async function registerUser(input: z.infer<typeof authInputSchema>): Promise<SessionUser> {
@@ -44,7 +45,7 @@ export async function registerUser(input: z.infer<typeof authInputSchema>): Prom
 
 export async function verifyUser(email: string, password: string): Promise<SessionUser | null> {
   const result = await query<UserRow>(
-    "select id, organization_id, name, email, password_hash, role from users where email = lower($1) and status = 'active'",
+    "select id, organization_id, name, email, password_hash, role, session_version from users where email = lower($1) and status = 'active'",
     [email],
   );
   const user = result.rows[0];
@@ -61,5 +62,6 @@ function toSessionUser(user: UserRow): SessionUser {
     name: user.name,
     role: user.role,
     organizationId: user.organization_id,
+    sessionVersion: user.session_version ?? 1,
   };
 }

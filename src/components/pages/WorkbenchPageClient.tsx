@@ -14,6 +14,7 @@ type Overview = {
   weeklyUsed: number;
   topics: HotTopic[];
   topicsRefreshedAt: string | null;
+  topicsStale: boolean;
   recentDrafts: Array<{ id: string; title: string; platform: string; updated_at?: string }>;
   recentUsage: Array<{ id: string; action_type: string; quota_cost: number; created_at: string }>;
   recentOrders: Array<{ id: string; status: string; amount_cents: number; currency: string; created_at: string }>;
@@ -21,40 +22,10 @@ type Overview = {
   recentGifts: Array<{ id: string; source_label: string; quota_amount: number; created_at: string }>;
 };
 
-const actionCards = [
-  {
-    title: "写文案",
-    desc: "从热点到脚本，一次完成今天要发的内容。",
-    href: "/apps/write-copy?from=workspace&entry=write-copy",
-    badge: "推荐",
-  },
-  {
-    title: "找选题",
-    desc: "结合你的数字分身，生成触达、信任和转化选题。",
-    href: "/apps/topic-picker?from=workspace&entry=topic-picker",
-    badge: "灵感",
-  },
-  {
-    title: "保单诊断",
-    desc: "梳理家庭保障结构，快速定位缺口与沟通重点。",
-    href: "/apps/policy-diagnosis?from=workspace&entry=policy-diagnosis",
-    badge: "专业",
-  },
-];
-
-const dailyQuotes = [
-  "真正专业的内容，不是把风险说重，而是把选择说清。",
-  "先帮客户看懂家庭责任，再谈产品，信任会走得更稳。",
-  "好文案不是催促成交，而是让客户愿意认真规划一次。",
-  "保险内容的温度，藏在克制、准确和替客户多想一步里。",
-  "把复杂问题讲明白，本身就是一种值得长期积累的专业。",
-  "持续输出有用的判断，比追逐每一次热度更接近信任。",
-  "先理解客户正在经历什么，再决定今天应该说什么。",
-];
-
 export function WorkbenchPageClient() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [homeContent, setHomeContent] = useState("");
 
   async function loadOverview(signal?: AbortSignal) {
     try {
@@ -76,23 +47,24 @@ export function WorkbenchPageClient() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    void fetch(apiPath("/api/system/public-config")).then((response) => response.json()).then((payload: { site?: { homeContent?: string } }) => setHomeContent(payload.site?.homeContent ?? "")).catch(() => undefined);
+  }, []);
+
   const balance = overview?.balance ?? 0;
   const draftCount = overview?.draftCount ?? 0;
   const notice = overview?.announcements?.[0] ?? null;
   const extraAnnouncements = overview?.announcements?.slice(1) ?? [];
   const hasDrafts = (overview?.recentDrafts?.length ?? 0) > 0;
   const hasAnnouncements = extraAnnouncements.length > 0;
-  const quote = dailyQuotes[new Date().getDate() % dailyQuotes.length];
-  const topics = overview?.topics ?? [];
+  const topics = (overview?.topics ?? []).slice(0, 10);
+  const primaryTopic = topics[0];
+  const latestDraft = overview?.recentDrafts?.[0];
+  const recommendation = buildDailyRecommendation(overview, primaryTopic);
 
   return (
     <div className="pageStack workbenchPage">
-      <section className="dailyBrief" aria-label="每日一句">
-        <span>每日一句</span>
-        <p>{quote}</p>
-        <time>{formatToday()}</time>
-      </section>
-
+      {homeContent ? <section className="noticeStrip"><span>平台提示</span><p>{homeContent}</p></section> : null}
       {notice ? (
         <section className="noticeStrip">
           <span>限时提示</span>
@@ -102,106 +74,93 @@ export function WorkbenchPageClient() {
         </section>
       ) : null}
 
-      <section className="todayStatusSection" aria-labelledby="weekly-status-title">
-        <div className="heroStatusCard todayStatusCard">
-          <div className="heroStatusHeader">
-            <div>
-              <h2 id="weekly-status-title">本周状态</h2>
-              <p>聚焦本周真实发生的创作和积分消耗。</p>
-            </div>
-            <span>{loading ? "同步中" : "已更新"}</span>
+      <section className="todayOpportunity" aria-labelledby="today-opportunity-title">
+        <div className="todayOpportunityHeader">
+          <div>
+            <span>今日机会</span>
+            <h2 id="today-opportunity-title">今日热点与创作角度</h2>
+            <p>热点全部展开，每条都可以直接带着推荐角度开始创作。</p>
           </div>
-          <div className="heroStatusGrid">
-            <div>
-              <strong>{balance}</strong>
-              <span>可用积分</span>
-            </div>
-            <div>
-              <strong>{overview?.weeklyDraftCount ?? 0}</strong>
-              <span>本周创作</span>
-            </div>
-            <div>
-              <strong>{overview?.weeklyUsed ?? 0}</strong>
-              <span>本周消耗</span>
-            </div>
-            <div>
-              <strong>{draftCount}</strong>
-              <span>全部作品</span>
-            </div>
+          <div className="todayOpportunityHeaderMeta">
+            <strong>{topics.length} 条</strong>
+            <time>{formatToday()}{overview?.topicsStale ? " · 缓存更新中" : ""}</time>
           </div>
         </div>
-      </section>
-
-      <div className="todayContentGrid">
-        <section className="todayHotTopics" aria-labelledby="hot-topics-title">
-          <div className="workbenchSectionHeader">
-            <div>
-              <span>内容雷达</span>
-              <h2 id="hot-topics-title">今日热点</h2>
-              <p>读取最近一次热榜缓存，打开首页不会额外扣积分。</p>
-            </div>
-            {overview?.topicsRefreshedAt ? <time>更新于 {formatRefreshTime(overview.topicsRefreshedAt)}</time> : null}
-          </div>
-          <div className="hotTopicList">
-            {topics.length > 0 ? topics.slice(0, 5).map((topic, index) => (
-              <article className="hotTopicRow" key={topic.id}>
-                <span className="hotTopicRank">{String(index + 1).padStart(2, "0")}</span>
-                <div className="hotTopicBody">
-                  <div className="hotTopicTitleLine">
+        {topics.length > 0 ? (
+          <div className="todayOpportunityList">
+            {topics.map((topic, index) => (
+              <article className={`todayOpportunityRow ${index < 3 ? "featured" : ""} heat-${topic.heat}`} key={topic.id}>
+                <span className="todayOpportunityRank">{String(index + 1).padStart(2, "0")}</span>
+                <div className="todayOpportunityRowBody">
+                  <div className="todayOpportunityTopicLine">
                     <strong>{topic.title}</strong>
-                    <span>{topic.source} · {topic.heat}热度</span>
+                    <div><span>{topic.category}</span><em><i aria-hidden="true" />{topic.heat}热度</em></div>
                   </div>
-                  <p>{topic.recommendedAngle}</p>
+                  <div className="todayOpportunityAngle"><span>创作角度</span><p>{topic.recommendedAngle}</p></div>
                 </div>
-                <a href={buildTopicCreationHref(topic)}>转成文案</a>
+                <a href={buildTopicCreationHref(topic)}>开始创作 <span aria-hidden="true">→</span></a>
               </article>
-            )) : (
-              <div className="workbenchEmptyState">
-                <strong>热点正在整理中</strong>
-                <span>后台热榜刷新完成后会自动出现在这里。</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="todayQuickEntries" aria-labelledby="quick-entries-title">
-          <div className="workbenchSectionHeader">
-            <div>
-              <span>快捷入口</span>
-              <h2 id="quick-entries-title">接着做</h2>
-              <p>只保留最常用的创作动作。</p>
-            </div>
-            <a href={appPath("/workspace")}>全部应用</a>
-          </div>
-          <div className="quickEntryList">
-            {actionCards.map((item) => (
-              <a className="quickEntryRow" href={appPath(item.href)} key={item.href}>
-                <span>{item.badge}</span>
-                <div><strong>{item.title}</strong><p>{item.desc}</p></div>
-                <em aria-hidden="true">→</em>
-              </a>
             ))}
           </div>
+        ) : (
+          <div className="workbenchEmptyState">
+            <strong>今日机会正在整理</strong>
+            <span>可以先从个人画像生成一组更适合自己的选题。</span>
+            <a href={appPath("/apps/topic-picker?from=dashboard&entry=topic-picker")}>现在找选题</a>
+          </div>
+        )}
+      </section>
+
+      <div className="todayDecisionGrid">
+        <section className="todayRecommendation" aria-labelledby="today-recommendation-title">
+          <div className="workbenchSectionHeader"><div><span>今日建议</span><h2 id="today-recommendation-title">下一步做什么</h2></div></div>
+          <div className="todayRecommendationBody">
+            <span>{recommendation.label}</span>
+            <strong>{recommendation.title}</strong>
+            <p>{recommendation.description}</p>
+            <a href={recommendation.href}>{recommendation.action}</a>
+          </div>
+        </section>
+
+        <section className="todayContinue" aria-labelledby="today-continue-title">
+          <div className="workbenchSectionHeader">
+            <div><span>继续创作</span><h2 id="today-continue-title">接着上次的内容</h2></div>
+            <a href={appPath("/drafts")}>全部作品</a>
+          </div>
+          {latestDraft ? (
+            <a className="todayContinueWork" href={appPath(`/works/${latestDraft.id}?from=dashboard&entry=${latestDraft.platform}`)}>
+              <div><span>{latestDraft.platform} · {formatDate(latestDraft.updated_at)}</span><strong>{latestDraft.title}</strong><p>继续审阅、修改或复用这篇内容。</p></div>
+              <em aria-hidden="true">→</em>
+            </a>
+          ) : (
+            <div className="todayContinueEmpty"><strong>还没有创作记录</strong><p>从一条客户问题或一个真实经历开始。</p><a href={appPath("/workspace")}>开始第一篇创作</a></div>
+          )}
         </section>
       </div>
+
+      <section className="todayStatusSection" aria-labelledby="weekly-status-title">
+        <div className="workbenchSectionHeader">
+          <div><span>本周进度</span><h2 id="weekly-status-title">内容经营状态</h2><p>只记录真实发生的创作与积分使用。</p></div>
+          <small>{loading ? "同步中" : "已更新"}</small>
+        </div>
+        <div className="todayProgressStrip">
+          <div><span>本周创作</span><strong>{overview?.weeklyDraftCount ?? 0}</strong></div>
+          <div><span>全部作品</span><strong>{draftCount}</strong></div>
+          <div><span>本周消耗</span><strong>{overview?.weeklyUsed ?? 0}</strong></div>
+          <div><span>可用积分</span><strong>{balance}</strong></div>
+        </div>
+      </section>
 
       {hasDrafts ? (
         <section className="recentWorksSection">
           <div className="workbenchSectionHeader">
-            <div>
-              <span>继续创作</span>
-              <h2>我的作品</h2>
-              <p>最近产出的作品，方便继续迭代和复用。</p>
-            </div>
-            <a href={appPath("/drafts")}>更多</a>
+            <div><span>内容资产</span><h2>最近作品</h2><p>快速回看最近产出的内容，完整管理统一进入创作历史。</p></div>
+            <a href={appPath("/drafts")}>进入创作历史</a>
           </div>
           <div className="draftCardGrid">
-            {(overview?.recentDrafts ?? []).map((draft) => (
-              <a className="draftCard" href={appPath(`/works/${draft.id}`)} key={draft.id}>
-                <div className="draftCardMeta">
-                  <span>{draft.platform}</span>
-                  <em>{formatDate(draft.updated_at)}</em>
-                </div>
+            {(overview?.recentDrafts ?? []).slice(0, 3).map((draft) => (
+              <a className="draftCard" href={appPath(`/works/${draft.id}?from=dashboard&entry=${draft.platform}`)} key={draft.id}>
+                <div className="draftCardMeta"><span>{draft.platform}</span><em>{formatDate(draft.updated_at)}</em></div>
                 <strong>{draft.title}</strong>
               </a>
             ))}
@@ -247,11 +206,35 @@ function formatToday() {
   return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date());
 }
 
-function formatRefreshTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-}
-
 function buildTopicCreationHref(topic: HotTopic) {
   const prompt = `${topic.title}\n\n热点背景：${topic.summary}\n保险内容角度：${topic.recommendedAngle}`;
   return appPath(`/apps/traffic-copy?from=dashboard&entry=traffic-copy&prompt=${encodeURIComponent(prompt)}`);
+}
+
+function buildDailyRecommendation(overview: Overview | null, topic?: HotTopic) {
+  if ((overview?.weeklyDraftCount ?? 0) === 0) {
+    return {
+      label: "低门槛开始",
+      title: "先完成一篇能发布的内容",
+      description: topic ? `可以从“${topic.title}”切入，小谷已准备好推荐角度。` : "先生成一组选题，再选择最有表达欲的一条。",
+      href: topic ? buildTopicCreationHref(topic) : appPath("/apps/topic-picker?from=dashboard&entry=topic-picker"),
+      action: topic ? "开始创作" : "生成选题",
+    };
+  }
+  if ((overview?.recentDrafts?.length ?? 0) > 0) {
+    return {
+      label: "内容组合建议",
+      title: "把最近作品改成另一个渠道版本",
+      description: "连续输出同一种形式容易疲劳，换成口播或朋友圈能提高同一份素材的利用率。",
+      href: appPath("/workspace"),
+      action: "开始一稿多用",
+    };
+  }
+  return {
+    label: "建立表达节奏",
+    title: "生成一组符合你定位的选题",
+    description: "围绕目标客群的真实问题，形成可持续的内容方向。",
+    href: appPath("/apps/topic-picker?from=dashboard&entry=topic-picker"),
+    action: "生成选题",
+  };
 }

@@ -35,10 +35,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const stream = new ReadableStream({
     async start(controller) {
       let streamClosed = false;
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
 
       const safeClose = () => {
         if (streamClosed) return;
         streamClosed = true;
+        if (heartbeat) clearInterval(heartbeat);
         controller.close();
       };
 
@@ -54,6 +56,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       };
 
       safeEnqueue(encoder.encode(": stream\n\n"));
+      heartbeat = setInterval(() => {
+        safeEnqueue(encoder.encode(": heartbeat\n\n"));
+      }, 15000);
 
       const runPromise = activeRunPromise ?? ensureBackgroundWorkRun({
         workId: work.id,

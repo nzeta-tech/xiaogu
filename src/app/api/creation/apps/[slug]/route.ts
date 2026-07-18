@@ -8,10 +8,11 @@ import {
   buildCreationOutputJson,
   isEmptyCreationFieldValue,
   stringifyCreationFieldValue,
-  summarizeTitle,
   type CreationFieldValue,
 } from "@/lib/creation/output";
+import { buildWorkTitle } from "@/lib/creation/work-title";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
+import { renderPolicyRenewalCards } from "@/lib/creation/policy-renewal-card";
 import {
   buildLeadCopyPrompt,
   getMultiChannelCopyStyleMode,
@@ -29,6 +30,7 @@ import {
   trySyncCreationCatalog,
 } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
+import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 
 type FieldValue = CreationFieldValue;
 
@@ -67,10 +69,14 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const body = (await request.json()) as { values?: Record<string, FieldValue> };
   const values = body.values ?? {};
+  const isPolicyRenewalCard = app.slug === "policy-renewal-card";
 
   const missingField = app.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
   if (missingField) {
     return Response.json({ error: `${missingField.label}还没有填写。` }, { status: 400 });
+  }
+  if (isPolicyRenewalCard && stringifyCreationFieldValue(values.confirmation) !== "confirmed") {
+    return Response.json({ error: "请先确认已经核对日期、金额、币种和保单号。" }, { status: 400 });
   }
 
   const quota = await requireQuota(user, "write_script");
@@ -87,17 +93,33 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       : app.slug === "ip-positioning"
         ? buildIpPositioningPrompt(app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
         : buildPrompt(app.name, app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null);
-  const imagePrompt = buildImagePrompt(app.name, app.fields, values, caseContext, app.promptHint);
+  const imagePrompt = isPolicyRenewalCard
+    ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
+    : buildImagePrompt(app.name, app.fields, values, caseContext, app.promptHint);
   const resolvedPrompt = app.resultType === "image" || app.resultType === "image-plan" ? imagePrompt : content;
+  const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
+  const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
+  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+  if (needsAvatarPhoto && visualAssetIds.length === 0 && isEmptyCreationFieldValue(values.reference_image)) {
+    return Response.json({ error: "请选择数字分身形象照，或临时上传一张形象照。" }, { status: 400 });
+  }
+  const visualReferences = app.resultType === "image"
+    ? await resolveAvatarVisualReferences({ userId: user.id, assetIds: visualAssetIds, appSlug: entry === "personality-card" ? "personality-card" : app.slug })
+    : [];
+  if (needsAvatarPhoto && visualAssetIds.length > 0 && visualReferences.length === 0) {
+    return Response.json({ error: "数字分身形象照当前不可用，请检查隐私设置、照片状态和使用范围。" }, { status: 400 });
+  }
   const imageResult =
     app.resultType === "image" || app.resultType === "image-plan"
-      ? await generateImageSet({
+      ? isPolicyRenewalCard
+        ? await renderPolicyRenewalCards({ ...values, reference_image: visualReferences[0]?.dataUrl ?? values.reference_image })
+        : await generateImageSet({
           prompt: imagePrompt,
           style: stringifyValue(values.style) || app.name,
           ratio: stringifyValue(values.ratio) || "1:1",
           count: 1,
-          referenceImages: extractReferenceImages(values),
-        })
+          referenceImages: [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
+          })
       : null;
 
   const run = await tryCreateAppRun({
@@ -112,7 +134,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     inputPayload: values,
     resolvedPrompt,
     quotaCost: quota.quotaCost,
-    model: process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? "local-sharp-template" : process.env.MODEL_NAME ?? "configured-model",
   });
 
   let result = "";
@@ -141,8 +163,12 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: error instanceof Error ? error.message : "内容生成失败，请稍后再试。" }, { status: 500 });
   }
 
-  const titleFields = isMultiChannelCopyAppSlug(app.slug) ? ["source"] : app.fields.map((field) => field.id);
-  const title = `${app.name}｜${summarizeTitle(values, titleFields)}`;
+  const title = buildWorkTitle({
+    appName: app.name,
+    appSlug: app.slug,
+    values,
+    result: app.resultType === "text" ? result : null,
+  });
   const contentJson = buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []);
   await tryCompleteAppRun({
     runId: run?.id ?? null,
@@ -152,6 +178,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       contentJson,
       images: imageResult?.images ?? [],
       imageMode: imageResult?.mode ?? null,
+      avatarVisualAssetIds: visualReferences.map((item) => item.id),
     },
   });
 
@@ -181,7 +208,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     userId: user.id,
     actionType: "creation_app_run",
     quotaCost: quota.quotaCost,
-    model: process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? "local-sharp-template" : process.env.MODEL_NAME ?? "configured-model",
     metadata: {
       appId: app.id,
       appSlug: app.slug,
@@ -189,6 +216,13 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       workId: work?.id ?? null,
       appRunId: run?.id ?? null,
     },
+  });
+  await logAvatarVisualUsage({
+    userId: user.id,
+    assetIds: visualReferences.map((item) => item.id),
+    workId: work?.id ?? null,
+    appRunId: run?.id ?? null,
+    contextType: app.slug,
   });
 
   return Response.json({

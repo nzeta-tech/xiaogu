@@ -10,6 +10,7 @@ import {
 } from "@/lib/thinking/questionnaire-template";
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 import type { HotTopic } from "@/lib/topics/types";
+import { defaultSystemSettings, systemSettingKeys, type SystemSettings } from "@/lib/system/settings";
 
 export async function tryCreateConversation(input: {
   userId: string | null;
@@ -299,8 +300,9 @@ export async function tryListWorks(userId: string | null) {
       note: string | null;
       is_favorite: boolean;
       is_used: boolean;
+      quota_cost: number | null;
     }>(
-      `select w.id, w.title, w.status, w.compliance_risk, w.updated_at, w.source_channel, w.note, w.is_favorite, w.is_used,
+      `select w.id, w.title, w.status, w.compliance_risk, w.updated_at, w.source_channel, w.note, w.is_favorite, w.is_used, ar.quota_cost,
               coalesce(
                 (
                   select wv.content
@@ -312,7 +314,8 @@ export async function tryListWorks(userId: string | null) {
                 ''
               ) as content
        from works w
-       where w.user_id = $1
+       left join app_runs ar on ar.id = w.app_run_id
+       where w.user_id = $1 and w.status <> 'archived'
        order by w.updated_at desc
        limit 50`,
       [userId],
@@ -328,6 +331,7 @@ export async function tryListWorks(userId: string | null) {
       note: row.note,
       is_favorite: row.is_favorite,
       is_used: row.is_used,
+      quota_cost: row.quota_cost,
     }));
   } catch {
     return [];
@@ -495,6 +499,33 @@ export async function tryUpdateWorkStatus(input: {
   }
 }
 
+export async function tryUpdateWorkMetadata(input: {
+  userId: string | null;
+  workId: string;
+  status?: "draft" | "used" | "archived";
+  note?: string;
+  isFavorite?: boolean;
+  isUsed?: boolean;
+}) {
+  if (!input.userId) return null;
+  try {
+    const result = await query<{ id: string; status: string; note: string; is_favorite: boolean; is_used: boolean; updated_at: string }>(
+      `update works
+       set status = coalesce($3, status),
+           note = coalesce($4, note),
+           is_favorite = coalesce($5, is_favorite),
+           is_used = coalesce($6, is_used),
+           updated_at = now()
+       where id = $1 and user_id = $2
+       returning id, status, note, is_favorite, is_used, updated_at`,
+      [input.workId, input.userId, input.status ?? null, input.note ?? null, input.isFavorite ?? null, input.isUsed ?? null],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function trySaveComplianceReport(input: {
   userId: string | null;
   draftId?: string | null;
@@ -549,6 +580,7 @@ export async function trySaveUsageLog(input: {
         JSON.stringify(input.metadata ?? {}),
       ],
     );
+    void import("@/lib/billing/notifications").then(({ maybeSendLowBalanceNotification }) => maybeSendLowBalanceNotification(input.userId!)).catch(() => undefined);
     return result.rows[0].id;
   } catch {
     return null;
@@ -582,7 +614,7 @@ export async function trySaveTopicSnapshots(input: { userId: string | null; topi
   }
 }
 
-export async function tryListLatestTopicSnapshots(input: { limit?: number; maxAgeMinutes?: number } = {}) {
+export async function tryListLatestTopicSnapshots(input: { limit?: number; maxAgeMinutes?: number; allowStale?: boolean } = {}) {
   const limit = Math.min(Math.max(input.limit ?? 12, 1), 30);
   const maxAgeMinutes = Math.min(Math.max(input.maxAgeMinutes ?? 20, 1), 1440);
 
@@ -594,14 +626,14 @@ export async function tryListLatestTopicSnapshots(input: { limit?: number; maxAg
       `with latest as (
          select max(created_at) as created_at
          from topic_snapshots
-         where created_at >= now() - ($1::int * interval '1 minute')
+         where $2::boolean or created_at >= now() - ($1::int * interval '1 minute')
        )
        select distinct on (title) raw_payload, topic_snapshots.created_at
        from topic_snapshots, latest
        where latest.created_at is not null
          and topic_snapshots.created_at >= latest.created_at - interval '30 seconds'
        order by title, topic_snapshots.created_at desc`,
-      [maxAgeMinutes],
+      [maxAgeMinutes, input.allowStale ?? false],
     );
 
     const rows = result.rows
@@ -610,9 +642,10 @@ export async function tryListLatestTopicSnapshots(input: { limit?: number; maxAg
     return {
       topics: rows.map((row) => row.raw_payload),
       refreshedAt: rows[0]?.created_at ?? null,
+      stale: rows[0] ? Date.now() - new Date(rows[0].created_at).getTime() > maxAgeMinutes * 60_000 : false,
     };
   } catch {
-    return { topics: [], refreshedAt: null };
+    return { topics: [], refreshedAt: null, stale: false };
   }
 }
 
@@ -621,6 +654,8 @@ export async function tryCreateOrder(input: {
   provider: string;
   plan: BillingPlan;
   status?: "pending" | "paid";
+  baseAmountCents?: number;
+  feeCents?: number;
   metadata?: Record<string, unknown>;
 }) {
   if (!input.userId) return null;
@@ -635,14 +670,16 @@ export async function tryCreateOrder(input: {
       quota_amount: number;
       created_at: string;
     }>(
-      `insert into orders(user_id, provider, status, amount_cents, currency, quota_amount, metadata, paid_at)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, case when $3 = 'paid' then now() else null end)
+      `insert into orders(user_id, provider, status, amount_cents, base_amount_cents, fee_cents, currency, quota_amount, metadata, paid_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, case when $3 = 'paid' then now() else null end)
        returning id, provider, status, amount_cents, currency, quota_amount, created_at`,
       [
         input.userId,
         input.provider,
         input.status ?? "pending",
         input.plan.amountCents,
+        input.baseAmountCents ?? input.plan.amountCents,
+        input.feeCents ?? 0,
         input.plan.currency,
         input.plan.quotaAmount,
         JSON.stringify({
@@ -655,6 +692,21 @@ export async function tryCreateOrder(input: {
     return result.rows[0];
   } catch {
     return null;
+  }
+}
+
+export async function tryGetTodayPaidAmountCents(userId: string, timezone = "Asia/Shanghai") {
+  try {
+    const result = await query<{ total: string }>(
+      `select coalesce(sum(amount_cents),0)::text as total
+       from orders
+       where user_id=$1 and status='paid' and paid_at is not null
+         and (paid_at at time zone $2)::date = (now() at time zone $2)::date`,
+      [userId, timezone],
+    );
+    return Number(result.rows[0]?.total ?? 0);
+  } catch {
+    return 0;
   }
 }
 
@@ -851,6 +903,29 @@ export async function tryListOrders(userId: string | null) {
   }
 }
 
+export async function tryExpirePendingOrders(userId: string, timeoutMinutes: number) {
+  try {
+    const result = await query<{ id: string }>(
+      `update orders set status='cancelled'
+       where user_id=$1 and status='pending' and created_at < now()-($2||' minutes')::interval
+       returning id`,
+      [userId, timeoutMinutes],
+    );
+    return result.rows.map((row) => row.id);
+  } catch {
+    return [];
+  }
+}
+
+export async function tryCountPendingOrders(userId: string) {
+  try {
+    const result = await query<{ count: string }>("select count(*)::text as count from orders where user_id=$1 and status='pending'", [userId]);
+    return Number(result.rows[0]?.count ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function tryListAdminOrders(limit = 100) {
   try {
     const result = await query<{
@@ -892,7 +967,8 @@ export async function tryUpdateAdminOrderStatus(input: { orderId: string; status
     }>(
       `update orders
        set status = $2,
-           paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end
+           paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end,
+           refunded_at = case when $2 = 'refunded' then now() else refunded_at end
        where id = $1
          and ($3::text is null or status = $3)
        returning id, status, paid_at`,
@@ -1396,6 +1472,7 @@ export async function tryCompleteAppRun(input: {
            error_message = $5,
            completed_at = now()
        where id = $1
+         and status <> 'succeeded'
        returning id, status, completed_at`,
       [
         input.runId,
@@ -1441,13 +1518,9 @@ export async function trySyncCreationCatalog() {
            name = excluded.name,
            emoji = excluded.emoji,
            description = excluded.description,
-           badge = excluded.badge,
-           points_cost = excluded.points_cost,
            result_type = excluded.result_type,
            requires_thinking = excluded.requires_thinking,
-           featured = excluded.featured,
            metadata = excluded.metadata,
-           sort_order = excluded.sort_order,
            updated_at = now()
          returning id`,
         [
@@ -1608,15 +1681,7 @@ export async function tryListCreationCatalog() {
        order by sort_order asc, created_at asc`,
     );
 
-    if (appRows.rows.length === 0) {
-      return {
-        categories: creationCategories.map((category) => ({
-          ...category,
-          count: creationApps.filter((app) => app.category === category.id).length,
-        })),
-        apps: creationApps,
-      };
-    }
+    if (appRows.rows.length === 0) return { categories: [], apps: [] };
 
     const fieldsByAppId = new Map<string, CreationApp["fields"]>();
     for (const row of fieldRows.rows) {
@@ -1663,13 +1728,7 @@ export async function tryListCreationCatalog() {
 
     return { categories, apps };
   } catch {
-    return {
-      categories: creationCategories.map((category) => ({
-        ...category,
-        count: creationApps.filter((app) => app.category === category.id).length,
-      })),
-      apps: creationApps,
-    };
+    return { categories: [], apps: [] };
   }
 }
 
@@ -1815,7 +1874,7 @@ export async function tryGetCreationExampleBySlug(slug: string) {
 
 export async function tryGetAdminSummary() {
   try {
-    const [users, activeUsers, conversations, drafts, orders, paidOrders, paidUsers, usage, todayRevenue, compliance, recentUsers, recentOrders, recentUsage, announcements, promoCodes] =
+    const [users, activeUsers, conversations, drafts, orders, paidOrders, paidUsers, usage, todayRevenue, yesterdayRevenue, newUsersToday, newUsersYesterday, openFeedback, failedRuns, compliance, recentUsers, recentOrders, recentUsage, announcements, promoCodes] =
       await Promise.all([
       query<{ count: string }>("select count(*) from users"),
       query<{ count: string }>("select count(*) from users where status = 'active'"),
@@ -1826,6 +1885,11 @@ export async function tryGetAdminSummary() {
       query<{ count: string }>("select count(distinct user_id) from orders where status = 'paid'"),
       query<{ total: string | null }>("select coalesce(sum(quota_cost), 0)::text as total from usage_logs"),
       query<{ total: string | null }>("select coalesce(sum(amount_cents), 0)::text as total from orders where status = 'paid' and paid_at >= date_trunc('day', now())"),
+      query<{ total: string | null }>("select coalesce(sum(amount_cents), 0)::text as total from orders where status = 'paid' and paid_at >= date_trunc('day', now()) - interval '1 day' and paid_at < date_trunc('day', now())"),
+      query<{ count: string }>("select count(*) from users where created_at >= date_trunc('day', now())"),
+      query<{ count: string }>("select count(*) from users where created_at >= date_trunc('day', now()) - interval '1 day' and created_at < date_trunc('day', now())"),
+      query<{ count: string }>("select count(*) from feedback_tickets where status in ('open', 'in_progress')"),
+      query<{ count: string }>("select count(*) from app_runs where status = 'failed' and created_at >= now() - interval '24 hours'"),
       query<{ risk_level: string; count: string }>(
         "select risk_level, count(*)::text from compliance_reports group by risk_level order by risk_level",
       ),
@@ -1880,6 +1944,11 @@ export async function tryGetAdminSummary() {
       paidAmountCents: Number(paidOrders.rows[0]?.total ?? 0),
       paidUsers: Number(paidUsers.rows[0]?.count ?? 0),
       todayRevenueCents: Number(todayRevenue.rows[0]?.total ?? 0),
+      yesterdayRevenueCents: Number(yesterdayRevenue.rows[0]?.total ?? 0),
+      newUsersToday: Number(newUsersToday.rows[0]?.count ?? 0),
+      newUsersYesterday: Number(newUsersYesterday.rows[0]?.count ?? 0),
+      openFeedback: Number(openFeedback.rows[0]?.count ?? 0),
+      failedRuns: Number(failedRuns.rows[0]?.count ?? 0),
       quotaConsumed: Number(usage.rows[0]?.total ?? 0),
       publishedAnnouncements: Number(announcements.rows[0]?.count ?? 0),
       activePromoCodes: Number(promoCodes.rows[0]?.count ?? 0),
@@ -2311,6 +2380,39 @@ export async function tryGetAdminContentOverview() {
   }
 }
 
+export async function tryListAdminAppRuns(limit = 100) {
+  try {
+    const result = await query<{ id: string; status: string; error_message: string | null; quota_cost: number; model: string | null; created_at: string; completed_at: string | null; app_name: string | null; app_slug: string | null; user_email: string | null; work_id: string | null }>(
+      `select ar.id, ar.status, ar.error_message, ar.quota_cost, ar.model, ar.created_at, ar.completed_at,
+              a.name as app_name, a.slug as app_slug, u.email as user_email, w.id as work_id
+       from app_runs ar
+       left join apps a on a.id = ar.app_id
+       left join users u on u.id = ar.user_id
+       left join works w on w.app_run_id = ar.id
+       where ar.status in ('running', 'failed')
+       order by case when ar.status = 'running' then 0 else 1 end, ar.created_at desc
+       limit $1`,
+      [Math.min(Math.max(limit, 1), 300)],
+    );
+    return result.rows;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryTerminateAdminAppRun(runId: string) {
+  try {
+    const result = await query<{ id: string; status: string }>(
+      `update app_runs set status = 'failed', error_message = '管理员终止悬挂任务', completed_at = now()
+       where id = $1 and status = 'running' returning id, status`,
+      [runId],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 type AnnouncementRecord = {
   id: string;
   title: string;
@@ -2737,52 +2839,27 @@ export async function tryGrantGiftCredits(input: {
   }
 }
 
-const defaultSettings = {
-  site: {
-    siteName: "小谷",
-    siteSubtitle: "保险内容增长助手",
-    supportContact: "support@xiaogu.ai",
-    footerNote: "让保险内容生产更稳定、更易运营。",
-  },
-  auth: {
-    allowRegistration: true,
-    requireInviteCode: false,
-    passwordHint: "至少 8 位密码",
-  },
-  payment: {
-    enableStripe: true,
-    enableManualTransfer: false,
-    displaySubscriptions: true,
-    purchaseNotice: "充值成功后额度会自动到账，可在账单页查看明细。",
-  },
-};
-
-export async function tryGetSystemSettings() {
+export async function tryGetSystemSettings(): Promise<SystemSettings> {
   try {
     const result = await query<{ setting_key: string; setting_value: Record<string, unknown> }>(
       `select setting_key, setting_value
        from system_settings
        where setting_key = any($1::text[])`,
-      [["site", "auth", "payment"]],
+      [systemSettingKeys],
     );
 
-    const output = { ...defaultSettings };
+    const output = structuredClone(defaultSystemSettings);
     for (const row of result.rows) {
-      if (row.setting_key === "site") output.site = { ...output.site, ...row.setting_value };
-      if (row.setting_key === "auth") output.auth = { ...output.auth, ...row.setting_value };
-      if (row.setting_key === "payment") output.payment = { ...output.payment, ...row.setting_value };
+      const key = row.setting_key as keyof SystemSettings;
+      if (key in output) Object.assign(output[key], row.setting_value);
     }
     return output;
   } catch {
-    return defaultSettings;
+    return structuredClone(defaultSystemSettings);
   }
 }
 
-export async function tryUpdateSystemSettings(input: {
-  site?: Record<string, unknown>;
-  auth?: Record<string, unknown>;
-  payment?: Record<string, unknown>;
-}) {
+export async function tryUpdateSystemSettings(input: Partial<{ [K in keyof SystemSettings]: Partial<SystemSettings[K]> }>) {
   try {
     for (const [key, value] of Object.entries(input)) {
       if (!value) continue;
@@ -2812,7 +2889,7 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
       tryListOrders(userId),
       tryListPublishedAnnouncements(5, "dashboard"),
       tryListGiftRecords(userId),
-      tryListLatestTopicSnapshots({ limit: 5, maxAgeMinutes: 1440 }),
+      tryListLatestTopicSnapshots({ limit: 10, maxAgeMinutes: 1440, allowStale: true }),
     ]);
 
     const weekStart = startOfCurrentWeek();
@@ -2834,6 +2911,7 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
       recentGifts: gifts.slice(0, 4),
       topics: topicSnapshot.topics,
       topicsRefreshedAt: topicSnapshot.refreshedAt,
+      topicsStale: topicSnapshot.stale,
     };
   } catch {
     return null;
@@ -2882,36 +2960,171 @@ export async function tryGetCreationHubData(userId: string | null) {
   }
 }
 
-export async function tryGetCreationWorksView(userId: string | null) {
+export type CreationWorksQuery = {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  platform?: string;
+  state?: "all" | "favorite" | "published" | "unpublished" | "noted" | "avatar";
+  from?: string;
+  to?: string;
+  sort?: "updated-desc" | "updated-asc" | "created-desc";
+};
+
+export async function tryGetCreationWorksView(userId: string | null, input: CreationWorksQuery = {}) {
   if (!userId) return null;
 
   try {
-    const works = await tryListWorks(userId);
+    const page = Math.max(1, Math.floor(input.page ?? 1));
+    const pageSize = Math.min(50, Math.max(1, Math.floor(input.pageSize ?? 20)));
+    const offset = (page - 1) * pageSize;
+    const values: unknown[] = [userId];
+    const filters = ["w.user_id = $1", "w.status <> 'archived'"];
+
+    if (input.search?.trim()) {
+      values.push(`%${input.search.trim()}%`);
+      const parameter = `$${values.length}`;
+      filters.push(`(w.title ilike ${parameter} or w.note ilike ${parameter} or w.source_channel ilike ${parameter} or exists (
+        select 1 from work_versions search_wv where search_wv.work_id = w.id and search_wv.content ilike ${parameter}
+      ))`);
+    }
+    if (input.platform?.trim() && input.platform !== "all") {
+      values.push(input.platform.trim());
+      filters.push(`w.source_channel = $${values.length}`);
+    }
+    if (input.state === "favorite") filters.push("w.is_favorite = true");
+    if (input.state === "published") filters.push("w.is_used = true");
+    if (input.state === "unpublished") filters.push("w.is_used = false");
+    if (input.state === "noted") filters.push("length(trim(coalesce(w.note, ''))) > 0");
+    if (input.state === "avatar") filters.push("jsonb_array_length(coalesce(ar.result_json->'avatarVisualAssetIds', '[]'::jsonb)) > 0");
+    if (input.from) {
+      values.push(input.from);
+      filters.push(`w.updated_at >= $${values.length}::date`);
+    }
+    if (input.to) {
+      values.push(input.to);
+      filters.push(`w.updated_at < ($${values.length}::date + interval '1 day')`);
+    }
+
+    const orderBy = input.sort === "updated-asc"
+      ? "w.updated_at asc"
+      : input.sort === "created-desc"
+        ? "w.created_at desc"
+        : "w.updated_at desc";
+    values.push(pageSize, offset);
+    const limitParameter = `$${values.length - 1}`;
+    const offsetParameter = `$${values.length}`;
+
+    const worksResult = await query<{
+      id: string;
+      title: string;
+      status: string;
+      compliance_risk: string;
+      created_at: string;
+      updated_at: string;
+      source_channel: string;
+      content: string;
+      note: string | null;
+      is_favorite: boolean;
+      is_used: boolean;
+      quota_cost: number | null;
+      result_json: Record<string, unknown> | null;
+      filtered_count: string;
+    }>(
+      `select w.id, w.title, w.status, w.compliance_risk, w.created_at, w.updated_at,
+              w.source_channel, w.note, w.is_favorite, w.is_used, ar.quota_cost, ar.result_json,
+              count(*) over() as filtered_count,
+              coalesce(
+                (select wv.content from work_versions wv where wv.work_id = w.id order by wv.version_no desc limit 1),
+                ''
+              ) as content
+       from works w
+       left join app_runs ar on ar.id = w.app_run_id
+       where ${filters.join(" and ")}
+       order by ${orderBy}
+       limit ${limitParameter} offset ${offsetParameter}`,
+      values,
+    );
+
+    const [totalsResult, platformsResult, activityResult] = await Promise.all([
+      query<{ all_count: string; favorite_count: string; published_count: string; unpublished_count: string; noted_count: string; avatar_count: string }>(
+        `select count(*) as all_count,
+                count(*) filter (where is_favorite) as favorite_count,
+                count(*) filter (where is_used) as published_count,
+                count(*) filter (where not is_used) as unpublished_count,
+                count(*) filter (where length(trim(coalesce(w.note, ''))) > 0) as noted_count,
+                count(*) filter (where jsonb_array_length(coalesce(ar.result_json->'avatarVisualAssetIds', '[]'::jsonb)) > 0) as avatar_count
+         from works w left join app_runs ar on ar.id = w.app_run_id where w.user_id = $1 and w.status <> 'archived'`,
+        [userId],
+      ),
+      query<{ platform: string; count: string }>(
+        `select source_channel as platform, count(*) as count
+         from works where user_id = $1 and status <> 'archived'
+         group by source_channel order by count(*) desc, source_channel asc`,
+        [userId],
+      ),
+      query<{ date: string; count: string }>(
+        `select to_char((updated_at at time zone 'Asia/Shanghai')::date, 'YYYY-MM-DD') as date, count(*) as count
+         from works
+         where user_id = $1 and status <> 'archived' and updated_at >= now() - interval '100 days'
+         group by (updated_at at time zone 'Asia/Shanghai')::date
+         order by (updated_at at time zone 'Asia/Shanghai')::date asc`,
+        [userId],
+      ),
+    ]);
+
+    const works = worksResult.rows;
+    const totalsRow = totalsResult.rows[0];
     const totals = {
-      all: works.length,
-      favorite: works.filter((work) => Boolean(work.is_favorite)).length,
-      used: works.filter((work) => Boolean(work.is_used)).length,
-      unused: works.filter((work) => !work.is_used).length,
-      noted: works.filter((work) => Boolean(work.note?.trim())).length,
+      all: Number(totalsRow?.all_count ?? 0),
+      favorite: Number(totalsRow?.favorite_count ?? 0),
+      used: Number(totalsRow?.published_count ?? 0),
+      unused: Number(totalsRow?.unpublished_count ?? 0),
+      noted: Number(totalsRow?.noted_count ?? 0),
+      avatar: Number(totalsRow?.avatar_count ?? 0),
     };
+    const filteredTotal = Number(works[0]?.filtered_count ?? 0);
 
     return {
       totals,
+      pagination: {
+        page,
+        pageSize,
+        total: filteredTotal,
+        hasMore: offset + works.length < filteredTotal,
+      },
+      platforms: platformsResult.rows.map((row) => ({ platform: row.platform, count: Number(row.count) })),
+      activity: activityResult.rows.map((row) => ({ date: row.date, count: Number(row.count) })),
       items: works.map((work) => ({
         id: work.id,
         title: work.title,
         content: work.content,
-        platform: work.platform,
+        platform: work.source_channel,
         status: work.status,
+        complianceRisk: work.compliance_risk,
+        createdAt: work.created_at,
         updatedAt: work.updated_at,
         note: work.note ?? "",
         isFavorite: Boolean(work.is_favorite),
         isUsed: Boolean(work.is_used),
+        quotaCost: Number(work.quota_cost ?? 0),
+        imageUrl: firstGeneratedImageUrl(work.result_json),
+        usesAvatarVisual: Array.isArray(work.result_json?.avatarVisualAssetIds) && work.result_json.avatarVisualAssetIds.length > 0,
       })),
     };
   } catch {
     return null;
   }
+}
+
+function firstGeneratedImageUrl(result: Record<string, unknown> | null) {
+  if (!Array.isArray(result?.images)) return "";
+  for (const item of result.images) {
+    if (!item || typeof item !== "object") continue;
+    const url = (item as { url?: unknown }).url;
+    if (typeof url === "string" && url.trim()) return url.trim();
+  }
+  return "";
 }
 
 function inferTitle(content: string) {

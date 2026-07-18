@@ -1,7 +1,9 @@
 import { grantCredits } from "@/lib/billing/openmeter";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 import { tryGetOrderByProvider, tryMarkOrderPaidByProvider } from "@/lib/db/repositories";
+import { query } from "@/lib/db/client";
 import { constructStripeWebhookEvent } from "@/lib/payments/stripe";
+import { accrueAffiliateCredits } from "@/lib/affiliate/service";
 
 export async function POST(request: Request) {
   const stripeSignature = request.headers.get("stripe-signature");
@@ -10,6 +12,12 @@ export async function POST(request: Request) {
     try {
       const payload = await request.text();
       const event = constructStripeWebhookEvent(payload, stripeSignature);
+      await query(
+        `insert into system_settings(setting_key,setting_value,updated_at)
+         values ('payment_health',$1::jsonb,now())
+         on conflict(setting_key) do update set setting_value=excluded.setting_value,updated_at=now()`,
+        [JSON.stringify({ lastWebhookAt: new Date().toISOString(), lastEventType: event.type, ok: true })],
+      );
 
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
@@ -34,7 +42,12 @@ export async function POST(request: Request) {
           if (!grant.ok) {
             return Response.json({ error: "积分发放失败，等待支付平台重试" }, { status: 502 });
           }
-          return Response.json({ received: true, eventType: event.type, order, grant });
+          const affiliate = await accrueAffiliateCredits({
+            orderId: order.id,
+            inviteeUserId: order.user_id,
+            purchasedCredits: order.quota_amount,
+          });
+          return Response.json({ received: true, eventType: event.type, order, grant, affiliate });
         }
       }
 

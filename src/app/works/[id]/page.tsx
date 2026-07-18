@@ -8,7 +8,7 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ id:
   return (
     <AuthGuard>
       <AppShell>
-        <WorkDetailPageClient workId={id} />
+        <WorkDetailPageClient key={id} workId={id} />
       </AppShell>
     </AuthGuard>
   );

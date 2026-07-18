@@ -37,7 +37,20 @@ type WorkspaceCard = {
   description: string;
   hint: string;
   actionLabel: "使用" | "需完善人设";
+  goals: WorkspaceGoal[];
 };
+
+type WorkspaceGoal = "all" | "attention" | "trust" | "conversion" | "brand" | "polish";
+
+type WorkspaceCategory = "all" | "copy" | "video" | "image" | "brand";
+
+const workspaceCategories: Array<{ id: WorkspaceCategory; label: string; description: string }> = [
+  { id: "all", label: "全部应用", description: "浏览所有创作能力" },
+  { id: "copy", label: "文案", description: "选题、引流与多渠道表达" },
+  { id: "video", label: "短视频 & 直播", description: "口播、画面与镜头表达" },
+  { id: "image", label: "做图", description: "知识卡片与文章配图" },
+  { id: "brand", label: "个人品牌", description: "定位与长期内容资产" },
+];
 
 const workspaceCards: WorkspaceCard[] = [
   {
@@ -50,6 +63,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "用同一份真实素材生成口播、公众号、小红书和朋友圈内容，并针对各平台调整表达方式。",
     hint: "系统会区分事实、观点和待核验信息，再完成多渠道表达。",
     actionLabel: "使用",
+    goals: ["attention", "trust", "conversion"],
   },
   {
     slug: "image-card",
@@ -61,6 +75,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "将文章、口述稿或主题转成原创知识卡片，可自由选择视觉样式和画面比例。",
     hint: "优先保证中文可读性、信息层级和内容来源清晰。",
     actionLabel: "使用",
+    goals: ["attention", "trust"],
   },
   {
     slug: "video-script-polish",
@@ -72,6 +87,19 @@ const workspaceCards: WorkspaceCard[] = [
     description: "从开场吸引力、内容逻辑和说话节奏三个方面检查口播底稿，并在保留事实的基础上优化。",
     hint: "每条修改建议都对应原稿证据，便于对照采用。",
     actionLabel: "使用",
+    goals: ["polish", "trust"],
+  },
+  {
+    slug: "policy-renewal-card",
+    appSlug: "policy-renewal-card",
+    name: "保单续保提醒卡",
+    emoji: "🗓️",
+    pointsLabel: "5",
+    badge: "新",
+    description: "填写续保日期、保费和顾问信息，生成文字准确、适合微信发送的服务提醒图片。",
+    hint: "保单号默认脱敏，客户与保单信息不会发送给图片模型。",
+    actionLabel: "使用",
+    goals: ["trust", "conversion"],
   },
   {
     slug: "wechat-article-polish",
@@ -83,6 +111,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "保留原文事实和核心立场，重新打磨公众号文章的标题、结构、段落衔接与收尾。",
     hint: "信息缺口会被标记，不用流畅表达掩盖不确定性。",
     actionLabel: "使用",
+    goals: ["polish", "trust"],
   },
   {
     slug: "lead-copy",
@@ -93,6 +122,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "提炼素材中真正能帮助读者的内容，分别产出口播、小红书和公众号引流文案。",
     hint: "互动动作保持克制，不使用焦虑、虚假稀缺或收益承诺。",
     actionLabel: "使用",
+    goals: ["attention", "conversion"],
   },
   {
     slug: "traffic-copy",
@@ -104,6 +134,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "把热点、事件和观点改写成更有冲突感、代入感与传播力的流量内容。",
     hint: "强调反常识钩子、逻辑推进和普通人场景，不把推测写成事实。",
     actionLabel: "使用",
+    goals: ["attention"],
   },
   {
     slug: "marketing-copy",
@@ -115,6 +146,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "围绕客户、产品和方案，从产品、方案、案例、观念四个方向生成可信营销内容。",
     hint: "同时呈现价值与规则边界，保留具体而克制的互动承接。",
     actionLabel: "使用",
+    goals: ["conversion"],
   },
   {
     slug: "lead-package",
@@ -125,6 +157,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "从一个具体问题出发，完整生成资料定位、内容目录、正文、领取说明和发布文案。",
     hint: "资料用于帮助用户整理问题，不替代正式保险建议。",
     actionLabel: "使用",
+    goals: ["conversion", "trust"],
   },
   {
     slug: "voice-note-copy",
@@ -135,6 +168,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "在保留录音原意的基础上，拆分出清晰观点、精彩原话和可继续加工的内容素材。",
     hint: "不会把未经确认的口误或推测改写成确定事实。",
     actionLabel: "使用",
+    goals: ["polish"],
   },
   {
     slug: "live-script",
@@ -145,6 +179,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "结合直播主题、目标观众、已有材料和互动目的，生成从开场到收尾的完整直播脚本。",
     hint: "涉及产品和案例的内容必须可核验，并在脚本中标记合规边界。",
     actionLabel: "使用",
+    goals: ["trust", "conversion"],
   },
   {
     slug: "topic-picker",
@@ -155,6 +190,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "基于你的内容画像一次生成 6 个选题，同时兼顾扩大触达、讲清问题和建立信任。",
     hint: "每个选题包含事实来源要求、写作角度和不应越过的表达边界。",
     actionLabel: "需完善人设",
+    goals: ["attention", "brand"],
   },
   {
     slug: "general-content",
@@ -165,6 +201,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "从输入素材中提炼更具普遍共鸣的切入点，生成口播稿和公众号文章。",
     hint: "适合普通观点、分享型素材和非强销售内容。",
     actionLabel: "使用",
+    goals: ["trust"],
   },
   {
     slug: "wechat-images",
@@ -175,6 +212,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "分析公众号文章的章节节奏，为开篇、重点、转折和总结分别生成合适的配图。",
     hint: "图片不复制文章全文，只承担章节定位和阅读停顿。",
     actionLabel: "使用",
+    goals: ["polish"],
   },
   {
     slug: "letter",
@@ -185,16 +223,18 @@ const workspaceCards: WorkspaceCard[] = [
     description: "结合真实主题、事件背景和人物关系，写出适合重要节点发布的长信及精简稿。",
     hint: "不编造人数、成交、评价或共同经历。",
     actionLabel: "使用",
+    goals: ["brand", "trust"],
   },
   {
     slug: "xiaohongshu-check",
     appSlug: "xiaohongshu-check",
-    name: "小红书违规检测",
+    name: "小红书文案风险检查",
     emoji: "🧐",
     pointsLabel: "5",
     description: "识别文案中的绝对化表达、收益暗示、焦虑营销、隐私问题和无依据数据，并给出修改方案。",
     hint: "检测用于发布前辅助复核，不代表平台官方审核结论。",
     actionLabel: "使用",
+    goals: ["polish"],
   },
   {
     slug: "policy-diagnosis",
@@ -206,6 +246,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "梳理现有保单的保障责任、期限、保额和信息缺口，列出需要进一步确认的问题。",
     hint: "缺少正式合同信息时明确列出待确认项，结果不构成保险建议。",
     actionLabel: "使用",
+    goals: ["trust", "conversion"],
   },
   {
     slug: "ip-positioning",
@@ -217,6 +258,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "结合个人人设画像与当前业务情况，明确 IP 定位、账号标签和长期内容方向。",
     hint: "从人设、客群、差异化和表达风格四个角度输出定位方案。",
     actionLabel: "需完善人设",
+    goals: ["brand"],
   },
   {
     slug: "breakthrough",
@@ -227,6 +269,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "分析目前阻碍增长的关键问题，给出突破路径、阶段动作和可直接执行的任务清单。",
     hint: "更偏增长陪跑视角，帮助梳理卡点、动作和复盘指标。",
     actionLabel: "使用",
+    goals: ["brand", "conversion"],
   },
   {
     slug: "personality-card",
@@ -237,6 +280,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "根据个人介绍和照片生成风格化名片，集中呈现你的身份、专长与个人特点。",
     hint: "更适合做个人形象展示卡，一眼让人记住你是谁、擅长什么。",
     actionLabel: "使用",
+    goals: ["brand"],
   },
   {
     slug: "recruit-script",
@@ -247,6 +291,7 @@ const workspaceCards: WorkspaceCard[] = [
     description: "根据候选人简历整理人物画像、面谈流程、沟通话题、欢迎话术、注意事项和后续跟进内容。",
     hint: "更适合增员面谈前的准备，快速生成逐字稿和跟进话术。",
     actionLabel: "使用",
+    goals: ["conversion"],
   },
   {
     slug: "recruit-followup",
@@ -257,14 +302,13 @@ const workspaceCards: WorkspaceCard[] = [
     description: "分析候选人面谈记录，生成沟通信件、信息跟踪表、后续计划和招募主题公众号文章。",
     hint: "更适合面谈后的二次承接和持续跟踪。",
     actionLabel: "使用",
+    goals: ["conversion"],
   },
 ];
 
 const hiddenWorkspaceCardSlugs = new Set([
   "wechat-article-polish",
   "lead-package",
-  "voice-note-copy",
-  "live-script",
   "policy-diagnosis",
   "breakthrough",
   "personality-card",
@@ -277,6 +321,8 @@ const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCa
 export function CreationHubPageClient() {
   const [loading, setLoading] = useState(true);
   const [hubData, setHubData] = useState<HubPayload | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<WorkspaceCategory>("all");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -315,47 +361,89 @@ export function CreationHubPageClient() {
     );
   }
 
+  const usageByApp = new Map(hubData.hub.appUsage.map((item) => [item.appId, item.usedCount]));
+  const frequentCards = getFrequentCards(usageByApp);
+  const hasFrequentUsage = frequentCards.some((card) => getUsageCount(card, usageByApp) > 0);
+  const filteredCards = visibleWorkspaceCards
+    .filter((card) => selectedCategory === "all" || getWorkspaceCategory(card) === selectedCategory)
+    .filter((card) => `${card.name}${card.description}`.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((left, right) => getUsageCount(right, usageByApp) - getUsageCount(left, usageByApp));
+
   return (
     <div className="pageStack creationHubPage workspaceHubPage">
-      <section className="workspaceHubSummary">
-        <div className="workspaceHubSummaryHeader">
+      <section className="workspaceFrequent" aria-labelledby="workspace-frequent-title">
+        <div className="workspaceFrequentHeader">
           <div>
-            <h2>围绕获客增长的 AI 内容创作应用</h2>
+            <span>{hasFrequentUsage ? "按使用习惯整理" : "适合从这里开始"}</span>
+            <h2 id="workspace-frequent-title">{hasFrequentUsage ? "常用应用" : "推荐应用"}</h2>
           </div>
-          <a className="workspaceHubGuideLink" href={appPath("/help")}>使用攻略</a>
+          <a href={appPath("/drafts")}>{hubData.hub.worksView.draftCount.toLocaleString("zh-CN")} 篇作品</a>
         </div>
-        <div className="workspaceHubWorksStrip">
-          <div className="workspaceHubWorksCopy">
-            <strong>我的作品</strong>
-            <span>查看全部创作记录</span>
-          </div>
-          <a className="workspaceHubWorksAction" href={appPath("/drafts")}>
-            {(hubData?.hub.worksView.draftCount ?? 0).toLocaleString("zh-CN")} 篇作品
-          </a>
+        <div className="workspaceFrequentGrid">
+          {frequentCards.map((card) => (
+            <a href={resolveWorkspaceHref(card)} key={`frequent-${card.slug}`}>
+              <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true">{card.emoji}</span>
+              <div>
+                <strong>{card.name}</strong>
+                <span>{getUsageCount(card, usageByApp) > 0 ? `已使用 ${getUsageCount(card, usageByApp)} 次` : getCardInspiration(card)}</span>
+              </div>
+              <em aria-hidden="true">→</em>
+            </a>
+          ))}
         </div>
       </section>
 
       <section className="workspaceHubSection">
+        <div className="workspaceCatalogHeader">
+          <div>
+            <span>创作应用</span>
+            <h2>今天想创作什么</h2>
+            <p>从内容形式出发，快速找到适合这次表达的创作方式。</p>
+          </div>
+          <div className="workspaceCatalogActions">
+            <label>
+              <span className="srOnly">搜索创作工具</span>
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索工具" type="search" />
+            </label>
+            <a href={appPath("/help")}>使用攻略</a>
+          </div>
+        </div>
+        <div className="workspaceCategoryTabs" aria-label="应用分类">
+          {workspaceCategories.map((category) => (
+            <button className={selectedCategory === category.id ? "active" : ""} key={category.id} onClick={() => setSelectedCategory(category.id)} type="button">
+              <strong>{category.label}</strong>
+              <span>{category.description}</span>
+            </button>
+          ))}
+        </div>
         <div className="workspaceHubGrid">
-          {visibleWorkspaceCards.map((card) => (
-            <article className={`workspaceHubCard ${getCardThemeClass(card.badge)}`} key={card.slug}>
+          {filteredCards.map((card) => (
+            <article className={`workspaceHubCard workspaceCard-${getWorkspaceCategory(card)} ${getCardThemeClass(card.badge)}`} key={card.slug}>
               <div className="workspaceHubCardHeader">
-                <span className="workspaceHubCardIcon">{card.emoji}</span>
+                <span className="workspaceHubCardIcon" aria-hidden="true">{card.emoji}</span>
+                <div>
+                  <span className="workspaceCardCategory">{getWorkspaceCategoryLabel(card)}</span>
+                  {card.badge ? <em>{card.badge.replace("！", "")}</em> : null}
+                  {getUsageCount(card, usageByApp) > 0 ? <small>使用过 {getUsageCount(card, usageByApp)} 次</small> : null}
+                </div>
               </div>
 
               <div className="workspaceHubCardBody">
                 <strong>{card.name}</strong>
                 <p>{card.description}</p>
+                <div className="workspaceCardInspiration"><span>灵感</span><p>{getCardInspiration(card)}</p></div>
               </div>
 
               <div className="workspaceHubCardFooter">
+                <span>{card.pointsLabel} 积分 · {getCardOutputLabel(card)}</span>
                 <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>
-                  {resolveWorkspaceActionLabel(card)}
+                  {resolveWorkspaceActionLabel(card)} <span aria-hidden="true">→</span>
                 </a>
               </div>
             </article>
           ))}
         </div>
+        {filteredCards.length === 0 ? <div className="workspaceCatalogEmpty">没有找到匹配的创作工具，试试其他目标或关键词。</div> : null}
       </section>
 
     </div>
@@ -381,4 +469,61 @@ function resolveWorkspaceActionLabel(card: WorkspaceCard) {
 function resolveWorkspaceHref(card: WorkspaceCard) {
   if (card.actionLabel === "需完善人设") return appPath("/thinking");
   return appPath(`/apps/${card.appSlug}?from=workspace&entry=${card.slug}`);
+}
+
+function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {
+  return usageByApp.get(card.slug) ?? usageByApp.get(card.appSlug) ?? 0;
+}
+
+function getCardOutputLabel(card: WorkspaceCard) {
+  if (card.slug === "image-card" || card.slug === "wechat-images" || card.slug === "policy-renewal-card") return "图片结果";
+  if (card.slug.includes("check")) return "风险报告";
+  if (card.slug === "topic-picker") return "6 个选题";
+  return "可编辑文案";
+}
+
+function getWorkspaceCategory(card: WorkspaceCard): Exclude<WorkspaceCategory, "all"> {
+  if (["video-script-polish", "voice-note-copy", "live-script"].includes(card.slug)) return "video";
+  if (["image-card", "wechat-images", "policy-renewal-card"].includes(card.slug)) return "image";
+  if (["topic-picker", "ip-positioning", "letter"].includes(card.slug)) return "brand";
+  return "copy";
+}
+
+function getWorkspaceCategoryLabel(card: WorkspaceCard) {
+  const category = getWorkspaceCategory(card);
+  if (category === "video") return "短视频 & 直播";
+  if (category === "image") return "做图";
+  if (category === "brand") return "个人品牌";
+  return "文案";
+}
+
+function getCardInspiration(card: WorkspaceCard) {
+  const inspirations: Record<string, string> = {
+    "write-copy": "把一次客户提问，变成能发布的口播和朋友圈。",
+    "image-card": "把复杂保险知识，做成一眼能看懂的知识卡片。",
+    "policy-renewal-card": "把续费日期和金额整理成一张有温度、不会写错字的提醒卡。",
+    "video-script-polish": "让平淡的开场更抓人，让表达更像真实说话。",
+    "voice-note-copy": "把一段随口说出的想法，整理成清晰、有个人感的素材。",
+    "live-script": "从开场、讲解到互动收尾，搭好一场直播的完整节奏。",
+    "lead-copy": "从一个具体问题切入，让真正需要的人愿意了解。",
+    "traffic-copy": "借一个当下话题，说清普通人真正关心的风险。",
+    "marketing-copy": "不硬推产品，也能把方案价值讲得具体可信。",
+    "topic-picker": "围绕你的客群，一次打开六个可持续表达方向。",
+    "general-content": "把生活感受和真实经历，沉淀成有共鸣的内容。",
+    "wechat-images": "让长文章在重点、转折和总结处更有阅读节奏。",
+    "letter": "在重要节点，用一封信说出平时没说完整的话。",
+    "xiaohongshu-check": "发布前检查一次，避免好内容被高风险表达拖累。",
+    "ip-positioning": "找到别人为什么记住你，以及你应该长期讲什么。",
+  };
+  return inspirations[card.slug] ?? card.hint;
+}
+
+function getFrequentCards(usageByApp: Map<string, number>) {
+  const uniqueApps = visibleWorkspaceCards.filter((card, index, cards) => cards.findIndex((item) => item.appSlug === card.appSlug) === index);
+  const ranked = uniqueApps.sort((left, right) => getUsageCount(right, usageByApp) - getUsageCount(left, usageByApp));
+  if (ranked.some((card) => getUsageCount(card, usageByApp) > 0)) return ranked.slice(0, 3);
+  const fallbackSlugs = ["write-copy", "image-card", "traffic-copy"];
+  return fallbackSlugs
+    .map((slug) => visibleWorkspaceCards.find((card) => card.slug === slug))
+    .filter((card): card is WorkspaceCard => Boolean(card));
 }

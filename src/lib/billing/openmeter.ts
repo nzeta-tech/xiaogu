@@ -93,8 +93,9 @@ export async function getQuotaBalance(customerId: string) {
   }
 
   const remoteBalance = hasExplicitBalance ? balance : hasAccess ? Number.MAX_SAFE_INTEGER : 0;
-  const effectiveBalance = Math.max(remoteBalance, localBalance);
-  return { balance: effectiveBalance, hasAccess: hasAccess || localBalance > 0, mode: "openmeter" as const };
+  void remoteBalance;
+  void hasAccess;
+  return { balance: localBalance, hasAccess: localBalance > 0, mode: "openmeter" as const };
 }
 
 export async function reportUsage(input: {
@@ -151,18 +152,19 @@ export async function grantCredits(input: {
   const { baseUrl, apiKey, featureKey } = getConfig();
   if (!baseUrl || !apiKey) {
     if (!isDemoModeEnabled()) {
-      return { ok: false, mode: "unconfigured" as const };
+      return { ok: true, synced: false, mode: "unconfigured" as const };
     }
 
     return { ok: true, mode: "demo" as const };
   }
 
-  const customer = await ensureCustomer(input.customerId);
-  if (!customer?.id) {
-    return { ok: false, mode: "openmeter" as const };
-  }
+  try {
+    const customer = await ensureCustomer(input.customerId);
+    if (!customer?.id) {
+      return { ok: true, synced: false, mode: "openmeter" as const };
+    }
 
-  const response = await fetch(`${baseUrl}/events`, {
+    const response = await fetch(`${baseUrl}/events`, {
     method: "POST",
     headers: {
       "content-type": "application/cloudevents+json",
@@ -183,9 +185,12 @@ export async function grantCredits(input: {
         ...input.metadata,
       },
     }),
-  });
+    });
 
-  return { ok: response.ok, mode: "openmeter" as const };
+    return { ok: true, synced: response.ok, mode: "openmeter" as const };
+  } catch {
+    return { ok: true, synced: false, mode: "openmeter" as const };
+  }
 }
 
 export async function revokeCredits(input: {
@@ -194,16 +199,21 @@ export async function revokeCredits(input: {
   reason: string;
   metadata?: Record<string, unknown>;
 }) {
-  return reportUsage({
-    customerId: input.customerId,
-    action: "write_script",
-    amount: input.amount,
-    metadata: {
-      adjustment: "credit_revocation",
-      reason: input.reason,
-      ...input.metadata,
-    },
-  });
+  try {
+    const remote = await reportUsage({
+      customerId: input.customerId,
+      action: "write_script",
+      amount: input.amount,
+      metadata: {
+        adjustment: "credit_revocation",
+        reason: input.reason,
+        ...input.metadata,
+      },
+    });
+    return { ...remote, ok: true, synced: remote.ok };
+  } catch {
+    return { ok: true, synced: false, mode: getMeteringMode() };
+  }
 }
 
 async function ensureCustomer(customerId: string) {

@@ -56,4 +56,26 @@ export type AvatarPrivacySettings = {
   behavior_learning_enabled: boolean;
   customer_memory_enabled: boolean;
   auto_inference_enabled: boolean;
+  visual_creation_enabled: boolean;
+};
+
+export type AvatarVisualAssetRole = "portrait" | "professional" | "lifestyle" | "full_body" | "side_profile";
+
+export type AvatarVisualAsset = {
+  id: string;
+  role: AvatarVisualAssetRole;
+  label: string;
+  is_primary: boolean;
+  status: "active" | "disabled" | "archived";
+  usage_scopes: string[];
+  allow_creation: boolean;
+  content_type: string;
+  original_filename: string;
+  size_bytes: number;
+  width: number;
+  height: number;
+  quality_json: { warnings?: string[]; megapixels?: number };
+  created_at: string;
+  updated_at: string;
+  content_url: string;
 };

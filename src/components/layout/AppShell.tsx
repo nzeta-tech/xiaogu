@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
+import { listenForPageMeta, type PageMetaDetail } from "@/lib/client/page-meta";
 
 const platformNavItems = [
   { id: "workbench", href: "/dashboard", label: "今日", shortLabel: "今日工作台", icon: "home" },
   { id: "creation", href: "/workspace", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
-  { id: "crm", href: "/thinking", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
   { id: "assets", href: "/drafts", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
+  { id: "crm", href: "/thinking", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
+  { id: "invite", href: "/benefits#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
   { id: "growth", href: "/account", label: "用户中心", shortLabel: "权益与账户", icon: "sprout" },
 ];
 
@@ -17,12 +19,24 @@ const adminNavItem = { id: "admin", href: "/admin", label: "管理后台", short
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const navigationSource = searchParams.get("from");
   const [role, setRole] = useState("broker");
   const [userName, setUserName] = useState("经纪人");
   const [quotaBalance, setQuotaBalance] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminSection, setAdminSection] = useState<AdminSectionId>("overview");
-  const [siteConfig, setSiteConfig] = useState({ siteName: "小谷", siteSubtitle: "保险内容增长助手", supportContact: "", footerNote: "" });
+  const [siteConfig, setSiteConfig] = useState<{ siteName: string; siteSubtitle: string; supportContact: string; footerNote: string; logoUrl: string; helpUrl: string; homeContent: string; customNavItems: Array<{ id: string; label: string; url: string; visibility: "user" | "admin"; sortOrder: number }> }>({ siteName: "小谷", siteSubtitle: "保险内容增长助手", supportContact: "", footerNote: "", logoUrl: "/brand/xiaogu-icon.png", helpUrl: "/help", homeContent: "", customNavItems: [] });
+  const [pageMetaOverride, setPageMetaOverride] = useState<PageMetaDetail | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPageMetaOverride(null), 0);
+    const stopListening = listenForPageMeta(setPageMetaOverride);
+    return () => {
+      window.clearTimeout(timer);
+      stopListening();
+    };
+  }, [pathname]);
 
   useEffect(() => {
     async function loadUser() {
@@ -82,13 +96,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname === "/thinking" ||
     pathname === "/questionnaire" ||
     pathname === "/feedback" ||
+    pathname === "/benefits" ||
+    pathname === "/billing" ||
     pathname === "/account" ||
     pathname.startsWith("/apps/") ||
     pathname.startsWith("/examples/") ||
     pathname.startsWith("/works/");
   const creationBrandName = `${siteConfig.siteName}AI`;
-  const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, adminNavItem] : platformNavItems;
-  const pageMeta = getPageMeta(pathname, siteConfig.siteSubtitle);
+  const customUserNavItems = siteConfig.customNavItems.filter((item) => item.visibility === "user").sort((a, b) => a.sortOrder - b.sortOrder).map((item) => ({ ...item, href: item.url, shortLabel: item.label, icon: "help" }));
+  const customAdminNavItems = siteConfig.customNavItems.filter((item) => item.visibility === "admin").sort((a, b) => a.sortOrder - b.sortOrder);
+  const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, ...customUserNavItems, adminNavItem] : [...platformNavItems, ...customUserNavItems];
+  const pageMeta = pageMetaOverride ?? getPageMeta(pathname, siteConfig.siteSubtitle);
 
   return (
     <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""}`}>
@@ -96,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="appSidebarInner">
           <a className="brand brandLink" href={appPath("/workspace")}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="brandMark" src={appPath("/brand/xiaogu-icon.png")} alt="小谷" />
+            <img className="brandMark" src={resolvePublicUrl(siteConfig.logoUrl)} alt="小谷" />
             <div className="brandCopy creationBrandCopy">
               <strong>{creationBrandName}</strong>
               <span>保险人的智能工作伙伴</span>
@@ -104,14 +122,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </a>
 
           <nav className="appSidebarNav" aria-label="主导航">
-            <span className="appSidebarLabel">工作空间</span>
-            {visiblePlatformNavItems.map((item) => (
-              <a className={isNavItemActive(pathname, item.id) ? "active" : ""} href={appPath(item.href)} key={`${item.href}-${item.label}`}>
+            <span className="appSidebarLabel">{pathname === "/admin" ? "运营管理" : "工作空间"}</span>
+            {(pathname === "/admin" ? [adminNavItem] : visiblePlatformNavItems).map((item) => (
+              <a className={isNavItemActive(pathname, item.id, navigationSource) ? "active" : ""} href={resolvePublicUrl(item.href)} key={`${item.href}-${item.label}`}>
                 <span className="appSidebarIcon" aria-hidden="true"><NavIcon name={item.icon} /></span>
                 <span>{item.label}</span>
               </a>
             ))}
-            {role === "admin" ? (
+            {role === "admin" && pathname === "/admin" ? (
               <div className="adminSidebarSubmenu" aria-label="管理后台子菜单">
                 {adminMenuItems.map((item) => (
                   <a
@@ -124,11 +142,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <span>{item.label}</span>
                   </a>
                 ))}
+                {customAdminNavItems.map((item) => <a href={resolvePublicUrl(item.url)} key={`admin-custom-${item.id}`}><span className="appSidebarIcon" aria-hidden="true"><NavIcon name="help" /></span><span>{item.label}</span></a>)}
               </div>
+            ) : null}
+            {pathname === "/admin" ? (
+              <a className="adminBackToWorkspace" href={appPath("/workspace")}>
+                <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="creation" /></span>
+                <span>返回工作空间</span>
+              </a>
             ) : null}
           </nav>
 
           <div className="appSidebarFooter">
+            <a className="sidebarSupportLink" href={resolvePublicUrl(siteConfig.helpUrl)}>
+              <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="help" /></span>
+              <span>使用帮助</span>
+            </a>
             <a className="sidebarSupportLink" href={appPath("/feedback")}>
               <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="support" /></span>
               <span>反馈支持</span>
@@ -142,10 +171,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="appHeaderBar">
             <a className="mobileBrand" href={appPath("/dashboard")} aria-label="小谷首页">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={appPath("/brand/xiaogu-icon.png")} alt="" />
+              <img src={resolvePublicUrl(siteConfig.logoUrl)} alt="" />
             </a>
             <div className="appPageIdentity">
-              <strong>{pageMeta.title}</strong>
+              <strong>{pageMeta.title}{pageMeta.status ? <em>{pageMeta.status}</em> : null}</strong>
               <span>{pageMeta.description}</span>
             </div>
 
@@ -191,7 +220,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <nav className="mobileAppNav" aria-label="移动端主导航">
           {platformNavItems.map((item) => (
-            <a className={isNavItemActive(pathname, item.id) ? "active" : ""} href={appPath(item.href)} key={`mobile-${item.id}`}>
+            <a className={isNavItemActive(pathname, item.id, navigationSource) ? "active" : ""} href={appPath(item.href)} key={`mobile-${item.id}`}>
               <span aria-hidden="true"><NavIcon name={item.icon} /></span>
               <strong>{item.label}</strong>
             </a>
@@ -256,6 +285,16 @@ function NavIcon({ name }: { name: string }) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 7h6l2 2h8v10H4z" />
         <path d="M4 7V5h6l2 2" />
+      </svg>
+    );
+  }
+
+  if (name === "gift") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 10h16v10H4z" />
+        <path d="M3 6h18v4H3zM12 6v14" />
+        <path d="M12 6H8.5a2.5 2.5 0 1 1 2.2-3.7L12 6Zm0 0h3.5a2.5 2.5 0 1 0-2.2-3.7L12 6Z" />
       </svg>
     );
   }
@@ -328,13 +367,20 @@ function AdminSectionIcon({ name }: { name: AdminSectionId }) {
   );
 }
 
-function isNavItemActive(pathname: string, itemId?: string) {
+function isNavItemActive(pathname: string, itemId?: string, navigationSource?: string | null) {
+  const isWorkDetail = pathname.startsWith("/works/");
+  const workNavigationItem = navigationSource === "creation-works"
+    ? "assets"
+    : navigationSource === "dashboard"
+      ? "workbench"
+      : "creation";
+
   if (itemId === "creation") {
-    return pathname === "/workspace" || pathname.startsWith("/apps/") || pathname.startsWith("/examples/") || pathname.startsWith("/works/");
+    return pathname === "/workspace" || pathname.startsWith("/apps/") || pathname.startsWith("/examples/") || (isWorkDetail && workNavigationItem === "creation");
   }
 
   if (itemId === "workbench") {
-    return pathname === "/dashboard";
+    return pathname === "/dashboard" || (isWorkDetail && workNavigationItem === "workbench");
   }
 
   if (itemId === "crm") {
@@ -342,11 +388,15 @@ function isNavItemActive(pathname: string, itemId?: string) {
   }
 
   if (itemId === "growth") {
-    return pathname === "/account" || pathname === "/benefits" || pathname === "/billing";
+    return pathname === "/account" || pathname === "/billing";
+  }
+
+  if (itemId === "invite") {
+    return pathname === "/benefits";
   }
 
   if (itemId === "assets") {
-    return pathname === "/drafts";
+    return pathname === "/drafts" || (isWorkDetail && workNavigationItem === "assets");
   }
 
   if (itemId === "admin") {
@@ -360,14 +410,18 @@ function isNavItemActive(pathname: string, itemId?: string) {
   return false;
 }
 
-function getPageMeta(pathname: string, fallbackDescription: string) {
+function resolvePublicUrl(value: string) {
+  return /^https?:\/\//i.test(value) ? value : appPath(value.startsWith("/") ? value : `/${value}`);
+}
+
+function getPageMeta(pathname: string, fallbackDescription: string): PageMetaDetail {
   if (pathname === "/dashboard") return { title: "今日工作台", description: "把今天的重要动作推进下去" };
   if (pathname === "/workspace" || pathname.startsWith("/apps/")) return { title: "获客创作", description: "从想法到可发布内容" };
   if (pathname.startsWith("/works/") || pathname.startsWith("/examples/")) return { title: "作品详情", description: "审阅、优化与复用内容" };
   if (pathname === "/drafts") return { title: "创作历史", description: "管理作品与创作素材" };
   if (pathname === "/thinking" || pathname === "/questionnaire") return { title: "数字分身", description: "管理人设与表达偏好" };
   if (pathname === "/billing") return { title: "会员与积分", description: "查看额度和购买记录" };
-  if (pathname === "/benefits") return { title: "成长权益", description: "活动兑换与奖励记录" };
+  if (pathname === "/benefits") return { title: "邀请有礼", description: "邀请好友、查看返利与活动奖励" };
   if (pathname === "/feedback") return { title: "反馈支持", description: "告诉我们你的使用感受" };
   if (pathname === "/account") return { title: "用户中心", description: "个人资料、经营数据与账号安全" };
   if (pathname === "/admin") return { title: "管理后台", description: "运营与系统管理" };
