@@ -147,6 +147,10 @@ export async function tryCreateWork(input: {
   if (!input.userId) return null;
 
   try {
+    const resolvedTitle = await ensureUniqueWorkTitle({
+      userId: input.userId,
+      title: input.title ?? inferTitle(input.content),
+    });
     const appRecord = input.appCode
       ? await query<{ id: string }>("select id from apps where code = $1 or slug = $1 limit 1", [input.appCode])
       : { rows: [] as Array<{ id: string }> };
@@ -167,7 +171,7 @@ export async function tryCreateWork(input: {
         input.appRunId ?? null,
         appRecord.rows[0]?.id ?? null,
         input.conversationId ?? null,
-        input.title ?? inferTitle(input.content),
+        resolvedTitle,
         input.sourceChannel ?? input.appCode ?? "",
         input.complianceRisk ?? "unchecked",
       ],
@@ -216,6 +220,13 @@ export async function tryUpdateWorkContent(input: {
     if (!workRow.rows[0]) return null;
 
     if (input.title || input.appRunId || input.status || input.complianceRisk) {
+      const resolvedTitle = input.title
+        ? await ensureUniqueWorkTitle({
+          userId: input.userId,
+          workId: input.workId,
+          title: input.title,
+        })
+        : null;
       await query(
         `update works
          set title = coalesce($3, title),
@@ -224,7 +235,7 @@ export async function tryUpdateWorkContent(input: {
              compliance_risk = coalesce($6, compliance_risk),
              updated_at = now()
          where id = $1 and user_id = $2`,
-        [input.workId, input.userId, input.title ?? null, input.status ?? null, input.appRunId ?? null, input.complianceRisk ?? null],
+        [input.workId, input.userId, resolvedTitle ?? null, input.status ?? null, input.appRunId ?? null, input.complianceRisk ?? null],
       );
     } else {
       await query(
@@ -338,8 +349,8 @@ export async function tryListWorks(userId: string | null) {
   }
 }
 
-export async function tryGetWorkDetail(input: { userId: string | null; workId: string }) {
-  if (!input.userId) return null;
+export async function tryGetWorkDetail(input: { userId: string | null; workId: string; access?: "own" | "admin" }) {
+  if (!input.userId && input.access !== "admin") return null;
 
   try {
     const workResult = await query<{
@@ -369,8 +380,8 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
                 ''
               ) as content
        from works w
-       where w.id = $1 and w.user_id = $2`,
-      [input.workId, input.userId],
+       where w.id = $1${input.access === "admin" ? "" : " and w.user_id = $2"}`,
+      input.access === "admin" ? [input.workId] : [input.workId, input.userId],
     );
     if (!workResult.rows[0]) return null;
 
@@ -392,16 +403,18 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
       ? await query<{
           id: string;
           status: string;
+          error_message: string | null;
           tone: string | null;
           target_channels: string[];
           model: string | null;
           quota_cost: number | null;
           input_payload: Record<string, unknown> | null;
+          result_text: string | null;
           result_json: Record<string, unknown> | null;
           created_at: string;
           completed_at: string | null;
         }>(
-          `select id, status, tone, target_channels, model, quota_cost, input_payload, result_json, created_at, completed_at
+          `select id, status, error_message, tone, target_channels, model, quota_cost, input_payload, result_text, result_json, created_at, completed_at
            from app_runs
            where id = $1`,
           [workResult.rows[0].app_run_id],
@@ -409,11 +422,13 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
       : { rows: [] as Array<{
           id: string;
           status: string;
+          error_message: string | null;
           tone: string | null;
           target_channels: string[];
           model: string | null;
           quota_cost: number | null;
           input_payload: Record<string, unknown> | null;
+          result_text: string | null;
           result_json: Record<string, unknown> | null;
           created_at: string;
           completed_at: string | null;
@@ -441,6 +456,28 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
   }
 }
 
+export const STALE_APP_RUN_AFTER_MINUTES = 15;
+
+export async function tryExpireStaleAppRuns(userId: string | null, staleAfterMinutes = STALE_APP_RUN_AFTER_MINUTES) {
+  const safeMinutes = Math.min(Math.max(Math.floor(staleAfterMinutes), 5), 120);
+  try {
+    const result = await query<{ id: string }>(
+      `update app_runs
+       set status = 'failed',
+           error_message = '创作任务超时未完成，已自动释放，可重新发起生成。',
+           completed_at = now()
+       where status in ('queued', 'running')
+         and created_at < now() - ($2 * interval '1 minute')
+         and ($1::uuid is null or user_id = $1::uuid)
+       returning id`,
+      [userId, safeMinutes],
+    );
+    return result.rows.length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function tryListRecoverableRunningWorks(limit = 20) {
   try {
     const result = await query<{
@@ -460,6 +497,7 @@ export async function tryListRecoverableRunningWorks(limit = 20) {
        from works w
        join app_runs ar on ar.id = w.app_run_id
        where ar.status = 'running'
+         and ar.created_at >= now() - (${STALE_APP_RUN_AFTER_MINUTES} * interval '1 minute')
          and ar.input_payload is not null
        order by ar.created_at asc
        limit $1`,
@@ -2965,7 +3003,7 @@ export type CreationWorksQuery = {
   pageSize?: number;
   search?: string;
   platform?: string;
-  state?: "all" | "favorite" | "published" | "unpublished" | "noted" | "avatar";
+  state?: "all" | "favorite" | "noted" | "avatar";
   from?: string;
   to?: string;
   sort?: "updated-desc" | "updated-asc" | "created-desc";
@@ -2993,8 +3031,6 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
       filters.push(`w.source_channel = $${values.length}`);
     }
     if (input.state === "favorite") filters.push("w.is_favorite = true");
-    if (input.state === "published") filters.push("w.is_used = true");
-    if (input.state === "unpublished") filters.push("w.is_used = false");
     if (input.state === "noted") filters.push("length(trim(coalesce(w.note, ''))) > 0");
     if (input.state === "avatar") filters.push("jsonb_array_length(coalesce(ar.result_json->'avatarVisualAssetIds', '[]'::jsonb)) > 0");
     if (input.from) {
@@ -3027,12 +3063,14 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
       note: string | null;
       is_favorite: boolean;
       is_used: boolean;
+      app_run_status: string | null;
+      app_run_error_message: string | null;
       quota_cost: number | null;
       result_json: Record<string, unknown> | null;
       filtered_count: string;
     }>(
       `select w.id, w.title, w.status, w.compliance_risk, w.created_at, w.updated_at,
-              w.source_channel, w.note, w.is_favorite, w.is_used, ar.quota_cost, ar.result_json,
+              w.source_channel, w.note, w.is_favorite, w.is_used, ar.status as app_run_status, ar.error_message as app_run_error_message, ar.quota_cost, ar.result_json,
               count(*) over() as filtered_count,
               coalesce(
                 (select wv.content from work_versions wv where wv.work_id = w.id order by wv.version_no desc limit 1),
@@ -3047,11 +3085,9 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
     );
 
     const [totalsResult, platformsResult, activityResult] = await Promise.all([
-      query<{ all_count: string; favorite_count: string; published_count: string; unpublished_count: string; noted_count: string; avatar_count: string }>(
+      query<{ all_count: string; favorite_count: string; noted_count: string; avatar_count: string }>(
         `select count(*) as all_count,
                 count(*) filter (where is_favorite) as favorite_count,
-                count(*) filter (where is_used) as published_count,
-                count(*) filter (where not is_used) as unpublished_count,
                 count(*) filter (where length(trim(coalesce(w.note, ''))) > 0) as noted_count,
                 count(*) filter (where jsonb_array_length(coalesce(ar.result_json->'avatarVisualAssetIds', '[]'::jsonb)) > 0) as avatar_count
          from works w left join app_runs ar on ar.id = w.app_run_id where w.user_id = $1 and w.status <> 'archived'`,
@@ -3078,8 +3114,6 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
     const totals = {
       all: Number(totalsRow?.all_count ?? 0),
       favorite: Number(totalsRow?.favorite_count ?? 0),
-      used: Number(totalsRow?.published_count ?? 0),
-      unused: Number(totalsRow?.unpublished_count ?? 0),
       noted: Number(totalsRow?.noted_count ?? 0),
       avatar: Number(totalsRow?.avatar_count ?? 0),
     };
@@ -3107,6 +3141,8 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
         note: work.note ?? "",
         isFavorite: Boolean(work.is_favorite),
         isUsed: Boolean(work.is_used),
+        appRunStatus: work.app_run_status ?? "",
+        errorMessage: work.app_run_error_message ?? "",
         quotaCost: Number(work.quota_cost ?? 0),
         imageUrl: firstGeneratedImageUrl(work.result_json),
         usesAvatarVisual: Array.isArray(work.result_json?.avatarVisualAssetIds) && work.result_json.avatarVisualAssetIds.length > 0,
@@ -3133,4 +3169,53 @@ function inferTitle(content: string) {
     .map((line) => line.trim())
     .find(Boolean);
   return firstLine?.slice(0, 80) || "未命名草稿";
+}
+
+async function ensureUniqueWorkTitle(input: {
+  userId: string;
+  title: string;
+  workId?: string;
+}) {
+  const baseTitle = normalizeWorkTitle(input.title);
+  if (!baseTitle) return "未命名作品";
+
+  const prefixPattern = `${baseTitle} · %`;
+  const existing = await query<{ title: string }>(
+    `select title
+     from works
+     where user_id = $1
+       and ($2::uuid is null or id <> $2::uuid)
+       and (created_at at time zone 'Asia/Shanghai')::date = (now() at time zone 'Asia/Shanghai')::date
+       and (title = $3 or title like $4)
+     order by created_at asc`,
+    [input.userId, input.workId ?? null, baseTitle, prefixPattern],
+  );
+
+  if (existing.rows.length === 0) return baseTitle;
+
+  const suffixes = new Set<number>();
+  let hasBaseTitle = false;
+  for (const row of existing.rows) {
+    const currentTitle = normalizeWorkTitle(row.title);
+    if (currentTitle === baseTitle) {
+      hasBaseTitle = true;
+      continue;
+    }
+
+    if (!currentTitle.startsWith(`${baseTitle} · `)) continue;
+    const suffixValue = Number(currentTitle.slice(baseTitle.length + 3));
+    if (Number.isInteger(suffixValue) && suffixValue >= 2) {
+      suffixes.add(suffixValue);
+    }
+  }
+
+  if (!hasBaseTitle) return baseTitle;
+
+  let nextSuffix = 2;
+  while (suffixes.has(nextSuffix)) nextSuffix += 1;
+  return `${baseTitle} · ${nextSuffix}`;
+}
+
+function normalizeWorkTitle(title: string) {
+  return title.replace(/\s+/g, " ").trim().slice(0, 120);
 }

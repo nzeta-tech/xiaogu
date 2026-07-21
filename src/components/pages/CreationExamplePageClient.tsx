@@ -453,6 +453,8 @@ export function CreationExamplePageClient({
                       {imageResults.map((item, index) => (
                         <article className="wechatImagesExampleGalleryCard" id={item.id ?? `image-result-${index + 1}`} key={item.id ?? item.imageUrl}>
                           <div className="creationExampleImageFrame" style={item.ratio ? { aspectRatio: item.ratio } : undefined}>
+                            {/* Example result URLs can be external assets from the seeded library. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img alt={`${activeExample.title} ${index + 1}`} className="creationExamplePreviewImage" src={item.imageUrl} />
                           </div>
                           <div className="wechatImagesExampleGalleryMeta">
@@ -481,6 +483,8 @@ export function CreationExamplePageClient({
                       <div className="creationExampleImageGrid">
                         <article className="creationExampleImageTile">
                           <div className="creationExampleImageFrame" style={item.ratio ? { aspectRatio: item.ratio } : undefined}>
+                            {/* Example result URLs can be external assets from the seeded library. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img alt={activeExample.title} className="creationExamplePreviewImage" src={item.imageUrl} />
                           </div>
                           <div className="creationExampleImageActions">

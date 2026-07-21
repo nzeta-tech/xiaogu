@@ -1,15 +1,5 @@
-"use client";
-
-import { AuthGuard } from "@/components/AuthGuard";
-import { AppShell } from "@/components/layout/AppShell";
-import { DraftsPageClient } from "@/components/pages/DraftsPageClient";
+import { redirect } from "next/navigation";
 
 export default function DraftsPage() {
-  return (
-    <AuthGuard>
-      <AppShell>
-        <DraftsPageClient />
-      </AppShell>
-    </AuthGuard>
-  );
+  redirect("/works");
 }

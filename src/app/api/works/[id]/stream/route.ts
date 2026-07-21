@@ -5,13 +5,15 @@ import {
   getBackgroundWorkRunSnapshot,
   subscribeToBackgroundWorkRun,
 } from "@/lib/creation/background-run-registry";
-import { tryGetWorkDetail } from "@/lib/db/repositories";
+import { getCreationUserError } from "@/lib/creation/errors";
+import { tryExpireStaleAppRuns, tryGetWorkDetail } from "@/lib/db/repositories";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
 
   const { id } = await context.params;
+  await tryExpireStaleAppRuns(user.id);
   const work = await tryGetWorkDetail({ userId: user.id, workId: id });
   if (!work) {
     return Response.json({ error: "作品不存在或无权访问" }, { status: 404 });
@@ -96,7 +98,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           return;
         }
         if (snapshot.status === "error") {
-          safeEnqueue(encodeEvent({ type: "error", content: snapshot.error || "内容生成失败" }));
+          safeEnqueue(encodeEvent({ type: "error", content: getCreationUserError(snapshot.error) }));
           safeClose();
           return;
         }
@@ -134,7 +136,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           return;
         }
         if (event.type === "error") {
-          safeEnqueue(encodeEvent({ type: "error", content: event.content ?? "内容生成失败" }));
+          safeEnqueue(encodeEvent({ type: "error", content: getCreationUserError(event.content) }));
           unsubscribe?.();
           safeClose();
         }

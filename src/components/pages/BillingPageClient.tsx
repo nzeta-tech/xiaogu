@@ -207,7 +207,14 @@ export function BillingPageClient() {
             </article>
           ))}
         </div>
-        {commerceConfig.helpImageUrl ? <div className="billingHelpMedia"><img src={commerceConfig.helpImageUrl} alt="支付帮助" /><p>{commerceConfig.purchaseNotice}</p></div> : null}
+        {commerceConfig.helpImageUrl ? (
+          <div className="billingHelpMedia">
+            {/* CMS-configured external image; keep native img for flexible runtime URLs. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={commerceConfig.helpImageUrl} alt="支付帮助" />
+            <p>{commerceConfig.purchaseNotice}</p>
+          </div>
+        ) : null}
       </section> : null}
 
       <div className="billingTwoColumn">

@@ -1,0 +1,26 @@
+services:
+  app:
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "server.js"]
+    ports:
+      - "3001:3000"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      FONTCONFIG_FILE: /app/public/fonts/fonts.conf
+      DATABASE_URL: ${RDS_DATABASE_URL:?RDS_DATABASE_URL is required for deployed runtime}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    volumes:
+      - ./runtime:/app:ro
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped

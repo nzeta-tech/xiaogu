@@ -1,11 +1,14 @@
 import { getQuotaBalance } from "./openmeter";
 import { getQuotaCost, type QuotaAction } from "./quota";
 import type { SessionUser } from "@/lib/auth/session";
-import { tryGetSystemSettings } from "@/lib/db/repositories";
+import { tryExpireStaleAppRuns, tryGetSystemSettings } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
 
 export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number) {
   const settings = await tryGetSystemSettings();
+  if (action === "write_script") {
+    await tryExpireStaleAppRuns(user.id);
+  }
   if (settings.site.maintenanceMode && user.role !== "admin") {
     return { ok: false as const, response: Response.json({ error: settings.site.maintenanceMessage }, { status: 503 }), quotaCost: 0, balance: null };
   }

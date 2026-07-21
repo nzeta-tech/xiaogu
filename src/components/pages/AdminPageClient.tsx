@@ -1028,7 +1028,7 @@ export function AdminPageClient() {
                 <Metric label="累计消耗" value={selectedUserDetail.totals.quotaConsumed} />
               </div>
               <AdminPanel title="最近订单">{selectedUserDetail.orders.slice(0, 8).map((order) => <Row key={order.id} title={formatMoney(order.amount_cents, order.currency)} meta={`${order.quota_amount} 点 · ${order.status} · ${formatDate(order.created_at)}`} />)}</AdminPanel>
-              <AdminPanel title="最近作品">{selectedUserDetail.works.slice(0, 8).map((work) => <Row key={work.id} title={work.title} meta={`${work.platform} · ${work.status} · ${formatDate(work.updated_at)}`} />)}</AdminPanel>
+              <AdminPanel title="最近作品">{selectedUserDetail.works.slice(0, 8).map((work) => <Row key={work.id} title={work.title} meta={`${work.platform} · ${work.status} · ${formatDate(work.updated_at)}`} href={adminWorkHref(work.id)} />)}</AdminPanel>
             </div> : null}
           </AdminDrawer>
         </section>
@@ -1058,6 +1058,7 @@ export function AdminPageClient() {
                   key={work.id}
                   title={work.title}
                   meta={`${work.user_email ?? "未知用户"} · ${work.app_name ?? work.source_channel ?? "未知应用"} · ${work.status} · 合规 ${work.compliance_risk} · ${formatDate(work.updated_at)}`}
+                  href={adminWorkHref(work.id)}
                 />
               ))}
               {(contentOverview?.recentWorks ?? []).length === 0 ? <div className="emptyState">暂无作品数据。</div> : null}
@@ -1148,7 +1149,7 @@ export function AdminPageClient() {
 
           {contentView === "runs" ? <AdminPanel title="失败与运行任务">
             <div className="tableList">
-              {appRuns.map((run) => <div className="tableRow" key={run.id}><div><strong>{run.app_name ?? run.app_slug ?? "未知应用"}</strong><span>{run.user_email ?? "未知用户"} · {run.quota_cost} 点 · {run.model ?? "未记录模型"} · {formatDate(run.created_at)}</span>{run.error_message ? <span>错误：{run.error_message}</span> : null}</div><div className="rowActions"><AdminStatus value={run.status} />{run.work_id ? <a className="secondaryButton linkButton" href={apiPath(`/works/${run.work_id}`)}>查看作品</a> : null}{run.status === "running" ? <button className="secondaryButton" onClick={() => requestConfirm({ title: "终止运行中的任务？", description: "任务将标记为失败；已发出的上游模型请求可能无法立即取消。", confirmLabel: "终止任务", danger: true, onConfirm: () => terminateRun(run.id) })}>终止任务</button> : null}</div></div>)}
+              {appRuns.map((run) => <div className="tableRow" key={run.id}><div><strong>{run.app_name ?? run.app_slug ?? "未知应用"}</strong><span>{run.user_email ?? "未知用户"} · {run.quota_cost} 点 · {run.model ?? "未记录模型"} · {formatDate(run.created_at)}</span>{run.error_message ? <span>错误：{run.error_message}</span> : null}</div><div className="rowActions"><AdminStatus value={run.status} />{run.work_id ? <a className="secondaryButton linkButton" href={adminWorkHref(run.work_id)}>查看作品</a> : null}{run.status === "running" ? <button className="secondaryButton" onClick={() => requestConfirm({ title: "终止运行中的任务？", description: "任务将标记为失败；已发出的上游模型请求可能无法立即取消。", confirmLabel: "终止任务", danger: true, onConfirm: () => terminateRun(run.id) })}>终止任务</button> : null}</div></div>)}
               {appRuns.length === 0 ? <div className="emptyState">当前没有失败或运行中的任务。</div> : null}
             </div>
           </AdminPanel> : null}
@@ -1464,13 +1465,23 @@ function moveItem<T>(items: T[], from: number, to: number) {
   return next;
 }
 
-function Row({ title, meta }: { title: string; meta: string }) {
-  return (
-    <div className="adminInfoRow">
+function Row({ title, meta, href }: { title: string; meta: string; href?: string }) {
+  const content = (
+    <>
       <strong>{title}</strong>
       <p>{meta}</p>
-    </div>
+    </>
   );
+
+  if (href) {
+    return <a className="adminInfoRow adminInfoRowLink" href={href}>{content}</a>;
+  }
+
+  return <div className="adminInfoRow">{content}</div>;
+}
+
+function adminWorkHref(workId: string) {
+  return apiPath(`/works/${workId}?from=admin&admin=1`);
 }
 
 function formatMoney(amountCents: number, currency: string) {

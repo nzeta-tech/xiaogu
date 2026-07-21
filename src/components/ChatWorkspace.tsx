@@ -28,7 +28,8 @@ type Topic = {
 };
 
 type SpeechRecognitionEventLike = Event & {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+  resultIndex?: number;
+  results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }>;
 };
 
 type SpeechRecognitionLike = {
@@ -39,6 +40,7 @@ type SpeechRecognitionLike = {
   onend: (() => void) | null;
   onerror: (() => void) | null;
   start: () => void;
+  stop: () => void;
 };
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
@@ -87,6 +89,8 @@ export function ChatWorkspace() {
   const [userName, setUserName] = useState("经纪人");
   const [expandedTopicIds, setExpandedTopicIds] = useState<string[]>([]);
   const [listening, setListening] = useState(false);
+  const [voicePaused, setVoicePaused] = useState(false);
+  const [voiceElapsed, setVoiceElapsed] = useState(0);
   const [voiceSupported] = useState(() => Boolean(getSpeechRecognitionConstructor()));
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [quota, setQuota] = useState(0);
@@ -95,6 +99,11 @@ export function ChatWorkspace() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const streamQueueRef = useRef("");
   const streamTimerRef = useRef<number | null>(null);
+  const inputRef = useRef(input);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceSessionRef = useRef<{ initialInput: string; segmentBaseInput: string } | null>(null);
+  const voiceCancelingRef = useRef(false);
+  const voiceCompletingRef = useRef(false);
 
   const canUseQuota = quota >= Number.MAX_SAFE_INTEGER || quota > 0;
   const visibleTopics = useMemo(() => {
@@ -174,23 +183,87 @@ export function ChatWorkspace() {
 
   function startVoiceInput() {
     const SpeechRecognition = getSpeechRecognitionConstructor();
-    if (!SpeechRecognition || listening) return;
+    if (!SpeechRecognition || loading) return;
+    if (listening && !voicePaused) return;
+
+    if (!voiceSessionRef.current) {
+      voiceSessionRef.current = { initialInput: inputRef.current, segmentBaseInput: inputRef.current };
+      setVoiceElapsed(0);
+    } else {
+      voiceSessionRef.current.segmentBaseInput = inputRef.current;
+    }
+
+    voiceCancelingRef.current = false;
+    voiceCompletingRef.current = false;
 
     const recognition = new SpeechRecognition();
     recognition.lang = "zh-CN";
-    recognition.interimResults = false;
-    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.continuous = true;
     recognition.onresult = (event) => {
       const transcript = Array.from(event.results)
         .flatMap((result) => Array.from(result).map((item) => item.transcript))
         .join("")
         .trim();
-      if (transcript) setInput((current) => `${current}${current ? " " : ""}${transcript}`);
+      const session = voiceSessionRef.current;
+      if (transcript && session) setInput(appendInlineVoiceText(session.segmentBaseInput, transcript));
     };
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      if (voiceCancelingRef.current) {
+        const session = voiceSessionRef.current;
+        setInput(session?.initialInput ?? "");
+        resetVoiceInputState();
+        return;
+      }
+      if (voiceCompletingRef.current) {
+        resetVoiceInputState();
+        return;
+      }
+      setVoicePaused(true);
+    };
+    recognition.onerror = () => resetVoiceInputState();
     setListening(true);
+    setVoicePaused(false);
+    recognitionRef.current = recognition;
     recognition.start();
+  }
+
+  function pauseVoiceInput() {
+    const session = voiceSessionRef.current;
+    if (session) session.segmentBaseInput = inputRef.current;
+    setVoicePaused(true);
+    recognitionRef.current?.stop();
+  }
+
+  function finishVoiceInput() {
+    voiceCompletingRef.current = true;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    } else {
+      resetVoiceInputState();
+    }
+  }
+
+  function cancelVoiceInput() {
+    const session = voiceSessionRef.current;
+    voiceCancelingRef.current = true;
+    setInput(session?.initialInput ?? "");
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    } else {
+      resetVoiceInputState();
+    }
+  }
+
+  function resetVoiceInputState() {
+    recognitionRef.current = null;
+    voiceSessionRef.current = null;
+    voiceCancelingRef.current = false;
+    voiceCompletingRef.current = false;
+    setListening(false);
+    setVoicePaused(false);
+    setVoiceElapsed(0);
   }
 
   async function loadTopics(announce = true, refresh = false, skipQuotaGuard = false) {
@@ -344,8 +417,19 @@ export function ChatWorkspace() {
   }, [messages, loading]);
 
   useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  useEffect(() => {
+    if (!listening || voicePaused) return undefined;
+    const timer = window.setInterval(() => setVoiceElapsed((current) => current + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [listening, voicePaused]);
+
+  useEffect(() => {
     return () => {
       if (streamTimerRef.current) window.clearInterval(streamTimerRef.current);
+      recognitionRef.current?.stop();
     };
   }, []);
 
@@ -456,7 +540,7 @@ export function ChatWorkspace() {
               <button
                 className={`voiceButton iconButton ${listening ? "listening" : ""}`}
                 onClick={startVoiceInput}
-                disabled={!voiceSupported || listening || loading}
+                disabled={!voiceSupported || (listening && !voicePaused) || loading}
                 title={voiceSupported ? "语音输入" : "当前浏览器不支持语音输入"}
                 type="button"
               >
@@ -467,6 +551,16 @@ export function ChatWorkspace() {
               </button>
             </div>
           </div>
+          {listening ? (
+            <VoiceInputPanel
+              elapsed={voiceElapsed}
+              paused={voicePaused}
+              onCancel={cancelVoiceInput}
+              onFinish={finishVoiceInput}
+              onPause={pauseVoiceInput}
+              onResume={startVoiceInput}
+            />
+          ) : null}
         </div>
       </section>
 
@@ -675,6 +769,64 @@ function getSpeechRecognitionConstructor() {
     webkitSpeechRecognition?: SpeechRecognitionConstructor;
   };
   return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
+}
+
+function VoiceInputPanel({
+  elapsed,
+  paused,
+  onCancel,
+  onFinish,
+  onPause,
+  onResume,
+}: {
+  elapsed: number;
+  paused: boolean;
+  onCancel: () => void;
+  onFinish: () => void;
+  onPause: () => void;
+  onResume: () => void;
+}) {
+  return (
+    <div className={paused ? "voiceCapturePanel paused" : "voiceCapturePanel"} role="status" aria-live="polite">
+      <div className="voiceCaptureStatus">
+        <span className="voiceCaptureDot" aria-hidden="true" />
+        <strong>{paused ? "语音输入已暂停" : `语音输入中 ${formatVoiceElapsed(elapsed)}`}</strong>
+      </div>
+      <div className="voiceWaveform" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, index) => (
+          <span key={index} />
+        ))}
+      </div>
+      <div className="voiceCaptureActions">
+        <button className="voiceCaptureButton secondary" onClick={paused ? onResume : onPause} type="button">
+          <span aria-hidden="true">{paused ? "▶" : "Ⅱ"}</span>
+          {paused ? "继续" : "暂停"}
+        </button>
+        <button className="voiceCaptureButton finish" onClick={onFinish} type="button">
+          <span aria-hidden="true">✓</span>
+          完成
+        </button>
+        <button className="voiceCaptureButton cancel" onClick={onCancel} type="button">
+          <span aria-hidden="true">×</span>
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatVoiceElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const rest = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
+}
+
+function appendInlineVoiceText(current: string, nextChunk: string) {
+  const currentText = current.trim();
+  const chunk = nextChunk.trim();
+  if (!currentText) return chunk;
+  if (!chunk) return currentText;
+  return `${currentText} ${chunk}`;
 }
 
 function MicIcon() {

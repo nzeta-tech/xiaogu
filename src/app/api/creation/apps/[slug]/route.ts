@@ -12,7 +12,7 @@ import {
 } from "@/lib/creation/output";
 import { buildWorkTitle } from "@/lib/creation/work-title";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
-import { renderPolicyRenewalCards } from "@/lib/creation/policy-renewal-card";
+import { buildPolicyRenewalImagePrompt } from "@/lib/creation/policy-renewal-card";
 import {
   buildLeadCopyPrompt,
   getMultiChannelCopyStyleMode,
@@ -31,6 +31,7 @@ import {
 } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
+import { getCreationUserError } from "@/lib/creation/errors";
 
 type FieldValue = CreationFieldValue;
 
@@ -88,13 +89,15 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     ? buildWriteCopyPrompt(app.fields, values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
     : isMultiChannelCopyAppSlug(app.slug)
       ? buildLeadCopyPrompt(app.fields, values, app.promptHint, caseContext, getMultiChannelCopyVariant(app.slug))
-      : app.slug === "xiaohongshu-check"
-        ? buildXiaohongshuCheckPrompt(values, caseContext, app.promptHint)
-      : app.slug === "ip-positioning"
-        ? buildIpPositioningPrompt(app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
+    : app.slug === "xiaohongshu-check"
+      ? buildXiaohongshuCheckPrompt(values, caseContext, app.promptHint)
+    : app.slug === "live-script"
+      ? buildLiveScriptPrompt(values, caseContext, app.promptHint)
+    : app.slug === "ip-positioning"
+      ? buildIpPositioningPrompt(app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
         : buildPrompt(app.name, app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null);
   const imagePrompt = isPolicyRenewalCard
-    ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
+    ? buildPolicyRenewalImagePrompt(values)
     : buildImagePrompt(app.name, app.fields, values, caseContext, app.promptHint);
   const resolvedPrompt = app.resultType === "image" || app.resultType === "image-plan" ? imagePrompt : content;
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
@@ -111,9 +114,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   }
   const imageResult =
     app.resultType === "image" || app.resultType === "image-plan"
-      ? isPolicyRenewalCard
-        ? await renderPolicyRenewalCards({ ...values, reference_image: visualReferences[0]?.dataUrl ?? values.reference_image })
-        : await generateImageSet({
+      ? await generateImageSet({
           prompt: imagePrompt,
           style: stringifyValue(values.style) || app.name,
           ratio: stringifyValue(values.ratio) || "1:1",
@@ -134,7 +135,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     inputPayload: values,
     resolvedPrompt,
     quotaCost: quota.quotaCost,
-    model: isPolicyRenewalCard ? "local-sharp-template" : process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : process.env.MODEL_NAME ?? "configured-model",
   });
 
   let result = "";
@@ -150,17 +151,18 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
               app.slug === "write-copy" || app.slug === "ip-positioning" ? "general" : getMultiChannelCopyStyleMode(app.slug),
             );
   } catch (error) {
+    const userError = getCreationUserError(error);
     await tryCompleteAppRun({
       runId: run?.id ?? null,
       status: "failed",
       resultText: "",
-      errorMessage: error instanceof Error ? error.message : "内容生成失败",
+      errorMessage: error instanceof Error ? error.message : userError,
       resultJson: {
         images: imageResult?.images ?? [],
         imageMode: imageResult?.mode ?? null,
       },
     });
-    return Response.json({ error: error instanceof Error ? error.message : "内容生成失败，请稍后再试。" }, { status: 500 });
+    return Response.json({ error: userError }, { status: 500 });
   }
 
   const title = buildWorkTitle({
@@ -208,7 +210,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     userId: user.id,
     actionType: "creation_app_run",
     quotaCost: quota.quotaCost,
-    model: isPolicyRenewalCard ? "local-sharp-template" : process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : process.env.MODEL_NAME ?? "configured-model",
     metadata: {
       appId: app.id,
       appSlug: app.slug,
@@ -375,6 +377,55 @@ function buildWriteCopyPrompt(
   }
 
   return lines.join("\n");
+}
+
+function buildLiveScriptPrompt(
+  values: Record<string, FieldValue>,
+  caseContext: string[],
+  promptHint: string,
+) {
+  const livePoint = stringifyValue(values.live_point).trim();
+
+  return [
+    "你现在在执行小谷应用：写直播稿。",
+    "你是一位擅长保险经纪人直播间内容设计的直播策划顾问。",
+    "这是一篇可以直接阅读、复制和继续编辑的直播内容稿，不是问卷分析，也不是把提示词逐条回答的执行清单。",
+    ...caseContext,
+    `应用提示：${promptHint}`,
+    "",
+    "写作原则：",
+    "1. 先提炼用户观点的核心矛盾、受众痛点和一句话主张，再展开直播内容。",
+    "2. 语言像真人主播：短句、口语、自然停顿，有承接和互动，不写成论文或营销长文。",
+    "3. 观点不明确的地方可以做合理结构化，但不得替用户编造产品、案例、数据、身份或承诺。",
+    "4. 保险表达必须合规：不承诺收益、承保或理赔，不制造恐慌，不夸大产品；缺少事实时标注“待核实”。",
+    "5. 转化要轻，以评论关键词、私信咨询、预约梳理和领取清单为主，不做强逼单。",
+    "",
+    "请只输出一篇完整内容，使用 Markdown 标题层级，不要使用【】作为章节标题，不要使用 Markdown 表格，不要输出“以下是”“好的”等前言：",
+    "# 保险直播稿",
+    "## 重要提醒",
+    "用一段简短提醒说明：涉及产品、数据、案例、收益或理赔的内容须由主播在开播前核实；不要写泛泛的免责声明。",
+    "## 直播主题",
+    "提炼一句清楚的直播主题，并给出 3 个可发布的直播标题。标题要具体、有对象和冲突点，不夸大、不制造恐慌。",
+    "## 引流方式说明",
+    "给出 2-3 种低风险承接方式，例如评论关键词、私信咨询、预约梳理或资料领取；每种写一条可直接说的口播话术。不得建议规避平台审核或使用违规导流方式。",
+    "## 人设内容",
+    "只根据用户输入提炼 1 段可自然植入的专业背景；没有提供真实经历时，保留“请按真实情况补充”的占位，不得编造资历、服务人数或案例。",
+    "## 预热话术",
+    "写一段开播前或开场前可用的预热话术，交代对象、今天讲什么、为什么值得听完，并自然引导关注或预约。",
+    "## 直播内容框架",
+    "拆成 5-7 个“板块”，每个板块使用三级标题，并写明目的、关键内容点、互动动作和下一段钩子。框架要呈现从问题切入、认知建立、方法讲解、案例或场景、收尾承接的完整节奏。",
+    "## 完整直播稿",
+    "按上述每个板块逐段输出可直接念的完整口播稿。每段自然嵌入评论区互动、停顿或回应提示、留人钩子和轻承接动作；用“【互动】”“【随口】”“【钩子】”“【承接】”作短标签即可。案例、产品数据和结论没有输入依据时必须写“待核实”或“建议按真实情况替换”。",
+    "## 金句总览",
+    "提炼 6-10 句可单独传播的金句，围绕本场直播观点，不编造数据或绝对承诺。",
+    "## 全场统计",
+    "统计本稿的互动点、承接动作和留人钩子数量，给出概览即可。",
+    "## 脚本使用建议",
+    "给出 5-7 条开播前和直播中的实操提醒，覆盖熟悉框架、互动节奏、案例替换、数据核实、人设补充和临场调整。",
+    "",
+    "用户提供的直播观点：",
+    livePoint || "未填写",
+  ].filter(Boolean).join("\n\n");
 }
 
 function buildIpPositioningPrompt(

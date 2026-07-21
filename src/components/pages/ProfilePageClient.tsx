@@ -236,7 +236,13 @@ export function ProfilePageClient() {
       <section className="avatarConsoleHero">
         <p className="avatarConsoleVision">让小谷理解并记住你的经验、判断与表达方式，把它们沉淀成可长期复用的个人内容资产，让每一次创作都更像你。</p>
         <div className="avatarConsoleIdentity">
-          {primaryPhoto ? <img alt={`${displayName}的主形象`} className="avatarConsolePhoto" src={primaryPhoto.content_url} /> : <div className="avatarConsoleMark" aria-hidden="true">AI</div>}
+          {primaryPhoto ? (
+            <>
+              {/* User-uploaded avatar assets may use runtime-generated URLs. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img alt={`${displayName}的主形象`} className="avatarConsolePhoto" src={primaryPhoto.content_url} />
+            </>
+          ) : <div className="avatarConsoleMark" aria-hidden="true">AI</div>}
           <div>
             <div className="avatarConsoleMeta">
               <span>{loading ? "同步中" : "分身在线"}</span>
@@ -447,6 +453,8 @@ function VisualAssetsView({
             return (
               <article className={photo.status === "active" ? "avatarVisualCard" : "avatarVisualCard disabled"} key={photo.id}>
                 <div className="avatarVisualFrame">
+                  {/* User-uploaded avatar assets may use runtime-generated URLs. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img alt={photo.label || visualRoleLabels[photo.role]} src={photo.content_url} />
                   {photo.is_primary ? <strong>主形象</strong> : null}
                   <span>{photo.width} × {photo.height}</span>
@@ -482,6 +490,7 @@ function VisualAssetsView({
 function OverviewView({ workspace, maturity, onOpenTab }: { workspace: AvatarWorkspace | null; maturity: ReturnType<typeof calculateMaturity>; onOpenTab: (tab: AvatarTab) => void }) {
   const snapshot = workspace?.profile?.snapshot;
   const pending = workspace?.proposals.filter((item) => item.status === "pending") ?? [];
+  const maturityTips = buildMaturityTips(workspace, maturity);
   return (
     <div className="avatarOverviewGrid">
       <section className="avatarOverviewMain">
@@ -494,6 +503,17 @@ function OverviewView({ workspace, maturity, onOpenTab }: { workspace: AvatarWor
         </div>
       </section>
       <aside className="avatarOverviewAside">
+        <section>
+          <div className="avatarSectionHeader compact"><div><span>下一步建议</span><h2>怎么提升分身成熟度</h2></div></div>
+          <div className="avatarMaturityTips">
+            {maturityTips.map((tip) => (
+              <button className="avatarMaturityTip" key={tip.title} onClick={() => onOpenTab(tip.tab)} type="button">
+                <strong>{tip.title}</strong>
+                <span>{tip.description}</span>
+              </button>
+            ))}
+          </div>
+        </section>
         <section>
           <div className="avatarSectionHeader compact"><div><span>进化动态</span><h2>待确认建议</h2></div><button onClick={() => onOpenTab("evolution")}>{pending.length} 条</button></div>
           {pending.slice(0, 2).map((item) => <button className="avatarProposalPreview" key={item.id} onClick={() => onOpenTab("evolution")}><strong>{item.title}</strong><span>{item.description}</span></button>)}
@@ -538,6 +558,82 @@ function calculateMaturity(workspace: AvatarWorkspace | null) {
     { key: "boundary", label: "合规边界", value: score(Boolean(snapshot?.belief_system.disbelieves.length), snapshot?.content_motifs.taboo_angles.length ?? 0, count("boundary")), hint: "禁用表达、隐私和合规要求" },
   ];
   return { overall: Math.round(dimensions.reduce((sum, item) => sum + item.value, 0) / dimensions.length), dimensions };
+}
+
+function buildMaturityTips(workspace: AvatarWorkspace | null, maturity: ReturnType<typeof calculateMaturity>) {
+  const snapshot = workspace?.profile?.snapshot;
+  const tips: Array<{ title: string; description: string; tab: AvatarTab }> = [];
+
+  if (!snapshot?.trust_signals.personal_story_anchor || (snapshot.trust_signals.case_signals?.length ?? 0) < 2) {
+    tips.push({
+      title: "补 1-2 个真实案例",
+      description: "去“学习资料”或“我的记忆”补充脱敏客户故事，能最快提升内容案例成熟度。",
+      tab: "sources",
+    });
+  }
+
+  if ((workspace?.sources.length ?? 0) < 2) {
+    tips.push({
+      title: "添加你的原文资料",
+      description: "上传朋友圈、文章或录音整理稿，让分身学到你的真实表达，而不只是一份问卷摘要。",
+      tab: "sources",
+    });
+  }
+
+  if ((workspace?.photos.length ?? 0) === 0) {
+    tips.push({
+      title: "上传形象照",
+      description: "补 1 张正面照和 1 张职业半身照后，做图、名片和封面会更像你本人。",
+      tab: "visual",
+    });
+  }
+
+  if ((workspace?.usage.count ?? 0) === 0) {
+    tips.push({
+      title: "先试写 1 个常用主题",
+      description: "去“分身试验室”跑一次对比生成，最容易判断它目前像不像你。",
+      tab: "lab",
+    });
+  }
+
+  if ((workspace?.proposals.filter((item) => item.status === "pending").length ?? 0) > 0) {
+    tips.push({
+      title: "处理待确认进化建议",
+      description: "接受或忽略这些建议后，分身会形成更稳定的新版本。",
+      tab: "evolution",
+    });
+  }
+
+  const weakest = [...maturity.dimensions].sort((a, b) => a.value - b.value)[0];
+  if (weakest?.key === "audience") {
+    tips.push({
+      title: "补充客户高频问题",
+      description: "把客户最常问的原话和真实顾虑再补几条，分身会更懂你的目标客群。",
+      tab: "memory",
+    });
+  } else if (weakest?.key === "expression") {
+    tips.push({
+      title: "补一段最像你的表达",
+      description: "补充你常用的措辞、结构和不喜欢的说法，能明显减少 AI 味。",
+      tab: "memory",
+    });
+  } else if (weakest?.key === "boundary") {
+    tips.push({
+      title: "明确不能替你说的话",
+      description: "把不能承诺、不能夸大、不能制造焦虑的表达写进边界，合规和像你都会更稳。",
+      tab: "memory",
+    });
+  }
+
+  if (tips.length < 3) {
+    tips.push({
+      title: "持续使用并反馈",
+      description: "每次用完在试验室或作品里判断“更像我/太销售/太正式”，系统才会持续进化。",
+      tab: "lab",
+    });
+  }
+
+  return tips.slice(0, 4);
 }
 
 function score(hasCore: boolean, evidenceCount: number, memoryCount: number) {

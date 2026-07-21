@@ -1,0 +1,9 @@
+[Unit]
+Description=Xiaogu Monitor Check
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/xiaogu-monitor/monitor.env
+ExecStart=/opt/xiaogu-monitor/xiaogu-monitor.sh --check

@@ -7,10 +7,22 @@ import { safeAuthRedirect } from "@/lib/auth/redirect";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import ReactMarkdown from "react-markdown";
 
-export function AuthForm({ mode, initialReferralCode = "", nextPath = "" }: { mode: "login" | "register"; initialReferralCode?: string; nextPath?: string }) {
+export function AuthForm({
+  mode,
+  initialReferralCode = "",
+  nextPath = "",
+  initialEmail = "",
+  initialError = "",
+}: {
+  mode: "login" | "register";
+  initialReferralCode?: string;
+  nextPath?: string;
+  initialEmail?: string;
+  initialError?: string;
+}) {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [referralCode, setReferralCode] = useState(initialReferralCode.trim().toUpperCase());
@@ -22,7 +34,7 @@ export function AuthForm({ mode, initialReferralCode = "", nextPath = "" }: { mo
     affiliate?: { enabled?: boolean };
     legal?: { termsEnabled?: boolean; displayMode?: "checkbox" | "modal"; documents?: Array<{ slug: string; title: string; content: string }> };
   } | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [agreementOpen, setAgreementOpen] = useState(false);
@@ -135,7 +147,12 @@ export function AuthForm({ mode, initialReferralCode = "", nextPath = "" }: { mo
             ? "继续今天的内容创作与数字分身管理。"
             : "注册后即可建立你的专属内容空间。"}
         </p>
-        <form className="form" onSubmit={submit}>
+        <form
+          action={`${mode === "login" ? apiPath("/api/auth/login") : apiPath("/api/auth/register")}${nextPath ? `?next=${encodeURIComponent(safeAuthRedirect(nextPath))}` : ""}`}
+          className="form"
+          method="post"
+          onSubmit={submit}
+        >
           {mode === "register" ? (
             <label>
               姓名

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Xiaogu Monitor every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=xiaogu-monitor.service
+
+[Install]
+WantedBy=timers.target

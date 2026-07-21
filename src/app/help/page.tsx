@@ -12,7 +12,7 @@ export default async function HelpPage() {
   return (
     <main className="legalPage">
       <header className="legalHeader">
-        <Link href="/workspace">返回创作广场</Link>
+        <Link href="/create">返回创作广场</Link>
         <h1>使用帮助</h1>
         <p>从账号登录、内容创作到积分支付，把最常见的问题一次讲清楚。</p>
       </header>

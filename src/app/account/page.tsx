@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppShell } from "@/components/layout/AppShell";
@@ -36,10 +37,10 @@ type TotpState = { available: boolean; enabled: boolean; setupPending: boolean }
 type TotpSetup = { secret: string; uri: string; qrCodeDataUrl: string };
 
 const serviceLinks = [
-  { href: "/thinking", label: "个人画像", detail: "管理定位与表达风格", icon: "profile" },
-  { href: "/drafts", label: "创作历史", detail: "查看作品与创作记录", icon: "works" },
+  { href: "/avatar", label: "个人画像", detail: "管理定位与表达风格", icon: "profile" },
+  { href: "/works", label: "创作历史", detail: "查看作品与创作记录", icon: "works" },
   { href: "/billing", label: "会员与积分", detail: "积分购买、订单和用量", icon: "billing" },
-  { href: "/benefits", label: "成长权益", detail: "活动兑换与奖励记录", icon: "benefits" },
+  { href: "/rewards", label: "成长权益", detail: "活动兑换与奖励记录", icon: "benefits" },
   { href: "/help", label: "使用帮助", detail: "常见问题与使用说明", icon: "help" },
   { href: "/feedback", label: "反馈支持", detail: "提交问题并查看进展", icon: "support" },
 ];
@@ -175,8 +176,8 @@ function AccountCenter() {
           </div>
         </div>
         <div className="accountHeroActions">
-          <a className="secondaryButton linkButton" href={appPath("/thinking")}>完善个人画像</a>
-          <a className="primaryButton linkButton" href={appPath("/workspace")}>开始创作</a>
+          <a className="secondaryButton linkButton" href={appPath("/avatar")}>完善个人画像</a>
+          <a className="primaryButton linkButton" href={appPath("/create")}>开始创作</a>
         </div>
       </section>
 
@@ -199,7 +200,7 @@ function AccountCenter() {
                 <h2>个人经营档案</h2>
                 <p>这些信息会影响选题角度、内容语气和客户表达。</p>
               </div>
-              <a href={appPath("/thinking")}>{thinking.summary?.ready ? "更新画像" : "开始建立"}</a>
+              <a href={appPath("/avatar")}>{thinking.summary?.ready ? "更新画像" : "开始建立"}</a>
             </div>
 
             <div className="accountProgressRow">
@@ -240,7 +241,7 @@ function AccountCenter() {
             {totp.available ? <div className="accountTotpPanel">
               <div><h3>身份验证器</h3><p>{totp.enabled ? "登录时需要验证码或一次性恢复码。" : "使用身份验证器为账号增加第二层保护。"}</p></div>
               {!totp.enabled && !totpSetup ? <form className="accountPasswordForm" onSubmit={setupTotp}><label>当前密码<input name="password" type="password" autoComplete="current-password" required /></label><button className="secondaryButton" type="submit">开始设置</button></form> : null}
-              {totpSetup ? <div className="accountTotpSetup"><img src={totpSetup.qrCodeDataUrl} alt="身份验证器二维码" /><code>{totpSetup.secret}</code><form className="accountPasswordForm" onSubmit={enableTotp}><label>6 位验证码<input name="token" inputMode="numeric" autoComplete="one-time-code" required /></label><button className="primaryButton" type="submit">确认启用</button></form></div> : null}
+              {totpSetup ? <div className="accountTotpSetup"><Image src={totpSetup.qrCodeDataUrl} alt="身份验证器二维码" width={192} height={192} unoptimized /><code>{totpSetup.secret}</code><form className="accountPasswordForm" onSubmit={enableTotp}><label>6 位验证码<input name="token" inputMode="numeric" autoComplete="one-time-code" required /></label><button className="primaryButton" type="submit">确认启用</button></form></div> : null}
               {totp.enabled ? <form className="accountPasswordForm" onSubmit={disableTotp}><label>当前密码<input name="password" type="password" required /></label><label>验证码或恢复码<input name="token" autoComplete="one-time-code" required /></label><button className="secondaryButton" type="submit">关闭二次验证</button></form> : null}
               {recoveryCodes.length ? <div className="accountRecoveryCodes" role="status"><strong>恢复码只显示一次</strong>{recoveryCodes.map((code) => <code key={code}>{code}</code>)}</div> : null}
             </div> : null}
@@ -284,7 +285,7 @@ function AccountCenter() {
           <section className="accountSectionCard">
             <div className="accountSectionHeader compact">
               <div><span>最近更新</span><h2>创作历史</h2></div>
-              <a href={appPath("/drafts")}>查看全部</a>
+              <a href={appPath("/works")}>查看全部</a>
             </div>
             <div className="accountRecentWorks">
               {(overview.recentDrafts ?? []).slice(0, 3).map((draft) => (

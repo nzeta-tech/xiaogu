@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import { parseCreationOutput, type CreationOutputBatch, type CreationOutputItem, type CreationOutputViewMode } from "@/lib/creation/output";
+import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 
 type WorkDetail = {
   id: string;
@@ -22,11 +23,13 @@ type WorkDetail = {
   app_run?: {
     id: string;
     status: string;
+    error_message?: string | null;
     tone?: string | null;
     target_channels?: string[];
     model?: string | null;
     quota_cost?: number | null;
     input_payload?: Record<string, unknown> | null;
+    result_text?: string | null;
     result_json?: Record<string, unknown> | null;
     created_at: string;
     completed_at?: string | null;
@@ -59,13 +62,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [activeBatchId, setActiveBatchId] = useState("");
   const [activeItemIds, setActiveItemIds] = useState<Record<string, string>>({});
   const [fontScale, setFontScale] = useState(100);
-  const [wechatThemes, setWechatThemes] = useState<Record<string, WechatTheme>>({});
-  const [xhsFormats, setXhsFormats] = useState<Record<string, XhsFormat>>({});
-  const [xhsDrafts, setXhsDrafts] = useState<Record<string, string>>({});
-  const [xhsTemplates, setXhsTemplates] = useState<Record<string, XhsTemplate>>({});
-  const [xhsFontSizes, setXhsFontSizes] = useState<Record<string, XhsFontSize>>({});
+  const [wechatThemes] = useState<Record<string, WechatTheme>>({});
+  const [xhsFormats] = useState<Record<string, XhsFormat>>({});
+  const [xhsDrafts] = useState<Record<string, string>>({});
+  const [xhsTemplates] = useState<Record<string, XhsTemplate>>({});
+  const [xhsFontSizes] = useState<Record<string, XhsFontSize>>({});
   const [copied, setCopied] = useState<CopyState>({});
-  const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [imageNotice, setImageNotice] = useState("");
   const [watermarkText, setWatermarkText] = useState("");
@@ -74,6 +76,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [showResultDetails, setShowResultDetails] = useState(false);
   const [selectedTopicId, setSelectedTopicId] = useState("");
   const [retryingImages, setRetryingImages] = useState(false);
+  const [retryingWork, setRetryingWork] = useState(false);
   const [previewField, setPreviewField] = useState<PreviewField | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [streamState, setStreamState] = useState<WorkStreamState>({
@@ -85,12 +88,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     error: "",
   });
   const [streamRetryKey, setStreamRetryKey] = useState(0);
-  const workReturnHref = searchParams.get("from") === "dashboard" ? appPath("/dashboard") : appPath("/drafts");
-  const workReturnLabel = searchParams.get("from") === "dashboard" ? "返回今日工作台" : "返回创作历史";
+  const workFrom = searchParams.get("from");
+  const workReturnHref = workFrom === "admin" ? appPath("/admin?view=works#content") : workFrom === "dashboard" || workFrom === "today" ? appPath("/today") : appPath("/works");
+  const workReturnLabel = workFrom === "admin" ? "返回内容管理" : workFrom === "dashboard" || workFrom === "today" ? "返回今日工作台" : "返回创作历史";
   usePageMeta({
     title: work ? `${formatWorkTitle(work)} · 作品` : "作品详情",
     description: work ? `${formatAppLabel(work.platform)} / 审阅、优化与复用` : "正在加载作品",
-    status: work?.app_run?.status === "running" ? "生成中" : work?.app_run?.status === "succeeded" ? "已完成" : "",
+    status: work?.app_run?.status === "running" ? "生成中" : work?.app_run?.status === "succeeded" ? "已完成" : work?.app_run?.status === "failed" ? "生成失败" : "",
   });
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const copyTimerRef = useRef<number | null>(null);
@@ -101,13 +105,19 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     setPreviewField(null);
     setPreviewImage(null);
   });
+  const workStatus = work?.app_run?.status ?? "";
+  const workContent = work?.content ?? "";
+  const workPlatform = work?.platform ?? "";
+  const workAppRunId = work?.app_run?.id ?? "";
+  const isAdminPreview = searchParams.get("admin") === "1";
+  const workApiHref = useMemo(() => apiPath(`/api/works/${workId}${isAdminPreview ? "?admin=1" : ""}`), [isAdminPreview, workId]);
 
   useEffect(() => {
     const controller = new AbortController();
     async function loadWork() {
       try {
         setLoading(true);
-        const response = await fetch(apiPath(`/api/works/${workId}`), { signal: controller.signal });
+        const response = await fetch(workApiHref, { signal: controller.signal });
         const payload = (await response.json()) as { work?: WorkDetail };
         setWork(payload.work ?? null);
       } catch (error) {
@@ -122,13 +132,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
     void loadWork();
     return () => controller.abort();
-  }, [workId]);
+  }, [workApiHref]);
 
   useEffect(() => {
+    const copyTimer = copyTimerRef.current;
+    const saveTimer = saveTimerRef.current;
+    const imageTimer = imageTimerRef.current;
     return () => {
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-      if (imageTimerRef.current) window.clearTimeout(imageTimerRef.current);
+      if (copyTimer) window.clearTimeout(copyTimer);
+      if (saveTimer) window.clearTimeout(saveTimer);
+      if (imageTimer) window.clearTimeout(imageTimer);
       streamReaderAbortRef.current?.abort();
     };
   }, []);
@@ -150,14 +163,14 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   useEffect(() => {
     if (!work) return;
-    if (work.app_run?.status && work.app_run.status !== "running") return;
-    if (work.content.trim() && work.app_run?.status !== "running") return;
+    if (workStatus && workStatus !== "running") return;
+    if (workContent.trim() && workStatus !== "running") return;
 
-    const prefersStreaming = supportsWorkStreaming(work.platform);
+    const prefersStreaming = supportsWorkStreaming(workPlatform);
     if (prefersStreaming && streamState.connected) return;
 
     const timer = window.setInterval(async () => {
-      const response = await fetch(apiPath(`/api/works/${workId}`));
+      const response = await fetch(workApiHref);
       const payload = (await response.json()) as { work?: WorkDetail };
       if (payload.work) {
         setWork(payload.work);
@@ -168,7 +181,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     }, 3000);
 
     return () => window.clearInterval(timer);
-  }, [workId, work?.app_run?.status, work?.content, work?.platform, streamState.connected, streamState.error]);
+  }, [streamState.connected, streamState.error, work, workApiHref, workContent, workPlatform, workStatus]);
 
   useEffect(() => {
     streamReaderAbortRef.current?.abort();
@@ -183,8 +196,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       });
     });
 
-    if (!work?.app_run || work.app_run.status !== "running") return () => window.cancelAnimationFrame(resetFrame);
-    if (!supportsWorkStreaming(work.platform)) return () => window.cancelAnimationFrame(resetFrame);
+    if (isAdminPreview || !workAppRunId || workStatus !== "running") return () => window.cancelAnimationFrame(resetFrame);
+    if (!supportsWorkStreaming(workPlatform)) return () => window.cancelAnimationFrame(resetFrame);
 
     const controller = new AbortController();
     streamReaderAbortRef.current = controller;
@@ -205,7 +218,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
           setStreamState((current) => ({
             ...current,
             connected: false,
-            error: "生成流暂时不可用，已切回自动刷新。",
+                error: "生成进度流没有连接上，可能是网络或服务暂时不稳定；系统会继续自动刷新结果。",
           }));
           return;
         }
@@ -264,7 +277,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 retryable: payload.retryable ?? current.retryable,
                 connected: false,
               }));
-              const refreshed = await fetch(apiPath(`/api/works/${workId}`), { signal: controller.signal });
+              const refreshed = await fetch(workApiHref, { signal: controller.signal });
               const refreshedPayload = (await refreshed.json()) as { work?: WorkDetail };
               if (refreshedPayload.work) setWork(refreshedPayload.work);
             }
@@ -273,7 +286,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               setStreamState((current) => ({
                 ...current,
                 connected: false,
-                error: payload.content ?? "内容生成失败",
+                error: getCreationUserError(payload.content),
               }));
             }
           }
@@ -283,7 +296,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
         setStreamState((current) => ({
           ...current,
           connected: false,
-          error: "生成流连接中断，已切回结果轮询。",
+          error: "生成进度流中途断开，可能是网络短暂中断；系统会继续自动刷新结果。",
         }));
       }
     }
@@ -293,7 +306,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       window.cancelAnimationFrame(resetFrame);
       controller.abort();
     };
-  }, [streamRetryKey, workId, work?.app_run?.id, work?.app_run?.status, work?.platform]);
+  }, [isAdminPreview, streamRetryKey, workApiHref, workAppRunId, workId, workPlatform, workStatus]);
 
   const streamedBatches = useMemo(() => {
     if (!streamState.content.trim()) return [];
@@ -318,6 +331,22 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   const batches = useMemo(() => {
     if (!work) return [];
+    if (work.platform === "live-script") {
+      const content = streamState.content || work.content || work.app_run?.result_text || "";
+      return content.trim()
+        ? [{
+            id: "live-script-result",
+            label: "完整直播稿",
+            items: [{
+              id: "live-script-result-1",
+              title: "保险直播稿",
+              body: content,
+              summary: content.slice(0, 120),
+              viewMode: "plain" as const,
+            }],
+          }]
+        : [];
+    }
     const parsedBatches = parseCreationOutput(work.content).batches;
 
     if (work.platform === "write-copy") {
@@ -423,6 +452,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const isLetterWork = work?.platform === "letter";
   const isTopicPickerWork = work?.platform === "topic-picker";
   const isXiaohongshuCheckWork = work?.platform === "xiaohongshu-check";
+  const isLiveScriptWork = work?.platform === "live-script";
   const isVideoScriptPolishWork = work?.platform === "video-script-polish";
   const isWechatArticlePolishWork = work?.platform === "wechat-article-polish";
   const isPolishWork = isVideoScriptPolishWork || isWechatArticlePolishWork;
@@ -446,7 +476,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     : preferredBatch;
   const resolvedBatchId = activeBatch?.id ?? "";
   const hasRenderableBatches = batches.some(hasRenderableBatch);
-  const plainResultContent = streamState.content || work?.content || (
+  const plainResultContent = streamState.content || work?.content || work?.app_run?.result_text || (
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
   const getActiveItemId = (batch: CreationOutputBatch) => (
@@ -492,7 +522,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     } catch {
       window.sessionStorage.setItem(draftKey, JSON.stringify({ ...payload, reference_image: "" }));
     }
-    window.location.href = appPath("/apps/policy-renewal-card?from=workspace&entry=policy-renewal-card");
+    window.location.href = appPath("/apps/policy-renewal-card?from=create&entry=policy-renewal-card");
   }
 
   function handleExport(title: string, body: string, options?: { viewMode?: CreationOutputViewMode; theme?: WechatTheme }) {
@@ -550,56 +580,35 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     }
   }
 
-  function updateWechatTheme(itemId: string, theme: WechatTheme) {
-    setWechatThemes((current) => ({ ...current, [itemId]: theme }));
-  }
+  async function retryFailedWork() {
+    const payload = work?.app_run?.input_payload;
+    if (!work || !payload || retryingWork) return;
 
-  function updateXhsFormat(itemId: string, format: XhsFormat) {
-    setXhsFormats((current) => ({ ...current, [itemId]: format }));
-  }
-
-  function updateXhsDraft(itemId: string, value: string) {
-    setXhsDrafts((current) => ({ ...current, [itemId]: value }));
-  }
-
-  function updateXhsTemplate(itemId: string, value: XhsTemplate) {
-    setXhsTemplates((current) => ({ ...current, [itemId]: value }));
-  }
-
-  function updateXhsFontSize(itemId: string, value: XhsFontSize) {
-    setXhsFontSizes((current) => ({ ...current, [itemId]: value }));
-  }
-
-  async function saveItemContent(itemId: string, nextBody: string) {
-    if (!work) return;
-    const nextWork = mergeItemBody(work, itemId, nextBody);
-    setWork(nextWork);
-    setSavingItemId(itemId);
-    setSaveMessage("正在保存...");
-
-    const response = await fetch(apiPath(`/api/works/${work.id}`), {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        status: "draft",
-        title: nextWork.title,
-        content: nextWork.content,
-        contentJson: nextWork.content_json,
-      }),
-    });
-
-    const payload = (await response.json()) as { work?: WorkDetail; error?: string };
-    if (payload.work) {
-      setWork(payload.work);
-      setSaveMessage("已自动保存到我的作品");
-    } else {
-      setSaveMessage(payload.error ?? "保存失败");
+    setRetryingWork(true);
+    setSaveMessage("");
+    flashImageNotice("正在重新创建作品...");
+    try {
+      const response = await fetch(apiPath(`/api/creation/apps/${work.platform}/prepare`), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values: payload }),
+      });
+      const next = (await response.json().catch(() => ({}))) as { error?: string; work?: { id?: string } };
+      if (!response.ok || !next.work?.id) {
+        const message = getCreationUserError(next.error, CREATION_NETWORK_ERROR);
+        setSaveMessage(message);
+        flashImageNotice(message);
+        return;
+      }
+      window.location.href = appPath(`/works/${next.work.id}?from=creation-works`);
+    } finally {
+      setRetryingWork(false);
     }
-
-    setSavingItemId(null);
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => setSaveMessage(""), 1800);
   }
+
+  const failedRetryAction = work?.app_run?.status === "failed" && work?.app_run?.input_payload
+    ? () => { void retryFailedWork(); }
+    : undefined;
 
   if (loading) {
     return <div className="pageStack"><section className="panel emptyState">正在加载作品详情...</section></div>;
@@ -636,11 +645,11 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage imageInstancePage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content imageInstanceShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={imageMeta.title} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={imageMeta.title} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="imageInstanceHero">
             <div className="imageInstanceHeroCopy">
               <div className="imageInstanceHeroTitleRow">
-                <span className="imageInstanceHeroBadge">{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</span>
+                <span className="imageInstanceHeroBadge">{getWorkStatusLabel(work)}</span>
                 <strong>{formatAppLabel(work.platform)}</strong>
               </div>
               <h1>{imageMeta.title}</h1>
@@ -735,8 +744,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               >
                 <div className="imageResultsHeader">
                   <div>
-                    <h2>生成的图片</h2>
-                    <p>{streamState.connected ? "结果会持续回填，优先把选图和下载动作放在首屏。" : `共 ${generatedCount} 张，建议先看推荐图，再决定是否全部下载。`}</p>
+                    <h2>{isPolicyRenewalCardWork ? "图文融合成品" : "生成的图片"}</h2>
+                    <p>{isPolicyRenewalCardWork ? "文字、信息和视觉版式已合成在图片内，下载后可直接发送。" : streamState.connected ? "结果会持续回填，优先把选图和下载动作放在首屏。" : `共 ${generatedCount} 张，建议先看推荐图，再决定是否全部下载。`}</p>
                   </div>
                   <div className="instanceResultActions">
                     {imageRetryable ? (
@@ -842,7 +851,11 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       tabIndex={0}
                     >
                       {selectedImage ? (
-                        <img alt={`当前图片结果 ${selectedImageIndex + 1}`} src={selectedImage.url} />
+                        <>
+                          {/* Generated image URLs can be external or signed, so keep native img in the preview canvas. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img alt={`当前图片结果 ${selectedImageIndex + 1}`} src={selectedImage.url} />
+                        </>
                       ) : (
                         <div className="imageStudioEmpty">
                           <strong>{showImagePlaceholders ? "图片生成中..." : "当前还没有图片结果"}</strong>
@@ -863,6 +876,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                             onClick={() => setSelectedImageId(image.id)}
                             type="button"
                           >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img alt="" src={image.url} />
                             <span>{index + 1}</span>
                           </button>
@@ -963,6 +977,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                         {index === recommendedImageIndex ? <span className="generatedImageBadge">推荐先看</span> : null}
                       </div>
                       <div className="generatedImageMedia">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img alt={`生成结果 ${index + 1}`} className="generatedImageAsset" src={image.url} />
                       </div>
                       <div className="generatedImageInsight">
@@ -1006,7 +1021,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     <div className="imageInfoTableLabel">标题</div>
                     <div className="imageInfoTableValue imageInfoTableTitleCell">
                       <div className="imageTitleValue">
-                        <em>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</em>
+                        <em>{getWorkStatusLabel(work)}</em>
                         <strong>{imageMeta.title}</strong>
                       </div>
                     </div>
@@ -1058,7 +1073,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage instanceOriginPage writeCopyOriginPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceOriginShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="instanceOriginLayout">
             <aside className="instanceOriginSidebar">
               <div className="instanceOriginSidebarCard">
@@ -1121,7 +1136,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             <main className="instanceOriginMain">
               <section className="instanceOriginNotice">
                 <span>想让后续内容更贴近你的表达方式？</span>
-                <a href={appPath("/profile")}>完善数字分身人设 →</a>
+                <a href={appPath("/avatar")}>完善数字分身人设 →</a>
               </section>
 
               <section
@@ -1135,7 +1150,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                   <div className="instanceStudioHeroMeta instanceOriginMeta">
                     <span>{formatAppLabel(work.platform)}</span>
-                    <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+                    <strong>{getWorkStatusLabel(work)}</strong>
                     <em>{formatDate(work.updated_at)}</em>
                   </div>
                 </div>
@@ -1144,7 +1159,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     <div className="instanceSummaryCell">
                       <span>标题</span>
                       <div className="instanceOriginTitleCell">
-                        <em>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</em>
+                        <em>{getWorkStatusLabel(work)}</em>
                         <strong>{formatWorkTitle(work)}</strong>
                       </div>
                     </div>
@@ -1193,7 +1208,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                   {streamState.connected
                     ? <span className="instanceSaveHint">内容生成中，正在持续回填结果...</span>
-                    : saveMessage ? <span className="instanceSaveHint">{savingItemId ? "正在保存..." : saveMessage}</span> : null}
+                    : saveMessage ? <span className="instanceSaveHint">{saveMessage}</span> : null}
                 </div>
 
                 {streamState.error ? (
@@ -1236,6 +1251,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                           return (
                           <ResultBlock
                             copied={Boolean(copied[activeItem.id])}
+                            isLiveScript={false}
                             isWriteCopy
                             item={activeItem}
                             key={activeItem.id}
@@ -1244,18 +1260,11 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                               viewMode: activeItem.viewMode,
                               theme: wechatThemes[activeItem.id] ?? "default",
                             })}
-                            onSave={saveItemContent}
-                            saving={savingItemId === activeItem.id}
                             theme={wechatThemes[activeItem.id] ?? "default"}
                             xhsDraft={xhsDrafts[activeItem.id] ?? activeItem.body}
                             xhsFormat={xhsFormats[activeItem.id] ?? "plain"}
                             xhsTemplate={xhsTemplates[activeItem.id] ?? "journal"}
                             xhsFontSize={xhsFontSizes[activeItem.id] ?? "md"}
-                            onThemeChange={updateWechatTheme}
-                            onXhsDraftChange={updateXhsDraft}
-                            onXhsFormatChange={updateXhsFormat}
-                            onXhsTemplateChange={updateXhsTemplate}
-                            onXhsFontSizeChange={updateXhsFontSize}
                           />
                           );
                         })()}
@@ -1284,7 +1293,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage instanceOriginPage generalContentWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceOriginShell generalContentResultShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="instanceOriginLayout generalContentResultLayout">
             <aside className="instanceOriginSidebar">
               <div className="instanceOriginSidebarCard generalContentResultSidebarCard">
@@ -1353,7 +1362,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                   <div className="instanceStudioHeroMeta instanceOriginMeta">
                     <span>{formatAppLabel(work.platform)}</span>
-                    <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+                    <strong>{getWorkStatusLabel(work)}</strong>
                     <em>{formatDate(work.updated_at)}</em>
                   </div>
                 </div>
@@ -1362,7 +1371,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     <div className="instanceSummaryCell">
                       <span>标题</span>
                       <div className="instanceOriginTitleCell">
-                        <em>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</em>
+                        <em>{getWorkStatusLabel(work)}</em>
                         <strong>{formatWorkTitle(work)}</strong>
                       </div>
                     </div>
@@ -1413,7 +1422,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                   {streamState.connected
                     ? <span className="instanceSaveHint">内容生成中，正在持续回填结果...</span>
-                    : saveMessage ? <span className="instanceSaveHint">{savingItemId ? "正在保存..." : saveMessage}</span> : null}
+                    : saveMessage ? <span className="instanceSaveHint">{saveMessage}</span> : null}
                 </div>
 
                 {streamState.error ? (
@@ -1439,7 +1448,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage instanceStudioPage letterWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content letterResultShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="letterResultHero">
             <div className="letterResultHeroHeader">
               <div className="letterResultTitleBlock">
@@ -1448,12 +1457,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               </div>
               <div className="instanceStudioHeroMeta compact letterResultHeroMeta">
                 <span>{formatAppLabel(work.platform)}</span>
-                <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+                <strong>{getWorkStatusLabel(work)}</strong>
                 <em>{formatDate(work.updated_at)}</em>
               </div>
             </div>
             <div className="letterResultHeroActions">
-              <a className="creationExampleStudioAction" href={appPath(`/apps/${work.platform}?from=workspace&entry=letter`)}>再次创作</a>
+              <a className="creationExampleStudioAction" href={appPath(`/apps/${work.platform}?from=create&entry=letter`)}>再次创作</a>
             </div>
           </section>
 
@@ -1550,7 +1559,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage instanceStudioPage topicPickerWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content topicPickerResultShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryHref={appPath(`/apps/write-copy?from=topic-picker&prompt=${encodeURIComponent(topicHandoffPrompt)}`)} primaryLabel="继续写文案" />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryHref={appPath(`/apps/write-copy?from=topic-picker&prompt=${encodeURIComponent(topicHandoffPrompt)}`)} primaryLabel="继续写文案" onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="topicPickerResultHero">
             <div className="topicPickerResultHeroHeader">
               <div className="topicPickerResultTitleBlock">
@@ -1559,7 +1568,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               </div>
               <div className="instanceStudioHeroMeta compact topicPickerResultHeroMeta">
                 <span>{formatAppLabel(work.platform)}</span>
-                <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+                <strong>{getWorkStatusLabel(work)}</strong>
                 <em>{formatDate(work.updated_at)}</em>
               </div>
             </div>
@@ -1681,12 +1690,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const sourceContent = typeof work.app_run?.input_payload?.content === "string"
       ? work.app_run.input_payload.content
       : "";
-    const statusLabel = work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status);
+    const statusLabel = getWorkStatusLabel(work);
 
     return (
       <div className={`workDetailPage instanceStudioPage xiaohongshuCheckResultPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content xiaohongshuCheckResultShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel="重新检测" />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel="重新检测" onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section
             className="xiaohongshuCheckHero"
             id="basic-info"
@@ -1838,7 +1847,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage instanceStudioPage polishWorkDetailPage videoPolishResultPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceStudioShell videoPolishResultShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel="再次精修" />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel="再次精修" onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="instanceStudioHero polishInstanceHero videoPolishResultHero">
             <div className="instanceStudioHeroHeader videoPolishResultHeroHeader">
               <div className="instanceStudioTitleBlock videoPolishResultTitleBlock">
@@ -1847,7 +1856,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               </div>
               <div className="instanceStudioHeroMeta compact videoPolishResultHeroMeta">
                 <span>{formatAppLabel(work.platform)}</span>
-                <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+                <strong>{getWorkStatusLabel(work)}</strong>
                 <em>{formatDate(work.updated_at)}</em>
               </div>
             </div>
@@ -1972,18 +1981,18 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   }
 
   return (
-    <div className={`${isStructuredCopyWork ? "workDetailPage instanceStudioPage writeCopyWorkDetailPage" : isSimpleCopyWork ? "workDetailPage instanceStudioPage simpleCopyWorkDetailPage" : isPolishWork ? "workDetailPage instanceStudioPage polishWorkDetailPage" : "workDetailPage instanceStudioPage"} ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
+    <div className={`${isStructuredCopyWork ? "workDetailPage instanceStudioPage writeCopyWorkDetailPage" : isSimpleCopyWork ? "workDetailPage instanceStudioPage simpleCopyWorkDetailPage" : isPolishWork ? "workDetailPage instanceStudioPage polishWorkDetailPage" : isLiveScriptWork ? "workDetailPage instanceStudioPage liveScriptWorkDetailPage" : "workDetailPage instanceStudioPage"} ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
       <div className="page-content instanceStudioShell">
-        <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel={isPolishWork ? "再次精修" : "再次创作"} />
+        <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryLabel={isPolishWork ? "再次精修" : "再次创作"} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
         <section className={isStructuredCopyWork ? "instanceStudioHero writeCopyInstanceHero" : isPolishWork ? "instanceStudioHero polishInstanceHero" : "instanceStudioHero"}>
           <div className="instanceStudioHeroHeader">
             <div className="instanceStudioTitleBlock">
               <h1>{formatWorkTitle(work)}</h1>
-              <p>{isWriteCopyWork ? "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写人设问卷。" : isTrafficCopyWork ? "围绕素材生成流量内容，重点保留冲突钩子、逻辑推进和普通人代入场景。" : isMarketingCopyWork ? "围绕素材，从产品、方案、案例和观念四个方向生成营销内容。" : isLeadCopyWork ? "围绕同一份素材生成口播稿、小红书笔记和公众号文章，并按渠道保留各自的引流节奏。" : isVideoScriptPolishWork ? "这条作品保留了原稿的核心意思，同时把开头、结构和表达节奏重新提了一层，方便你直接复看、复制和继续改稿。" : isWechatArticlePolishWork ? "这条作品以现有文章为底稿，重点重做了标题、结构推进、语言质感和结尾互动，方便你直接进入长文阅读和继续调整。" : "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写人设问卷。"}</p>
+              <p>{isWriteCopyWork ? "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写人设问卷。" : isTrafficCopyWork ? "围绕素材生成流量内容，重点保留冲突钩子、逻辑推进和普通人代入场景。" : isMarketingCopyWork ? "围绕素材，从产品、方案、案例和观念四个方向生成营销内容。" : isLeadCopyWork ? "围绕同一份素材生成口播稿、小红书笔记和公众号文章，并按渠道保留各自的引流节奏。" : isLiveScriptWork ? "围绕一个直播观点整理成可直接开讲的内容稿，包含开场、主体讲解、互动问答和收尾承接。" : isVideoScriptPolishWork ? "这条作品保留了原稿的核心意思，同时把开头、结构和表达节奏重新提了一层，方便你直接复看、复制和继续改稿。" : isWechatArticlePolishWork ? "这条作品以现有文章为底稿，重点重做了标题、结构推进、语言质感和结尾互动，方便你直接进入长文阅读和继续调整。" : "本作品使用资深创作者风格创作，若想打造自己的个性化风格，请填写人设问卷。"}</p>
             </div>
             <div className="instanceStudioHeroMeta compact">
               <span>{formatAppLabel(work.platform)}</span>
-              <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+              <strong>{getWorkStatusLabel(work)}</strong>
               <em>{formatDate(work.updated_at)}</em>
             </div>
           </div>
@@ -2019,10 +2028,26 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               </div>
             </div>
           ) : null}
+          {isLiveScriptWork ? (
+            <div className="liveScriptInstanceHeroSummary">
+              <div>
+                <span>内容形式</span>
+                <strong>保险直播完整内容稿</strong>
+              </div>
+              <div>
+                <span>核心结构</span>
+                <strong>框架 · 逐字稿 · 金句 · 建议</strong>
+              </div>
+              <div>
+                <span>使用方式</span>
+                <strong>可直接开讲、复制或导出</strong>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="instanceStudioLayout">
-          <aside className="instanceStudioSidebar">
+          <aside className={isLiveScriptWork ? "instanceStudioSidebar liveScriptSidebar" : "instanceStudioSidebar"}>
             <div className="instanceStudioSidebarCard instanceSummarySidebarCard">
               <div className="sidebarBackRow">
                 <a className="back-btn backLink instanceTextBack" href={workReturnHref}>← {workReturnLabel}</a>
@@ -2052,7 +2077,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   onClick={() => jumpToSection("generated-content")}
                   type="button"
                 >
-                  生成内容
+                  {isLiveScriptWork ? "完整直播稿" : "生成内容"}
                 </button>
               </div>
 
@@ -2065,37 +2090,39 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
               </div>
 
-              <div className="instanceSidebarSection batchNavSection">
-                <strong>生成内容</strong>
-                {isImageWork && imageResults.length > 0 ? (
-                  <button
-                    className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
-                    onClick={() => jumpToSection("generated-content")}
-                    type="button"
-                  >
-                    图片结果x{imageResults.length}
-                  </button>
-                ) : isSimpleCopyWork ? (
-                  <button
-                    className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
-                    onClick={() => jumpToSection("generated-content")}
-                    type="button"
-                  >
-                    正文
-                  </button>
-                ) : (
-                  batches.map((batch) => (
+              {!isLiveScriptWork ? (
+                <div className="instanceSidebarSection batchNavSection">
+                  <strong>生成内容</strong>
+                  {isImageWork && imageResults.length > 0 ? (
                     <button
-                      className={activeBatch?.id === batch.id ? "instanceNavButton active" : "instanceNavButton"}
-                      key={batch.id}
-                      onClick={() => switchBatch(batch.id)}
+                      className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
+                      onClick={() => jumpToSection("generated-content")}
                       type="button"
                     >
-                      {formatBatchNavLabel(batch.label, batch.items.length, isStructuredCopyWork)}
+                      图片结果x{imageResults.length}
                     </button>
-                  ))
-                )}
-              </div>
+                  ) : isSimpleCopyWork ? (
+                    <button
+                      className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
+                      onClick={() => jumpToSection("generated-content")}
+                      type="button"
+                    >
+                      正文
+                    </button>
+                  ) : (
+                    batches.map((batch) => (
+                      <button
+                        className={activeBatch?.id === batch.id ? "instanceNavButton active" : "instanceNavButton"}
+                        key={batch.id}
+                        onClick={() => switchBatch(batch.id)}
+                        type="button"
+                      >
+                        {formatBatchNavLabel(batch.label, batch.items.length, isStructuredCopyWork)}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
             </div>
           </aside>
 
@@ -2112,7 +2139,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                   <div className="instanceSummaryCell">
                     <span>状态</span>
-                    <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+                    <strong>{getWorkStatusLabel(work)}</strong>
                   </div>
                 </div>
                 <div className="instanceSummaryRow">
@@ -2204,20 +2231,20 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             ) : null}
 
             <section
-              className={isStructuredCopyWork ? "instanceSectionCard writeCopyResultSectionCard" : isSimpleCopyWork ? "instanceSectionCard simpleCopyResultSectionCard" : isPolishWork ? "instanceSectionCard polishResultSectionCard" : "instanceSectionCard"}
+                className={isStructuredCopyWork ? "instanceSectionCard writeCopyResultSectionCard" : isSimpleCopyWork ? "instanceSectionCard simpleCopyResultSectionCard" : isPolishWork ? "instanceSectionCard polishResultSectionCard" : isLiveScriptWork ? "instanceSectionCard liveScriptResultSectionCard" : "instanceSectionCard"}
               ref={(node) => { sectionRefs.current["generated-content"] = node; }}
             >
               <div className="instanceSectionHeader instanceSectionHeaderSplit">
                 <div>
-                  <h2>{isImageWork ? "生成的图片" : isPolishWork ? "精修结果" : "生成内容"}</h2>
-                  <p>{isImageWork ? "集中展示生成图片、下载和复制动作。" : isWriteCopyWork ? "按渠道分组展示口播稿、小红书、公众号和朋友圈结果。" : isSimpleCopyWork ? "完整正文集中展示，可直接复制或导出继续使用。" : isLeadCopyWork ? "按口播稿、小红书和公众号三个渠道展示 3 / 2 / 2 组引流成稿。" : isVideoScriptPolishWork ? "先看精修后的主稿，再看每一段是否更顺口、更好开口，保留复制和导出动作方便继续使用。" : isWechatArticlePolishWork ? "按长文阅读节奏展示精修结果，重点看标题、段落推进、语言质感和结尾互动是否更顺。" : "按内容结构顺序展示每一组生成结果。"}</p>
+                  <h2>{isImageWork ? "生成的图片" : isPolishWork ? "精修结果" : isLiveScriptWork ? "生成结果" : "生成内容"}</h2>
+                  <p>{isImageWork ? "集中展示生成图片、下载和复制动作。" : isWriteCopyWork ? "按渠道分组展示口播稿、小红书、公众号和朋友圈结果。" : isSimpleCopyWork ? "完整正文集中展示，可直接复制或导出继续使用。" : isLeadCopyWork ? "按口播稿、小红书和公众号三个渠道展示 3 / 2 / 2 组引流成稿。" : isLiveScriptWork ? "按直播内容页结构展示完整正文，方便先读整体，再复制或导出使用。" : isVideoScriptPolishWork ? "先看精修后的主稿，再看每一段是否更顺口、更好开口，保留复制和导出动作方便继续使用。" : isWechatArticlePolishWork ? "按长文阅读节奏展示精修结果，重点看标题、段落推进、语言质感和结尾互动是否更顺。" : "按内容结构顺序展示每一组生成结果。"}</p>
                 </div>
                 {isImageWork ? (
                   imageNotice ? <span className="instanceSaveHint">{imageNotice}</span> : null
                 ) : (
                   streamState.connected && (isStructuredCopyWork || isSimpleCopyWork)
                     ? <span className="instanceSaveHint">内容生成中，正在持续回填结果...</span>
-                    : saveMessage ? <span className="instanceSaveHint">{savingItemId ? "正在保存..." : saveMessage}</span> : null
+                    : saveMessage ? <span className="instanceSaveHint">{saveMessage}</span> : null
                 )}
               </div>
 
@@ -2262,6 +2289,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                               <strong>结果 {index + 1}</strong>
                               <button className="instanceActionButton instanceImageOpen" onClick={() => void handleImageOpen(image.url)} type="button">查看</button>
                             </div>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img alt={`生成结果 ${index + 1}`} className="instanceGeneratedImage" src={image.url} />
                             <div className="instanceImageActions">
                               <button className="instanceActionButton" onClick={() => void handleImageDownload(image.url, `图片结果-${index + 1}.png`)} type="button">下载</button>
@@ -2308,10 +2336,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                 </article>
               ) : hasRenderableBatches ? (
-                <div className={isStructuredCopyWork ? "instanceBatchStack writeCopyBatchStack" : isPolishWork ? "instanceBatchStack polishBatchStack" : "instanceBatchStack"} style={{ fontSize: `${fontScale}%` }}>
+                <div className={isStructuredCopyWork ? "instanceBatchStack writeCopyBatchStack" : isPolishWork ? "instanceBatchStack polishBatchStack" : isLiveScriptWork ? "instanceBatchStack liveScriptBatchStack" : "instanceBatchStack"} style={{ fontSize: `${fontScale}%` }}>
                   {(isStructuredCopyWork || isPolishWork ? batches.filter((batch) => batch.id === resolvedBatchId) : batches).map((batch) => (
                     <section
-                      className={isStructuredCopyWork ? "instanceBatchGroup writeCopyBatchGroup" : isPolishWork ? "instanceBatchGroup polishBatchGroup" : "instanceBatchGroup"}
+                      className={isStructuredCopyWork ? "instanceBatchGroup writeCopyBatchGroup" : isPolishWork ? "instanceBatchGroup polishBatchGroup" : isLiveScriptWork ? "instanceBatchGroup liveScriptResultDocument" : "instanceBatchGroup"}
                       key={batch.id}
                       ref={(node) => { sectionRefs.current[batch.id] = node; }}
                     >
@@ -2346,6 +2374,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                         return (
                           <ResultBlock
                             copied={Boolean(copied[activeItem.id])}
+                            isLiveScript={isLiveScriptWork}
                             isWriteCopy={isStructuredCopyWork}
                             item={activeItem}
                             key={activeItem.id}
@@ -2354,18 +2383,11 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                               viewMode: activeItem.viewMode,
                               theme: wechatThemes[activeItem.id] ?? "default",
                             })}
-                            onSave={saveItemContent}
-                            saving={savingItemId === activeItem.id}
                             theme={wechatThemes[activeItem.id] ?? "default"}
                             xhsDraft={xhsDrafts[activeItem.id] ?? activeItem.body}
                             xhsFormat={xhsFormats[activeItem.id] ?? "plain"}
                             xhsTemplate={xhsTemplates[activeItem.id] ?? "journal"}
                             xhsFontSize={xhsFontSizes[activeItem.id] ?? "md"}
-                            onThemeChange={updateWechatTheme}
-                            onXhsDraftChange={updateXhsDraft}
-                            onXhsFormatChange={updateXhsFormat}
-                            onXhsTemplateChange={updateXhsTemplate}
-                            onXhsFontSizeChange={updateXhsFontSize}
                           />
                         );
                       })()}
@@ -2397,6 +2419,8 @@ function ResultWorkspaceBar({
   title,
   primaryHref,
   primaryLabel = "再次创作",
+  onPrimaryAction,
+  primaryBusy = false,
 }: {
   detailsOpen: boolean;
   onToggleDetails: () => void;
@@ -2406,23 +2430,32 @@ function ResultWorkspaceBar({
   title?: string;
   primaryHref?: string;
   primaryLabel?: string;
+  onPrimaryAction?: (() => void) | undefined;
+  primaryBusy?: boolean;
 }) {
   return (
     <header className="resultWorkspaceBar">
-      <a className="resultWorkspaceBack" href={returnHref || appPath("/drafts")} aria-label={returnLabel || "返回创作历史"}>←</a>
+      <a className="resultWorkspaceBack" href={returnHref || appPath("/works")} aria-label={returnLabel || "返回创作历史"}>←</a>
       <div className="resultWorkspaceIdentity">
         <span>{formatAppLabel(work.platform)}</span>
         <h1>{title || formatWorkTitle(work)}</h1>
       </div>
       <div className="resultWorkspaceStatus">
-        <span className={work.app_run?.status === "succeeded" ? "complete" : ""} />
-        <strong>{work.app_run?.status === "succeeded" ? "已完成" : formatStatusLabel(work.status)}</strong>
+        <span className={work.app_run?.status === "succeeded" ? "complete" : work.app_run?.status === "failed" ? "error" : ""} />
+        <strong>{getWorkStatusLabel(work)}</strong>
+        {work.app_run?.status === "failed" && work.app_run?.error_message ? <small>{work.app_run.error_message}</small> : null}
         <time dateTime={work.updated_at}>{formatDate(work.updated_at)}</time>
       </div>
       <button className={detailsOpen ? "resultWorkspaceDetails active" : "resultWorkspaceDetails"} onClick={onToggleDetails} type="button">
         {detailsOpen ? "收起参数" : "生成参数"}
       </button>
-      <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)}>{primaryLabel}</a>
+      {onPrimaryAction ? (
+        <button className="resultWorkspacePrimary" disabled={primaryBusy} onClick={onPrimaryAction} type="button">
+          {primaryBusy ? "处理中..." : primaryLabel}
+        </button>
+      ) : (
+        <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)}>{primaryLabel}</a>
+      )}
     </header>
   );
 }
@@ -2476,6 +2509,8 @@ function PreviewImageModal({
           <button aria-label="关闭预览" className="instancePreviewClose" onClick={onClose} type="button">×</button>
         </div>
         <div className="instancePreviewModalBody instanceImagePreviewBody">
+          {/* Preview modal displays arbitrary generated/user images, so native img is the safest fit. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img alt={previewImage.label} className="instanceImagePreviewAsset" src={previewImage.url} />
         </div>
       </div>
@@ -2485,6 +2520,7 @@ function PreviewImageModal({
 
 function ResultBlock({
   item,
+  isLiveScript,
   isWriteCopy,
   theme,
   xhsFormat,
@@ -2492,17 +2528,11 @@ function ResultBlock({
   xhsTemplate,
   xhsFontSize,
   copied,
-  saving,
   onCopy,
   onExport,
-  onThemeChange,
-  onXhsFormatChange,
-  onXhsDraftChange,
-  onXhsTemplateChange,
-  onXhsFontSizeChange,
-  onSave,
 }: {
   item: CreationOutputItem;
+  isLiveScript: boolean;
   isWriteCopy: boolean;
   theme: WechatTheme;
   xhsFormat: XhsFormat;
@@ -2510,21 +2540,13 @@ function ResultBlock({
   xhsTemplate: XhsTemplate;
   xhsFontSize: XhsFontSize;
   copied: boolean;
-  saving: boolean;
   onCopy: () => void;
   onExport: () => void;
-  onThemeChange: (itemId: string, theme: WechatTheme) => void;
-  onXhsFormatChange: (itemId: string, format: XhsFormat) => void;
-  onXhsDraftChange: (itemId: string, value: string) => void;
-  onXhsTemplateChange: (itemId: string, value: XhsTemplate) => void;
-  onXhsFontSizeChange: (itemId: string, value: XhsFontSize) => void;
-  onSave: (itemId: string, value: string) => Promise<void>;
 }) {
   const editableBody = item.viewMode === "xiaohongshu" ? xhsDraft : item.body;
   const copyLabel = item.viewMode === "wechat"
     ? copied ? "公众号格式已复制" : "复制公众号格式"
     : copied ? "已复制" : "复制";
-  const xhsStats = item.viewMode === "xiaohongshu" ? analyzeXhsDraft(xhsDraft) : null;
   const hasMeaningfulContent = editableBody.replace(/\s+/g, "").trim().length > 0;
 
   const handleWechatCopy = async () => {
@@ -2587,11 +2609,11 @@ function ResultBlock({
   }
 
   return (
-    <article className={isWriteCopy ? "instanceResultBlock active writeCopyResultBlock" : "instanceResultBlock active"} id={`instance-item-${item.id}`}>
+    <article className={isWriteCopy ? "instanceResultBlock active writeCopyResultBlock" : isLiveScript ? "instanceResultBlock active liveScriptResultBlock" : "instanceResultBlock active"} id={`instance-item-${item.id}`}>
       <div className="instanceResultToolbar">
         <div className="instanceResultToolbarTitle">
-          <strong>{item.title}</strong>
-          <span>文本预览</span>
+          <strong>{isLiveScript ? "完整直播稿" : item.title}</strong>
+          <span>{isLiveScript ? "直播脚本 · 可直接开讲" : "文本预览"}</span>
         </div>
         <div className="instanceResultActions">
           <button className="instanceActionButton" onClick={onCopy} type="button">{copied ? "已复制" : "复制"}</button>
@@ -2869,80 +2891,6 @@ function readLabeledBlock(block: string, labels: string[]) {
   return block.match(regex)?.[1]?.trim() ?? "";
 }
 
-function PolishReportContent({ content }: { content: string }) {
-  const sections = content
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-
-  return (
-    <div className="polishReportContent">
-      {sections.map((section, index) => {
-        if (section.startsWith("❌")) {
-          return <ReportCallout key={`report-${index}`} tone="problem" title="问题" body={section.replace(/^❌\s*/, "")} />;
-        }
-
-        if (section.startsWith("✅")) {
-          return <ReportCallout key={`report-${index}`} tone="solution" title="建议改法" body={section.replace(/^✅\s*/, "")} />;
-        }
-
-        if (section.startsWith("💡")) {
-          return <ReportCallout key={`report-${index}`} tone="insight" title="原理说明" body={section.replace(/^💡\s*/, "")} />;
-        }
-
-        if (/^标题建议[:：]/.test(section) || /^标签建议[:：]/.test(section)) {
-          const [heading, ...rest] = section.split("\n");
-          return (
-            <article className="polishReportListCard" key={`report-${index}`}>
-              <strong>{heading}</strong>
-              <div className="polishReportListBody">
-                <MarkdownContent content={rest.join("\n")} />
-              </div>
-            </article>
-          );
-        }
-
-        if (/^[1-9]\d*[.、]/.test(section)) {
-          return (
-            <article className="polishReportListCard" key={`report-${index}`}>
-              <div className="polishReportListBody">
-                <MarkdownContent content={section} />
-              </div>
-            </article>
-          );
-        }
-
-        return (
-          <article className="polishReportParagraphCard" key={`report-${index}`}>
-            <MarkdownContent content={section} />
-          </article>
-        );
-      })}
-    </div>
-  );
-}
-
-function ReportCallout({
-  tone,
-  title,
-  body,
-}: {
-  tone: "problem" | "solution" | "insight";
-  title: string;
-  body: string;
-}) {
-  return (
-    <article className={`polishReportCallout ${tone}`}>
-      <div className="polishReportCalloutHeader">
-        <strong>{title}</strong>
-      </div>
-      <div className="polishReportCalloutBody">
-        <MarkdownContent content={body} />
-      </div>
-    </article>
-  );
-}
-
 type ArticleBlock =
   | { type: "heading"; level: 1 | 2 | 3; text: string }
   | { type: "quote"; text: string }
@@ -2950,86 +2898,6 @@ type ArticleBlock =
   | { type: "paragraph"; text: string };
 
 type ArticleHeadingBlock = { type: "heading"; level: 1 | 2 | 3; text: string };
-
-function WechatArticlePreview({ content, theme }: { content: string; theme: WechatTheme }) {
-  const blocks = parseWechatArticleBlocks(content);
-  const titleBlock = blocks.find((block): block is ArticleHeadingBlock => block.type === "heading" && block.level === 1);
-  const bodyBlocks = titleBlock ? blocks.filter((block, index) => index !== blocks.indexOf(titleBlock)) : blocks;
-
-  if (bodyBlocks.length === 0 && !titleBlock) {
-    return <div className="markdownMessage">{renderMarkdown(content)}</div>;
-  }
-
-  if (theme === "editorial") {
-    return <EditorialWechatPreview titleBlock={titleBlock} blocks={bodyBlocks} />;
-  }
-
-  if (theme === "forest") {
-    return <ForestWechatPreview titleBlock={titleBlock} blocks={bodyBlocks} />;
-  }
-
-  return <div className="markdownMessage">{renderMarkdown(content)}</div>;
-}
-
-function EditorialWechatPreview({ titleBlock, blocks }: { titleBlock?: ArticleHeadingBlock; blocks: ArticleBlock[] }) {
-  return (
-    <div className="wechatArticleLayout wechatArticleLayout-editorial">
-      {titleBlock ? (
-        <header className="wechatArticleHero wechatArticleHero-editorial">
-          <span className="wechatArticleKicker">INSIGHT NOTE</span>
-          <h1>{renderInlineMarkdown(titleBlock.text)}</h1>
-        </header>
-      ) : null}
-      <div className="wechatArticleFlow wechatArticleFlow-editorial">
-        {renderWechatArticleBlocks(blocks, "editorial")}
-      </div>
-    </div>
-  );
-}
-
-function ForestWechatPreview({ titleBlock, blocks }: { titleBlock?: ArticleHeadingBlock; blocks: ArticleBlock[] }) {
-  return (
-    <div className="wechatArticleLayout wechatArticleLayout-forest">
-      {titleBlock ? (
-        <header className="wechatArticleHero wechatArticleHero-forest">
-          <span className="wechatArticleKicker">深度判断</span>
-          <h1>{renderInlineMarkdown(titleBlock.text)}</h1>
-        </header>
-      ) : null}
-      <div className="wechatArticleFlow wechatArticleFlow-forest">
-        {renderWechatArticleBlocks(blocks, "forest")}
-      </div>
-    </div>
-  );
-}
-
-function renderWechatArticleBlocks(blocks: ArticleBlock[], variant: "editorial" | "forest") {
-  return blocks.map((block, index) => {
-    if (block.type === "heading") {
-      const Tag = block.level === 2 ? "h2" : "h3";
-      return <Tag className={`wechatArticleSectionTitle wechatArticleSectionTitle-${variant}`} key={`${block.type}-${index}`}>{renderInlineMarkdown(block.text)}</Tag>;
-    }
-
-    if (block.type === "quote") {
-      return <blockquote className={`wechatArticleQuote wechatArticleQuote-${variant}`} key={`${block.type}-${index}`}>{renderInlineMarkdown(block.text)}</blockquote>;
-    }
-
-    if (block.type === "list") {
-      return (
-        <div className={`wechatArticleList wechatArticleList-${variant}`} key={`${block.type}-${index}`}>
-          {block.items.map((item, itemIndex) => (
-            <div className="wechatArticleListItem" key={`${index}-${itemIndex}`}>
-              <span>{block.ordered ? `${itemIndex + 1}.` : "•"}</span>
-              <div>{renderInlineMarkdown(item)}</div>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    return <p className={`wechatArticleParagraph wechatArticleParagraph-${variant}`} key={`${block.type}-${index}`}>{renderInlineMarkdown(block.text)}</p>;
-  });
-}
 
 function parseWechatArticleBlocks(content: string): ArticleBlock[] {
   const lines = content.split("\n");
@@ -3177,10 +3045,6 @@ function renderInlineMarkdown(text: string) {
     }
     return <span key={`${part}-${index}`}>{part}</span>;
   });
-}
-
-function isVideoScriptPolishReportItem(item: CreationOutputItem) {
-  return ["逐句精细批改", "系统提升方法论", "推荐标题 + 标签"].includes(item.title);
 }
 
 async function copyText(text: string) {
@@ -3481,32 +3345,6 @@ function sanitizeFilename(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 60) || "作品";
 }
 
-function mergeItemBody(work: WorkDetail, itemId: string, nextBody: string): WorkDetail {
-  const parsed = work.content_json?.batches?.length
-    ? { batches: work.content_json.batches }
-    : parseCreationOutput(work.content);
-
-  const nextBatches = parsed.batches.map((batch) => ({
-    ...batch,
-    items: batch.items.map((item) => (
-      item.id === itemId
-        ? {
-            ...item,
-            body: nextBody,
-            summary: inferSummary(nextBody),
-          }
-        : item
-    )),
-  }));
-
-  return {
-    ...work,
-    content: composeContent(nextBatches),
-    content_json: { batches: nextBatches },
-    updated_at: new Date().toISOString(),
-  };
-}
-
 type TopicPickerSection = {
   id: string;
   title: string;
@@ -3665,24 +3503,6 @@ function mergeStreamedBatches(baseBatches: CreationOutputBatch[], streamedBatche
   const mergedLabels = new Set(merged.map((batch) => batch.label));
   const extras = streamedBatches.filter((batch) => !mergedLabels.has(batch.label));
   return [...merged, ...extras];
-}
-
-function composeContent(batches: CreationOutputBatch[]) {
-  return batches
-    .map((batch) => {
-      const body = batch.items.map((item) => item.body.trim()).filter(Boolean).join("\n\n");
-      return `【${restoreBatchTitle(batch.label)}】\n${body}`;
-    })
-    .join("\n\n")
-    .trim();
-}
-
-function restoreBatchTitle(label: string) {
-  if (label === "口播稿") return "短视频口播";
-  if (label === "小红书") return "小红书笔记";
-  if (label === "公众号") return "公众号文章";
-  if (label === "朋友圈") return "朋友圈文案";
-  return label;
 }
 
 function inferSummary(body: string) {
@@ -3937,20 +3757,15 @@ function formatWorkTitle(work: WorkDetail) {
 
 function formatStatusLabel(value?: string | null) {
   if (value === "draft") return "草稿";
-  if (value === "published") return "已发布";
   if (value === "archived") return "已归档";
   if (value === "succeeded") return "已完成";
+  if (value === "running") return "生成中";
+  if (value === "failed") return "生成失败";
   return value ?? "";
 }
 
-function readDraft(appSlug: string) {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(`creation-draft:${appSlug}`);
-    return raw ? JSON.parse(raw) as Record<string, string | string[]> : null;
-  } catch {
-    return null;
-  }
+function getWorkStatusLabel(work?: Pick<WorkDetail, "status" | "app_run"> | null) {
+  return formatStatusLabel(work?.app_run?.status ?? work?.status);
 }
 
 function countWriteCopyOutputs(batches: CreationOutputBatch[]) {
@@ -4019,49 +3834,6 @@ function formatItemTabLabel(title: string, batchLabel: string, count: number, it
 
   return `${fallbackLabel} | ${compact.slice(0, 18)}`;
 }
-
-function countTextBlocks(content: string) {
-  return content
-    .split(/\n\s*\n/)
-    .map((item) => item.trim())
-    .filter(Boolean).length;
-}
-
-function analyzeXhsDraft(content: string) {
-  const normalized = content.trim();
-  if (!normalized) {
-    return { blockCount: 0, characterCount: 0 };
-  }
-
-  const blocks = normalized
-    .split(/\n\s*---\s*\n/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return {
-    blockCount: blocks.length || countTextBlocks(content),
-    characterCount: normalized.replace(/\s+/g, "").length,
-  };
-}
-
-const xhsTemplateOptions: Array<{ label: string; value: XhsTemplate }> = [
-  { label: "手账笔记", value: "journal" },
-  { label: "侧边卡片", value: "side-card" },
-  { label: "极光星云", value: "aurora" },
-  { label: "经典红本", value: "classic-red" },
-  { label: "清新便签", value: "memo" },
-  { label: "夜幕卡片", value: "night-card" },
-  { label: "简约卡片", value: "minimal" },
-  { label: "知简风格", value: "simple" },
-  { label: "星标卡片", value: "star-card" },
-];
-
-const xhsFontSizeOptions: Array<{ label: string; value: XhsFontSize }> = [
-  { label: "小", value: "sm" },
-  { label: "中", value: "md" },
-  { label: "大", value: "lg" },
-  { label: "特大", value: "xl" },
-];
 
 function buildImageWorkMeta(work: WorkDetail) {
   const payload = work.app_run?.input_payload ?? {};

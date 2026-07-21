@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import {
   type CreationApp,
@@ -318,6 +319,30 @@ const hiddenWorkspaceCardSlugs = new Set([
 
 const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCardSlugs.has(card.slug));
 
+const workspaceIconUrls: Record<string, string> = {
+  "write-copy": "/icons/creation/book-pencil.webp",
+  "image-card": "/icons/creation/palette.webp",
+  "video-script-polish": "/icons/creation/microphone.webp",
+  "policy-renewal-card": "/icons/creation/calendar.webp",
+  "lead-copy": "/icons/creation/sprout.webp",
+  "traffic-copy": "/icons/creation/lightning.webp",
+  "marketing-copy": "/icons/creation/megaphone.webp",
+  "lead-package": "/icons/creation/book-pencil.webp",
+  "voice-note-copy": "/icons/creation/microphone.webp",
+  "live-script": "/icons/creation/microphone.webp",
+  "topic-picker": "/icons/creation/idea.webp",
+  "general-content": "/icons/creation/book-pencil.webp",
+  "wechat-images": "/icons/creation/landscape.webp",
+  "letter": "/icons/creation/book-pencil.webp",
+  "xiaohongshu-check": "/icons/creation/warning.webp",
+  "policy-diagnosis": "/icons/creation/warning.webp",
+  "ip-positioning": "/icons/creation/map-pin.webp",
+  "breakthrough": "/icons/creation/lightning.webp",
+  "personality-card": "/icons/creation/sprout.webp",
+  "recruit-script": "/icons/creation/calendar.webp",
+  "recruit-followup": "/icons/creation/sprout.webp",
+};
+
 export function CreationHubPageClient() {
   const [loading, setLoading] = useState(true);
   const [hubData, setHubData] = useState<HubPayload | null>(null);
@@ -377,12 +402,12 @@ export function CreationHubPageClient() {
             <span>{hasFrequentUsage ? "按使用习惯整理" : "适合从这里开始"}</span>
             <h2 id="workspace-frequent-title">{hasFrequentUsage ? "常用应用" : "推荐应用"}</h2>
           </div>
-          <a href={appPath("/drafts")}>{hubData.hub.worksView.draftCount.toLocaleString("zh-CN")} 篇作品</a>
+          <a href={appPath("/works")}>{hubData.hub.worksView.draftCount.toLocaleString("zh-CN")} 篇作品</a>
         </div>
         <div className="workspaceFrequentGrid">
           {frequentCards.map((card) => (
             <a href={resolveWorkspaceHref(card)} key={`frequent-${card.slug}`}>
-              <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true">{card.emoji}</span>
+              <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true"><WorkspaceIcon card={card} /></span>
               <div>
                 <strong>{card.name}</strong>
                 <span>{getUsageCount(card, usageByApp) > 0 ? `已使用 ${getUsageCount(card, usageByApp)} 次` : getCardInspiration(card)}</span>
@@ -420,7 +445,7 @@ export function CreationHubPageClient() {
           {filteredCards.map((card) => (
             <article className={`workspaceHubCard workspaceCard-${getWorkspaceCategory(card)} ${getCardThemeClass(card.badge)}`} key={card.slug}>
               <div className="workspaceHubCardHeader">
-                <span className="workspaceHubCardIcon" aria-hidden="true">{card.emoji}</span>
+                <span className="workspaceHubCardIcon" aria-hidden="true"><WorkspaceIcon card={card} /></span>
                 <div>
                   <span className="workspaceCardCategory">{getWorkspaceCategoryLabel(card)}</span>
                   {card.badge ? <em>{card.badge.replace("！", "")}</em> : null}
@@ -450,6 +475,12 @@ export function CreationHubPageClient() {
   );
 }
 
+function WorkspaceIcon({ card }: { card: WorkspaceCard }) {
+  const iconUrl = workspaceIconUrls[card.slug] ?? workspaceIconUrls[card.appSlug];
+  if (!iconUrl) return <>{card.emoji}</>;
+  return <Image alt="" height={512} src={iconUrl} width={512} />;
+}
+
 function getCardThemeClass(badge?: string) {
   if (!badge) return "theme-default";
   if (badge.includes("火")) return "theme-orange";
@@ -467,8 +498,8 @@ function resolveWorkspaceActionLabel(card: WorkspaceCard) {
 }
 
 function resolveWorkspaceHref(card: WorkspaceCard) {
-  if (card.actionLabel === "需完善人设") return appPath("/thinking");
-  return appPath(`/apps/${card.appSlug}?from=workspace&entry=${card.slug}`);
+  if (card.actionLabel === "需完善人设") return appPath("/avatar");
+  return appPath(`/apps/${card.appSlug}?from=create&entry=${card.slug}`);
 }
 
 function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {

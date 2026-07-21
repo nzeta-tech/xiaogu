@@ -1,15 +1,5 @@
-"use client";
-
-import { AuthGuard } from "@/components/AuthGuard";
-import { AppShell } from "@/components/layout/AppShell";
-import { BenefitsPageClient } from "@/components/pages/BenefitsPageClient";
+import { redirect } from "next/navigation";
 
 export default function BenefitsPage() {
-  return (
-    <AuthGuard>
-      <AppShell>
-        <BenefitsPageClient />
-      </AppShell>
-    </AuthGuard>
-  );
+  redirect("/rewards");
 }

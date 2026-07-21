@@ -7,11 +7,11 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { listenForPageMeta, type PageMetaDetail } from "@/lib/client/page-meta";
 
 const platformNavItems = [
-  { id: "workbench", href: "/dashboard", label: "今日", shortLabel: "今日工作台", icon: "home" },
-  { id: "creation", href: "/workspace", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
-  { id: "assets", href: "/drafts", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
-  { id: "crm", href: "/thinking", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
-  { id: "invite", href: "/benefits#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
+  { id: "workbench", href: "/today", label: "今日", shortLabel: "今日工作台", icon: "home" },
+  { id: "creation", href: "/create", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
+  { id: "assets", href: "/works", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
+  { id: "crm", href: "/avatar", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
+  { id: "invite", href: "/rewards#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
   { id: "growth", href: "/account", label: "用户中心", shortLabel: "权益与账户", icon: "sprout" },
 ];
 
@@ -90,13 +90,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   const isCreationSurface =
-    pathname === "/dashboard" ||
-    pathname === "/workspace" ||
-    pathname === "/drafts" ||
-    pathname === "/thinking" ||
+    pathname === "/today" ||
+    pathname === "/create" ||
+    pathname === "/works" ||
+    pathname === "/avatar" ||
     pathname === "/questionnaire" ||
     pathname === "/feedback" ||
-    pathname === "/benefits" ||
+    pathname === "/rewards" ||
     pathname === "/billing" ||
     pathname === "/account" ||
     pathname.startsWith("/apps/") ||
@@ -112,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""}`}>
       <aside className="appSidebar">
         <div className="appSidebarInner">
-          <a className="brand brandLink" href={appPath("/workspace")}>
+          <a className="brand brandLink" href={appPath("/create")}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img className="brandMark" src={resolvePublicUrl(siteConfig.logoUrl)} alt="小谷" />
             <div className="brandCopy creationBrandCopy">
@@ -146,7 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             ) : null}
             {pathname === "/admin" ? (
-              <a className="adminBackToWorkspace" href={appPath("/workspace")}>
+              <a className="adminBackToWorkspace" href={appPath("/create")}>
                 <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="creation" /></span>
                 <span>返回工作空间</span>
               </a>
@@ -169,7 +169,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="shellMainColumn">
         <header className="appHeader">
           <div className="appHeaderBar">
-            <a className="mobileBrand" href={appPath("/dashboard")} aria-label="小谷首页">
+            <a className="mobileBrand" href={appPath("/today")} aria-label="小谷首页">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={resolvePublicUrl(siteConfig.logoUrl)} alt="" />
             </a>
@@ -371,20 +371,20 @@ function isNavItemActive(pathname: string, itemId?: string, navigationSource?: s
   const isWorkDetail = pathname.startsWith("/works/");
   const workNavigationItem = navigationSource === "creation-works"
     ? "assets"
-    : navigationSource === "dashboard"
+    : navigationSource === "dashboard" || navigationSource === "today"
       ? "workbench"
-      : "creation";
+    : "creation";
 
   if (itemId === "creation") {
-    return pathname === "/workspace" || pathname.startsWith("/apps/") || pathname.startsWith("/examples/") || (isWorkDetail && workNavigationItem === "creation");
+    return pathname === "/create" || pathname.startsWith("/apps/") || pathname.startsWith("/examples/") || (isWorkDetail && workNavigationItem === "creation");
   }
 
   if (itemId === "workbench") {
-    return pathname === "/dashboard" || (isWorkDetail && workNavigationItem === "workbench");
+    return pathname === "/today" || (isWorkDetail && workNavigationItem === "workbench");
   }
 
   if (itemId === "crm") {
-    return pathname === "/thinking" || pathname === "/questionnaire";
+    return pathname === "/avatar" || pathname === "/questionnaire";
   }
 
   if (itemId === "growth") {
@@ -392,11 +392,11 @@ function isNavItemActive(pathname: string, itemId?: string, navigationSource?: s
   }
 
   if (itemId === "invite") {
-    return pathname === "/benefits";
+    return pathname === "/rewards";
   }
 
   if (itemId === "assets") {
-    return pathname === "/drafts" || (isWorkDetail && workNavigationItem === "assets");
+    return pathname === "/works" || (isWorkDetail && workNavigationItem === "assets");
   }
 
   if (itemId === "admin") {
@@ -415,13 +415,13 @@ function resolvePublicUrl(value: string) {
 }
 
 function getPageMeta(pathname: string, fallbackDescription: string): PageMetaDetail {
-  if (pathname === "/dashboard") return { title: "今日工作台", description: "把今天的重要动作推进下去" };
-  if (pathname === "/workspace" || pathname.startsWith("/apps/")) return { title: "获客创作", description: "从想法到可发布内容" };
+  if (pathname === "/today") return { title: "今日工作台", description: "把今天的重要动作推进下去" };
+  if (pathname === "/create" || pathname.startsWith("/apps/")) return { title: "获客创作", description: "从想法到可发布内容" };
   if (pathname.startsWith("/works/") || pathname.startsWith("/examples/")) return { title: "作品详情", description: "审阅、优化与复用内容" };
-  if (pathname === "/drafts") return { title: "创作历史", description: "管理作品与创作素材" };
-  if (pathname === "/thinking" || pathname === "/questionnaire") return { title: "数字分身", description: "管理人设与表达偏好" };
+  if (pathname === "/works") return { title: "创作历史", description: "管理作品与创作素材" };
+  if (pathname === "/avatar" || pathname === "/questionnaire") return { title: "数字分身", description: "管理人设与表达偏好" };
   if (pathname === "/billing") return { title: "会员与积分", description: "查看额度和购买记录" };
-  if (pathname === "/benefits") return { title: "邀请有礼", description: "邀请好友、查看返利与活动奖励" };
+  if (pathname === "/rewards") return { title: "邀请有礼", description: "邀请好友、查看返利与活动奖励" };
   if (pathname === "/feedback") return { title: "反馈支持", description: "告诉我们你的使用感受" };
   if (pathname === "/account") return { title: "用户中心", description: "个人资料、经营数据与账号安全" };
   if (pathname === "/admin") return { title: "管理后台", description: "运营与系统管理" };

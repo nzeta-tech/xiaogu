@@ -106,7 +106,7 @@ export function WorkbenchPageClient() {
           <div className="workbenchEmptyState">
             <strong>今日机会正在整理</strong>
             <span>可以先从个人画像生成一组更适合自己的选题。</span>
-            <a href={appPath("/apps/topic-picker?from=dashboard&entry=topic-picker")}>现在找选题</a>
+            <a href={appPath("/apps/topic-picker?from=today&entry=topic-picker")}>现在找选题</a>
           </div>
         )}
       </section>
@@ -125,15 +125,15 @@ export function WorkbenchPageClient() {
         <section className="todayContinue" aria-labelledby="today-continue-title">
           <div className="workbenchSectionHeader">
             <div><span>继续创作</span><h2 id="today-continue-title">接着上次的内容</h2></div>
-            <a href={appPath("/drafts")}>全部作品</a>
+            <a href={appPath("/works")}>全部作品</a>
           </div>
           {latestDraft ? (
-            <a className="todayContinueWork" href={appPath(`/works/${latestDraft.id}?from=dashboard&entry=${latestDraft.platform}`)}>
+            <a className="todayContinueWork" href={appPath(`/works/${latestDraft.id}?from=today&entry=${latestDraft.platform}`)}>
               <div><span>{latestDraft.platform} · {formatDate(latestDraft.updated_at)}</span><strong>{latestDraft.title}</strong><p>继续审阅、修改或复用这篇内容。</p></div>
               <em aria-hidden="true">→</em>
             </a>
           ) : (
-            <div className="todayContinueEmpty"><strong>还没有创作记录</strong><p>从一条客户问题或一个真实经历开始。</p><a href={appPath("/workspace")}>开始第一篇创作</a></div>
+            <div className="todayContinueEmpty"><strong>还没有创作记录</strong><p>从一条客户问题或一个真实经历开始。</p><a href={appPath("/create")}>开始第一篇创作</a></div>
           )}
         </section>
       </div>
@@ -155,11 +155,11 @@ export function WorkbenchPageClient() {
         <section className="recentWorksSection">
           <div className="workbenchSectionHeader">
             <div><span>内容资产</span><h2>最近作品</h2><p>快速回看最近产出的内容，完整管理统一进入创作历史。</p></div>
-            <a href={appPath("/drafts")}>进入创作历史</a>
+            <a href={appPath("/works")}>进入创作历史</a>
           </div>
           <div className="draftCardGrid">
             {(overview?.recentDrafts ?? []).slice(0, 3).map((draft) => (
-              <a className="draftCard" href={appPath(`/works/${draft.id}?from=dashboard&entry=${draft.platform}`)} key={draft.id}>
+              <a className="draftCard" href={appPath(`/works/${draft.id}?from=today&entry=${draft.platform}`)} key={draft.id}>
                 <div className="draftCardMeta"><span>{draft.platform}</span><em>{formatDate(draft.updated_at)}</em></div>
                 <strong>{draft.title}</strong>
               </a>
@@ -208,7 +208,7 @@ function formatToday() {
 
 function buildTopicCreationHref(topic: HotTopic) {
   const prompt = `${topic.title}\n\n热点背景：${topic.summary}\n保险内容角度：${topic.recommendedAngle}`;
-  return appPath(`/apps/traffic-copy?from=dashboard&entry=traffic-copy&prompt=${encodeURIComponent(prompt)}`);
+  return appPath(`/apps/traffic-copy?from=today&entry=traffic-copy&prompt=${encodeURIComponent(prompt)}`);
 }
 
 function buildDailyRecommendation(overview: Overview | null, topic?: HotTopic) {
@@ -217,7 +217,7 @@ function buildDailyRecommendation(overview: Overview | null, topic?: HotTopic) {
       label: "低门槛开始",
       title: "先完成一篇能发布的内容",
       description: topic ? `可以从“${topic.title}”切入，小谷已准备好推荐角度。` : "先生成一组选题，再选择最有表达欲的一条。",
-      href: topic ? buildTopicCreationHref(topic) : appPath("/apps/topic-picker?from=dashboard&entry=topic-picker"),
+      href: topic ? buildTopicCreationHref(topic) : appPath("/apps/topic-picker?from=today&entry=topic-picker"),
       action: topic ? "开始创作" : "生成选题",
     };
   }
@@ -226,7 +226,7 @@ function buildDailyRecommendation(overview: Overview | null, topic?: HotTopic) {
       label: "内容组合建议",
       title: "把最近作品改成另一个渠道版本",
       description: "连续输出同一种形式容易疲劳，换成口播或朋友圈能提高同一份素材的利用率。",
-      href: appPath("/workspace"),
+      href: appPath("/create"),
       action: "开始一稿多用",
     };
   }
@@ -234,7 +234,7 @@ function buildDailyRecommendation(overview: Overview | null, topic?: HotTopic) {
     label: "建立表达节奏",
     title: "生成一组符合你定位的选题",
     description: "围绕目标客群的真实问题，形成可持续的内容方向。",
-    href: appPath("/apps/topic-picker?from=dashboard&entry=topic-picker"),
+    href: appPath("/apps/topic-picker?from=today&entry=topic-picker"),
     action: "生成选题",
   };
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
+import { bootstrapAvatarFromThinkingSubmission } from "@/lib/avatar/bootstrap";
 import {
   tryGetBrokerProfile,
   tryGetLatestThinkingProfileSnapshot,
@@ -130,6 +131,16 @@ export async function POST(request: Request) {
 
     if (!profile || !savedQuestionnaire || !savedThinkingSnapshot) {
       return Response.json({ error: "人设保存失败，请稍后再试。" }, { status: 503 });
+    }
+
+    const bootstrapped = await bootstrapAvatarFromThinkingSubmission({
+      userId: user.id,
+      questionnaireId: savedQuestionnaire.id,
+      snapshot: builtProfile.snapshot,
+      summary: builtProfile.summary,
+    });
+    if (!bootstrapped) {
+      return Response.json({ error: "人设已保存，但数字分身初始化失败，请稍后重试。" }, { status: 503 });
     }
 
     const derivedSummary = computeThinkingProfileSummary(buildThinkingProfileBrief(builtProfile.snapshot, builtProfile.summary));

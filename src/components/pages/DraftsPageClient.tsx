@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiPath, appPath } from "@/lib/client/url";
+import { parseCreationOutput } from "@/lib/creation/output";
 
-type StatusFilter = "all" | "favorite" | "published" | "unpublished" | "noted" | "avatar";
+type StatusFilter = "all" | "favorite" | "noted" | "avatar";
 type SortMode = "updated-desc" | "updated-asc" | "created-desc";
 type ViewMode = "list" | "grid";
 type LoadState = "loading" | "ready" | "error";
@@ -21,13 +22,15 @@ type DraftItem = {
   note?: string;
   isFavorite?: boolean;
   isUsed?: boolean;
+  appRunStatus?: string;
+  errorMessage?: string;
   quotaCost?: number;
   imageUrl?: string;
   usesAvatarVisual?: boolean;
 };
 
 type WorksData = {
-  totals: { all: number; favorite: number; used: number; unused: number; noted: number; avatar: number };
+  totals: { all: number; favorite: number; noted: number; avatar: number };
   pagination: { page: number; pageSize: number; total: number; hasMore: boolean };
   platforms: Array<{ platform: string; count: number }>;
   activity: Array<{ date: string; count: number }>;
@@ -39,8 +42,6 @@ type WorksPayload = { works: WorksData };
 const statusOptions: Array<{ value: StatusFilter; label: string; totalKey?: keyof WorksData["totals"] }> = [
   { value: "all", label: "全部", totalKey: "all" },
   { value: "favorite", label: "已收藏", totalKey: "favorite" },
-  { value: "published", label: "已发布", totalKey: "used" },
-  { value: "unpublished", label: "待发布", totalKey: "unused" },
   { value: "noted", label: "有备注", totalKey: "noted" },
   { value: "avatar", label: "含本人形象", totalKey: "avatar" },
 ];
@@ -191,16 +192,11 @@ export function DraftsPageClient() {
     if (await patchWork(noteItem, { note: noteValue.trim() })) setNoteItem(null);
   }
 
-  async function runBatch(action: "publish" | "unpublish" | "archive") {
+  async function runBatch() {
     if (!data || selectedIds.size === 0) return;
     setBatchBusy(true);
     const selected = data.items.filter((item) => selectedIds.has(item.id));
-    if (action === "archive") {
-      for (const item of selected) await archiveWork(item);
-    } else {
-      const isUsed = action === "publish";
-      await Promise.all(selected.map((item) => patchWork(item, { isUsed, status: isUsed ? "used" : "draft" })));
-    }
+    for (const item of selected) await archiveWork(item);
     setSelectedIds(new Set());
     setBatchBusy(false);
     await loadWorks(1);
@@ -249,7 +245,7 @@ export function DraftsPageClient() {
           <h1>创作历史 <span>· {data.totals.all} 个作品</span></h1>
           <p>集中查找、整理和发布你的创作内容</p>
         </div>
-        <a className="creationHistoryPrimary" href={appPath("/workspace")}><span aria-hidden="true">＋</span> 新建内容</a>
+        <a className="creationHistoryPrimary" href={appPath("/create")}><span aria-hidden="true">＋</span> 新建内容</a>
       </header>
 
       <section className="creationHistoryToolbar" aria-label="作品筛选">
@@ -286,9 +282,7 @@ export function DraftsPageClient() {
       {selectedIds.size > 0 ? (
         <div className="creationHistoryBatchBar">
           <strong>已选 {selectedIds.size} 项</strong>
-          <button type="button" disabled={batchBusy} onClick={() => void runBatch("publish")}>标为已发布</button>
-          <button type="button" disabled={batchBusy} onClick={() => void runBatch("unpublish")}>标为待发布</button>
-          <button className="danger" type="button" disabled={batchBusy} onClick={() => void runBatch("archive")}>归档</button>
+          <button className="danger" type="button" disabled={batchBusy} onClick={() => void runBatch()}>归档</button>
           <button type="button" aria-label="取消选择" title="取消选择" onClick={() => setSelectedIds(new Set())}>×</button>
         </div>
       ) : null}
@@ -307,7 +301,6 @@ export function DraftsPageClient() {
               onFavorite={() => void patchWork(item, { isFavorite: !item.isFavorite })}
               onMenu={() => setOpenMenuId(openMenuId === item.id ? null : item.id)}
               onNote={() => openNoteEditor(item)}
-              onPublish={() => { setOpenMenuId(null); void patchWork(item, { isUsed: !item.isUsed, status: item.isUsed ? "draft" : "used" }); }}
               onArchive={() => void archiveWork(item)}
             />
           ))}
@@ -339,7 +332,6 @@ function WorkCard(props: {
   onFavorite: () => void;
   onMenu: () => void;
   onNote: () => void;
-  onPublish: () => void;
   onArchive: () => void;
 }) {
   const { item } = props;
@@ -355,10 +347,11 @@ function WorkCard(props: {
         {item.imageUrl ? <span className="creationHistoryThumbImage" style={{ backgroundImage: `url(${JSON.stringify(item.imageUrl).slice(1, -1)})` }} aria-hidden="true" /> : <span aria-hidden="true">{platformSymbol(item.platform)}</span>}
       </div>
       <div className="creationHistoryItemBody">
-        <div className="creationHistoryItemTitleRow"><a href={href}>{formatWorkTitle(item)}</a><span className={item.isUsed ? "published" : "pending"}>{item.isUsed ? "已发布" : "待发布"}</span></div>
-        <div className="creationHistoryItemMeta"><span>{formatPlatformLabel(item.platform)}</span><span>{formatRelativeDate(item.updatedAt)}</span>{item.quotaCost ? <span>{item.quotaCost} 积分</span> : null}</div>
+        <div className="creationHistoryItemTitleRow"><a href={href}>{formatWorkTitle(item)}</a>{item.appRunStatus === "failed" ? <span className="pending">生成失败</span> : null}</div>
+        <div className="creationHistoryItemMeta"><span>{buildWorkDescriptor(item)}</span><span>{formatRelativeDate(item.updatedAt)}</span>{item.quotaCost ? <span>{item.quotaCost} 积分</span> : null}</div>
         <p>{buildWorkPreview(item)}</p>
         <div className="creationHistoryItemTags">
+          {item.appRunStatus === "failed" && item.errorMessage?.trim() ? <span className="risk high" title={item.errorMessage.trim()}>失败原因：{truncateText(item.errorMessage.trim(), 28)}</span> : null}
           {item.usesAvatarVisual ? <span>本人形象</span> : null}
           {formatRisk(item.complianceRisk) ? <span className={`risk ${normalizeRisk(item.complianceRisk)}`}>{formatRisk(item.complianceRisk)}</span> : null}
           {item.note?.trim() ? <button type="button" onClick={props.onNote}>备注：{item.note.trim()}</button> : null}
@@ -368,7 +361,7 @@ function WorkCard(props: {
         <button className={item.isFavorite ? "favorite active" : "favorite"} type="button" aria-label={item.isFavorite ? "取消收藏" : "收藏"} title={item.isFavorite ? "取消收藏" : "收藏"} onClick={props.onFavorite}>{item.isFavorite ? "★" : "☆"}</button>
         <div className="creationHistoryMore">
           <button type="button" aria-label="更多操作" title="更多操作" onClick={(event) => { event.stopPropagation(); props.onMenu(); }}>⋯</button>
-          {props.menuOpen ? <div className="creationHistoryMoreMenu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={props.onNote}>编辑备注</button><button type="button" onClick={props.onPublish}>{item.isUsed ? "标为待发布" : "标为已发布"}</button><button className="danger" type="button" onClick={props.onArchive}>归档作品</button></div> : null}
+          {props.menuOpen ? <div className="creationHistoryMoreMenu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={props.onNote}>编辑备注</button><button className="danger" type="button" onClick={props.onArchive}>归档作品</button></div> : null}
         </div>
       </div>
     </article>
@@ -391,8 +384,6 @@ function adjustTotals(totals: WorksData["totals"], before: DraftItem, after: Dra
   return {
     ...totals,
     favorite: totals.favorite + Number(Boolean(after.isFavorite)) - Number(Boolean(before.isFavorite)),
-    used: totals.used + Number(Boolean(after.isUsed)) - Number(Boolean(before.isUsed)),
-    unused: totals.unused + Number(!after.isUsed) - Number(!before.isUsed),
     noted: totals.noted + Number(Boolean(after.note?.trim())) - Number(Boolean(before.note?.trim())),
   };
 }
@@ -401,15 +392,22 @@ function subtractItemFromTotals(totals: WorksData["totals"], item: DraftItem) {
   return {
     all: Math.max(0, totals.all - 1),
     favorite: Math.max(0, totals.favorite - Number(Boolean(item.isFavorite))),
-    used: Math.max(0, totals.used - Number(Boolean(item.isUsed))),
-    unused: Math.max(0, totals.unused - Number(!item.isUsed)),
     noted: Math.max(0, totals.noted - Number(Boolean(item.note?.trim()))),
     avatar: Math.max(0, totals.avatar - Number(Boolean(item.usesAvatarVisual))),
   };
 }
 
 function buildWorkPreview(item: DraftItem) {
-  return item.content.replace(/[#*_>`~\[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180) || "这条作品暂时还没有可展示内容。";
+  if (item.appRunStatus === "failed" && !item.content.trim()) {
+    return item.errorMessage?.trim() || "这条作品生成失败，可点进详情查看原因后再重试。";
+  }
+  const summary = buildWorkSummary(item);
+  if (summary) return summary;
+  return sanitizePreviewText(item.content).slice(0, 180) || "这条作品暂时还没有可展示内容。";
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, Math.max(1, maxLength - 1))}…` : value;
 }
 
 function formatWorkTitle(item: DraftItem) {
@@ -424,6 +422,133 @@ function formatPlatformLabel(platform: string) {
     "xiaohongshu-check": "小红书合规检测", letter: "信件创作",
   };
   return labels[platform] || "其他创作";
+}
+
+function buildWorkDescriptor(item: DraftItem) {
+  const imageDescriptor = buildImageDescriptor(item);
+  if (imageDescriptor) return imageDescriptor;
+
+  const outputDescriptor = buildOutputDescriptor(item.content);
+  if (outputDescriptor) return `${formatPlatformLabel(item.platform)} · ${outputDescriptor}`;
+
+  return formatPlatformLabel(item.platform);
+}
+
+function buildImageDescriptor(item: DraftItem) {
+  if (!["image-card", "wechat-images", "policy-renewal-card"].includes(item.platform)) return "";
+  const style = extractLabeledValue(item.content, "风格");
+  const ratio = extractLabeledValue(item.content, "比例");
+  const pieces = [style ? formatImageStyleLabel(style) : "", ratio].filter(Boolean);
+  if (pieces.length > 0) return `${formatPlatformLabel(item.platform)} · ${pieces.join(" · ")}`;
+  return formatPlatformLabel(item.platform);
+}
+
+function buildOutputDescriptor(content: string) {
+  const parsed = parseCreationOutput(content);
+  const labels = Array.from(new Set(parsed.batches.map((batch) => normalizeDescriptorLabel(batch.label)).filter(Boolean)));
+  if (labels.length === 0) return "";
+  if (labels.length <= 3) return labels.join(" / ");
+  return `${labels.slice(0, 3).join(" / ")} 等`;
+}
+
+function buildWorkSummary(item: DraftItem) {
+  if (["image-card", "wechat-images", "policy-renewal-card"].includes(item.platform)) {
+    const imageSummary = buildImageSummary(item.content);
+    if (imageSummary) return imageSummary;
+  }
+
+  const parsed = parseCreationOutput(item.content);
+  for (const batch of parsed.batches) {
+    for (const outputItem of batch.items) {
+      const summary = sanitizePreviewText(outputItem.summary || outputItem.body);
+      if (summary && !isWeakPreview(summary, batch.label)) {
+        return summary.slice(0, 180);
+      }
+    }
+  }
+
+  return "";
+}
+
+function buildImageSummary(content: string) {
+  const source = extractBlockAfterLabel(content, "图片文案底稿");
+  if (source) return sanitizePreviewText(source).slice(0, 180);
+
+  const articlePlan = extractBlockAfterLabel(content, "文章配图方案");
+  if (articlePlan) return sanitizePreviewText(articlePlan).slice(0, 180);
+
+  const cardPlan = extractBlockAfterLabel(content, "图片卡片方案");
+  if (cardPlan) return sanitizePreviewText(cardPlan).slice(0, 180);
+
+  return "";
+}
+
+function extractLabeledValue(content: string, label: string) {
+  const match = content.match(new RegExp(`(?:^|\\n)${label}[：:]\\s*(.+)`, "i"));
+  return match?.[1]?.split("\n")[0]?.trim() ?? "";
+}
+
+function extractBlockAfterLabel(content: string, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content.match(new RegExp(`(?:^|\\n)${escapedLabel}[：:]?\\s*\\n([\\s\\S]+?)(?=\\n(?:[\\u4e00-\\u9fa5A-Za-z_ ]+[：:]|补充设置[：:]?)|$)`));
+  return match?.[1]?.trim() ?? "";
+}
+
+function formatImageStyleLabel(style: string) {
+  const labels: Record<string, string> = {
+    illustration: "手绘插画",
+    whiteboard: "白板手写",
+    zen: "东方禅意",
+    "line-illustration": "线稿插画",
+    luxury: "高端质感",
+    magazine: "杂志风格",
+    graffiti: "城市涂鸦",
+    "event-stage": "演讲现场",
+    "handwritten-notes": "手写笔记",
+    clay: "立体粘土",
+    "minimal-drawing": "极简手绘",
+    business: "商务风格",
+    blackboard: "黑板报",
+    "flat-knowledge": "扁平知识",
+    morandi: "莫兰迪",
+    "science-sketch": "科普手绘",
+    "dark-pro": "深色专业",
+    "fresh-card": "清爽卡片",
+    "daily-sign": "质感日签",
+    study: "学霸笔记",
+    "large-sign": "大字日签",
+    "black-white": "黑白调",
+    scrapbook: "手账拼贴",
+    "white-orange-blue": "白橙蓝简约",
+    daily: "日报风格",
+    custom: "自定义风格",
+  };
+  return labels[style] ?? style;
+}
+
+function normalizeDescriptorLabel(value: string) {
+  return value
+    .replace(/^[一二三四五六七八九十0-9]+[、.）)]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizePreviewText(value: string) {
+  return value
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/[#*_>`~\[\]]/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isWeakPreview(value: string, label: string) {
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (normalized === normalizeDescriptorLabel(label)) return true;
+  if (normalized.length < 10) return true;
+  if (/^(生成内容|创作结果|分析报告|精修报告|精修说明|图片卡片方案|文章配图方案)$/.test(normalized)) return true;
+  return false;
 }
 
 function platformSymbol(platform: string) {

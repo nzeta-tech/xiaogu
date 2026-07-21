@@ -14,11 +14,13 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import { CreationExamplePageClient } from "@/components/pages/CreationExamplePageClient";
 import type { AvatarVisualAsset } from "@/lib/avatar/types";
+import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 
 type FieldValue = string | string[];
 
 type SpeechRecognitionEventLike = Event & {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+  resultIndex?: number;
+  results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }>;
 };
 
 type SpeechRecognitionLike = {
@@ -75,7 +77,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const [values, setValues] = useState<Record<string, FieldValue>>(() => {
-    const initialValues = createInitialValues(pageApp, exampleSlug ? activeExample : null, searchParams.get("from") === "workspace");
+    const from = searchParams.get("from");
+    const initialValues = createInitialValues(pageApp, exampleSlug ? activeExample : null, from === "workspace" || from === "create");
     const initialPrompt = searchParams.get("prompt")?.trim();
     const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
     return initialPrompt && promptField ? { ...initialValues, [promptField.id]: initialPrompt } : initialValues;
@@ -85,6 +88,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [error, setError] = useState("");
   const [draftStatus, setDraftStatus] = useState<"restored" | "saving" | "saved" | "">("");
   const [voiceFieldId, setVoiceFieldId] = useState<string | null>(null);
+  const [voicePaused, setVoicePaused] = useState(false);
+  const [voiceElapsed, setVoiceElapsed] = useState(0);
   const [uploadNames, setUploadNames] = useState<Record<string, string>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const [uploadSuccess, setUploadSuccess] = useState<Record<string, string>>({});
@@ -93,14 +98,19 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const valuesRef = useRef(values);
+  const voiceSessionRef = useRef<{ fieldId: string; initialValue: FieldValue | undefined; segmentBaseValue: FieldValue | undefined } | null>(null);
+  const voiceCancelingRef = useRef(false);
+  const voiceCompletingRef = useRef(false);
   const voiceSupported = useMemo(() => Boolean(getSpeechRecognitionConstructor()), []);
   const draftKey = `creation-draft:${workspaceEntry || app.slug}`;
   const requiredFields = pageApp.fields.filter((field) => field.required);
   const completedRequiredFields = requiredFields.filter((field) => !isEmpty(values[field.id]));
   const missingRequiredFields = requiredFields.filter((field) => isEmpty(values[field.id]));
   const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
-  const creationReturnHref = searchParams.get("from") === "dashboard" ? appPath("/dashboard") : appPath("/workspace");
-  const creationReturnLabel = searchParams.get("from") === "dashboard" ? "返回今日工作台" : "返回获客创作";
+  const creationFrom = searchParams.get("from");
+  const creationReturnHref = creationFrom === "dashboard" || creationFrom === "today" ? appPath("/today") : appPath("/create");
+  const creationReturnLabel = creationFrom === "dashboard" || creationFrom === "today" ? "返回今日工作台" : "返回获客创作";
   const experienceCopy = getAppExperienceCopy(app.slug, workspaceEntry);
   const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
   const wechatArticle = typeof values.article === "string" ? values.article : "";
@@ -121,6 +131,16 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   useEffect(() => {
     return () => recognitionRef.current?.stop();
   }, []);
+
+  useEffect(() => {
+    valuesRef.current = values;
+  }, [values]);
+
+  useEffect(() => {
+    if (!voiceFieldId || voicePaused) return undefined;
+    const timer = window.setInterval(() => setVoiceElapsed((current) => current + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [voiceFieldId, voicePaused]);
 
   useEffect(() => {
     if (!showAllWechatStyles) return;
@@ -199,19 +219,26 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     setError("");
     window.sessionStorage.setItem(draftKey, JSON.stringify(values));
 
-    const response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "" } }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "" } }),
+      });
+    } catch {
+      setError(CREATION_NETWORK_ERROR);
+      setLoading(false);
+      return;
+    }
 
-    const payload = (await response.json().catch(() => ({ error: "创建作品失败，请稍后再试。" }))) as {
+    const payload = (await response.json().catch(() => ({ error: CREATION_NETWORK_ERROR }))) as {
       error?: string;
       work?: { id?: string };
     };
 
     if (!response.ok || !payload.work?.id) {
-      setError(payload.error ?? "创建作品失败，请稍后再试。");
+      setError(getCreationUserError(payload.error, CREATION_NETWORK_ERROR));
       setLoading(false);
       return;
     }
@@ -266,7 +293,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           method: "POST",
           body: formData,
         });
-        const payload = (await response.json().catch(() => ({ error: "保单解析失败，请换一个文件重试。" }))) as {
+        const payload = (await response.json().catch(() => ({ error: "解析服务没有返回有效回应，可能是网络中断或服务暂时不可用。请检查网络后重试。" }))) as {
           fields?: Record<string, string>;
           missing?: string[];
           error?: string;
@@ -293,6 +320,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               : "已完成解析，但暂未识别出标准字段，请手动补充。",
         }));
         return;
+      } catch {
+        setUploadErrors((current) => ({ ...current, [fieldId]: "保单文件没有成功送到解析服务，可能是网络中断或服务暂时不可用。请检查网络后重试。" }));
       } finally {
         setUploadingFields((current) => ({ ...current, [fieldId]: false }));
       }
@@ -306,7 +335,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         method: "POST",
         body: formData,
       });
-      const payload = (await response.json().catch(() => ({ error: "文件解析失败，请换一个文件重试。" }))) as {
+      const payload = (await response.json().catch(() => ({ error: "解析服务没有返回有效回应，可能是网络中断或服务暂时不可用。请检查网络后重试。" }))) as {
         text?: string;
         error?: string;
       };
@@ -323,6 +352,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         [fieldId]: appendTextValue(current[fieldId], payload.text ?? ""),
       }));
       setUploadSuccess((current) => ({ ...current, [fieldId]: "文件内容已导入。" }));
+    } catch {
+      setUploadErrors((current) => ({ ...current, [fieldId]: "文件没有成功送到解析服务，可能是网络中断或服务暂时不可用。请检查网络后重试。" }));
     } finally {
       setUploadingFields((current) => ({ ...current, [fieldId]: false }));
     }
@@ -335,13 +366,33 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       return;
     }
 
-    recognitionRef.current?.stop();
+    if (voiceFieldId === fieldId && !voicePaused) return;
+
+    if (voiceFieldId && voiceFieldId !== fieldId) {
+      setError("请先完成或取消当前语音输入。");
+      return;
+    }
+
+    if (!voiceSessionRef.current || voiceSessionRef.current.fieldId !== fieldId) {
+      voiceSessionRef.current = {
+        fieldId,
+        initialValue: valuesRef.current[fieldId],
+        segmentBaseValue: valuesRef.current[fieldId],
+      };
+      setVoiceElapsed(0);
+    } else {
+      voiceSessionRef.current.segmentBaseValue = valuesRef.current[fieldId];
+    }
+
+    voiceCancelingRef.current = false;
+    voiceCompletingRef.current = false;
     setVoiceFieldId(fieldId);
+    setVoicePaused(false);
     setError("");
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.lang = "zh-CN";
     recognition.onresult = (event) => {
       const transcript = Array.from(event.results)
@@ -350,20 +401,75 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         .join("")
         .trim();
       if (!transcript) return;
+      const session = voiceSessionRef.current;
+      if (!session || session.fieldId !== fieldId) return;
       setValues((current) => ({
         ...current,
-        [fieldId]: appendTextValue(current[fieldId], transcript),
+        [fieldId]: appendTextValue(session.segmentBaseValue, transcript),
       }));
     };
     recognition.onerror = () => {
       setError("语音输入失败，请再试一次。");
-      setVoiceFieldId(null);
+      resetVoiceInputState();
     };
     recognition.onend = () => {
-      setVoiceFieldId(null);
+      recognitionRef.current = null;
+      if (voiceCancelingRef.current) {
+        const session = voiceSessionRef.current;
+        if (session) {
+          setValues((current) => ({ ...current, [session.fieldId]: session.initialValue ?? "" }));
+        }
+        resetVoiceInputState();
+        return;
+      }
+      if (voiceCompletingRef.current) {
+        resetVoiceInputState();
+        return;
+      }
+      setVoicePaused(true);
     };
     recognition.start();
     recognitionRef.current = recognition;
+  }
+
+  function pauseVoiceInput() {
+    if (!voiceFieldId) return;
+    const session = voiceSessionRef.current;
+    if (session) session.segmentBaseValue = valuesRef.current[voiceFieldId];
+    setVoicePaused(true);
+    recognitionRef.current?.stop();
+  }
+
+  function finishVoiceInput() {
+    voiceCompletingRef.current = true;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    } else {
+      resetVoiceInputState();
+    }
+  }
+
+  function cancelVoiceInput() {
+    const session = voiceSessionRef.current;
+    voiceCancelingRef.current = true;
+    if (session) {
+      setValues((current) => ({ ...current, [session.fieldId]: session.initialValue ?? "" }));
+    }
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    } else {
+      resetVoiceInputState();
+    }
+  }
+
+  function resetVoiceInputState() {
+    recognitionRef.current = null;
+    voiceSessionRef.current = null;
+    voiceCancelingRef.current = false;
+    voiceCompletingRef.current = false;
+    setVoiceFieldId(null);
+    setVoicePaused(false);
+    setVoiceElapsed(0);
   }
 
   return (
@@ -374,7 +480,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           <span className="subpageBreadcrumb">获客创作 / {pageApp.name}</span>
         </div>
 
-        <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : "app-info-card"}>
+        <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : isLiveScript ? "app-info-card liveScriptHeroCard" : "app-info-card"}>
           <div className="app-header">
             <span className="app-icon creationToolEmoji">{pageApp.emoji}</span>
             <div className="app-text">
@@ -459,13 +565,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           {isLiveScript ? (
             <div className="liveScriptHeroBody">
               <div className="liveScriptHeroIntro">
-                <strong>按 10 段直播引导填信息，系统会帮你整理成更完整的直播流程稿</strong>
-                <p>把直播经验、客群、误区、案例、转化目标和产品信息讲清楚，系统再整理成可执行流程。</p>
+                <strong>只需写下一个直播观点，系统会帮你整理成完整的直播流程稿</strong>
+                <p>把你想讲的主题、判断或要解决的问题写下来，系统会补齐开场、讲解、互动和收尾。</p>
               </div>
               <div className="liveScriptHeroChecklist">
                 <div>
                   <span>适合输入</span>
-                  <strong>直播主题、目标客群、常见误区、真实案例、产品卖点、人设素材</strong>
+                    <strong>一段完整观点，或几句想在直播间讲清楚的话</strong>
                 </div>
                 <div>
                   <span>生成结果</span>
@@ -842,10 +948,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           </section>
         ) : null}
 
-        <form className={isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
+        <form className={isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
           {/* eslint-disable-next-line react-hooks/refs */}
           {visibleFields.map((field, index) => (
-            <label className={isImageCard ? "field-card creationField imageCardField" : isXiaohongshuCheck ? "field-card creationField xiaohongshuCheckField" : "field-card creationField"} id={`creation-field-${field.id}`} key={field.id}>
+            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck })} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
                   <span className="step-number">{index + 1}</span>
@@ -888,6 +994,16 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   styleRecommendation: isWechatImages && field.id === "style" ? wechatStyleRecommendation : undefined,
                   onShowAllStyles: isWechatImages && field.id === "style" ? () => setShowAllWechatStyles(true) : undefined,
                 })}
+                {voiceFieldId === field.id ? (
+                  <VoiceInputPanel
+                    elapsed={voiceElapsed}
+                    paused={voicePaused}
+                    onCancel={cancelVoiceInput}
+                    onFinish={finishVoiceInput}
+                    onPause={pauseVoiceInput}
+                    onResume={() => startVoiceInput(field.id)}
+                  />
+                ) : null}
                 {field.helper && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，暂不支持图片</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "reference_image" ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
@@ -996,13 +1112,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
           {error ? <div className="formError submit-alert">{error}</div> : null}
           {pageApp.requiresThinking ? (
-            <div className="resultSavedHint submit-alert">本应用会结合你的数字分身判断内容重点。<a href={appPath("/thinking")}>查看或完善数字分身</a></div>
+            <div className="resultSavedHint submit-alert">本应用会结合你的数字分身判断内容重点。<a href={appPath("/avatar")}>查看或完善数字分身</a></div>
           ) : null}
           {isWriteCopy && !isVoiceNoteSubpage ? (
-            <div className="resultSavedHint submit-alert">需要更贴近你的表达习惯？<a href={appPath("/thinking")}>完善数字分身</a>，也可以直接按本次选择生成。</div>
+            <div className="resultSavedHint submit-alert">需要更贴近你的表达习惯？<a href={appPath("/avatar")}>完善数字分身</a>，也可以直接按本次选择生成。</div>
           ) : null}
           {isTopicPicker ? (
-            <div className="resultSavedHint submit-alert">选题会参考你的定位和目标客户。生成前可先<a href={appPath("/thinking")}>检查数字分身信息</a>。</div>
+            <div className="resultSavedHint submit-alert">选题会参考你的定位和目标客户。生成前可先<a href={appPath("/avatar")}>检查数字分身信息</a>。</div>
           ) : null}
           {isXiaohongshuCheck ? (
             <div className="resultSavedHint submit-alert">检测结果用于发布前辅助复核，不代表小红书官方审核结论。</div>
@@ -1019,8 +1135,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             </div>
             <button className="primaryButton submit-button submitButton" disabled={loading} onClick={() => void handleSubmit()} type="button">
               {loading
-                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成 2 张提醒卡..." : "创作中..."
-                : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成 2 张提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
+                : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>
@@ -1196,6 +1312,8 @@ function WechatStyleLibrary({
             const recommended = recommendation.value === option.value;
             return (
               <button className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => onSelect(option.value)} type="button">
+                {/* Preview assets come from configurable URLs; native img keeps them flexible here. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 {option.previewUrl ? <img alt={option.label} src={option.previewUrl} /> : <span className="wechatStyleLibraryPlaceholder" />}
                 <strong>{option.label}</strong>
                 {recommended ? <em>推荐</em> : null}
@@ -1246,6 +1364,8 @@ function AvatarVisualPicker({
               const selected = selectedIds.includes(photo.id);
               return (
                 <button className={selected ? "active" : ""} key={photo.id} onClick={() => onSelectionChange(selected ? selectedIds.filter((id) => id !== photo.id) : maxSelection === 1 ? [photo.id] : selectedIds.length < maxSelection ? [...selectedIds, photo.id] : selectedIds)} type="button">
+                  {/* Avatar assets use runtime-generated URLs and vary in origin, so keep plain img here. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img alt={photo.label || "数字分身形象照"} src={photo.content_url} />
                   <span>{photo.is_primary ? "主形象" : avatarPhotoRoleLabel(photo.role)}</span>
                   {selected ? <i>✓</i> : null}
@@ -1253,7 +1373,7 @@ function AvatarVisualPicker({
               );
             })}
           </div>
-        ) : <p>暂无可用于此应用的形象照。<a href={appPath("/thinking")}>前往数字分身添加</a></p>
+        ) : <p>暂无可用于此应用的形象照。<a href={appPath("/avatar")}>前往数字分身添加</a></p>
       ) : <p>本次只生成场景配图，不使用人物形象。</p>}
       {enabled && availablePhotos.length ? <small>{maxSelection === 1 ? "本次最多选择 1 张顾问形象照。" : "可选择 1–4 张；多角度照片有助于保持人物特征一致。"}</small> : null}
     </section>
@@ -1330,7 +1450,7 @@ function recommendWechatImageStyle(article: string): WechatStyleRecommendation {
 }
 
 function supportsVoice(fieldId: string) {
-  return fieldId === "source" || fieldId === "article" || fieldId === "signature" || fieldId === "theme" || fieldId === "offer" || fieldId === "audience" || fieldId === "resume" || fieldId === "followup_notes" || fieldId === "draft" || fieldId === "policy_info" || fieldId === "insured_overview" || fieldId === "concerns";
+  return fieldId === "source" || fieldId === "article" || fieldId === "signature" || fieldId === "theme" || fieldId === "offer" || fieldId === "audience" || fieldId === "resume" || fieldId === "followup_notes" || fieldId === "draft" || fieldId === "policy_info" || fieldId === "insured_overview" || fieldId === "concerns" || fieldId === "live_point";
 }
 
 function getAppExperienceCopy(appSlug: string, entry: string) {
@@ -1341,7 +1461,7 @@ function getAppExperienceCopy(appSlug: string, entry: string) {
   const copy: Record<string, { input: string; output: string }> = {
     "write-copy": { input: "一份有事实和观点的真实素材", output: "口播、小红书、公众号和朋友圈版本" },
     "image-card": { input: "文章、口播稿或清晰主题", output: "按指定风格和比例生成知识卡片" },
-    "policy-renewal-card": { input: "已核对的客户称呼、续保日期、保费与顾问信息", output: "两套可直接发送的续保提醒图片与微信文案" },
+    "policy-renewal-card": { input: "已核对的客户称呼、续保日期、保费与顾问信息", output: "一张由图片模型直接生成的图文融合提醒卡" },
     "lead-copy": { input: "客户问题、个人观点或参考内容", output: "适合引流承接的多平台文案" },
     "traffic-copy": { input: "热点事实、出处和你的判断", output: "有钩子、有逻辑的传播型内容" },
     "marketing-copy": { input: "客户画像、产品规则和真实案例", output: "四个营销角度的可信内容" },
@@ -1350,7 +1470,7 @@ function getAppExperienceCopy(appSlug: string, entry: string) {
     "ip-positioning": { input: "账号现状、目标客户和业务优势", output: "定位主张、账号标签和内容主线" },
     breakthrough: { input: "当前卡点、已做动作和期望结果", output: "问题判断、优先动作和复盘指标" },
     "team-recruit": { input: "团队优势和明确的招募对象", output: "招募文案、海报标题和私信话术" },
-    "live-script": { input: "直播主题、观众问题和可核验材料", output: "从开场到收尾的完整直播脚本" },
+    "live-script": { input: "一段直播观点或想讲清楚的问题", output: "从开场到收尾的完整直播脚本" },
     "general-content": { input: "一份完整观点或分享素材", output: "口播稿和公众号文章" },
     "wechat-images": { input: "结构完整的公众号文章", output: "适配文章节奏的多张配图" },
     "video-script-polish": { input: "准备发布的完整口播原稿", output: "问题诊断、修改建议和精修稿" },
@@ -1372,6 +1492,7 @@ function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, e
   if (appSlug === "lead-copy") classes.push("leadCopyAppPage");
   if (appSlug === "traffic-copy" || appSlug === "marketing-copy") classes.push("polishAppPage", "videoPolishAppPage", "multiChannelPolishAppPage");
   if (appSlug === "lead-package") classes.push("leadPackageAppPage");
+  if (appSlug === "live-script") classes.push("liveScriptAppPage");
   if (appFamily === "topic-picker") classes.push("topicPickerAppPage");
   if (appFamily === "polish-video" || appFamily === "polish-wechat-article") classes.push("polishAppPage");
   if (appFamily === "polish-video") classes.push("videoPolishAppPage");
@@ -1380,6 +1501,20 @@ function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, e
   if (appFamily === "xiaohongshu-check") classes.push("xiaohongshuCheckAppPage");
   if (entry === "recruit-script") classes.push("recruitScriptAppPage");
   if (entry === "recruit-followup") classes.push("recruitFollowupAppPage");
+  return classes.join(" ");
+}
+
+function getCreationFieldClassName(
+  fieldId: string,
+  flags: { isImageCard: boolean; isLiveScript: boolean; isXiaohongshuCheck: boolean },
+) {
+  const classes = ["field-card", "creationField"];
+  if (flags.isImageCard) classes.push("imageCardField");
+  if (flags.isXiaohongshuCheck) classes.push("xiaohongshuCheckField");
+  if (flags.isLiveScript) {
+    classes.push("liveScriptField", `liveScriptField-${fieldId}`);
+    if (fieldId === "live_point") classes.push("liveScriptFieldWide");
+  }
   return classes.join(" ");
 }
 
@@ -1563,6 +1698,8 @@ function renderField({
                   onClick={() => onChange(option.value)}
                   type="button"
                 >
+                  {/* Style previews come from the admin-configurable asset library. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   {option.previewUrl ? <img alt={option.label} className="imageStylePreview" src={option.previewUrl} /> : <div className="imageStylePreview imageStylePreviewPlaceholder" />}
                   <span className="imageStyleLabel">{option.label}</span>
                   {recommended ? <span className="wechatStyleRecommended">推荐</span> : null}
@@ -1634,6 +1771,56 @@ function renderField({
       {uploadSuccess ? <span className="imageCardUploadSuccess">{uploadSuccess}</span> : null}
     </div>
   );
+}
+
+function VoiceInputPanel({
+  elapsed,
+  paused,
+  onCancel,
+  onFinish,
+  onPause,
+  onResume,
+}: {
+  elapsed: number;
+  paused: boolean;
+  onCancel: () => void;
+  onFinish: () => void;
+  onPause: () => void;
+  onResume: () => void;
+}) {
+  return (
+    <div className={paused ? "voiceCapturePanel paused" : "voiceCapturePanel"} role="status" aria-live="polite">
+      <div className="voiceCaptureStatus">
+        <span className="voiceCaptureDot" aria-hidden="true" />
+        <strong>{paused ? "语音输入已暂停" : `语音输入中 ${formatVoiceElapsed(elapsed)}`}</strong>
+      </div>
+      <div className="voiceWaveform" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, index) => (
+          <span key={index} />
+        ))}
+      </div>
+      <div className="voiceCaptureActions">
+        <button className="voiceCaptureButton secondary" onClick={paused ? onResume : onPause} type="button">
+          <span aria-hidden="true">{paused ? "▶" : "Ⅱ"}</span>
+          {paused ? "继续" : "暂停"}
+        </button>
+        <button className="voiceCaptureButton finish" onClick={onFinish} type="button">
+          <span aria-hidden="true">✓</span>
+          完成
+        </button>
+        <button className="voiceCaptureButton cancel" onClick={onCancel} type="button">
+          <span aria-hidden="true">×</span>
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatVoiceElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const rest = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
 }
 
 function appendTextValue(current: FieldValue | undefined, nextChunk: string) {

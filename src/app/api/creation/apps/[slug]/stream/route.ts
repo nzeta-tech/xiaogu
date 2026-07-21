@@ -2,6 +2,7 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
 import { executeCreationAppRun } from "@/lib/creation/execute-app-run";
 import { tryGetCreationAppBySlug, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { getCreationUserError } from "@/lib/creation/errors";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -97,7 +98,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
               return;
             }
             if (payload.type === "error") {
-              safeEnqueue(encodeEvent({ type: "error", content: payload.content ?? "内容生成失败" }));
+              safeEnqueue(encodeEvent({ type: "error", content: getCreationUserError(payload.content) }));
             }
           },
         });

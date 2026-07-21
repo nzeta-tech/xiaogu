@@ -295,6 +295,15 @@ body {
   font-size: 20px !important;
 }
 
+.workspaceHubCardIcon img,
+.workspaceFrequentIcon img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
 .workspaceHubCardBody strong {
   color: var(--text) !important;
   font-size: 17px !important;
@@ -2075,6 +2084,41 @@ body {
 .avatarProposalPreview strong {
   color: #334155;
   font-size: 12px;
+}
+
+.avatarMaturityTips {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.avatarMaturityTip {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+  text-align: left;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.avatarMaturityTip:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
+}
+
+.avatarMaturityTip strong {
+  color: #1e3a8a;
+  font-size: 12px;
+}
+
+.avatarMaturityTip span {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.65;
 }
 
 .avatarProposalPreview span {
@@ -4577,8 +4621,14 @@ body .workDetailPage :is(.instanceOriginSidebarCard, .letterResultSidebarCard, .
   .mobileBrand { display: block; width: 34px; height: 34px; flex: 0 0 34px; }
   .mobileBrand img { width: 100%; height: 100%; border-radius: 8px; }
   .appPageIdentity { margin-right: auto; }
-  .appPageIdentity span, .headerRewardLink, .xiaoguLightTheme .quotaChip span { display: none; }
+  .appPageIdentity span, .headerRewardLink { display: none; }
   .xiaoguLightTheme .quotaChip { min-height: 32px !important; padding: 0 9px; }
+  .xiaoguLightTheme .quotaChip span {
+    display: inline !important;
+    color: #64748b !important;
+    font-size: 10px !important;
+    white-space: nowrap;
+  }
   .xiaoguLightTheme .userPill { width: 32px; min-width: 32px; height: 32px; min-height: 32px !important; }
   .xiaoguLightTheme .main,
   .xiaoguLightTheme.creationShell .main { width: 100% !important; padding: 16px 14px 88px !important; }
@@ -7026,6 +7076,218 @@ body .workDetailPage :is(.instanceOriginSidebarCard, .letterResultSidebarCard, .
   display: none !important;
 }
 
+.creationAppPage.liveScriptAppPage.application-create-page {
+  width: min(1200px, 100%) !important;
+  max-width: 1200px !important;
+  min-height: calc(100vh - 120px) !important;
+  padding: 24px !important;
+  background: #fafbfc !important;
+}
+
+.liveScriptAppPage .page-content {
+  gap: 20px !important;
+}
+
+.liveScriptAppPage .pageBackBar {
+  margin-bottom: -8px !important;
+}
+
+.liveScriptAppPage .backLink {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 4px 8px !important;
+  color: #64748b !important;
+  font-size: 14px !important;
+}
+
+.liveScriptAppPage .subpageBreadcrumb,
+.liveScriptAppPage .creationOutcomeStrip,
+.liveScriptAppPage .liveScriptHeroBody,
+.liveScriptAppPage .liveScriptBriefingCard {
+  display: none !important;
+}
+
+.liveScriptAppPage .liveScriptHeroCard {
+  padding: 24px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+}
+
+.liveScriptAppPage .app-header {
+  align-items: flex-start !important;
+  gap: 16px !important;
+  min-height: 0 !important;
+  padding-right: 0 !important;
+}
+
+.liveScriptAppPage .app-icon.creationToolEmoji {
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 48px !important;
+  line-height: 1 !important;
+}
+
+.liveScriptAppPage .app-name {
+  margin: 0 0 8px !important;
+  color: #1a202c !important;
+  font-size: 24px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+}
+
+.liveScriptAppPage .app-description {
+  max-width: none !important;
+  margin: 0 !important;
+  color: #64748b !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+.liveScriptAppPage .subpageTaskState {
+  display: none !important;
+}
+
+.liveScriptAppPage .liveScriptCreateForm {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 20px !important;
+}
+
+.liveScriptAppPage .liveScriptField {
+  position: static !important;
+  overflow: visible !important;
+  padding: 24px !important;
+  border: 1px solid transparent !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+}
+
+.liveScriptAppPage .liveScriptField::before {
+  display: none !important;
+}
+
+.liveScriptAppPage .liveScriptField:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.liveScriptAppPage .liveScriptField .fieldCardHeader {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 16px !important;
+  margin-bottom: 20px !important;
+}
+
+.liveScriptAppPage .liveScriptField .stepIndicator {
+  width: 24px !important;
+  height: 24px !important;
+  border: 1.5px solid #1a202c !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  color: #1a202c !important;
+}
+
+.liveScriptAppPage .liveScriptField .step-number {
+  color: #1a202c !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+.liveScriptAppPage .liveScriptField .field-title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  color: #1a202c !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+}
+
+.liveScriptAppPage .liveScriptField .field-help {
+  margin-top: 8px !important;
+  color: #64748b !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+.liveScriptAppPage .liveScriptField .creationTextarea,
+.liveScriptAppPage .liveScriptField .creationInput {
+  border: 2px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  background: #fafbfc !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+.liveScriptAppPage .liveScriptField .creationTextarea {
+  min-height: 132px !important;
+}
+
+.liveScriptAppPage .liveScriptField .creationTextarea:focus,
+.liveScriptAppPage .liveScriptField .creationInput:focus {
+  border-color: #3b82f6 !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+}
+
+.liveScriptAppPage .liveScriptField .choiceGrid,
+.liveScriptAppPage .liveScriptField .radio-select-group {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+}
+
+.liveScriptAppPage .liveScriptField .choiceButton,
+.liveScriptAppPage .liveScriptField .radio-select-option {
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 14px 20px !important;
+  border: 2px solid #e5e7eb !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  white-space: nowrap !important;
+}
+
+.liveScriptAppPage .liveScriptField .choiceButton.active,
+.liveScriptAppPage .liveScriptField .radio-select-option.is-checked {
+  border-color: #409eff !important;
+  background: linear-gradient(135deg, #f0f9ff, #e6f7ff) !important;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15) !important;
+}
+
+.liveScriptAppPage .creationStickyAction {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 16px !important;
+  min-height: 0 !important;
+  padding: 24px 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.liveScriptAppPage .creationSubmitSummary {
+  display: none !important;
+}
+
+.liveScriptAppPage .creationStickyAction .submitButton {
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  max-width: 400px !important;
+  min-width: 0 !important;
+  height: 48px !important;
+  border-radius: 10px !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
 @media (max-width: 760px) {
   .creationAppPage.application-create-page {
     width: 100% !important;
@@ -7076,6 +7338,58 @@ body .workDetailPage :is(.instanceOriginSidebarCard, .letterResultSidebarCard, .
     width: 146px !important;
     min-width: 146px !important;
     max-width: 146px !important;
+  }
+
+  .creationAppPage.liveScriptAppPage.application-create-page {
+    padding: 16px !important;
+  }
+
+  .liveScriptAppPage .liveScriptHeroCard,
+  .liveScriptAppPage .liveScriptField {
+    padding: 20px !important;
+  }
+
+  .liveScriptAppPage .app-header {
+    flex-wrap: wrap !important;
+  }
+
+  .liveScriptAppPage .app-name {
+    font-size: 20px !important;
+  }
+
+  .liveScriptAppPage .liveScriptField .fieldCardHeader {
+    gap: 12px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .liveScriptAppPage .liveScriptField .field-title {
+    font-size: 16px !important;
+  }
+
+  .liveScriptAppPage .liveScriptField .choiceButton,
+  .liveScriptAppPage .liveScriptField .radio-select-option {
+    padding: 10px 14px !important;
+    white-space: normal !important;
+  }
+
+  .liveScriptAppPage .creationStickyAction .submitButton {
+    flex: 0 0 auto !important;
+    flex-basis: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 44px !important;
+    max-width: none !important;
+    font-size: 15px !important;
+  }
+
+  .liveScriptAppPage .creationStickyAction {
+    position: relative !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    padding: 24px 0 !important;
   }
 }
 .accountSessionActions { display: flex; justify-content: flex-end; margin-top: 12px; }
@@ -7128,3 +7442,482 @@ body .workDetailPage :is(.instanceOriginSidebarCard, .letterResultSidebarCard, .
 .serviceHealthGrid article span, .serviceHealthGrid article p { color: var(--muted); font-size: 12px; }
 .panelHeaderActions { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 @media (max-width: 720px) { .settingsFormGrid, .serviceHealthGrid { grid-template-columns: 1fr; } }
+
+/* Live scripts are delivered as one working document, not a collection of result cards. */
+.liveScriptWorkDetailPage .liveScriptResultSectionCard {
+  gap: 0 !important;
+  padding: 0 !important;
+  overflow: visible;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultSectionCard > .instanceSectionHeader {
+  padding: 20px 24px 10px;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultSectionCard > .instanceSectionHeader h2 {
+  color: #134e4a !important;
+}
+
+.liveScriptWorkDetailPage .liveScriptBatchStack,
+.liveScriptWorkDetailPage .liveScriptResultDocument {
+  display: block;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultDocument > .instanceBatchHeaderRow,
+.liveScriptWorkDetailPage .liveScriptResultDocument > .instanceBatchItemTabs {
+  display: none;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock {
+  gap: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultToolbar {
+  top: 8px;
+  min-height: 58px;
+  padding: 11px 24px 12px !important;
+  border-top: 1px solid #e2e8f0;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultToolbarTitle strong {
+  color: #134e4a;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultToolbarTitle span {
+  color: #0f766e;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .instancePlainResult {
+  width: min(100%, 940px);
+  margin: 0 auto;
+  padding: 34px 42px 56px !important;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownMessage {
+  gap: 10px;
+  padding: 0;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading {
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading-level-1 {
+  margin: 0 0 18px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid #99f6e4;
+  color: #134e4a;
+  font-size: 28px;
+  line-height: 1.35;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading-level-2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 32px 0 10px;
+  padding: 0;
+  border-top: 0;
+  color: #0f766e;
+  font-size: 20px;
+  line-height: 1.45;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading-level-2::before {
+  width: 4px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  background: #14b8a6;
+  content: "";
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading-level-3 {
+  margin: 22px 0 6px;
+  color: #334155;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock :is(.markdownParagraph, .markdownListItem) {
+  color: #263244 !important;
+  line-height: 2 !important;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownParagraph > strong:first-child {
+  color: #0f766e;
+}
+
+.liveScriptWorkDetailPage .liveScriptResultBlock .markdownQuote {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-left: 3px solid #5eead4;
+  border-radius: 0 6px 6px 0;
+  background: #f0fdfa;
+  color: #115e59;
+  line-height: 1.9;
+}
+
+@media (max-width: 760px) {
+  .liveScriptWorkDetailPage .liveScriptResultSectionCard > .instanceSectionHeader {
+    padding: 16px 16px 8px;
+  }
+
+  .liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultToolbar {
+    top: 0;
+    padding: 10px 16px 11px !important;
+  }
+
+  .liveScriptWorkDetailPage .liveScriptResultBlock .instancePlainResult {
+    padding: 24px 18px 38px !important;
+  }
+
+  .liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading-level-1 {
+    font-size: 23px;
+  }
+
+  .liveScriptWorkDetailPage .liveScriptResultBlock .markdownHeading-level-2 {
+    margin-top: 26px;
+    font-size: 18px;
+  }
+}
+
+/* Final spacing pass for the live-script reading workflow. */
+body .liveScriptWorkDetailPage .instanceStudioShell {
+  max-width: 1160px !important;
+  padding: 14px 20px 56px !important;
+}
+
+body .liveScriptWorkDetailPage .resultWorkspaceBar {
+  margin-bottom: 14px;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioLayout {
+  gap: 12px !important;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioSidebarCard {
+  gap: 8px !important;
+  min-height: 48px !important;
+  padding: 6px 8px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioSidebarCard .instanceSidebarSection {
+  gap: 4px !important;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioSidebarCard .instanceSidebarSection + .instanceSidebarSection {
+  margin-left: 6px;
+  padding-left: 10px !important;
+  border-left: 1px solid #e2e8f0 !important;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioSidebarCard .instanceNavButton {
+  min-height: 32px !important;
+  padding: 0 11px !important;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioSidebarCard .instanceZoomGroup {
+  padding: 2px !important;
+}
+
+body .liveScriptWorkDetailPage .instanceStudioSidebarCard .instanceZoomButton {
+  height: 28px !important;
+  padding: 0 8px;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultSectionCard {
+  scroll-margin-top: 88px;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultSectionCard > .instanceSectionHeader {
+  gap: 4px;
+  padding: 22px 28px 12px;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultSectionCard > .instanceSectionHeader p {
+  max-width: 680px;
+  line-height: 1.65;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultToolbar {
+  min-height: 62px;
+  padding: 12px 28px 13px !important;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultActions {
+  gap: 8px;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .instanceActionButton {
+  min-width: 76px;
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .instanceActionButton:hover:not(:disabled) {
+  border-color: #5eead4 !important;
+  background: #f0fdfa !important;
+  color: #0f766e !important;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultActions .instanceActionButton:first-child:hover:not(:disabled) {
+  border-color: #115e59 !important;
+  background: #115e59 !important;
+  color: #ffffff !important;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .instancePlainResult {
+  width: min(100%, 900px);
+  padding: 40px 50px 64px !important;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .markdownSpacer {
+  height: 8px;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock .markdownListItem {
+  gap: 10px;
+  padding-left: 2px;
+}
+
+body .liveScriptWorkDetailPage .liveScriptResultBlock ::selection {
+  background: #ccfbf1;
+  color: #134e4a;
+}
+
+@media (max-width: 760px) {
+  body .liveScriptWorkDetailPage .instanceStudioShell {
+    padding: 10px 10px 34px !important;
+  }
+
+  body .liveScriptWorkDetailPage .resultWorkspaceBar {
+    margin-bottom: 10px;
+  }
+
+  body .liveScriptWorkDetailPage .instanceStudioLayout {
+    gap: 10px !important;
+  }
+
+  body .liveScriptWorkDetailPage .instanceStudioSidebarCard {
+    min-height: 44px !important;
+  }
+
+  body .liveScriptWorkDetailPage .instanceStudioSidebarCard .instanceSidebarSection + .instanceSidebarSection {
+    margin-left: 2px;
+    padding-left: 6px !important;
+  }
+
+  body .liveScriptWorkDetailPage .liveScriptResultSectionCard > .instanceSectionHeader {
+    padding: 18px 18px 10px;
+  }
+
+  body .liveScriptWorkDetailPage .liveScriptResultBlock .instanceResultToolbar {
+    min-height: 56px;
+    padding: 10px 18px 11px !important;
+  }
+
+  body .liveScriptWorkDetailPage .liveScriptResultBlock .instancePlainResult {
+    padding: 28px 20px 44px !important;
+  }
+}
+
+/* Shared result-workspace interaction baseline. */
+body .workDetailPage :is(button, a):focus-visible {
+  outline: 2px solid #14b8a6;
+  outline-offset: 2px;
+}
+
+body .workDetailPage :is(
+  .instanceSectionCard,
+  .instanceOriginResultCard,
+  .imageInstanceCard,
+  .topicPickerResultCard,
+  .videoPolishResultCard,
+  .xiaohongshuCheckReportCard,
+  .letterResultLeadBlock
+) {
+  scroll-margin-top: 88px;
+}
+
+body .workDetailPage .resultWorkspaceBar {
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+body .workDetailPage .resultWorkspaceBar:focus-within {
+  border-color: #99f6e4;
+  box-shadow: 0 10px 28px rgba(13, 148, 136, 0.1);
+}
+
+body .workDetailPage :is(.instanceActionButton, .instancePrimaryAction, .creationExampleBlockActions button):disabled {
+  cursor: not-allowed;
+}
+
+/* Reading-oriented outputs keep a stable, comfortable measure. */
+body :is(.simpleCopyWorkDetailPage, .generalContentWorkDetailPage) .instancePlainResult {
+  width: min(100%, 900px);
+  margin-inline: auto;
+}
+
+body :is(.simpleCopyWorkDetailPage, .generalContentWorkDetailPage) .markdownMessage {
+  padding-right: 0;
+  padding-bottom: 0;
+}
+
+body :is(.simpleCopyWorkDetailPage, .generalContentWorkDetailPage) .markdownHeading-level-1 {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #cbd5e1;
+  font-size: 26px;
+  line-height: 1.4;
+}
+
+body :is(.simpleCopyWorkDetailPage, .generalContentWorkDetailPage) .markdownHeading-level-2 {
+  margin-top: 28px;
+  color: #0f766e;
+  font-size: 20px;
+}
+
+/* Multi-channel generation: make the selected version easier to scan and act on. */
+body .writeCopyWorkDetailPage .writeCopyResultSectionCard {
+  padding: 20px !important;
+}
+
+body .writeCopyWorkDetailPage .writeCopyBatchStack {
+  gap: 18px !important;
+}
+
+body .writeCopyWorkDetailPage .writeCopyBatchGroup {
+  gap: 12px;
+  padding: 18px !important;
+  border-color: #e2e8f0 !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+}
+
+body .writeCopyWorkDetailPage .writeCopyBatchGroup .instanceBatchHeaderRow {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #edf2f7;
+}
+
+body .writeCopyWorkDetailPage .writeCopyBatchGroup .instanceBatchHeading {
+  color: #1e293b;
+  font-size: 18px;
+}
+
+body .writeCopyWorkDetailPage .writeCopyBatchGroup .instanceBatchCount {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+body .writeCopyWorkDetailPage .writeCopyBatchItemTabs {
+  flex-wrap: nowrap;
+  margin-top: 0;
+  padding: 2px 0 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+body .writeCopyWorkDetailPage .writeCopyItemTab {
+  flex: 0 0 auto;
+  border-color: #e2e8f0 !important;
+  background: #f8fafc !important;
+  color: #475569 !important;
+}
+
+body .writeCopyWorkDetailPage .writeCopyItemTab.active {
+  border-color: #99f6e4 !important;
+  background: #ecfdf5 !important;
+  color: #0f766e !important;
+}
+
+body .writeCopyWorkDetailPage .writeCopyResultBlock {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+/* Choice reports: reinforce selection without turning every section into a card. */
+body .topicPickerWorkDetailPage .topicPickerResultCard {
+  padding: 20px 24px !important;
+}
+
+body .topicPickerWorkDetailPage .topicPickerReportSection {
+  padding: 22px 4px;
+  scroll-margin-top: 88px;
+}
+
+body .topicPickerWorkDetailPage .topicPickerReportSection.selected {
+  padding-inline: 16px;
+  border-left: 3px solid #14b8a6;
+  border-radius: 0 8px 8px 0;
+  background: #f8fffd;
+}
+
+body .topicPickerWorkDetailPage .topicPickerReportSection .creationExampleBlockBody {
+  max-width: 880px;
+}
+
+body .topicPickerWorkDetailPage .topicPickerSectionHeading > button {
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+/* Report pages: preserve a clear action hierarchy and compact diagnostic blocks. */
+body .xiaohongshuCheckResultPage .xiaohongshuCheckReportCard {
+  padding: 20px 24px !important;
+}
+
+body .xiaohongshuCheckResultPage .xiaohongshuCheckReportBody {
+  max-width: 940px;
+}
+
+body .xiaohongshuCheckResultPage .xiaohongshuCheckSummaryGrid > div {
+  min-height: 86px;
+}
+
+body .xiaohongshuCheckResultPage .xiaohongshuCheckAmendmentStack article {
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+@media (hover: hover) {
+  body .xiaohongshuCheckResultPage .xiaohongshuCheckAmendmentStack article:hover {
+    border-color: #fecdd3;
+    background: #fffafb;
+  }
+
+  body .imageInstancePage .imageStudioThumbnails button:hover {
+    border-color: #5eead4;
+    box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.12);
+  }
+
+  body .imageInstancePage .imageStudioSecondaryActions button:hover:not(:disabled) {
+    color: #0f766e;
+    background: #f0fdfa;
+  }
+}
+
+@media (max-width: 760px) {
+  body :is(.simpleCopyWorkDetailPage, .generalContentWorkDetailPage) .instancePlainResult {
+    width: 100%;
+  }
+
+  body :is(.simpleCopyWorkDetailPage, .generalContentWorkDetailPage) .markdownHeading-level-1 {
+    font-size: 22px;
+  }
+
+  body .writeCopyWorkDetailPage .writeCopyResultSectionCard,
+  body .writeCopyWorkDetailPage .writeCopyBatchGroup,
+  body .topicPickerWorkDetailPage .topicPickerResultCard,
+  body .xiaohongshuCheckResultPage .xiaohongshuCheckReportCard {
+    padding: 16px !important;
+  }
+
+  body .topicPickerWorkDetailPage .topicPickerReportSection.selected {
+    padding-inline: 12px;
+  }
+}

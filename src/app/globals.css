@@ -8450,6 +8450,181 @@ a {
   background: var(--brand);
 }
 
+.voiceCapturePanel {
+  width: 100%;
+  margin-top: 14px;
+  padding: 18px 20px 16px;
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.06), 0 14px 34px rgba(59, 130, 246, 0.12);
+}
+
+.voiceCapturePanel.paused {
+  border-color: #cbd5e1;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.1);
+}
+
+.voiceCaptureStatus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #dc2626;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.voiceCapturePanel.paused .voiceCaptureStatus {
+  color: #64748b;
+}
+
+.voiceCaptureDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #f87171;
+  box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.14);
+}
+
+.voiceWaveform {
+  display: grid;
+  grid-template-columns: repeat(18, minmax(10px, 1fr));
+  align-items: end;
+  gap: 5px;
+  height: 72px;
+  margin: 18px 0 14px;
+}
+
+.voiceWaveform span {
+  display: block;
+  min-width: 0;
+  height: 8px;
+  border-radius: 3px;
+  background: #3b82f6;
+  animation: voiceWavePulse 1.15s ease-in-out infinite;
+}
+
+.voiceWaveform span:nth-child(1),
+.voiceWaveform span:nth-child(2) {
+  height: 34px;
+}
+
+.voiceWaveform span:nth-child(3),
+.voiceWaveform span:nth-child(10),
+.voiceWaveform span:nth-child(11),
+.voiceWaveform span:nth-child(12) {
+  height: 22px;
+}
+
+.voiceWaveform span:nth-child(4),
+.voiceWaveform span:nth-child(5),
+.voiceWaveform span:nth-child(8) {
+  height: 17px;
+}
+
+.voiceWaveform span:nth-child(6),
+.voiceWaveform span:nth-child(7) {
+  height: 27px;
+}
+
+.voiceWaveform span:nth-child(9) {
+  height: 12px;
+}
+
+.voiceWaveform span:nth-child(n + 13) {
+  height: 6px;
+}
+
+.voiceWaveform span:nth-child(2n) {
+  animation-delay: 0.16s;
+}
+
+.voiceWaveform span:nth-child(3n) {
+  animation-delay: 0.3s;
+}
+
+.voiceCapturePanel.paused .voiceWaveform span {
+  animation-play-state: paused;
+  background: #94a3b8;
+}
+
+.voiceCaptureActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.voiceCaptureButton {
+  min-height: 36px;
+  padding: 0 20px;
+  border: 1px solid #d8dee8;
+  border-radius: 6px;
+  background: #fff;
+  color: #5f6875;
+  font-size: 15px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.voiceCaptureButton:hover {
+  transform: translateY(-1px);
+}
+
+.voiceCaptureButton.finish {
+  border-color: #5fbf35;
+  background: #5fbf35;
+  color: #fff;
+}
+
+.voiceCaptureButton.cancel {
+  color: #6b7280;
+}
+
+@keyframes voiceWavePulse {
+  0%,
+  100% {
+    transform: scaleY(0.72);
+    opacity: 0.86;
+  }
+  50% {
+    transform: scaleY(1.18);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .voiceCapturePanel {
+    padding: 14px;
+  }
+
+  .voiceCaptureStatus {
+    font-size: 15px;
+  }
+
+  .voiceWaveform {
+    grid-template-columns: repeat(12, minmax(8px, 1fr));
+    height: 54px;
+  }
+
+  .voiceWaveform span:nth-child(n + 13) {
+    display: none;
+  }
+
+  .voiceCaptureActions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .voiceCaptureButton {
+    flex: 1 1 96px;
+    padding: 0 12px;
+  }
+}
+
 .sendButton {
   margin-left: auto;
   border: 0;
@@ -9063,6 +9238,16 @@ a {
   border-radius: 8px;
   background: #ffffff;
   transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.adminInfoRowLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.adminInfoRowLink:focus-visible {
+  outline: 2px solid #14b8a6;
+  outline-offset: 2px;
 }
 
 .adminInfoRow:hover {
@@ -14764,6 +14949,21 @@ a {
   font-weight: 600 !important;
 }
 
+.user-questionnaire-page .section-nav-btns .questionnaire-bottom-submit {
+  justify-content: center !important;
+  min-width: min(320px, 100%) !important;
+  margin-left: auto !important;
+  border-color: #4f7cff !important;
+  background: #4f7cff !important;
+  color: #fff !important;
+  box-shadow: 0 10px 24px rgba(79, 124, 255, 0.22) !important;
+}
+
+.user-questionnaire-page .section-nav-btns .questionnaire-bottom-submit:hover:not(:disabled) {
+  background: #3f6df6 !important;
+  border-color: #3f6df6 !important;
+}
+
 .user-questionnaire-page .questionnaire-toast {
   position: fixed !important;
   right: 24px !important;
@@ -14814,6 +15014,17 @@ a {
 
   .user-questionnaire-page .title-actions .action-btn {
     flex: 1 !important;
+  }
+
+  .user-questionnaire-page .section-nav-btns {
+    flex-direction: column !important;
+  }
+
+  .user-questionnaire-page .section-nav-btns button,
+  .user-questionnaire-page .section-nav-btns .questionnaire-bottom-submit {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
   }
 
   .user-questionnaire-page .section-description,
@@ -18036,6 +18247,50 @@ a {
   line-height: 1.55;
 }
 
+.liveScriptWorkDetailPage .instanceStudioHero {
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.liveScriptWorkDetailPage .liveScriptInstanceHeroSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.liveScriptWorkDetailPage .liveScriptInstanceHeroSummary div {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid rgba(20, 184, 166, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.liveScriptWorkDetailPage .liveScriptInstanceHeroSummary span {
+  color: #0f766e;
+  font-size: 12px;
+}
+
+.liveScriptWorkDetailPage .liveScriptInstanceHeroSummary strong {
+  color: #134e4a;
+  line-height: 1.55;
+}
+
+.liveScriptWorkDetailPage .instanceResultBlock .markdownHeading-level-1 {
+  margin-top: 0;
+  color: #134e4a;
+}
+
+.liveScriptWorkDetailPage .instanceResultBlock .markdownHeading-level-2 {
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+  color: #0f766e;
+}
+
+.liveScriptWorkDetailPage .instanceResultBlock .markdownHeading-level-3 {
+  color: #334155;
+}
+
 .polishWorkDetailPage .polishBatchStack {
   gap: 24px;
 }
@@ -18915,7 +19170,8 @@ a {
   .writeCopyExamplePage .writeCopyExampleSummary,
   .polishExamplePage .polishExampleSummary,
   .writeCopyWorkDetailPage .writeCopyInstanceHeroSummary,
-  .polishWorkDetailPage .polishInstanceHeroSummary {
+  .polishWorkDetailPage .polishInstanceHeroSummary,
+  .liveScriptWorkDetailPage .liveScriptInstanceHeroSummary {
     grid-template-columns: 1fr;
   }
 
@@ -19082,7 +19338,10 @@ a {
 }
 
 .creationShell .quotaChip span {
-  display: none !important;
+  display: inline !important;
+  color: rgba(255, 255, 255, 0.84) !important;
+  font-size: 12px !important;
+  white-space: nowrap;
 }
 
 .creationShell .quotaChip strong {

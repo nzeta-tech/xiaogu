@@ -21,7 +21,7 @@ export function AuthGuard({ children, requireAdmin = false }: { children: React.
         const user = payload.user as { role?: string } | null | undefined;
         if (user) {
           if (requireAdmin && user.role !== "admin") {
-            router.replace("/workspace");
+            router.replace("/create");
             return;
           }
           setReady(true);

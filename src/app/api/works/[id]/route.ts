@@ -2,21 +2,25 @@ import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { ensureBackgroundWorkRun } from "@/lib/creation/background-run-registry";
 import { parseCreationOutput } from "@/lib/creation/output";
-import { tryGetWorkDetail, tryUpdateWorkContent, tryUpdateWorkMetadata } from "@/lib/db/repositories";
+import { tryExpireStaleAppRuns, tryGetWorkDetail, tryUpdateWorkContent, tryUpdateWorkMetadata } from "@/lib/db/repositories";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
 
   const { id } = await context.params;
-  const work = await tryGetWorkDetail({ userId: user.id, workId: id });
+  const adminAccess = user.role === "admin" && new URL(request.url).searchParams.get("admin") === "1";
+  if (!adminAccess) await tryExpireStaleAppRuns(user.id);
+  const work = await tryGetWorkDetail({ userId: user.id, workId: id, access: adminAccess ? "admin" : "own" });
   if (!work) {
     return Response.json({ error: "作品不存在或无权访问" }, { status: 404 });
   }
-  const normalizedWork = normalizeWorkDetail(work);
+  const restoredWork = await restoreCompletedRunResult(work, user.id, adminAccess);
+  const normalizedWork = normalizeWorkDetail(restoredWork);
 
   const payload = normalizedWork.app_run?.input_payload;
   if (
+    !adminAccess &&
     normalizedWork.app_run?.status === "running" &&
     payload &&
     typeof payload === "object" &&
@@ -107,6 +111,41 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   const updated = await tryUpdateWorkMetadata({ userId: user.id, workId: id, status: "archived" });
   if (!updated) return Response.json({ error: "作品不存在或归档失败" }, { status: 404 });
   return Response.json({ ok: true, work: updated });
+}
+
+async function restoreCompletedRunResult<T extends {
+  id: string;
+  content: string;
+  content_json?: Record<string, unknown> | null;
+  app_run?: {
+    status?: string;
+    result_text?: string | null;
+    result_json?: Record<string, unknown> | null;
+  } | null;
+}>(work: T, userId: string, adminAccess: boolean): Promise<T> {
+  const resultText = work.app_run?.status === "succeeded" ? work.app_run.result_text?.trim() : "";
+  if (work.content.trim() || !resultText) return work;
+
+  const resultJson = work.app_run?.result_json;
+  const contentJson = resultJson?.contentJson;
+  const resolvedContentJson = contentJson && typeof contentJson === "object"
+    ? contentJson as Record<string, unknown>
+    : parseCreationOutput(resultText);
+
+  if (!adminAccess) {
+    await tryUpdateWorkContent({
+      userId,
+      workId: work.id,
+      content: resultText,
+      contentJson: resolvedContentJson,
+    });
+  }
+
+  return {
+    ...work,
+    content: resultText,
+    content_json: resolvedContentJson,
+  };
 }
 
 function normalizeWorkDetail<T extends {

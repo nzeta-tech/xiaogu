@@ -38,6 +38,20 @@ docker compose run --rm migrate
 docker compose up app
 ```
 
+生产运行时形态：
+
+```bash
+docker compose -f docker-compose.deployed.yml up -d --force-recreate app
+```
+
+这条路径默认使用仓库根目录 `.env` 里的 `RDS_DATABASE_URL`，并从 `./runtime` 挂载已经构建好的 standalone 产物。当前生产 RDS 连接建议包含 SSL 参数，例如：
+
+```bash
+RDS_DATABASE_URL=postgresql://...@insurance-content-agent-postgres...:5432/insurance_content_agent?sslmode=no-verify
+```
+
+不要在 Xiaogu 的 RDS 上启用自动主密码托管/轮换，除非已经同步打通 Secrets Manager 到运行时配置的发布链路；否则会出现数据库可用但应用凭据失效的切换事故。
+
 ## 当前能力
 
 - 服务端注册/登录 API、bcrypt 密码、HttpOnly 会话

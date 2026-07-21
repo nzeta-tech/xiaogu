@@ -15,8 +15,8 @@ export async function GET(request: Request) {
     const pageSize = Number(url.searchParams.get("pageSize") || "20");
     const stateValue = url.searchParams.get("state") || "all";
     const sortValue = url.searchParams.get("sort") || "updated-desc";
-    const state = ["all", "favorite", "published", "unpublished", "noted", "avatar"].includes(stateValue)
-      ? stateValue as "all" | "favorite" | "published" | "unpublished" | "noted" | "avatar"
+    const state = ["all", "favorite", "noted", "avatar"].includes(stateValue)
+      ? stateValue as "all" | "favorite" | "noted" | "avatar"
       : "all";
     const sort = ["updated-desc", "updated-asc", "created-desc"].includes(sortValue)
       ? sortValue as "updated-desc" | "updated-asc" | "created-desc"

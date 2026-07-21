@@ -1,6 +1,6 @@
 const authEntryPaths = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 
-export function safeAuthRedirect(value: string | null | undefined, fallback = "/dashboard") {
+export function safeAuthRedirect(value: string | null | undefined, fallback = "/today") {
   const candidate = value?.trim();
   if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\")) return fallback;
 

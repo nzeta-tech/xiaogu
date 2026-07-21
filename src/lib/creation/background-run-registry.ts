@@ -1,5 +1,6 @@
 import { executeCreationAppRun, RetryableCreationRunError } from "@/lib/creation/execute-app-run";
 import type { CreationFieldValue } from "@/lib/creation/output";
+import { getCreationUserError } from "@/lib/creation/errors";
 
 type FieldValue = CreationFieldValue;
 type StreamImage = { id: string; url: string };
@@ -34,7 +35,7 @@ const activeWorkRuns =
   backgroundRunGlobal[backgroundRunRegistryKey] ??
   (backgroundRunGlobal[backgroundRunRegistryKey] = new Map<string, BackgroundWorkRunEntry>());
 const BACKGROUND_RETRY_DELAY_MS = 3000;
-const MAX_BACKGROUND_RETRIES = 0;
+const MAX_BACKGROUND_RETRIES = 2;
 
 export function isWorkRunActive(workId: string) {
   return activeWorkRuns.has(workId);
@@ -103,7 +104,7 @@ export function startBackgroundWorkRun(input: {
     }
     if (event.type === "error") {
       snapshot.status = "error";
-      snapshot.error = event.content ?? "内容生成失败";
+      snapshot.error = getCreationUserError(event.content);
     }
 
     for (const listener of listeners) {

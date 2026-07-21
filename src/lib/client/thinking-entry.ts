@@ -56,6 +56,6 @@ export function useThinkingEntryState() {
       ? "已完成内容画像，可随时查看和调整，让创作更贴近你的真实经验与表达"
       : "建立内容画像，让选题、语气和专业边界更贴近你的实际工作",
     actionLabel: hasThinking ? "查看人设" : "创建人设",
-    href: appPath("/thinking"),
+    href: appPath("/avatar"),
   };
 }

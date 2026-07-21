@@ -2,6 +2,7 @@ import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
 import { startBackgroundWorkRun } from "@/lib/creation/background-run-registry";
+import { buildWorkTitle } from "@/lib/creation/work-title";
 import { query } from "@/lib/db/client";
 import { isEmptyCreationFieldValue } from "@/lib/creation/output";
 import { tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
@@ -44,10 +45,17 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
   }
 
+  const pendingTitle = buildWorkTitle({
+    appName: effectiveApp.name,
+    appSlug: app.slug,
+    values,
+    result: null,
+  });
+
   const work = await tryCreateWork({
     userId: user.id,
     appCode: app.slug,
-    title: `${effectiveApp.name}｜正在生成`,
+    title: pendingTitle,
     content: "",
     contentJson: { batches: [] },
     sourceChannel: app.slug,
@@ -59,7 +67,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json(
       {
         error: databaseReachable
-          ? "预创建作品失败，请稍后再试。"
+          ? "作品记录没有成功保存，可能是数据库暂时繁忙。你的填写内容仍在当前页面，请稍后重试。"
           : "预创建作品失败：当前数据库未连接，请先启动本地 Postgres/Redis 服务。",
       },
       { status: 500 },

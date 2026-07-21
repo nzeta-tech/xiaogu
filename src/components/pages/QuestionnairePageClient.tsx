@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import {
@@ -126,16 +126,6 @@ export function QuestionnairePageClient() {
   }, [template]);
 
   useEffect(() => {
-    if (!isDirty) return;
-
-    const timer = window.setInterval(() => {
-      void saveDraft(false, true);
-    }, 30000);
-
-    return () => window.clearInterval(timer);
-  }, [answers, isDirty]);
-
-  useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent) {
       if (!isDirty) return;
       event.preventDefault();
@@ -160,7 +150,7 @@ export function QuestionnairePageClient() {
     setIsDirty(true);
   }
 
-  async function saveDraft(showNotice = true, isAutoSave = false) {
+  const saveDraft = useCallback(async (showNotice = true, isAutoSave = false) => {
     setSaving(true);
     localStorage.setItem(
       storageKey,
@@ -181,7 +171,17 @@ export function QuestionnairePageClient() {
     }
 
     if (showNotice) setNotice("草稿保存成功");
-  }
+  }, [answers]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+
+    const timer = window.setInterval(() => {
+      void saveDraft(false, true);
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [isDirty, saveDraft]);
 
   async function submitQuestionnaire() {
     if (!canSubmit) {
@@ -230,7 +230,7 @@ export function QuestionnairePageClient() {
     setIsDirty(false);
     setNotice("提交成功，正在生成人设画像...");
     window.setTimeout(() => {
-      location.href = appPath("/thinking");
+      location.href = appPath("/avatar");
     }, 900);
   }
 
@@ -241,7 +241,7 @@ export function QuestionnairePageClient() {
           <aside className="sidebar-wrapper">
             <div className="left-sidebar">
               <div className="sidebar-header">
-                <a className="back-btn" href={appPath("/thinking")}>
+                <a className="back-btn" href={appPath("/avatar")}>
                   <span aria-hidden="true">‹</span>
                   返回
                 </a>
@@ -352,7 +352,16 @@ export function QuestionnairePageClient() {
                     下一章节
                     <span aria-hidden="true">›</span>
                   </button>
-                ) : null}
+                ) : (
+                  <button
+                    className="questionnaire-bottom-submit"
+                    disabled={!canSubmit || submitting}
+                    onClick={() => void submitQuestionnaire()}
+                    type="button"
+                  >
+                    {submitting ? "提交中" : canSubmit ? "完成并进入数字分身" : `还差 ${requiredQuestionCount - completedRequired} 个必填问题`}
+                  </button>
+                )}
               </div>
             </div>
 

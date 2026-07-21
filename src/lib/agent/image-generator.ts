@@ -2,7 +2,7 @@ import { isDemoModeEnabled } from "@/lib/config/runtime";
 
 const IMAGE_REQUEST_TIMEOUT_MS = clampDuration(process.env.IMAGE_REQUEST_TIMEOUT_MS, 240000, 60000, 300000);
 const IMAGE_GENERATION_BUDGET_MS = clampDuration(process.env.IMAGE_GENERATION_BUDGET_MS, 600000, IMAGE_REQUEST_TIMEOUT_MS, 900000);
-const IMAGE_REQUEST_MAX_ATTEMPTS = 1;
+const IMAGE_REQUEST_MAX_ATTEMPTS = 2;
 const IMAGE_SAFE_SIZE = "1024x1024";
 const IMAGE_RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -233,7 +233,7 @@ async function requestImageBatch(input: {
         });
 
         if (attempt < maxAttempts) {
-          await sleep(2000 * attempt);
+          await sleep(1500 * attempt);
           continue;
         }
         return [];
@@ -261,7 +261,7 @@ async function requestImageBatch(input: {
       });
 
       if (attempt < maxAttempts) {
-        await sleep(1000 * attempt);
+        await sleep(1500 * attempt);
         continue;
       }
       return [];
