@@ -6,6 +6,7 @@ import { apiPath, appPath } from "@/lib/client/url";
 
 const menuNavItems = [
   { id: "workbench", href: "/workspace", label: "工作台", shortLabel: "工作台", icon: "home" },
+  { id: "today", href: "/today", label: "今日", shortLabel: "参考素材", icon: "home" },
   { id: "creation", href: "/workspace", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
   { id: "crm", href: "/thinking", label: "客户经营", shortLabel: "客户经营", icon: "users" },
   { id: "growth", href: "/benefits", label: "成长", shortLabel: "成长", icon: "sprout" },
@@ -13,6 +14,7 @@ const menuNavItems = [
 
 const platformNavItems = [
   { id: "workbench", href: "/workspace", label: "工作台", shortLabel: "工作台", icon: "home" },
+  { id: "today", href: "/today", label: "今日", shortLabel: "参考素材", icon: "home" },
   { id: "creation", href: "/workspace", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
   { id: "crm", href: "/thinking", label: "客户经营", shortLabel: "客户经营", icon: "users" },
   { id: "growth", href: "/benefits", label: "成长", shortLabel: "成长", icon: "sprout" },
@@ -65,6 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const isCreationSurface =
     pathname === "/workspace" ||
+    pathname === "/today" ||
     pathname === "/drafts" ||
     pathname === "/thinking" ||
     pathname === "/questionnaire" ||
@@ -244,6 +247,8 @@ function isNavItemActive(pathname: string, itemId?: string) {
   if (itemId === "creation") {
     return pathname === "/workspace" || pathname === "/drafts" || pathname.startsWith("/apps/") || pathname.startsWith("/examples/") || pathname.startsWith("/works/");
   }
+
+  if (itemId === "today") return pathname === "/today";
 
   if (itemId === "crm") {
     return pathname === "/thinking" || pathname === "/questionnaire";
