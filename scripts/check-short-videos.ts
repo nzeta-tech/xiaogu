@@ -48,6 +48,16 @@ async function main() {
   const noSource = await getShortVideoFeed();
   assert.deepEqual(noSource.items, [], "无授权源必须返回空列表");
   assert.equal(noSource.degradationReason, "provider_not_configured");
+
+  const originalFetch = globalThis.fetch;
+  const validProviderItem = { ...base, source_url: "https://example.invalid/video/valid" };
+  const structurallyFilteredItem = { ...base, id: "unauthorized", authorized: false, source_url: "http://example.invalid/video/filtered" };
+  process.env.AUTHORIZED_SHORT_VIDEO_API_BASE = "https://provider.example.invalid";
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: [validProviderItem, structurallyFilteredItem] }), { status: 200, headers: { "content-type": "application/json" } });
+  const providerResult = await getShortVideoFeed({ refresh: true });
+  assert.equal(providerResult.items.length, 1, "eligible provider item remains available");
+  assert.equal(providerResult.filteredCount, 1, "structurally rejected provider item is retained in filteredCount");
+  globalThis.fetch = originalFetch;
   if (configuredProvider) process.env.AUTHORIZED_SHORT_VIDEO_API_BASE = configuredProvider;
   console.log("short-video policy negative checks passed");
 }

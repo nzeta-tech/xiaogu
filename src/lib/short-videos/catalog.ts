@@ -41,9 +41,10 @@ export type ProviderItem = {
   sensitive_information?: boolean;
 };
 
-type CachedFeed = { items: ShortVideo[]; fetchedAt: string };
+type CachedFeed = { items: ShortVideo[]; fetchedAt: string; filteredCount: number };
 let cachedFeed: CachedFeed | null = null;
 let lastProviderAttemptAt: number | null = null;
+let latestProviderFilteredCount = 0;
 
 const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 const PROVIDER_INTERVAL_MS = 15 * 60 * 1000;
@@ -76,10 +77,12 @@ export async function getShortVideoFeed(input: {
       if (!response.ok) throw new Error(`provider returned ${response.status}`);
       const payload = (await response.json()) as { data?: ProviderItem[] };
       // Authorization is a provider contract, not something Xiaogu infers from a public URL.
-      const items = (payload.data ?? [])
+      const providerItems = payload.data ?? [];
+      const items = providerItems
         .map((item, index) => (item.authorized === true ? normalizeProviderItem(item, index) : null))
-    .filter((item): item is ShortVideo => item !== null && isStructurallyEligible(item));
-      if (items.length > 0) cachedFeed = { items, fetchedAt: now.toISOString() };
+        .filter((item): item is ShortVideo => item !== null && isStructurallyEligible(item));
+      latestProviderFilteredCount = providerItems.length - items.length;
+      if (items.length > 0) cachedFeed = { items, fetchedAt: now.toISOString(), filteredCount: latestProviderFilteredCount };
     } catch {
       degraded = true;
       degradationReason = "provider_unavailable";
@@ -90,13 +93,13 @@ export async function getShortVideoFeed(input: {
   }
 
   if (!cachedFeed) {
-    return { items: [], filteredCount: 0, fetchedAt: null, source: "none", degraded: true, degradationReason: degradationReason ?? "no_eligible_items" };
+    return { items: [], filteredCount: latestProviderFilteredCount, fetchedAt: null, source: "none", degraded: true, degradationReason: degradationReason ?? "no_eligible_items" };
   }
 
   if (degraded || !baseUrl) source = "cache";
   const stale = now.getTime() - new Date(cachedFeed.fetchedAt).getTime() > MAX_CACHE_AGE_MS;
   const sortedItems = filterAndSortShortVideos(cachedFeed.items, input);
-  const filteredCount = sortedItems.filter((item) => classifyShortVideo(item) === "filtered").length;
+  const filteredCount = cachedFeed.filteredCount + sortedItems.filter((item) => classifyShortVideo(item) === "filtered").length;
   const items = sortedItems
     .filter((item) => classifyShortVideo(item) !== "filtered")
     .map((item) => stale ? {
