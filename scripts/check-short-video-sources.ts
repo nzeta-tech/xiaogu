@@ -33,6 +33,14 @@ const withVerifiedFixture: ProviderItem = {
   reviewer_id: "fixture-reviewer",
 };
 
+const wechatFixture: ProviderItem = {
+  ...withVerifiedFixture,
+  id: "wechat-channels-fixture",
+  platform: "wechat_channels",
+  platform_adapter: "wechat_channels_official",
+  source_url: "https://channels.weixin.qq.com/example/video/1",
+};
+
 const metadataOnly = normalizeProviderItem(authorizedMetadata);
 assert.equal(metadataOnly.metrics.statisticsAt, "", "oEmbed metadata must not invent statistics time");
 assert.equal(classifyShortVideo(metadataOnly), "filtered", "metadata without statistics is not a ranking item");
@@ -40,6 +48,15 @@ assert.equal(classifyShortVideo(metadataOnly), "filtered", "metadata without sta
 const displayableEmbed = normalizeProviderItem(withVerifiedFixture);
 assert.equal(displayableEmbed.compliance.status, "displayable");
 assert.equal(displayableEmbed.compliance.rightsScope, "embed_only");
+
+const displayableWechat = normalizeProviderItem(wechatFixture);
+assert.equal(displayableWechat.platformAdapter, "wechat_channels_official");
+assert.equal(displayableWechat.compliance.status, "displayable", "authorized WeChat Channels fixture passes the same gates");
+assert.equal(
+  classifyShortVideo(normalizeProviderItem({ ...wechatFixture, platform_adapter: "douyin_official" })),
+  "filtered",
+  "cross-platform adapter mismatch must be filtered",
+);
 
 assert.equal(
   classifyShortVideo(normalizeProviderItem({ ...withVerifiedFixture, metrics: undefined })),

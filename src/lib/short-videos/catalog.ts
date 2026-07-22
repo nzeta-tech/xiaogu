@@ -7,6 +7,7 @@ import type {
   ShortVideoEvidence,
   ShortVideoFeed,
   ShortVideoMetric,
+  ShortVideoPlatformAdapter,
   ShortVideoSort,
 } from "./types";
 
@@ -14,6 +15,7 @@ export type ProviderItem = {
   id?: string;
   title?: string;
   platform?: string;
+  platform_adapter?: ShortVideoPlatformAdapter;
   source_url?: string;
   source_title?: string;
   published_at?: string;
@@ -119,6 +121,7 @@ export function normalizeProviderItem(item: ProviderItem, index = 0): ShortVideo
     id: item.id?.trim() || `short-video-${index}-${encodeURIComponent(item.title?.trim() || "untitled").slice(0, 28)}`,
     title: item.title?.trim() || "未命名视频",
     platform: item.platform?.trim() || "unknown",
+    platformAdapter: item.platform_adapter ?? inferPlatformAdapter(item.platform),
     sourceUrl: item.source_url?.trim() || "",
     sourceTitle: item.source_title?.trim() || undefined,
     publishedAt: parseDate(item.published_at),
@@ -165,10 +168,26 @@ export function classifyShortVideo(item: ShortVideo, raw?: Pick<ProviderItem, "a
 export function isStructurallyEligible(item: ShortVideo) {
   const rightsActive = !item.rightsExpiresAt || new Date(item.rightsExpiresAt).getTime() > Date.now();
   return Boolean(
-    item.title && item.title !== "未命名视频" && /^https:\/\//i.test(item.sourceUrl) && item.platform !== "unknown" &&
+    item.title && item.title !== "未命名视频" && /^https:\/\//i.test(item.sourceUrl) && item.platform !== "unknown" && platformAdapterMatches(item) &&
     item.metrics.statisticsAt && !Number.isNaN(Date.parse(item.metrics.statisticsAt)) && item.compliance.rightsBasis && item.compliance.rightsScope &&
       item.attribution && item.platformPolicyCheckedAt && rightsActive,
   );
+}
+
+function inferPlatformAdapter(platform?: string): ShortVideoPlatformAdapter {
+  const value = platform?.trim().toLowerCase();
+  if (value === "douyin" || value === "抖音") return "douyin_official";
+  if (value === "wechat_channels" || value === "微信视频号") return "wechat_channels_official";
+  if (value === "tiktok") return "tiktok_official";
+  return "approved_other";
+}
+
+function platformAdapterMatches(item: ShortVideo) {
+  const platform = item.platform.toLowerCase();
+  if (platform === "douyin" || platform === "抖音") return item.platformAdapter === "douyin_official";
+  if (platform === "wechat_channels" || platform === "微信视频号") return item.platformAdapter === "wechat_channels_official";
+  if (platform === "tiktok") return item.platformAdapter === "tiktok_official";
+  return item.platformAdapter === "approved_other";
 }
 
 export function filterAndSortShortVideos(items: ShortVideo[], input: { theme?: string; platform?: string; sort?: ShortVideoSort }) {

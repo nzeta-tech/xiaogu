@@ -2,6 +2,7 @@ export type FactStatus = "unverified" | "human_verified" | "rejected";
 export type FactType = "policy_term" | "regulation" | "claim_case" | "premium" | "health" | "other";
 export type RightsBasis = "official_api_display" | "platform_embed" | "owner_license" | "public_domain" | "other_approved";
 export type RightsScope = "metadata_only" | "link_only" | "embed_only" | "download_republish";
+export type ShortVideoPlatformAdapter = "douyin_official" | "wechat_channels_official" | "tiktok_official" | "approved_other";
 
 export type ShortVideoEvidence = {
   officialUrl: string;
@@ -32,6 +33,7 @@ export type ShortVideo = {
   id: string;
   title: string;
   platform: string;
+  platformAdapter: ShortVideoPlatformAdapter;
   sourceUrl: string;
   sourceTitle?: string;
   publishedAt?: string;
