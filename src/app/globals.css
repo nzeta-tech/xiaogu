@@ -13612,6 +13612,178 @@ a {
   }
 }
 
+.todayPage {
+  display: grid;
+  gap: 18px;
+}
+
+.todayIntro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px 30px;
+  border: 1px solid #dce6f2;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #ffffff, #f0f7f6);
+  box-shadow: var(--shadow);
+}
+
+.todayIntro h1 {
+  margin: 10px 0 0;
+  color: #152438;
+  font-size: clamp(28px, 4vw, 44px);
+}
+
+.todayIntro p {
+  max-width: 680px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.todayToolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.todayToolbar label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.todayToolbar select {
+  min-width: 150px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+.todayFeedMeta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.todayDegraded,
+.todayError,
+.todayEmpty {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #fff8eb;
+  color: #8a4b08;
+  font-size: 13px;
+}
+
+.todayError {
+  background: #fff1f0;
+  color: var(--danger);
+}
+
+.todayEmpty {
+  background: #f5f8fc;
+  color: var(--muted);
+}
+
+.shortVideoGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.shortVideoCard {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.shortVideoCardTop,
+.shortVideoMeta,
+.shortVideoTimes,
+.shortVideoMetrics,
+.shortVideoTags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortVideoStatus,
+.shortVideoReference,
+.shortVideoTags span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.shortVideoStatus.displayable { background: #e7f7ef; color: #16704e; }
+.shortVideoStatus.pending_review { background: #fff4d6; color: #8a4b08; }
+.shortVideoStatus.filtered { background: #ffe9e7; color: var(--danger); }
+.shortVideoReference { background: #edf2ff; color: #3659a8; }
+.shortVideoTags span { background: #f0f3f7; color: #526277; }
+
+.shortVideoCard h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.shortVideoMeta,
+.shortVideoTimes,
+.shortVideoMetrics {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortVideoMeta span + span,
+.shortVideoTimes span + span,
+.shortVideoMetrics span + span {
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.shortVideoPolicy {
+  min-height: 20px;
+  margin: 0;
+  color: #67758b;
+  font-size: 12px;
+}
+
+.shortVideoSource {
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+@media (max-width: 900px) {
+  .shortVideoGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .todayIntro { align-items: flex-start; flex-direction: column; padding: 22px 18px; }
+  .todayToolbar { align-items: stretch; flex-direction: column; }
+  .todayFeedMeta { margin-left: 0; }
+  .shortVideoGrid { grid-template-columns: 1fr; }
+}
+
 /* Final override for the cloned instance page: keep it full-width and
    avoid older target-subpage/application-create-page constraints. */
 .creationShell .main:has(.imageInstancePage) {
