@@ -628,26 +628,6 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return <div className="pageStack"><section className="panel emptyState">没有找到这条作品。</section></div>;
   }
 
-  if (isLinkRemixWork) {
-    return (
-      <LinkRemixWorkDetail
-        activeBatchId={resolvedBatchId}
-        activeItemIds={activeItemIds}
-        batches={batches}
-        copied={copied}
-        fontScale={fontScale}
-        onCopy={handleCopy}
-        onExport={handleExport}
-        onSelectBatch={switchBatch}
-        onSelectItem={switchBatchItem}
-        onSetFontScale={setFontScale}
-        returnHref={workReturnHref}
-        returnLabel={workReturnLabel}
-        work={work}
-      />
-    );
-  }
-
   if (isImageWork) {
     const imageMeta = buildImageWorkMeta(work);
     const imageInputEntries = buildImageInputEntries(work);
@@ -1098,10 +1078,26 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     );
   }
 
-  if (isWriteCopyWork) {
-    const sourceText = typeof work.app_run?.input_payload?.source === "string" ? work.app_run.input_payload.source : "";
+  if (isWriteCopyWork || isLinkRemixWork) {
+    const isRemixResult = isLinkRemixWork;
+    const sourceText = isRemixResult
+      ? [
+          work.app_run?.input_payload?.source_transcript,
+          work.app_run?.input_payload?.source_text,
+          work.app_run?.input_payload?.source_url,
+        ].find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? ""
+      : typeof work.app_run?.input_payload?.source === "string" ? work.app_run.input_payload.source : "";
+    const sourcePlatform = typeof work.app_run?.input_payload?.source_platform === "string"
+      ? work.app_run.input_payload.source_platform
+      : "-";
+    const sourceUrl = typeof work.app_run?.input_payload?.source_url === "string"
+      ? work.app_run.input_payload.source_url
+      : "";
+    const remixAngle = typeof work.app_run?.input_payload?.remix_angle === "string"
+      ? work.app_run.input_payload.remix_angle
+      : "";
     return (
-      <div className={`workDetailPage instanceOriginPage writeCopyOriginPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
+      <div className={`workDetailPage instanceOriginPage writeCopyOriginPage writeCopyWorkDetailPage ${isRemixResult ? "linkRemixWorkDetailPage" : ""} ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content instanceOriginShell">
           <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="instanceOriginLayout">
@@ -1176,7 +1172,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 <div className="instanceSectionHeader instanceOriginHeader">
                   <div>
                     <h1>{formatAppLabel(work.platform)}</h1>
-                    <p>{streamState.connected ? "内容正在持续生成中，结果会按真实进度逐步回填。" : "已按实例页结构展示本次生成结果，可继续复制、导出和保存。"}</p>
+                    <p>{streamState.connected ? "内容正在持续生成中，结果会按真实进度逐步回填。" : isRemixResult ? "按多平台文案工作区展示二创结果，可继续复制、导出和查看来源信息。" : "已按实例页结构展示本次生成结果，可继续复制、导出和保存。"}</p>
                   </div>
                   <div className="instanceStudioHeroMeta instanceOriginMeta">
                     <span>{formatAppLabel(work.platform)}</span>
@@ -1210,20 +1206,32 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
                 <div className="instanceSourceMetaList instanceOriginSourceTable">
                   <div className="instanceSourceMetaItem">
-                    <span>表达倾向</span>
-                    <strong>{formatToneLabel(work.app_run?.tone) || "-"}</strong>
+                    <span>{isRemixResult ? "来源平台" : "表达倾向"}</span>
+                    <strong>{isRemixResult ? sourcePlatform : formatToneLabel(work.app_run?.tone) || "-"}</strong>
                   </div>
                   <div className="instanceSourceMetaItem">
-                    <span>创作素材</span>
+                    <span>{isRemixResult ? "提取内容" : "创作素材"}</span>
                     <div className="instanceInputActionRow">
                       <strong>文本输入</strong>
-                      <button className="instanceActionButton" onClick={() => setPreviewField({ label: "创作素材", value: sourceText, mode: "plain" })} type="button">查看</button>
+                      <button className="instanceActionButton" onClick={() => setPreviewField({ label: isRemixResult ? "提取内容" : "创作素材", value: sourceText, mode: "plain" })} type="button">查看</button>
                     </div>
                   </div>
                   <div className="instanceSourceMetaItem">
                     <span>生成内容</span>
                     <strong>{formatChannelLabels(work.app_run?.target_channels ?? []) || "-"}</strong>
                   </div>
+                  {isRemixResult ? (
+                    <div className="instanceSourceMetaItem">
+                      <span>参考链接</span>
+                      {sourceUrl ? <a href={sourceUrl} rel="noreferrer" target="_blank">打开原作品</a> : <strong>-</strong>}
+                    </div>
+                  ) : null}
+                  {isRemixResult && remixAngle ? (
+                    <div className="instanceSourceMetaItem">
+                      <span>补充方向</span>
+                      <strong>{remixAngle}</strong>
+                    </div>
+                  ) : null}
                 </div>
               </section>
 
@@ -2440,6 +2448,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   );
 }
 
+// Kept temporarily for compatibility with already-loaded client bundles during rollout.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function LinkRemixWorkDetail({
   activeBatchId,
   activeItemIds,
@@ -2614,7 +2624,9 @@ function formatRemixVersionLabel(title: string, index: number) {
 function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
   const normalized = content.replace(/\r\n/g, "\n").trim();
   if (!normalized) return [];
-  const headingPattern = /^#{1,3}\s+(.+?)\s*$/gm;
+  // Channel groups are always H2 headings. H3 headings are versions within a
+  // channel, so they must not terminate the channel's content.
+  const headingPattern = /^##\s+(.+?)\s*$/gm;
   const headings = Array.from(normalized.matchAll(headingPattern));
   const groups = new Map<string, CreationOutputBatch>();
   const channelMeta = (heading: string): { key: string; label: string; viewMode: CreationOutputViewMode } | null => {
@@ -2638,15 +2650,29 @@ function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
       label: meta.label,
       items: [],
     };
-    const itemIndex = batch.items.length + 1;
-    const titleMatch = body.match(/^标题[:：]\s*\n?([^\n]+)/m);
-    batch.items.push({
-      id: `${batch.id}-${itemIndex}`,
-      title: titleMatch?.[1]?.trim() || heading,
-      body,
-      viewMode: meta.viewMode,
-      summary: body.replace(/\s+/g, " ").slice(0, 120),
-    });
+    const versionPattern = /^###\s+(.+?)\s*$/gm;
+    const versions = Array.from(body.matchAll(versionPattern));
+    const items = versions.length > 0
+      ? versions.map((version, versionIndex) => ({
+          heading: version[1].trim(),
+          body: body.slice(
+            (version.index ?? 0) + version[0].length,
+            versionIndex + 1 < versions.length ? (versions[versionIndex + 1].index ?? body.length) : body.length,
+          ).trim(),
+        })).filter((version) => version.body)
+      : [{ heading, body }];
+
+    for (const item of items) {
+      const itemIndex = batch.items.length + 1;
+      const titleMatch = item.body.match(/^标题[:：]\s*\n?([^\n]+)/m);
+      batch.items.push({
+        id: `${batch.id}-${itemIndex}`,
+        title: titleMatch?.[1]?.trim() || item.heading,
+        body: item.body,
+        viewMode: meta.viewMode,
+        summary: item.body.replace(/\s+/g, " ").slice(0, 120),
+      });
+    }
     groups.set(meta.key, batch);
   }
 

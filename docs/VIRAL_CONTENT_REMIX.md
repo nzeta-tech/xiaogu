@@ -45,7 +45,7 @@ CONTAINER_BROWSER_START_URL=https://yuanbao.tencent.com/
 
 ## 转写与生成
 
-Docker Compose 默认启动内置的 `faster-whisper` CPU 服务，模型缓存保存在 `whisper_models` volume；首次转写会下载模型，默认 `small` 模型更适合中文。可通过 `WHISPER_MODEL=base` 降低首次下载体积和 CPU 占用。
+Docker Compose 默认启动内置的 `faster-whisper` CPU 服务，模型缓存保存在 `whisper_models` volume；首次转写会下载模型，默认 `small` 模型更适合中文。可通过 `WHISPER_MODEL=base` 降低首次下载体积和 CPU 占用。开发时若通过 `pnpm dev` 在宿主机启动应用，配置 `VIRAL_TRANSCRIBE_API_BASE=http://127.0.0.1:8000`；Compose 内的应用使用 `VIRAL_TRANSCRIBE_DOCKER_API_BASE=http://transcriber:8000`。转写端口仅绑定至本机回环地址。
 
 如需改用兼容 OpenAI 的远程转写服务，可将 `VIRAL_TRANSCRIBE_API_BASE` 留空，再配置：
 

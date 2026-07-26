@@ -9083,6 +9083,13 @@ body .linkRemixCreateForm #creation-field-remix_angle .creationTextarea { min-he
 body .linkRemixCreateForm .linkRemixInspectControls { margin-top: 12px; }
 body .linkRemixCreateForm .linkRemixInspectControls span { flex: 1 1 260px; font-size: 11px; }
 body .linkRemixCreateForm .linkRemixSourcePreview { width: min(220px, 100%); }
+body .linkRemixAppPage .creationStickyAction .submitButton:disabled {
+  border-color: #cbd5e1 !important;
+  background: #94a3b8 !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  cursor: not-allowed;
+}
 
 @media (hover: hover) {
   body .xiaohongshuCheckResultPage .xiaohongshuCheckAmendmentStack article:hover {

@@ -129,7 +129,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
     : filteredFields
   ).filter((field) => !isPolicyRenewalCard || values.avatar_visual_mode === "yes" || !["reference_image", "portrait_treatment"].includes(field.id));
+  const incomingLinkRemixSourceUrl = isLinkRemix ? searchParams.get("source_url")?.trim() ?? "" : "";
+  const incomingLinkRemixSourceTitle = isLinkRemix ? searchParams.get("source_title")?.trim() ?? "" : "";
+  const incomingLinkRemixSourcePlatform = isLinkRemix ? searchParams.get("source_platform")?.trim() ?? "" : "";
   const linkRemixSourceUrl = isLinkRemix && typeof values.source_url === "string" ? extractShareUrl(values.source_url.trim()) : "";
+  const remixAutoParsingPending = isLinkRemix
+    && isSupportedRemixSource(linkRemixSourceUrl)
+    && (inspectingSource || lastAutoInspectedUrlRef.current !== linkRemixSourceUrl);
 
   usePageMeta({
     title: `${pageApp.name} · 新建创作`,
@@ -192,14 +198,20 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     try {
       const restored = JSON.parse(saved) as Record<string, FieldValue>;
       const frame = window.requestAnimationFrame(() => {
-        setValues((current) => ({ ...current, ...restored }));
+        setValues((current) => ({
+          ...current,
+          ...restored,
+          ...(incomingLinkRemixSourceUrl ? { source_url: incomingLinkRemixSourceUrl } : {}),
+          ...(incomingLinkRemixSourceTitle ? { source_title: incomingLinkRemixSourceTitle } : {}),
+          ...(incomingLinkRemixSourcePlatform ? { source_platform: incomingLinkRemixSourcePlatform } : {}),
+        }));
         setDraftStatus("restored");
       });
       return () => window.cancelAnimationFrame(frame);
     } catch {
       window.sessionStorage.removeItem(draftKey);
     }
-  }, [draftKey]);
+  }, [draftKey, incomingLinkRemixSourcePlatform, incomingLinkRemixSourceTitle, incomingLinkRemixSourceUrl]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -221,6 +233,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }, [isLinkRemix, linkRemixSourceUrl]);
 
   async function handleSubmit() {
+    if (remixAutoParsingPending) {
+      setError("素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。");
+      return;
+    }
     const missingField = pageApp.fields.find((field) => field.required && isEmpty(values[field.id]));
     if (missingField) {
       setError(`${missingField.label}还没有填写。`);
@@ -287,13 +303,16 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       setSourceInspectMessage("爆款二创目前仅支持抖音和微信视频号作品链接。");
       return;
     }
+    const streamWechatTranscript = /^https:\/\/(?:www\.)?weixin\.qq\.com\//i.test(sourceUrl);
     setInspectingSource(true);
     setSourceInspectMessage("");
     try {
       const response = await fetch(apiPath("/api/creation/link-remix/inspect"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: sourceUrl, deferTranscription: true }),
+        // 视频号在页面上以 SSE 增量回填；抖音则在解析接口内下载并转写，
+        // 否则它会被延后且没有可用的流式转写入口。
+        body: JSON.stringify({ url: sourceUrl, deferTranscription: streamWechatTranscript }),
       });
       let payload = (await response.json().catch(() => ({}))) as { status?: string; taskId?: string; fields?: Record<string, string>; finalUrl?: string; thumbnailUrl?: string; mediaUrl?: string; note?: string; error?: string };
       let delegatedToLocalAgent = false;
@@ -334,7 +353,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           : recommendRemixTargets(fields.source_content_type, fields.source_type),
       }));
       setSourceInspectMessage(Object.keys(fields).length > 0 ? `已自动回填 ${Object.keys(fields).length} 项。${payload.note ?? ""}` : payload.note ?? "页面没有公开可读取的字段。");
-      if (!delegatedToLocalAgent && payload.mediaUrl && /^https:\/\/(?:www\.)?weixin\.qq\.com\//i.test(sourceUrl)) {
+      if (!delegatedToLocalAgent && payload.mediaUrl && streamWechatTranscript) {
         await streamRemixTranscript(sourceUrl);
       }
     } catch (inspectError) {
@@ -1308,14 +1327,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
           <section className="submit-section submitSection creationStickyAction">
             <div className="creationSubmitSummary">
-              <strong>{missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
-              <span>{draftStatus === "saving" ? "正在保存草稿…" : draftStatus === "restored" ? "已恢复上次草稿" : "草稿已自动保存"} · 本次消耗 {app.points} 积分</span>
+              <strong>{remixAutoParsingPending ? "正在自动解析素材" : missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
+              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "saving" ? "正在保存草稿…" : draftStatus === "restored" ? "已恢复上次草稿" : "草稿已自动保存"} · 本次消耗 ${app.points} 积分`}</span>
               <i aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></i>
             </div>
-            <button className="primaryButton submit-button submitButton" disabled={loading} onClick={() => void handleSubmit()} type="button">
+            <button className="primaryButton submit-button submitButton" disabled={loading || remixAutoParsingPending} onClick={() => void handleSubmit()} type="button">
               {loading
                 ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
-                : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                : remixAutoParsingPending ? "素材自动解析中..." : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>

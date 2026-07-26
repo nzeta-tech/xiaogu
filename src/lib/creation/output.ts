@@ -209,6 +209,14 @@ function splitItems(body: string, viewMode: CreationOutputViewMode, fallbackLabe
   const numberedItems = splitNumberedItems(normalized, viewMode, fallbackLabel);
   if (numberedItems.length > 0) return numberedItems;
 
+  // A public-account article naturally contains # and ## headings. Those
+  // headings belong to the same article; only explicit version markers split
+  // a multi-article response into separate items.
+  if (viewMode === "wechat") {
+    const versionedItems = splitVersionedItems(normalized, viewMode, fallbackLabel);
+    if (versionedItems.length > 0) return versionedItems;
+  }
+
   const splitPattern = getItemSplitPattern(viewMode);
   const blocks = normalized
     .split(splitPattern)
@@ -241,6 +249,27 @@ function splitItems(body: string, viewMode: CreationOutputViewMode, fallbackLabe
       };
     })
     .filter((item) => !isTrivialItemBody(item.body));
+}
+
+function splitVersionedItems(body: string, viewMode: CreationOutputViewMode, fallbackLabel: string) {
+  const blocks = body
+    .split(/\n(?=版本[一二三四五六七八九十0-9]+\s*[|｜])/u)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  if (blocks.length < 2 || !blocks.every((block) => /^版本[一二三四五六七八九十0-9]+\s*[|｜]/u.test(block))) {
+    return [];
+  }
+
+  return blocks.map((block, index) => {
+    const normalizedBlock = normalizeItemBody(block);
+    return {
+      title: inferItemTitle(normalizedBlock, fallbackLabel, index + 1),
+      body: normalizedBlock,
+      viewMode,
+      summary: inferSummary(normalizedBlock),
+    };
+  }).filter((item) => !isTrivialItemBody(item.body));
 }
 
 function getItemSplitPattern(viewMode: CreationOutputViewMode) {

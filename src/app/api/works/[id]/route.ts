@@ -154,7 +154,7 @@ function normalizeWorkDetail<T extends {
   content_json?: { batches?: unknown[] } | null;
 }>(work: T): T {
   if (!shouldRebuildContentJson(work.platform)) return work;
-  if (work.platform === "general-content") {
+  if (work.platform === "general-content" || work.platform === "write-copy") {
     return {
       ...work,
       content_json: parseCreationOutput(work.content),
