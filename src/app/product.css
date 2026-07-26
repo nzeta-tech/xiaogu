@@ -4410,6 +4410,17 @@ body .workDetailPage :is(.instanceOriginSidebarCard, .letterResultSidebarCard, .
   border: 0 !important;
 }
 
+/* Keep multi-channel switching distinct from navigation and text-size controls. */
+body .writeCopyOriginPage .instanceOriginSidebarCard {
+  flex-wrap: wrap;
+}
+
+body .writeCopyOriginPage .instanceOriginSidebarCard .writeCopyChannelNav {
+  flex: 0 0 100%;
+  padding-top: 7px !important;
+  border-top: 1px solid #e2e8f0 !important;
+}
+
 :is(.instanceOriginSidebarCard, .letterResultSidebarCard, .topicPickerResultSidebarCard, .xiaohongshuCheckSidebar, .videoPolishResultSidebarCard, .instanceStudioSidebarCard) .instanceSidebarSection > strong {
   margin: 0 4px 0 0 !important;
   color: #94a3b8 !important;

@@ -1147,7 +1147,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   </div>
                 </div>
 
-                <div className="instanceSidebarSection">
+                <div className="instanceSidebarSection writeCopyChannelNav">
                   <strong>生成内容</strong>
                   {batches.map((batch) => (
                     <button
@@ -4072,7 +4072,11 @@ function formatItemTabLabel(title: string, batchLabel: string, count: number, it
     return fallbackLabel;
   }
 
-  const preferIndexOnlyBatches = new Set(["口播稿", "朋友圈"]);
+  if (batchLabel === "口播稿") {
+    return `第${itemIndex + 1}条：${compact.slice(0, 18)}`;
+  }
+
+  const preferIndexOnlyBatches = new Set(["朋友圈"]);
   if (preferIndexOnlyBatches.has(batchLabel)) {
     return fallbackLabel;
   }

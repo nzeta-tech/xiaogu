@@ -217,9 +217,23 @@ export async function executeCreationAppRun(input: {
       }
     } else {
       const styleMode = app.slug === "write-copy" ? "general" : getMultiChannelCopyStyleMode(app.slug);
-      for await (const chunk of streamInsuranceContentAgent([{ role: "user", content: prompt }], input.userId, styleMode)) {
-        result += chunk;
-        await input.onEvent?.({ type: "delta", content: chunk });
+      // A full multi-channel run can contain ten publishable pieces, including
+      // two long-form articles. Generate each channel separately so a model's
+      // per-response output cap cannot leave the result at only the first
+      // channel (normally the video scripts).
+      const prompts = app.slug === "write-copy"
+        ? buildWriteCopyChannelPrompts(values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
+        : [prompt];
+
+      for (const channelPrompt of prompts) {
+        for await (const chunk of streamInsuranceContentAgent([{ role: "user", content: channelPrompt }], input.userId, styleMode)) {
+          result += chunk;
+          await input.onEvent?.({ type: "delta", content: chunk });
+        }
+        if (result.trim() && !result.endsWith("\n")) {
+          result += "\n\n";
+          await input.onEvent?.({ type: "delta", content: "\n\n" });
+        }
       }
 
       if (!result.trim()) {
@@ -653,6 +667,28 @@ function buildWriteCopyPrompt(
   lines.push(source);
 
   return lines.join("\n");
+}
+
+function buildWriteCopyChannelPrompts(
+  values: Record<string, FieldValue>,
+  caseContext: string[],
+  snapshot: ThinkingProfileSnapshot | null,
+  summary: ThinkingProfileSummary | null,
+) {
+  const targets = Array.isArray(values.targets)
+    ? values.targets.filter((target) => getWriteCopyTargetSpec(target))
+    : [];
+
+  if (targets.length <= 1) {
+    return [buildWriteCopyPrompt(values, caseContext, snapshot, summary)];
+  }
+
+  return targets.map((target) => buildWriteCopyPrompt(
+    { ...values, targets: [target] },
+    caseContext,
+    snapshot,
+    summary,
+  ));
 }
 
 function getWriteCopyTargetSpec(target: string) {
