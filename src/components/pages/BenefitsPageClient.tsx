@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 
@@ -20,6 +21,8 @@ type Gift = {
   created_at: string;
 };
 
+type AffiliateNotification = { id: string; title: string; body: string; read_at: string | null; created_at: string };
+
 type AffiliateDetail = {
   enabled: boolean;
   settings: { rebateRatePercent: number; freezeHours: number; durationDays: number; perInviteeCap: number };
@@ -34,26 +37,29 @@ export function BenefitsPageClient() {
   usePageMeta({ title: "邀请有礼 · 邀请与奖励", description: "邀请好友 / 返利与活动奖励" });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [gifts, setGifts] = useState<Gift[]>([]);
-  const [code, setCode] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
   const [affiliate, setAffiliate] = useState<AffiliateDetail | null>(null);
   const [affiliateBusy, setAffiliateBusy] = useState(false);
   const [affiliateNotice, setAffiliateNotice] = useState("");
+  const [inviteQrCode, setInviteQrCode] = useState("");
+  const [notifications, setNotifications] = useState<AffiliateNotification[]>([]);
+  const inviteLink = affiliate ? `${typeof window !== "undefined" ? window.location.origin : ""}${appPath("/register")}?ref=${encodeURIComponent(affiliate.account.referral_code)}` : "";
 
   async function loadAll(signal?: AbortSignal) {
     try {
-      const [announcementsResponse, giftsResponse, affiliateResponse] = await Promise.all([
+      const [announcementsResponse, giftsResponse, affiliateResponse, notificationsResponse] = await Promise.all([
         fetch(apiPath("/api/announcements?placement=benefits"), { signal }),
         fetch(apiPath("/api/gifts"), { signal }),
         fetch(apiPath("/api/affiliate"), { signal }),
+        fetch(apiPath("/api/affiliate/notifications"), { signal }),
       ]);
       const announcementsPayload = (await announcementsResponse.json()) as { announcements?: Announcement[] };
       const giftsPayload = (await giftsResponse.json()) as { gifts?: Gift[] };
       const affiliatePayload = (await affiliateResponse.json()) as { affiliate?: AffiliateDetail };
+      const notificationsPayload = (await notificationsResponse.json()) as { notifications?: AffiliateNotification[] };
       setAnnouncements(announcementsPayload.announcements ?? []);
       setGifts(giftsPayload.gifts ?? []);
       setAffiliate(affiliatePayload.affiliate ?? null);
+      setNotifications(notificationsPayload.notifications ?? []);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
     }
@@ -71,37 +77,39 @@ export function BenefitsPageClient() {
     window.requestAnimationFrame(() => document.getElementById("invite")?.scrollIntoView({ block: "start" }));
   }, [affiliate]);
 
-  async function redeem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setMessage("");
-    const response = await fetch(apiPath("/api/promo/redeem"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code }),
-    });
-    const payload = (await response.json()) as { redemption?: { rewardType?: string; creditAmount?: number; discountPercent?: number; code?: string }; error?: string };
-    if (!response.ok) {
-      setMessage(payload.error ?? "兑换失败");
-      setBusy(false);
+  useEffect(() => {
+    if (notifications.some((item) => !item.read_at)) void fetch(apiPath("/api/affiliate/notifications"), { method: "PATCH" });
+  }, [notifications]);
+
+  useEffect(() => {
+    if (!affiliate?.account.referral_code) {
+      setInviteQrCode("");
       return;
     }
-    const redemption = payload.redemption;
-    setMessage(
-      redemption?.rewardType === "discount"
-        ? `兑换成功：${redemption.code ?? code} 可在下一笔充值中抵扣 ${redemption.discountPercent ?? 0}%。`
-        : `兑换成功：${redemption?.code ?? code} 已到账 ${redemption?.creditAmount ?? 0} 点。`,
-    );
-    setCode("");
-    await loadAll();
-    setBusy(false);
-  }
+    const link = `${window.location.origin}${appPath("/register")}?ref=${encodeURIComponent(affiliate.account.referral_code)}`;
+    void QRCode.toDataURL(link, { width: 180, margin: 1 }).then(setInviteQrCode).catch(() => setInviteQrCode(""));
+  }, [affiliate]);
 
   async function copyInviteLink() {
-    if (!affiliate) return;
-    const link = `${window.location.origin}${appPath("/register")}?ref=${encodeURIComponent(affiliate.account.referral_code)}`;
-    await navigator.clipboard.writeText(link);
-    setAffiliateNotice("邀请链接已复制");
+    if (!inviteLink) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(inviteLink);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = inviteLink;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        if (!document.execCommand("copy")) throw new Error("copy failed");
+        input.remove();
+      }
+      setAffiliateNotice("已复制邀请链接");
+    } catch {
+      setAffiliateNotice("复制失败，请选中链接后手动复制");
+    }
   }
 
   async function transferAffiliate() {
@@ -128,60 +136,49 @@ export function BenefitsPageClient() {
         </div>
       </div>
 
-      <div className="adminGrid">
-        <section className="panel">
-          <div className="panelHeader">
-            <h2>优惠码兑换</h2>
-          </div>
-          <form className="stackForm" onSubmit={redeem}>
-            <input
-              value={code}
-              placeholder="输入优惠码或活动码"
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-            />
-            <button className="primaryButton" type="submit" disabled={busy || !code.trim()}>
-              {busy ? "兑换中" : "立即兑换"}
-            </button>
-            {message ? <div className="subtleText">{message}</div> : null}
-          </form>
-        </section>
+      <section className="panel">
+        <div className="panelHeader">
+          <h2>邀请活动公告</h2>
+        </div>
+        <div className="sideBody">
+          {announcements.map((item) => (
+            <div className="topic" key={item.id}>
+              <strong>{item.title}</strong>
+              <p>{item.content}</p>
+            </div>
+          ))}
+          {announcements.length === 0 ? <div className="emptyState">暂无邀请活动公告。</div> : null}
+        </div>
+      </section>
 
-        <section className="panel">
-          <div className="panelHeader">
-            <h2>最新公告</h2>
-          </div>
-          <div className="sideBody">
-            {announcements.map((item) => (
-              <div className="topic" key={item.id}>
-                <strong>{item.title}</strong>
-                <p>{item.content}</p>
-              </div>
-            ))}
-            {announcements.length === 0 ? <div className="emptyState">暂无活动公告。</div> : null}
-          </div>
-        </section>
-      </div>
+      {notifications.length > 0 ? <section className="panel affiliateNotifications"><div className="panelHeader"><h2>邀请动态</h2></div><div className="tableList">{notifications.slice(0, 10).map((item) => <div className={`tableRow ${item.read_at ? "" : "unread"}`} key={item.id}><div><strong>{item.title}</strong><span>{item.body}</span></div><small>{formatDate(item.created_at)}</small></div>)}</div></section> : null}
 
       {affiliate ? (
         <section className="panel affiliatePanel" id="invite">
           <div className="panelHeader">
             <div>
               <h2>邀请有礼</h2>
-              <p>{affiliate.enabled ? `邀请新用户注册；对方充值后，你按 ${affiliate.settings.rebateRatePercent}% 获得积分返利。` : "邀请活动暂未开放，开放后即可使用你的专属邀请码和邀请链接。"}</p>
+              <p>{affiliate.enabled ? `好友通过你的链接注册并充值，你将获得 ${affiliate.settings.rebateRatePercent}% 积分返利。` : "邀请活动暂未开放，开放后即可使用你的专属邀请码和邀请链接。"}</p>
             </div>
-            <button className="secondaryButton" disabled={!affiliate.enabled} type="button" onClick={() => void copyInviteLink()}>复制邀请链接</button>
           </div>
-          <div className="affiliateMetrics">
+          {affiliate.enabled ? <div className="affiliateLinkPanel">
+            <div className="affiliateLinkHeading"><div><strong>你的邀请链接</strong><span>分享链接或二维码，好友注册后会自动绑定邀请关系</span></div><button className="primaryButton" type="button" onClick={() => void copyInviteLink()}>复制邀请链接</button></div>
+            <div className="affiliateLinkInput"><input aria-label="邀请链接" readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} /><span>可直接选中复制</span></div>
+          </div> : null}
+          <div className="affiliateMetrics affiliateMetricsEnhanced">
             <div><span>已邀请</span><strong>{affiliate.inviteeCount} 人</strong></div>
             <div><span>可转入</span><strong>{affiliate.account.available_credits} 点</strong></div>
             <div><span>冻结中</span><strong>{affiliate.account.frozen_credits} 点</strong></div>
             <div><span>累计返利</span><strong>{affiliate.account.lifetime_credits} 点</strong></div>
           </div>
-          <div className="affiliateInviteBox">
-            <div><span>你的返利邀请码</span><code>{affiliate.account.referral_code}</code></div>
-            <button className="primaryButton" disabled={!affiliate.enabled || affiliateBusy || affiliate.account.available_credits <= 0} type="button" onClick={() => void transferAffiliate()}>
-              {affiliateBusy ? "转入中" : "转入可用积分"}
-            </button>
+          <div className="affiliateRewardTools">
+            <div className="affiliateInviteBox">
+              <div><span>返利邀请码</span><code>{affiliate.account.referral_code}</code></div>
+              <button className="secondaryButton" disabled={!affiliate.enabled || affiliateBusy || affiliate.account.available_credits <= 0} type="button" onClick={() => void transferAffiliate()}>
+                {affiliateBusy ? "转入中" : "转入可用积分"}
+              </button>
+            </div>
+            {affiliate.enabled && inviteQrCode ? <div className="affiliateQrBox"><img src={inviteQrCode} alt="邀请注册链接二维码" /><span>扫码注册</span></div> : null}
           </div>
           {affiliate.inviter ? <p className="subtleText">邀请人：{affiliate.inviter.name}（{affiliate.inviter.email}）</p> : null}
           {affiliate.settings.freezeHours > 0 ? <p className="subtleText">新返利冻结 {affiliate.settings.freezeHours} 小时后可转入。</p> : null}

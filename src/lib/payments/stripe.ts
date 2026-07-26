@@ -19,14 +19,20 @@ export function getStripe() {
   });
 }
 
+export function getStripeWithSecret(secretKey: string) {
+  if (!secretKey) throw new Error("Stripe Secret Key 未配置");
+  return new Stripe(secretKey, { appInfo: { name: "xiaogu-insurance-agent", version: "0.1.0" } });
+}
+
 export async function createStripeCheckoutSession(input: {
   orderId: string;
   userId: string;
   userEmail: string;
   plan: BillingPlan;
   productName?: string;
+  secretKey?: string;
 }) {
-  const stripe = getStripe();
+  const stripe = input.secretKey ? getStripeWithSecret(input.secretKey) : getStripe();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   return stripe.checkout.sessions.create({
@@ -69,11 +75,12 @@ export async function refundStripeCheckoutSession(sessionId: string) {
   return stripe.refunds.create({ payment_intent: paymentIntent });
 }
 
-export function constructStripeWebhookEvent(payload: string, signature: string) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+export function constructStripeWebhookEvent(payload: string, signature: string, config?: { secretKey?: string; webhookSecret?: string }) {
+  const secret = config?.webhookSecret ?? process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
     throw new Error("STRIPE_WEBHOOK_SECRET is not configured");
   }
 
-  return getStripe().webhooks.constructEvent(payload, signature, secret);
+  const stripe = config?.secretKey ? getStripeWithSecret(config.secretKey) : getStripe();
+  return stripe.webhooks.constructEvent(payload, signature, secret);
 }

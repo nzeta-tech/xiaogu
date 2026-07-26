@@ -50,6 +50,14 @@ export function AuthForm({
       .catch(() => setConfig(null));
   }, []);
 
+  useEffect(() => {
+    if (mode !== "register" || !initialReferralCode) return;
+    const key = `affiliate-visit:${initialReferralCode.trim().toUpperCase()}`;
+    if (window.sessionStorage.getItem(key)) return;
+    window.sessionStorage.setItem(key, "1");
+    void fetch(apiPath("/api/affiliate/visit"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ referralCode: initialReferralCode }) }).catch(() => undefined);
+  }, [initialReferralCode, mode]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -114,7 +122,7 @@ export function AuthForm({
         </div>
         <div className="authProductPreview" aria-label="小谷工作台预览">
           <div className="authPreviewTopbar">
-            <div><span>今日工作台</span><strong>内容经营状态</strong></div>
+            <div><span>今日灵感</span><strong>内容经营状态</strong></div>
             <span className="authPreviewOnline">已同步</span>
           </div>
           <div className="authPreviewBody">

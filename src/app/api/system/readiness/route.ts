@@ -7,9 +7,11 @@ import {
   isDemoModeEnabled,
   isProductionRuntime,
 } from "@/lib/config/runtime";
+import { checkLinkRemixDependencies } from "@/lib/creation/dependency-health";
 import { query } from "@/lib/db/client";
 
 export async function GET() {
+  const remixDependencies = await checkLinkRemixDependencies();
   const checks = [
     {
       key: "database",
@@ -65,6 +67,13 @@ export async function GET() {
       ok: !isDemoModeEnabled(),
       required: true,
     },
+    ...remixDependencies.filter((check) => check.key === "transcriber" || check.key === "yt_dlp").map((check) => ({
+      key: check.key,
+      label: check.label,
+      ok: check.ok,
+      required: true,
+      error: check.error,
+    })),
   ];
 
   const ready = checks.every((check) => !check.required || check.ok);

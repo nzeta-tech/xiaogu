@@ -4,6 +4,7 @@ const MAX_SUBJECT_LENGTH = 28;
 
 const titleFieldPriorities: Record<string, string[]> = {
   "write-copy": ["source"],
+  "link-remix": ["source_title", "remix_angle", "source_platform"],
   "image-card": ["source", "signature", "style"],
   "policy-renewal-card": ["customer_salutation", "renewal_date"],
   "lead-copy": ["source"],

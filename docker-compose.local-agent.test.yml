@@ -1,0 +1,11 @@
+name: xiaogu-agent-test
+
+services:
+  local-agent:
+    environment:
+      LOCAL_AGENT_ID: ${LOCAL_AGENT_TEST_ID:-macbook-test}
+      LOCAL_AGENT_VERSION: ${LOCAL_AGENT_VERSION:-test}
+    ports:
+      - "127.0.0.1:${LOCAL_AGENT_TEST_VNC_PORT:-16080}:6080"
+      - "127.0.0.1:${LOCAL_AGENT_TEST_WERSS_PORT:-18001}:8001"
+      - "127.0.0.1:${LOCAL_AGENT_TEST_WECHATSOGOU_PORT:-18010}:8010"

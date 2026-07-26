@@ -7,7 +7,7 @@ const schema = z.object({
   title: z.string().trim().min(1).max(120),
   content: z.string().trim().min(1).max(5000),
   kind: z.enum(["notice", "campaign", "update"]).default("notice"),
-  placement: z.enum(["global", "dashboard", "billing"]).default("global"),
+  placement: z.enum(["global", "dashboard", "billing", "benefits"]).default("global"),
   status: z.enum(["draft", "published"]).default("draft"),
   linkUrl: z.string().trim().url().optional().or(z.literal("")),
   isPinned: z.boolean().optional(),

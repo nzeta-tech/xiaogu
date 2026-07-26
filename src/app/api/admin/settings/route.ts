@@ -33,14 +33,15 @@ const schema = z.object({
     totpEnabled: z.boolean(), totpIssuer: z.string().trim().min(1).max(80),
   }).optional(),
   defaults: z.object({ signupCredits: z.number().int().min(0).max(100000), dailyCreationLimit: z.number().int().min(0).max(10000), monthlyCreationLimit: z.number().int().min(0).max(100000), maxConcurrentCreations: z.number().int().min(1).max(20), creationRpmLimit: z.number().int().min(1).max(1000) }).optional(),
-  features: z.object({ complianceEnabled: z.boolean(), imageGenerationEnabled: z.boolean(), hotTopicsEnabled: z.boolean(), feedbackEnabled: z.boolean() }).optional(),
+  features: z.object({ complianceEnabled: z.boolean(), imageGenerationEnabled: z.boolean(), hotTopicsEnabled: z.boolean(), feedbackEnabled: z.boolean(), localAgentEnabled: z.boolean() }).optional(),
   payment: z.object({
-    enableStripe: z.boolean(), enableManualTransfer: z.boolean(), displaySubscriptions: z.boolean(), purchaseNotice: z.string().trim().max(500),
+    enableStripe: z.boolean(), enableAirwallex: z.boolean(), enableAlipay: z.boolean(), enableWechat: z.boolean(), enableManualTransfer: z.boolean(), displaySubscriptions: z.boolean(), purchaseNotice: z.string().trim().max(500),
     orderTimeoutMinutes: z.number().int().min(5).max(1440), maxPendingOrders: z.number().int().min(1).max(100),
     minPurchaseCredits: z.number().int().min(1).max(1000000), maxPurchaseCredits: z.number().int().min(1).max(1000000),
     minOrderAmountCents: z.number().int().min(0).max(100000000), maxOrderAmountCents: z.number().int().min(0).max(100000000), dailyPaidAmountLimitCents: z.number().int().min(0).max(1000000000),
     feeRatePercent: z.number().min(0).max(100), productName: z.string().trim().min(1).max(120), helpImageUrl: z.string().trim().max(1000),
     lowBalanceNotifyEnabled: z.boolean(), lowBalanceThreshold: z.number().int().min(0).max(1000000), lowBalanceCooldownHours: z.number().int().min(1).max(720),
+    loadBalanceStrategy: z.enum(["round_robin", "least_amount"]), cancelRateLimitEnabled: z.boolean(), cancelRateLimitWindowMinutes: z.number().int().min(1).max(10080), cancelRateLimitMax: z.number().int().min(1).max(1000),
   }).optional(),
   affiliate: z.object({ enabled: z.boolean(), rebateRatePercent: z.number().min(0).max(100), freezeHours: z.number().int().min(0).max(720), durationDays: z.number().int().min(0).max(3650), perInviteeCap: z.number().int().min(0).max(1000000) }).optional(),
   email: z.object({

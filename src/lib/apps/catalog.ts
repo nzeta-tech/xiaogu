@@ -1,8 +1,5 @@
 export type CreationCategoryId = "content" | "ip" | "growth";
 
-import { creationExamples } from "./clean-examples";
-export { creationExamples };
-
 export type CreationFieldType = "textarea" | "select" | "multiselect" | "radio" | "file" | "text" | "text_or_file";
 
 export type CreationFieldOption = {
@@ -39,8 +36,6 @@ export type CreationApp = {
   description: string;
   promptHint: string;
   resultType: "text" | "image-plan" | "image";
-  exampleTitle?: string;
-  exampleSummary?: string;
   fields: CreationField[];
 };
 
@@ -53,47 +48,6 @@ export type CreationAppFamily =
   | "xiaohongshu-check"
   | "polish-video"
   | "polish-wechat-article";
-
-export type CreationExample = {
-  slug: string;
-  appSlug: string;
-  title: string;
-  summary: string;
-  intro: string;
-  highlight?: string;
-  ctaLabel?: string;
-  tabs?: string[];
-  linkedExamples?: string[];
-  exampleType?: "text" | "image";
-  sections: Array<{
-    id?: string;
-    title: string;
-    body: string;
-    quote?: string;
-  }>;
-  outputs?: Array<{
-    id?: string;
-    title: string;
-    tag?: string;
-    body: string;
-    quote?: string;
-    viewMode?: "plain" | "wechat";
-    children?: Array<{
-      id?: string;
-      title: string;
-      body: string;
-      quote?: string;
-    }>;
-  }>;
-  imageResults?: Array<{
-    id?: string;
-    title: string;
-    imageUrl: string;
-    badge?: string;
-    ratio?: string;
-    prompt?: string;
-  }>;
-};
 
 export type CreationCategory = {
   id: CreationCategoryId;
@@ -111,7 +65,7 @@ export const creationApps: CreationApp[] = [
   {
     id: "write-copy",
     slug: "write-copy",
-    name: "写文案",
+    name: "多平台文案创作",
     emoji: "🎨",
     category: "content",
     points: 5,
@@ -120,8 +74,6 @@ export const creationApps: CreationApp[] = [
     description: "把一份真实素材改写成适合口播、小红书、公众号和朋友圈发布的不同版本。",
     promptHint: "先提炼用户素材中的事实、观点和表达边界，再按所选渠道分别生成可发布内容。",
     resultType: "text",
-    exampleTitle: "保险规划师的人设文案案例",
-    exampleSummary: "同一份素材拆成口播稿、朋友圈和公众号三类输出。",
     fields: [
       {
         id: "tone",
@@ -158,9 +110,62 @@ export const creationApps: CreationApp[] = [
     ],
   },
   {
+    id: "link-remix",
+    slug: "link-remix",
+    name: "爆款灵感改编",
+    emoji: "🔗",
+    category: "content",
+    points: 8,
+    badge: "新",
+    featured: true,
+    description: "粘贴抖音或视频号公开分享链接，自动提取作品信息和口播内容，提炼结构后生成适合你的获客内容。",
+    promptHint: "只提炼公开内容的主题、观点和结构，结合用户选择的题材与渠道重新创作，不逐句改写、不复刻原文，不虚构原作者未提供的事实。",
+    resultType: "text",
+    fields: [
+      {
+        id: "source_url",
+        label: "粘贴分享链接",
+        type: "text",
+        required: true,
+        placeholder: "粘贴抖音或微信视频号的公开作品链接",
+        maxLength: 2000,
+      },
+      { id: "source_title", label: "原作品标题或文案开头", type: "text", placeholder: "从作品详情页复制，不要只填搜索结果标题", maxLength: 240 },
+      { id: "source_author", label: "作者或账号", type: "text", placeholder: "例如：账号名称 / 作者名称", maxLength: 120 },
+      { id: "source_published_at", label: "作品发布时间", type: "text", placeholder: "例如：2026-07-20 14:30；无法核验就填写“待核验”", maxLength: 40 },
+      { id: "source_like_count", label: "详情页可核验的点赞数", type: "text", placeholder: "例如：12.4万；必须来自作品详情页的点赞指标", helper: "不把播放、评论、收藏、分享或搜索结果数字当作点赞数。", maxLength: 40 },
+      { id: "source_content_type", label: "来源内容形态", type: "text", placeholder: "例如：视频、小红书纯图文、公众号正文", maxLength: 40 },
+      { id: "source_topic", label: "自动归类主题", type: "text", placeholder: "自动识别", maxLength: 80 },
+      { id: "source_tags", label: "自动提取标签", type: "text", placeholder: "自动提取", maxLength: 240 },
+      { id: "source_evidence", label: "作品中的事实证据摘要", type: "textarea", placeholder: "选填。记录作品中明确提到的案例、数据、时间范围、组织、流程或失败边界；没有就填“无”或留空。", maxLength: 1000 },
+      { id: "source_text", label: "提取的作品正文", type: "textarea", placeholder: "公众号正文或图文笔记正文会自动填入这里；也可以补充或修正。", maxLength: 12000 },
+      { id: "source_transcript", label: "提取的语音转写", type: "textarea", placeholder: "视频可用时会自动转写；也可以粘贴已有逐字稿。", maxLength: 12000 },
+      {
+        id: "remix_angle",
+        label: "补充你的想法建议",
+        type: "textarea",
+        placeholder: "选填。例如：更偏向30岁已婚女性的家庭保障提醒；语气专业但不制造焦虑；加入我亲身经历过的客户沟通场景。",
+        helper: "这会叠加到二创方向中；不填写时会结合你的内容画像和账号特点完成创作。",
+        maxLength: 1500,
+      },
+      {
+        id: "targets",
+        label: "选择要生成的内容",
+        type: "multiselect",
+        required: true,
+        options: [
+          { label: "口播文案（2篇）", value: "video_script" },
+          { label: "微信公众号（1篇）", value: "wechat_article" },
+          { label: "小红书（2篇）", value: "xiaohongshu" },
+          { label: "朋友圈（3条）", value: "moments" },
+        ],
+      },
+    ],
+  },
+  {
     id: "image-card",
     slug: "image-card",
-    name: "做图",
+    name: "知识卡片制作（图片）",
     emoji: "🪄",
     category: "content",
     points: 5,
@@ -168,8 +173,6 @@ export const creationApps: CreationApp[] = [
     description: "把文章、口播稿或一个明确主题做成适合发布的知识卡片。",
     promptHint: "根据内容目标、阅读场景、署名和比例生成原创知识卡片，优先保证中文可读性与信息层级。",
     resultType: "image",
-    exampleTitle: "公众号配图案例",
-    exampleSummary: "同一篇文章生成 1 张知识卡片配图策划。",
     fields: [
       {
         id: "style",
@@ -259,7 +262,7 @@ export const creationApps: CreationApp[] = [
   {
     id: "policy-renewal-card",
     slug: "policy-renewal-card",
-    name: "保单续保提醒卡",
+    name: "保单续保提醒卡（图片）",
     emoji: "🗓️",
     category: "content",
     points: 5,
@@ -464,8 +467,6 @@ export const creationApps: CreationApp[] = [
     description: "围绕一个具体问题，制作可领取的资料正文，并配好领取和发布话术。",
     promptHint: "围绕一个真实问题设计资料定位、目录、交付内容和领取说明，不制造稀缺感或虚假承诺。",
     resultType: "text",
-    exampleTitle: "宝妈医疗险资料包案例",
-    exampleSummary: "一次给出正文、朋友圈、自媒体选题和留资文案。",
     fields: [
       {
         id: "theme",
@@ -501,8 +502,6 @@ export const creationApps: CreationApp[] = [
     description: "结合你的定位和客户问题，生成兼顾触达、信任和转化的 6 个选题。",
     promptHint: "根据账号定位、目标读者和发布平台，生成覆盖触达、解释与信任目标的选题矩阵。",
     resultType: "text",
-    exampleTitle: "6 个高质量选题案例",
-    exampleSummary: "同主题拆成流量、信任、转化三种内容任务。",
     fields: [
       {
         id: "special_requirements",
@@ -515,7 +514,7 @@ export const creationApps: CreationApp[] = [
   {
     id: "ip-positioning",
     slug: "ip-positioning",
-    name: "IP定位",
+    name: "个人品牌定位",
     emoji: "🎯",
     category: "ip",
     points: 5,
@@ -523,8 +522,6 @@ export const creationApps: CreationApp[] = [
     description: "结合当前业务、优势和目标客户，梳理清晰的账号定位、标签与长期内容主线。",
     promptHint: "从人设、客群、差异化、表达风格四个角度给出定位方案，让账号更容易被记住。",
     resultType: "text",
-    exampleTitle: "IP 定位方案案例",
-    exampleSummary: "从现状、客群和服务标签里抽出更清楚的人设主张。",
     fields: [
       {
         id: "current_state",
@@ -552,8 +549,6 @@ export const creationApps: CreationApp[] = [
     description: "梳理当前最影响增长的问题，并给出优先顺序、下一步动作和复盘指标。",
     promptHint: "以增长陪跑的方式分析现状：先定位卡点，再给短期动作、内容策略和复盘指标。",
     resultType: "text",
-    exampleTitle: "破局增长案例",
-    exampleSummary: "针对私信多转化少的账号，给出节奏和动作拆解。",
     fields: [
       {
         id: "source",
@@ -582,8 +577,6 @@ export const creationApps: CreationApp[] = [
     description: "根据团队优势和候选人顾虑，生成招募文案、海报标题和私信沟通话术。",
     promptHint: "围绕团队优势、适合人群、成长路径和加入理由，写出可信的招募内容。",
     resultType: "text",
-    exampleTitle: "团队招募案例",
-    exampleSummary: "从训练体系和陪跑支持切进，写成更可信的招募文案。",
     fields: [
       {
         id: "team_offer",
@@ -604,15 +597,13 @@ export const creationApps: CreationApp[] = [
   {
     id: "live-script",
     slug: "live-script",
-    name: "写直播稿",
+    name: "直播脚本生成",
     emoji: "🎬",
     category: "content",
     points: 5,
     description: "根据直播主题、观众问题和已有材料，生成从开场、讲解、互动到收尾的完整脚本。",
     promptHint: "请围绕用户提供的直播观点，整理成主播可以直接开讲的完整直播流程稿。观点越具体，脚本越贴近真实直播。",
     resultType: "text",
-    exampleTitle: "直播流程稿案例",
-    exampleSummary: "从开场钩子、问题拆解到收口转化，展示一版更完整的直播脚本案例。",
     fields: [
       {
         id: "live_point",
@@ -635,8 +626,6 @@ export const creationApps: CreationApp[] = [
     description: "把一份完整观点或分享素材，整理成口播稿和公众号文章。",
     promptHint: "更适合普通观点、分享型素材和非强销售内容。",
     resultType: "text",
-    exampleTitle: "泛内容创作案例",
-    exampleSummary: "展示同一份观点如何分别整理成口播稿和公众号文章。",
     fields: [
       {
         id: "source",
@@ -660,15 +649,13 @@ export const creationApps: CreationApp[] = [
   {
     id: "wechat-images",
     slug: "wechat-images",
-    name: "公众号配图",
+    name: "文章配图生成",
     emoji: "🖼️",
     category: "content",
     points: 5,
     description: "分析公众号文章的开篇、重点和转折，为不同段落生成节奏匹配的配图。",
     promptHint: "更强调公众号阅读场景、段落节奏和多张配图输出。",
     resultType: "image",
-    exampleTitle: "公众号配图案例",
-    exampleSummary: "围绕公众号文章内容生成更适合段落阅读节奏的配图方案。",
     fields: [
       {
         id: "style",
@@ -713,7 +700,7 @@ export const creationApps: CreationApp[] = [
   {
     id: "video-script-polish",
     slug: "video-script-polish",
-    name: "口播文案精修",
+    name: "口播稿优化",
     emoji: "🔮",
     category: "content",
     points: 5,
@@ -869,10 +856,6 @@ export function getCreationAppBySlug(slug: string) {
   return creationApps.find((app) => app.slug === slug) ?? null;
 }
 
-export function getCreationExampleBySlug(slug: string) {
-  return creationExamples.find((example) => example.slug === slug) ?? null;
-}
-
 export function listCreationAppsByCategory(categoryId: CreationCategoryId) {
   return creationApps.filter((app) => app.category === categoryId);
 }
@@ -886,16 +869,4 @@ export function getCreationAppFamily(appSlug: string): CreationAppFamily {
   if (appSlug === "video-script-polish") return "polish-video";
   if (appSlug === "wechat-article-polish") return "polish-wechat-article";
   return "default";
-}
-
-export function getCreationExampleForApp(appSlug: string, exampleTitle?: string) {
-  if (exampleTitle) {
-    const exactMatch = creationExamples.find((item) => item.appSlug === appSlug && item.title === exampleTitle);
-    if (exactMatch) return exactMatch;
-  }
-  return creationExamples.find((item) => item.appSlug === appSlug) ?? null;
-}
-
-export function hasCreationExample(appSlug: string, exampleTitle?: string) {
-  return Boolean(getCreationExampleForApp(appSlug, exampleTitle));
 }

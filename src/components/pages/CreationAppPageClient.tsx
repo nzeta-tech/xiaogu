@@ -4,15 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getCreationAppFamily,
-  getCreationExampleBySlug,
-  getCreationExampleForApp,
   type CreationApp,
   type CreationAppFamily,
 } from "@/lib/apps/catalog";
-import { getEntryAdjustedApp, shouldShowRealExample } from "@/lib/apps/entry-app";
+import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
-import { CreationExamplePageClient } from "@/components/pages/CreationExamplePageClient";
 import type { AvatarVisualAsset } from "@/lib/avatar/types";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 
@@ -56,6 +53,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isPolicyDiagnosis = app.slug === "policy-diagnosis";
   const isVideoScriptPolish = appFamily === "polish-video";
   const isWechatArticlePolish = appFamily === "polish-wechat-article";
+  const isLinkRemix = app.slug === "link-remix";
   const isVoiceNoteEntry = app.slug === "write-copy" && workspaceEntry === "voice-note-copy";
   const isVoiceNoteSubpage = isWriteCopy && isVoiceNoteEntry;
   const isRecruitScriptEntry = app.slug === "team-recruit" && workspaceEntry === "recruit-script";
@@ -65,26 +63,32 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isIpPositioningEntry = app.slug === "ip-positioning" && workspaceEntry === "ip-positioning";
   const isPersonalityCardEntry = app.slug === "ip-positioning" && workspaceEntry === "personality-card";
   const isBreakthroughEntry = app.slug === "breakthrough" && workspaceEntry === "breakthrough";
-  const hasRealExample = shouldShowRealExample(app.slug, workspaceEntry);
   const isCompactWechatFlow = isWechatImages || isWechatArticlePolish;
   const isCompactWriteCopyFlow = isWriteCopy;
-  const exampleSlug = searchParams.get("example");
-  const activeExample = (exampleSlug ? getCreationExampleBySlug(exampleSlug) : null) ?? getCreationExampleForApp(app.slug, pageApp.exampleTitle);
   const filteredFields = pageApp.fields.filter((field) => {
     if ((isLeadCopy || isWriteCopy) && field.id === "targets") return false;
+    if (isLinkRemix && ["source_title", "source_author", "source_published_at", "source_like_count", "source_content_type", "source_topic", "source_tags", "source_evidence"].includes(field.id)) return false;
     return true;
   });
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const [values, setValues] = useState<Record<string, FieldValue>>(() => {
     const from = searchParams.get("from");
-    const initialValues = createInitialValues(pageApp, exampleSlug ? activeExample : null, from === "workspace" || from === "create");
+    const initialValues = createInitialValues(pageApp, from === "workspace" || from === "create");
     const initialPrompt = searchParams.get("prompt")?.trim();
     const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
-    return initialPrompt && promptField ? { ...initialValues, [promptField.id]: initialPrompt } : initialValues;
+    const sourceUrl = searchParams.get("source_url")?.trim();
+    const sourceTitle = searchParams.get("source_title")?.trim();
+    const sourcePlatform = searchParams.get("source_platform")?.trim();
+    return {
+      ...initialValues,
+      ...(initialPrompt && promptField ? { [promptField.id]: initialPrompt } : {}),
+      ...(sourceUrl && isLinkRemix ? { source_url: sourceUrl } : {}),
+      ...(sourceTitle && isLinkRemix ? { source_title: sourceTitle } : {}),
+      ...(sourcePlatform && isLinkRemix ? { source_platform: sourcePlatform } : {}),
+    };
   });
   const [loading, setLoading] = useState(false);
-  const [showExample, setShowExample] = useState(false);
   const [error, setError] = useState("");
   const [draftStatus, setDraftStatus] = useState<"restored" | "saving" | "saved" | "">("");
   const [voiceFieldId, setVoiceFieldId] = useState<string | null>(null);
@@ -94,6 +98,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const [uploadSuccess, setUploadSuccess] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
+  const [inspectingSource, setInspectingSource] = useState(false);
+  const [sourceInspectMessage, setSourceInspectMessage] = useState("");
+  const [sourcePreview, setSourcePreview] = useState<{ mediaUrl?: string; thumbnailUrl?: string }>({});
   const [showAllWechatStyles, setShowAllWechatStyles] = useState(false);
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
@@ -102,6 +109,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const voiceSessionRef = useRef<{ fieldId: string; initialValue: FieldValue | undefined; segmentBaseValue: FieldValue | undefined } | null>(null);
   const voiceCancelingRef = useRef(false);
   const voiceCompletingRef = useRef(false);
+  const lastAutoInspectedUrlRef = useRef("");
   const voiceSupported = useMemo(() => Boolean(getSpeechRecognitionConstructor()), []);
   const draftKey = `creation-draft:${workspaceEntry || app.slug}`;
   const requiredFields = pageApp.fields.filter((field) => field.required);
@@ -110,7 +118,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
   const creationFrom = searchParams.get("from");
   const creationReturnHref = creationFrom === "dashboard" || creationFrom === "today" ? appPath("/today") : appPath("/create");
-  const creationReturnLabel = creationFrom === "dashboard" || creationFrom === "today" ? "返回今日工作台" : "返回获客创作";
+  const creationReturnLabel = creationFrom === "dashboard" || creationFrom === "today" ? "返回今日灵感" : "返回轻松创作";
   const experienceCopy = getAppExperienceCopy(app.slug, workspaceEntry);
   const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
   const wechatArticle = typeof values.article === "string" ? values.article : "";
@@ -121,10 +129,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
     : filteredFields
   ).filter((field) => !isPolicyRenewalCard || values.avatar_visual_mode === "yes" || !["reference_image", "portrait_treatment"].includes(field.id));
+  const linkRemixSourceUrl = isLinkRemix && typeof values.source_url === "string" ? extractShareUrl(values.source_url.trim()) : "";
 
   usePageMeta({
     title: `${pageApp.name} · 新建创作`,
-    description: `获客创作 / ${pageApp.name}`,
+    description: `轻松创作 / ${pageApp.name}`,
     status: loading ? "生成中" : draftStatus === "saved" ? "已保存" : "",
   });
 
@@ -200,6 +209,17 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     return () => window.clearTimeout(timer);
   }, [draftKey, values]);
 
+  // The inspector is a local event handler; the URL/ref guard prevents duplicate requests.
+  useEffect(() => {
+    if (!isLinkRemix || !isSupportedRemixSource(linkRemixSourceUrl) || lastAutoInspectedUrlRef.current === linkRemixSourceUrl) return undefined;
+    const timer = window.setTimeout(() => {
+      lastAutoInspectedUrlRef.current = linkRemixSourceUrl;
+      void inspectRemixSource();
+    }, 700);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLinkRemix, linkRemixSourceUrl]);
+
   async function handleSubmit() {
     const missingField = pageApp.fields.find((field) => field.required && isEmpty(values[field.id]));
     if (missingField) {
@@ -255,6 +275,181 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       }
       return { ...current, [fieldId]: nextValue };
     });
+  }
+
+  async function inspectRemixSource() {
+    const sourceUrl = extractShareUrl(typeof values.source_url === "string" ? values.source_url.trim() : "");
+    if (!sourceUrl) {
+      setSourceInspectMessage("请先粘贴单条抖音或微信视频号作品链接。");
+      return;
+    }
+    if (!isSupportedRemixSource(sourceUrl)) {
+      setSourceInspectMessage("爆款二创目前仅支持抖音和微信视频号作品链接。");
+      return;
+    }
+    setInspectingSource(true);
+    setSourceInspectMessage("");
+    try {
+      const response = await fetch(apiPath("/api/creation/link-remix/inspect"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: sourceUrl, deferTranscription: true }),
+      });
+      let payload = (await response.json().catch(() => ({}))) as { status?: string; taskId?: string; fields?: Record<string, string>; finalUrl?: string; thumbnailUrl?: string; mediaUrl?: string; note?: string; error?: string };
+      let delegatedToLocalAgent = false;
+      if (!response.ok) throw new Error(payload.error ?? "公开页面解析失败。");
+      if (response.status === 202 && payload.taskId) {
+        delegatedToLocalAgent = true;
+        setSourceInspectMessage("任务已交给本地 Agent，正在等待解析和转写...");
+        const streamController = new AbortController();
+        const streamPromise = streamAgentTaskEvents(payload.taskId, streamController.signal);
+        try {
+          payload = await waitForRemixInspection(payload.taskId);
+        } finally {
+          streamController.abort();
+          await streamPromise.catch(() => undefined);
+        }
+      }
+      const fields = Object.fromEntries(Object.entries(payload.fields ?? {}).filter(([, value]) => typeof value === "string" && value.trim()));
+      lastAutoInspectedUrlRef.current = payload.finalUrl ?? sourceUrl;
+      setSourcePreview({ mediaUrl: payload.mediaUrl, thumbnailUrl: payload.thumbnailUrl });
+      setValues((current) => ({
+        ...current,
+        source_title: "",
+        source_author: "",
+        source_published_at: "",
+        source_like_count: "",
+        source_content_type: "",
+        source_type: "unknown",
+        source_evidence: "",
+        source_topic: "",
+        source_tags: "",
+        source_text: "",
+        source_transcript: "",
+        ...fields,
+        source_platform: inferRemixPlatform(payload.finalUrl ?? sourceUrl, fields.source_type),
+        source_url: payload.finalUrl ?? current.source_url,
+        targets: Array.isArray(current.targets) && current.targets.length > 0
+          ? current.targets
+          : recommendRemixTargets(fields.source_content_type, fields.source_type),
+      }));
+      setSourceInspectMessage(Object.keys(fields).length > 0 ? `已自动回填 ${Object.keys(fields).length} 项。${payload.note ?? ""}` : payload.note ?? "页面没有公开可读取的字段。");
+      if (!delegatedToLocalAgent && payload.mediaUrl && /^https:\/\/(?:www\.)?weixin\.qq\.com\//i.test(sourceUrl)) {
+        await streamRemixTranscript(sourceUrl);
+      }
+    } catch (inspectError) {
+      setSourceInspectMessage(inspectError instanceof Error ? inspectError.message : "公开页面解析失败。");
+    } finally {
+      setInspectingSource(false);
+    }
+  }
+
+  async function waitForRemixInspection(taskId: string) {
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const response = await fetch(apiPath(`/api/creation/link-remix/inspect/${encodeURIComponent(taskId)}`), { cache: "no-store" });
+      const payload = await response.json().catch(() => ({})) as {
+        status?: string;
+        error?: string;
+        result?: { status?: string; fields?: Record<string, string>; finalUrl?: string; thumbnailUrl?: string; mediaUrl?: string; note?: string };
+      };
+      if (!response.ok) throw new Error(payload.error ?? "本地 Agent 任务查询失败。");
+      if (payload.status === "succeeded" && payload.result) return payload.result;
+      if (payload.status === "failed" || payload.status === "cancelled") throw new Error(payload.error ?? "本地 Agent 未能完成解析。");
+      setSourceInspectMessage(payload.status === "leased" ? "本地 Agent 正在解析、下载并识别语音..." : "等待本地 Agent 领取任务...");
+    }
+    throw new Error("本地 Agent 处理超时，任务会保留并在 Agent 在线后继续执行。");
+  }
+
+  async function streamAgentTaskEvents(taskId: string, signal: AbortSignal) {
+    let afterId = 0;
+    let transcript = "";
+    let finished = false;
+    while (!signal.aborted && !finished) {
+      try {
+        const response = await fetch(apiPath(`/api/creation/link-remix/inspect/${encodeURIComponent(taskId)}/events?after=${afterId}`), {
+          cache: "no-store",
+          signal,
+        });
+        if (!response.ok || !response.body) throw new Error("转写事件流暂时不可用。");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const messages = buffer.split("\n\n");
+          buffer = messages.pop() ?? "";
+          for (const message of messages) {
+            if (!message.trim() || message.startsWith(":")) continue;
+            const idLine = message.split("\n").find((line) => line.startsWith("id: "));
+            const eventLine = message.split("\n").find((line) => line.startsWith("event: "));
+            const dataLine = message.split("\n").find((line) => line.startsWith("data: "));
+            const nextId = Number(idLine?.slice(4) ?? 0);
+            if (Number.isSafeInteger(nextId) && nextId > afterId) afterId = nextId;
+            if (!dataLine) continue;
+            const event = JSON.parse(dataLine.slice(6)) as { type?: string; content?: string; message?: string };
+            const eventName = eventLine?.slice(7) ?? event.type;
+            if (eventName === "reset") {
+              transcript = "";
+              setValues((current) => ({ ...current, source_transcript: "" }));
+            }
+            if (eventName === "status" && event.message) setSourceInspectMessage(event.message);
+            if (eventName === "delta" && event.content) {
+              transcript += event.content;
+              setValues((current) => ({ ...current, source_transcript: transcript }));
+              setSourceInspectMessage(`正在识别语音，已输出 ${transcript.length} 字...`);
+            }
+            if (eventName === "done" || eventName === "failed" || eventName === "error") finished = true;
+          }
+        }
+      } catch (error) {
+        if (signal.aborted) return;
+        setSourceInspectMessage(error instanceof Error ? `${error.message} 正在重新连接...` : "转写事件流中断，正在重新连接...");
+      }
+      if (!signal.aborted && !finished) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  async function streamRemixTranscript(sourceUrl: string) {
+    setValues((current) => ({ ...current, source_transcript: "" }));
+    setSourceInspectMessage("作品信息已回填，正在获取视频音频...");
+    const response = await fetch(apiPath("/api/creation/link-remix/transcribe"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: sourceUrl }),
+    });
+    if (!response.ok || !response.body) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error ?? "本地语音转写暂不可用。");
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let transcript = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const messages = buffer.split("\n\n");
+      buffer = messages.pop() ?? "";
+      for (const message of messages) {
+        const line = message.split("\n").find((item) => item.startsWith("data: "));
+        if (!line) continue;
+        const event = JSON.parse(line.slice(6)) as { type?: string; content?: string; message?: string };
+        if (event.type === "status" && event.message) {
+          setSourceInspectMessage(event.message);
+        }
+        if (event.type === "delta" && event.content) {
+          transcript += event.content;
+          setValues((current) => ({ ...current, source_transcript: transcript }));
+          setSourceInspectMessage(`正在识别语音，已输出 ${transcript.length} 字...`);
+        }
+        if (event.type === "error") throw new Error(event.message ?? "本地语音转写失败。");
+      }
+    }
+    setSourceInspectMessage(transcript ? `视频转写完成，已识别 ${transcript.length} 字。` : "视频中未识别到可用语音内容。");
   }
 
   function openFilePicker(fieldId: string) {
@@ -477,7 +672,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         <div className="page-content">
         <div className="page-back-bar pageBackBar">
           <a className="back-btn backLink" href={creationReturnHref}>← {creationReturnLabel}</a>
-          <span className="subpageBreadcrumb">获客创作 / {pageApp.name}</span>
+          <span className="subpageBreadcrumb">轻松创作 / {pageApp.name}</span>
         </div>
 
         <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : isLiveScript ? "app-info-card liveScriptHeroCard" : "app-info-card"}>
@@ -515,26 +710,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               {pageApp.requiresThinking ? <em>建议先完善人设</em> : null}
             </div>
           ) : null}
-          {!isImageCard && !isLeadCopy && !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && hasRealExample && activeExample && !isCompactWriteCopyFlow ? (
-            <div className="creationAppExampleActions">
-              <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
-                查看案例
-              </button>
-              <span className="creationAppCaseHint">{activeExample.title}</span>
-            </div>
-          ) : null}
-          {exampleSlug ? <div className="resultSavedHint">已从功能示例进入。系统只使用你本次提交的素材，不会复写示例内容。</div> : null}
           <div className="creationOutcomeStrip">
             <div><span>建议准备</span><strong>{experienceCopy.input}</strong></div>
             <div><span>本次产出</span><strong>{experienceCopy.output}</strong></div>
           </div>
-          {isGeneralContent && hasRealExample && activeExample ? (
-            <div className="creationAppExampleActions generalContentExampleActions">
-              <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
-                查看案例
-              </button>
-            </div>
-          ) : null}
           {isLeadCopy && !isMultiChannelPolishLayout ? (
             <div className="leadCopyIntro">
               围绕引流转化目标，一次产出口播稿、小红书笔记和公众号文章。
@@ -604,14 +783,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   <strong>主题越具体，越容易得到更贴近你当前业务的选题切口</strong>
                 </div>
               </div>
-              {hasRealExample && activeExample ? (
-                <div className="creationAppExampleActions topicPickerExampleActions">
-                  <button className="creationAppCaseButton" onClick={() => setShowExample(true)} type="button">
-                    查看案例
-                  </button>
-                  <span className="creationAppCaseHint">{activeExample.title}</span>
-                </div>
-              ) : null}
             </div>
           ) : null}
           {isWriteCopy && !isCompactWriteCopyFlow && !isVoiceNoteSubpage ? (
@@ -800,7 +971,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 <strong>怎么写，结果会更稳定</strong>
                 <p>先扔素材，再选想生成的平台。素材越像你平时会说的话，结果越自然。</p>
               </div>
-              <span className="writeCopyBriefingBadge">推荐先看案例</span>
+              <span className="writeCopyBriefingBadge">创作提示</span>
             </div>
             <div className="writeCopyBriefingGrid">
               <article>
@@ -948,10 +1119,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           </section>
         ) : null}
 
-        <form className={isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
-          {/* eslint-disable-next-line react-hooks/refs */}
+        <form className={isLinkRemix ? "create-form creationForm targetCreateForm linkRemixCreateForm" : isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
           {visibleFields.map((field, index) => (
-            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck })} id={`creation-field-${field.id}`} key={field.id}>
+            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix })} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
                   <span className="step-number">{index + 1}</span>
@@ -994,6 +1164,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   styleRecommendation: isWechatImages && field.id === "style" ? wechatStyleRecommendation : undefined,
                   onShowAllStyles: isWechatImages && field.id === "style" ? () => setShowAllWechatStyles(true) : undefined,
                 })}
+                {app.slug === "link-remix" && field.id === "source_url" ? (
+                  <div className="linkRemixInspectControls">
+                    <button className="secondaryButton" disabled={inspectingSource} onClick={() => void inspectRemixSource()} type="button">{inspectingSource ? "正在识别与提取..." : "识别并提取内容"}</button>
+                    {sourceInspectMessage ? <span>{sourceInspectMessage}</span> : null}
+                    {sourcePreview.mediaUrl ? <video className="linkRemixSourcePreview" controls preload="metadata" poster={sourcePreview.thumbnailUrl} src={sourcePreview.mediaUrl} /> : null}
+                  </div>
+                ) : null}
                 {voiceFieldId === field.id ? (
                   <VoiceInputPanel
                     elapsed={voiceElapsed}
@@ -1013,6 +1190,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               </span>
             </label>
           ))}
+
+          {isLinkRemix ? <RemixMetadataPanel values={values} onChange={updateField} /> : null}
 
           {(isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || isWechatImages || isPolicyRenewalCard) ? (
             <AvatarVisualPicker
@@ -1142,15 +1321,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         </form>
       </div>
 
-      {showExample && activeExample ? (
-        <CreationExamplePageClient
-          app={app}
-          example={activeExample}
-          mode="modal"
-          onClose={() => setShowExample(false)}
-        />
-      ) : null}
-
       {isWechatImages && showAllWechatStyles ? (
         <WechatStyleLibrary
           options={wechatStyleOptions}
@@ -1168,7 +1338,89 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   );
 }
 
-function createInitialValues(app: CreationApp, activeExample: { title?: string } | null, fromWorkspace: boolean) {
+function extractShareUrl(value: string) {
+  const match = value.match(/https?:\/\/[^\s"'<>]+/i)?.[0] ?? value;
+  return match.replace(/[，。！？；：、）》】]+$/g, "");
+}
+
+function inferRemixPlatform(url: string, sourceType?: string) {
+  if (sourceType === "douyin" || /douyin\.com/i.test(url)) return "抖音";
+  if (sourceType === "wechat_article" || /mp\.weixin\.qq\.com/i.test(url)) return "微信公众号";
+  if (sourceType === "wechat_channels" || /(?:www\.)?weixin\.qq\.com/i.test(url)) return "微信视频号";
+  if (sourceType === "xiaohongshu" || /xiaohongshu\.com|xhslink\.com/i.test(url)) return "小红书";
+  return "已自动识别";
+}
+
+function isSupportedRemixSource(url: string) {
+  try {
+    const host = new URL(url).hostname;
+    return /(^|\.)douyin\.com$/i.test(host)
+      || /^(?:www\.)?weixin\.qq\.com$/i.test(host)
+      || /(^|\.)channels\.weixin\.qq\.com$/i.test(host);
+  } catch {
+    return false;
+  }
+}
+
+function recommendRemixTargets(contentType?: string, sourceType?: string): string[] {
+  const value = `${contentType ?? ""} ${sourceType ?? ""}`.toLowerCase();
+  if (/文章|正文|图文|article/.test(value)) return ["wechat_article", "xiaohongshu"];
+  return ["video_script", "xiaohongshu"];
+}
+
+function RemixMetadataPanel({ values, onChange }: { values: Record<string, FieldValue>; onChange: (fieldId: string, value: FieldValue) => void }) {
+  const sourceTitle = typeof values.source_title === "string" ? values.source_title : "";
+  const sourceAuthor = typeof values.source_author === "string" ? values.source_author : "";
+  const publishedAt = typeof values.source_published_at === "string" ? values.source_published_at : "";
+  const likeCount = typeof values.source_like_count === "string" ? values.source_like_count : "";
+  const contentType = typeof values.source_content_type === "string" ? values.source_content_type : "";
+  const topic = typeof values.source_topic === "string" ? values.source_topic : "";
+  const tags = typeof values.source_tags === "string" ? values.source_tags : "";
+  const evidence = typeof values.source_evidence === "string" ? values.source_evidence : "";
+  const platform = typeof values.source_platform === "string" ? values.source_platform : "";
+  const hasMetadata = Boolean(sourceTitle || sourceAuthor || publishedAt || likeCount || contentType || topic || tags || evidence);
+
+  return (
+    <details className="linkRemixMetadata" open={hasMetadata}>
+      <summary>
+        <span>已提取的参考信息</span>
+        <small>{platform || "等待识别"}{contentType ? ` · ${contentType}` : ""}{topic ? ` · ${topic}` : ""}</small>
+      </summary>
+      <div className="linkRemixMetadataGrid">
+        <div className="linkRemixMetadataTitle">
+          <span>标题或文案开头</span>
+          <input aria-label="原作品标题或文案开头" className="creationInput" onChange={(event) => onChange("source_title", event.target.value)} placeholder="自动提取后可在这里修正" value={sourceTitle} />
+        </div>
+        <div>
+          <span>作者</span>
+          <input aria-label="作者或账号" className="creationInput" onChange={(event) => onChange("source_author", event.target.value)} placeholder="未读取到可留空" value={sourceAuthor} />
+        </div>
+        <div>
+          <span>发布时间</span>
+          <input aria-label="作品发布时间" className="creationInput" onChange={(event) => onChange("source_published_at", event.target.value)} placeholder="待核验" value={publishedAt} />
+        </div>
+        <div>
+          <span>点赞数</span>
+          <input aria-label="详情页可核验的点赞数" className="creationInput" onChange={(event) => onChange("source_like_count", event.target.value)} placeholder="待核验" value={likeCount} />
+        </div>
+        <div>
+          <span>主题</span>
+          <input aria-label="自动归类主题" className="creationInput" onChange={(event) => onChange("source_topic", event.target.value)} placeholder="自动识别" value={topic} />
+        </div>
+        <div>
+          <span>标签</span>
+          <input aria-label="自动提取标签" className="creationInput" onChange={(event) => onChange("source_tags", event.target.value)} placeholder="自动提取" value={tags} />
+        </div>
+        <div className="linkRemixMetadataEvidence">
+          <span>事实证据摘要</span>
+          <textarea aria-label="作品中的事实证据摘要" className="creationTextarea" onChange={(event) => onChange("source_evidence", event.target.value)} placeholder="自动提取后可在这里补充或修正" rows={2} value={evidence} />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
   const base = Object.fromEntries(app.fields.map((field) => [field.id, field.type === "multiselect" ? [] : ""])) as Record<string, FieldValue>;
   if (app.slug === "policy-renewal-card") {
     return {
@@ -1187,7 +1439,13 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
     return {
       ...base,
       tone: "self",
-      source: buildWriteCopySourceSeed(activeExample?.title, fromWorkspace),
+      source: buildWriteCopySourceSeed(fromWorkspace),
+      targets: ["video_script", "xiaohongshu", "wechat_article", "moments"],
+    };
+  }
+  if (app.slug === "link-remix") {
+    return {
+      ...base,
       targets: ["video_script", "xiaohongshu", "wechat_article", "moments"],
     };
   }
@@ -1226,7 +1484,7 @@ function createInitialValues(app: CreationApp, activeExample: { title?: string }
   return {
     ...base,
     style: "illustration",
-    source: activeExample?.title ? `${activeExample.title}\n\n请按这个案例的主题和表达方式，生成适合发布的知识卡片。` : "",
+    source: "",
     draw_portrait: "no",
     ratio: "3:4",
   };
@@ -1460,6 +1718,7 @@ function getAppExperienceCopy(appSlug: string, entry: string) {
   if (entry === "personality-card") return { input: "个人介绍、目标客户和清晰形象照", output: "可展示和传播的个人名片" };
   const copy: Record<string, { input: string; output: string }> = {
     "write-copy": { input: "一份有事实和观点的真实素材", output: "口播、小红书、公众号和朋友圈版本" },
+    "link-remix": { input: "一条公开分享链接，可补充你的创作想法", output: "口播、公众号、小红书和朋友圈原创版本" },
     "image-card": { input: "文章、口播稿或清晰主题", output: "按指定风格和比例生成知识卡片" },
     "policy-renewal-card": { input: "已核对的客户称呼、续保日期、保费与顾问信息", output: "一张由图片模型直接生成的图文融合提醒卡" },
     "lead-copy": { input: "客户问题、个人观点或参考内容", output: "适合引流承接的多平台文案" },
@@ -1490,6 +1749,7 @@ function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, e
   if (appFamily === "write-copy") classes.push("writeCopyAppPage");
   if (appSlug === "write-copy") classes.push("writeCopyBaseAppPage");
   if (appSlug === "lead-copy") classes.push("leadCopyAppPage");
+  if (appSlug === "link-remix") classes.push("linkRemixAppPage");
   if (appSlug === "traffic-copy" || appSlug === "marketing-copy") classes.push("polishAppPage", "videoPolishAppPage", "multiChannelPolishAppPage");
   if (appSlug === "lead-package") classes.push("leadPackageAppPage");
   if (appSlug === "live-script") classes.push("liveScriptAppPage");
@@ -1506,7 +1766,7 @@ function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, e
 
 function getCreationFieldClassName(
   fieldId: string,
-  flags: { isImageCard: boolean; isLiveScript: boolean; isXiaohongshuCheck: boolean },
+  flags: { isImageCard: boolean; isLiveScript: boolean; isXiaohongshuCheck: boolean; isLinkRemix: boolean },
 ) {
   const classes = ["field-card", "creationField"];
   if (flags.isImageCard) classes.push("imageCardField");
@@ -1514,6 +1774,10 @@ function getCreationFieldClassName(
   if (flags.isLiveScript) {
     classes.push("liveScriptField", `liveScriptField-${fieldId}`);
     if (fieldId === "live_point") classes.push("liveScriptFieldWide");
+  }
+  if (flags.isLinkRemix) {
+    classes.push("linkRemixField", `linkRemixField-${fieldId}`);
+    if (fieldId === "source_text" || fieldId === "source_transcript") classes.push("linkRemixExtractedContent");
   }
   return classes.join(" ");
 }
@@ -1854,10 +2118,9 @@ function getSpeechRecognitionConstructor() {
   return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
 }
 
-function buildWriteCopySourceSeed(exampleTitle?: string, fromWorkspace?: boolean) {
+function buildWriteCopySourceSeed(fromWorkspace?: boolean) {
   if (!fromWorkspace) return "";
-  if (!exampleTitle) return "";
-  return `${exampleTitle}\n\n请围绕这个观点，保留接地气、像真人说话的表达方式，生成适合不同平台直接发布的内容。`;
+  return "";
 }
 
 function describeWriteCopyTarget(value: string) {

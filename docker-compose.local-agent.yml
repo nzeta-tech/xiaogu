@@ -1,0 +1,101 @@
+services:
+  local-agent:
+    build:
+      context: .
+      target: local-agent
+    image: ${LOCAL_AGENT_IMAGE:-xiaogu/local-agent:development}
+    env_file:
+      - ${XIAOGU_AGENT_ENV_FILE:-.env}
+    environment:
+      HOSTNAME: 0.0.0.0
+      LOCAL_AGENT_RUNNER: "1"
+      LOCAL_AGENT_EXECUTOR: "1"
+      LOCAL_AGENT_BASE_URL: ${LOCAL_AGENT_BASE_URL:?Set LOCAL_AGENT_BASE_URL to the public Xiaogu URL}
+      LOCAL_AGENT_TOKEN: ${LOCAL_AGENT_TOKEN:?Set the same LOCAL_AGENT_TOKEN on AWS and locally}
+      LOCAL_AGENT_ID: ${LOCAL_AGENT_ID:-xiaogu-local}
+      LOCAL_AGENT_CAPABILITIES: ${LOCAL_AGENT_CAPABILITIES:-source.inspect}
+      LOCAL_AGENT_POLL_INTERVAL_MS: ${LOCAL_AGENT_POLL_INTERVAL_MS:-3000}
+      LOCAL_AGENT_LEASE_SECONDS: ${LOCAL_AGENT_LEASE_SECONDS:-600}
+      LOCAL_AGENT_TASK_TIMEOUT_MS: ${LOCAL_AGENT_TASK_TIMEOUT_MS:-900000}
+      LOCAL_AGENT_HEARTBEAT_INTERVAL_MS: ${LOCAL_AGENT_HEARTBEAT_INTERVAL_MS:-15000}
+      LOCAL_AGENT_TRANSCRIPT_BATCH_MS: ${LOCAL_AGENT_TRANSCRIPT_BATCH_MS:-400}
+      LOCAL_AGENT_VERSION: ${LOCAL_AGENT_VERSION:-local}
+      LOCAL_AGENT_PROTOCOL_VERSION: ${LOCAL_AGENT_PROTOCOL_VERSION:-1}
+      VIRAL_TRANSCRIBE_API_BASE: http://transcriber:8000
+      VIRAL_DOUYIN_DOWNLOAD_ENABLED: "1"
+      VIRAL_WECHAT_CONTAINER_BROWSER_ENABLED: "1"
+      VIRAL_WECHAT_DISCOVERY_ENABLED: "1"
+      VIRAL_WECHAT_DISCOVERY_API_BASE: http://wx-channel:2026
+      VIRAL_WECHAT_CDP_URL: http://127.0.0.1:9222
+      VIRAL_XHS_BROWSER_ENABLED: "1"
+      VIRAL_XHS_CDP_URL: http://127.0.0.1:9223
+      VIRAL_DOUYIN_BROWSER_ENABLED: "1"
+      VIRAL_DOUYIN_CDP_PORT: "9224"
+      VIRAL_SOGOU_BROWSER_ENABLED: "1"
+      VIRAL_SOGOU_CDP_URL: http://127.0.0.1:9225
+      VIRAL_WECHAT_MP_DISCOVERY_ENABLED: "1"
+      VIRAL_WECHAT_MP_CDP_URL: http://127.0.0.1:9226
+      VIRAL_WERSS_ENABLED: "1"
+      VIRAL_WERSS_API_BASE: http://127.0.0.1:8001
+      VIRAL_WECHATSOGOU_ENABLED: "1"
+      VIRAL_WECHATSOGOU_API_BASE: http://127.0.0.1:8010
+      WERSS_ENABLED: "1"
+    volumes:
+      - local_agent_douyin:/data/douyin-profile
+      - local_agent_wechat:/data/wechat-profile
+      - local_agent_xhs:/data/xhs-profile
+      - local_agent_sogou:/data/sogou-profile
+      - local_agent_wechat_mp:/data/wechat-mp-profile
+      - local_agent_media:/tmp/xiaogu-viral-media
+      - local_agent_werss:/opt/werss/data
+      - local_agent_wx_channel:/wx-channel:ro
+    depends_on:
+      transcriber:
+        condition: service_healthy
+      wx-channel:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/xiaogu/local-agent-healthcheck.sh"]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 90s
+
+  transcriber:
+    build:
+      context: .
+      dockerfile: docker/transcriber/Dockerfile
+    image: ${LOCAL_AGENT_TRANSCRIBER_IMAGE:-xiaogu/transcriber:development}
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-26214400}
+    volumes:
+      - local_agent_whisper:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  wx-channel:
+    build:
+      context: .
+      dockerfile: docker/wx-channel/Dockerfile
+    image: ${LOCAL_AGENT_WX_CHANNEL_IMAGE:-xiaogu/wx-channel:development}
+    volumes:
+      - local_agent_wx_channel:/data
+    restart: unless-stopped
+
+volumes:
+  local_agent_douyin:
+  local_agent_wechat:
+  local_agent_xhs:
+  local_agent_sogou:
+  local_agent_wechat_mp:
+  local_agent_media:
+  local_agent_whisper:
+  local_agent_wx_channel:
+  local_agent_werss:

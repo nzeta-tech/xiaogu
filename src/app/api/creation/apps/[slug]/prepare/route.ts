@@ -1,11 +1,14 @@
 import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
-import { startBackgroundWorkRun } from "@/lib/creation/background-run-registry";
+import { startBackgroundWorkRun, waitForBackgroundWorkRunStart } from "@/lib/creation/background-run-registry";
+import { checkLinkRemixDependencies, formatDependencyFailure } from "@/lib/creation/dependency-health";
 import { buildWorkTitle } from "@/lib/creation/work-title";
 import { query } from "@/lib/db/client";
 import { isEmptyCreationFieldValue } from "@/lib/creation/output";
+import { isSupportedLinkRemixUrl } from "@/lib/creation/link-remix-source";
 import { tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -20,11 +23,29 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
 
+  if (app.slug === "link-remix") {
+    const availability = await getLinkRemixAvailability();
+    if (!availability.available) {
+      return Response.json({ error: availability.reason, code: "LOCAL_AGENT_OFFLINE" }, { status: 503 });
+    }
+    const dependencies = await checkLinkRemixDependencies();
+    const failure = formatDependencyFailure(dependencies);
+    if (failure) {
+      return Response.json({
+        error: `二创不能继续：${failure}。请先恢复依赖服务后再重试。`,
+        dependencies,
+      }, { status: 503 });
+    }
+  }
+
   const quota = await requireQuota(user, "write_script", app.points);
   if (!quota.ok) return quota.response;
 
   const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
   const values = body.values ?? {};
+  if (app.slug === "link-remix" && !isSupportedLinkRemixUrl(typeof values.source_url === "string" ? values.source_url : "")) {
+    return Response.json({ error: "爆款二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
+  }
 
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
   const effectiveApp = getEntryAdjustedApp(app, entry);
@@ -74,13 +95,16 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     );
   }
 
-  void startBackgroundWorkRun({
+  startBackgroundWorkRun({
     workId: work.id,
     slug: app.slug,
     userId: user.id,
     values,
     quotaCost: quota.quotaCost,
   });
+  // Persist the app run before the request returns. Otherwise a serverless-like
+  // runtime can discard the detached task before the work page reconnects.
+  await waitForBackgroundWorkRunStart(work.id);
 
   return Response.json({
     ok: true,

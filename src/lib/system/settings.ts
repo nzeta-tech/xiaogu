@@ -61,9 +61,13 @@ export type SystemSettings = {
     imageGenerationEnabled: boolean;
     hotTopicsEnabled: boolean;
     feedbackEnabled: boolean;
+    localAgentEnabled: boolean;
   };
   payment: {
     enableStripe: boolean;
+    enableAirwallex: boolean;
+    enableAlipay: boolean;
+    enableWechat: boolean;
     enableManualTransfer: boolean;
     displaySubscriptions: boolean;
     purchaseNotice: string;
@@ -80,6 +84,10 @@ export type SystemSettings = {
     lowBalanceNotifyEnabled: boolean;
     lowBalanceThreshold: number;
     lowBalanceCooldownHours: number;
+    loadBalanceStrategy: "round_robin" | "least_amount";
+    cancelRateLimitEnabled: boolean;
+    cancelRateLimitWindowMinutes: number;
+    cancelRateLimitMax: number;
   };
   affiliate: {
     enabled: boolean;
@@ -225,9 +233,12 @@ AI 结果可能存在遗漏或错误。用户在对外发布或用于客户沟�
     totpIssuer: "小谷",
   },
   defaults: { signupCredits: 0, dailyCreationLimit: 0, monthlyCreationLimit: 0, maxConcurrentCreations: 2, creationRpmLimit: 10 },
-  features: { complianceEnabled: true, imageGenerationEnabled: true, hotTopicsEnabled: true, feedbackEnabled: true },
+  features: { complianceEnabled: true, imageGenerationEnabled: true, hotTopicsEnabled: true, feedbackEnabled: true, localAgentEnabled: false },
   payment: {
     enableStripe: true,
+    enableAirwallex: false,
+    enableAlipay: false,
+    enableWechat: false,
     enableManualTransfer: false,
     displaySubscriptions: true,
     purchaseNotice: "充值成功后额度会自动到账，可在账单页查看明细。",
@@ -244,6 +255,10 @@ AI 结果可能存在遗漏或错误。用户在对外发布或用于客户沟�
     lowBalanceNotifyEnabled: false,
     lowBalanceThreshold: 20,
     lowBalanceCooldownHours: 24,
+    loadBalanceStrategy: "round_robin",
+    cancelRateLimitEnabled: false,
+    cancelRateLimitWindowMinutes: 60,
+    cancelRateLimitMax: 5,
   },
   affiliate: { enabled: false, rebateRatePercent: 20, freezeHours: 0, durationDays: 0, perInviteeCap: 0 },
   email: {

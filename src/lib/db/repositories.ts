@@ -1,6 +1,6 @@
 import { getPool, query } from "./client";
 import type { AgentMessage } from "@/lib/agent/insurance-agent";
-import { creationApps, creationCategories, creationExamples, type CreationApp } from "@/lib/apps/catalog";
+import { creationApps, creationCategories, type CreationApp } from "@/lib/apps/catalog";
 import type { BillingPlan } from "@/lib/billing/plans";
 import type { ComplianceIssue } from "@/lib/compliance/check";
 import {
@@ -11,6 +11,7 @@ import {
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 import type { HotTopic } from "@/lib/topics/types";
 import { defaultSystemSettings, systemSettingKeys, type SystemSettings } from "@/lib/system/settings";
+import { decryptSettingSecret, encryptSettingSecret } from "@/lib/security/secrets";
 
 export async function tryCreateConversation(input: {
   userId: string | null;
@@ -695,6 +696,9 @@ export async function tryCreateOrder(input: {
   baseAmountCents?: number;
   feeCents?: number;
   metadata?: Record<string, unknown>;
+  providerInstanceId?: string | null;
+  paymentMethod?: string | null;
+  idempotencyKey?: string | null;
 }) {
   if (!input.userId) return null;
 
@@ -708,8 +712,9 @@ export async function tryCreateOrder(input: {
       quota_amount: number;
       created_at: string;
     }>(
-      `insert into orders(user_id, provider, status, amount_cents, base_amount_cents, fee_cents, currency, quota_amount, metadata, paid_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, case when $3 = 'paid' then now() else null end)
+      `insert into orders(user_id, provider, provider_instance_id, payment_method, status, amount_cents, base_amount_cents, fee_cents, currency, quota_amount, metadata, idempotency_key, paid_at)
+       values ($1, $2, $10, $11, $3, $4, $5, $6, $7, $8, $9::jsonb, $12, case when $3 = 'paid' then now() else null end)
+       on conflict (idempotency_key) where idempotency_key is not null do nothing
        returning id, provider, status, amount_cents, currency, quota_amount, created_at`,
       [
         input.userId,
@@ -725,12 +730,120 @@ export async function tryCreateOrder(input: {
           planName: input.plan.name,
           ...input.metadata,
         }),
+        input.providerInstanceId ?? null,
+        input.paymentMethod ?? input.provider,
+        input.idempotencyKey ?? null,
       ],
     );
-    return result.rows[0];
+    if (result.rows[0]) return result.rows[0];
+    if (input.idempotencyKey) {
+      const existing = await query<{ id: string; provider: string; status: string; amount_cents: number; currency: string; quota_amount: number; created_at: string }>(
+        `select id, provider, status, amount_cents, currency, quota_amount, created_at from orders where idempotency_key = $1`, [input.idempotencyKey],
+      );
+      return existing.rows[0];
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+export type PaymentProviderKey = "stripe" | "airwallex" | "easypay" | "alipay" | "wxpay";
+
+export type PaymentProviderInstance = {
+  id: string;
+  name: string;
+  providerKey: PaymentProviderKey;
+  enabled: boolean;
+  sortOrder: number;
+  supportedMethods: string[];
+  config: Record<string, string>;
+  minAmountCents: number;
+  maxAmountCents: number;
+  dailyLimitCents: number;
+  refundEnabled: boolean;
+  lastHealthStatus: string;
+  lastHealthCheckedAt: string | null;
+  lastWebhookAt: string | null;
+  lastError: string;
+};
+
+function mapPaymentProvider(row: {
+  id: string; name: string; provider_key: PaymentProviderKey; enabled: boolean; sort_order: number;
+  supported_methods: string[]; config_encrypted: string; min_amount_cents: number; max_amount_cents: number;
+  daily_limit_cents: string | number; refund_enabled: boolean; last_health_status: string;
+  last_health_checked_at: string | null; last_webhook_at: string | null; last_error: string;
+}, includeSecrets = false): PaymentProviderInstance {
+  let config: Record<string, string> = {};
+  if (includeSecrets && row.config_encrypted) {
+    try { config = JSON.parse(decryptSettingSecret(row.config_encrypted)) as Record<string, string>; } catch { config = {}; }
+  }
+  return {
+    id: row.id, name: row.name, providerKey: row.provider_key, enabled: row.enabled, sortOrder: row.sort_order,
+    supportedMethods: Array.isArray(row.supported_methods) ? row.supported_methods : [], config,
+    minAmountCents: row.min_amount_cents, maxAmountCents: row.max_amount_cents, dailyLimitCents: Number(row.daily_limit_cents),
+    refundEnabled: row.refund_enabled, lastHealthStatus: row.last_health_status,
+    lastHealthCheckedAt: row.last_health_checked_at, lastWebhookAt: row.last_webhook_at, lastError: row.last_error,
+  };
+}
+
+const paymentProviderSelect = `id, name, provider_key, enabled, sort_order, supported_methods, config_encrypted,
+  min_amount_cents, max_amount_cents, daily_limit_cents, refund_enabled, last_health_status,
+  last_health_checked_at, last_webhook_at, last_error`;
+
+export async function tryListPaymentProviders(options: { includeSecrets?: boolean } = {}) {
+  try {
+    const result = await query<Parameters<typeof mapPaymentProvider>[0]>(
+      `select ${paymentProviderSelect} from payment_provider_instances order by sort_order asc, created_at asc`,
+    );
+    return result.rows.map((row) => mapPaymentProvider(row, options.includeSecrets));
+  } catch { return []; }
+}
+
+export async function tryGetPaymentProvider(id: string, includeSecrets = false) {
+  try {
+    const result = await query<Parameters<typeof mapPaymentProvider>[0]>(
+      `select ${paymentProviderSelect} from payment_provider_instances where id = $1`, [id],
+    );
+    return result.rows[0] ? mapPaymentProvider(result.rows[0], includeSecrets) : null;
+  } catch { return null; }
+}
+
+export async function tryUpsertPaymentProvider(input: {
+  id?: string; name: string; providerKey: PaymentProviderKey; enabled: boolean; sortOrder: number;
+  supportedMethods: string[]; config?: Record<string, string>; existingConfig?: Record<string, string>;
+  minAmountCents: number; maxAmountCents: number; dailyLimitCents: number; refundEnabled: boolean;
+}) {
+  try {
+    const current = input.id ? await tryGetPaymentProvider(input.id, true) : null;
+    const config = { ...(current?.config ?? input.existingConfig ?? {}), ...(input.config ?? {}) };
+    const encrypted = encryptSettingSecret(JSON.stringify(config));
+    const result = await query<Parameters<typeof mapPaymentProvider>[0]>(
+      `insert into payment_provider_instances(id, name, provider_key, enabled, sort_order, supported_methods, config_encrypted, min_amount_cents, max_amount_cents, daily_limit_cents, refund_enabled, updated_at)
+       values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, now())
+       on conflict (id) do update set name=excluded.name, provider_key=excluded.provider_key, enabled=excluded.enabled,
+         sort_order=excluded.sort_order, supported_methods=excluded.supported_methods, config_encrypted=excluded.config_encrypted,
+         min_amount_cents=excluded.min_amount_cents, max_amount_cents=excluded.max_amount_cents, daily_limit_cents=excluded.daily_limit_cents,
+         refund_enabled=excluded.refund_enabled, updated_at=now()
+       returning ${paymentProviderSelect}`,
+      [input.id ?? null, input.name, input.providerKey, input.enabled, input.sortOrder, JSON.stringify(input.supportedMethods), encrypted, input.minAmountCents, input.maxAmountCents, input.dailyLimitCents, input.refundEnabled],
+    );
+    return result.rows[0] ? mapPaymentProvider(result.rows[0]) : null;
+  } catch { return null; }
+}
+
+export async function tryDeletePaymentProvider(id: string) {
+  try { await query("delete from payment_provider_instances where id = $1", [id]); return true; } catch { return false; }
+}
+
+export async function trySelectPaymentProvider(input: { method: string; amountCents: number; strategy: SystemSettings["payment"]["loadBalanceStrategy"] }) {
+  const providers = (await tryListPaymentProviders()).filter((provider) => provider.enabled && provider.supportedMethods.includes(input.method)
+    && input.amountCents >= provider.minAmountCents && (provider.maxAmountCents <= 0 || input.amountCents <= provider.maxAmountCents));
+  if (providers.length === 0) return null;
+  if (input.strategy === "least_amount") {
+    providers.sort((a, b) => a.dailyLimitCents - b.dailyLimitCents || a.sortOrder - b.sortOrder);
+  }
+  return providers[0];
 }
 
 export async function tryGetTodayPaidAmountCents(userId: string, timezone = "Asia/Shanghai") {
@@ -897,6 +1010,80 @@ export async function tryMarkOrderPaidByProvider(input: { provider: string; prov
   }
 }
 
+export async function tryMarkOrderCompleted(orderId: string) {
+  try {
+    const result = await query<{ id: string; status: string; completed_at: string }>(
+      `update orders set status='completed', completed_at=coalesce(completed_at, now()), credit_granted_at=coalesce(credit_granted_at, now())
+       where id=$1 and status in ('paid','completed') returning id, status, completed_at`, [orderId],
+    );
+    return result.rows[0] ?? null;
+  } catch { return null; }
+}
+
+export async function tryRecordWebhookEvent(input: { providerKey: string; eventId: string; eventType: string; orderId?: string | null; payloadHash?: string }) {
+  try {
+    const result = await query<{ id: string; status: string }>(
+      `insert into payment_webhook_events(provider_key,event_id,event_type,order_id,payload_hash,status)
+       values ($1,$2,$3,$4,$5,'received') on conflict(provider_key,event_id) do update set status='received', attempts=payment_webhook_events.attempts+1
+       where payment_webhook_events.status='failed' returning id,status`,
+      [input.providerKey, input.eventId, input.eventType, input.orderId ?? null, input.payloadHash ?? ""],
+    );
+    return { accepted: Boolean(result.rows[0]), id: result.rows[0]?.id ?? null };
+  } catch { return { accepted: false, id: null }; }
+}
+
+export async function tryFinishWebhookEvent(input: { providerKey: string; eventId: string; status: "processed" | "failed"; errorMessage?: string }) {
+  try {
+    await query(
+      `update payment_webhook_events set status=$3, error_message=$4, attempts=attempts+1, processed_at=case when $3='processed' then now() else processed_at end
+       where provider_key=$1 and event_id=$2`, [input.providerKey, input.eventId, input.status, input.errorMessage ?? ""],
+    );
+    return true;
+  } catch { return false; }
+}
+
+export async function tryGetOrderForCreditRetry(orderId: string) {
+  try {
+    const result = await query<{ id: string; user_id: string; quota_amount: number; status: string; provider: string; provider_order_id: string | null }>(
+      `select id,user_id,quota_amount,status,provider,provider_order_id from orders where id=$1`, [orderId],
+    );
+    return result.rows[0] ?? null;
+  } catch { return null; }
+}
+
+export async function tryUpsertManualReview(input: { orderId: string; userId: string; receiptUrl?: string; userNote?: string }) {
+  try {
+    const result = await query<{ id: string; order_id: string; status: string }>(
+      `insert into payment_manual_reviews(order_id,user_id,receipt_url,user_note) values($1,$2,$3,$4)
+       on conflict(order_id) do update set receipt_url=excluded.receipt_url,user_note=excluded.user_note,updated_at=now()
+       returning id,order_id,status`, [input.orderId, input.userId, input.receiptUrl ?? "", input.userNote ?? ""],
+    );
+    return result.rows[0] ?? null;
+  } catch { return null; }
+}
+
+export async function tryListManualReviews(status?: string) {
+  try {
+    const result = await query<Record<string, unknown>>(
+      `select r.id,r.order_id,r.user_id,r.receipt_url,r.user_note,r.status,r.reviewed_by,r.reviewed_at,r.review_note,r.created_at,
+              o.amount_cents,o.currency,o.quota_amount,o.provider,u.email as user_email,u.name as user_name
+       from payment_manual_reviews r join orders o on o.id=r.order_id join users u on u.id=r.user_id
+       where ($1::text is null or r.status=$1) order by r.created_at desc limit 500`, [status ?? null],
+    );
+    return result.rows;
+  } catch { return []; }
+}
+
+export async function tryReviewManualTransfer(input: { orderId: string; adminUserId: string; status: "approved" | "rejected"; note?: string }) {
+  try {
+    const result = await query<{ order_id: string; status: string }>(
+      `update payment_manual_reviews set status=$2,reviewed_by=$3,reviewed_at=now(),review_note=$4,updated_at=now()
+       where order_id=$1 and status='pending' returning order_id,status`, [input.orderId, input.status, input.adminUserId, input.note ?? ""],
+    );
+    return result.rows[0] ?? null;
+  } catch { return null; }
+}
+
 export async function tryGetOrderByProvider(input: { provider: string; providerOrderId: string }) {
   try {
     const result = await query<{ id: string; user_id: string; quota_amount: number; status: string }>(
@@ -964,6 +1151,16 @@ export async function tryCountPendingOrders(userId: string) {
   }
 }
 
+export async function tryListExpiredPendingOrders(timeoutMinutes: number) {
+  try {
+    const result = await query<{ id: string; provider: string; provider_order_id: string | null }>(
+      `update orders set status='expired', expired_at=now() where status='pending' and created_at < now() - ($1 || ' minutes')::interval
+       returning id,provider,provider_order_id`, [timeoutMinutes],
+    );
+    return result.rows;
+  } catch { return []; }
+}
+
 export async function tryListAdminOrders(limit = 100) {
   try {
     const result = await query<{
@@ -1006,7 +1203,10 @@ export async function tryUpdateAdminOrderStatus(input: { orderId: string; status
       `update orders
        set status = $2,
            paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end,
-           refunded_at = case when $2 = 'refunded' then now() else refunded_at end
+           refunded_at = case when $2 = 'refunded' then now() else refunded_at end,
+           completed_at = case when $2 = 'completed' then coalesce(completed_at, now()) else completed_at end,
+           expired_at = case when $2 = 'expired' then now() else expired_at end,
+           cancelled_at = case when $2 = 'cancelled' then now() else cancelled_at end
        where id = $1
          and ($3::text is null or status = $3)
        returning id, status, paid_at`,
@@ -1059,12 +1259,19 @@ export async function tryListUsageLogs(userId: string | null) {
       quota_cost: number;
       model: string | null;
       metadata: Record<string, unknown>;
+      work_id: string | null;
+      work_title: string | null;
+      app_slug: string | null;
       created_at: string;
     }>(
-      `select id, action_type, quota_cost, model, metadata, created_at
-       from usage_logs
-       where user_id = $1
-       order by created_at desc
+      `select l.id, l.action_type, l.quota_cost, l.model, l.metadata, l.created_at,
+              coalesce(w.id::text, nullif(l.metadata ->> 'workId', '')) as work_id,
+              w.title as work_title,
+              nullif(l.metadata ->> 'appSlug', '') as app_slug
+       from usage_logs l
+       left join works w on w.id::text = l.metadata ->> 'workId'
+       where l.user_id = $1
+       order by l.created_at desc
        limit 100`,
       [userId],
     );
@@ -1575,8 +1782,6 @@ export async function trySyncCreationCatalog() {
           app.featured ?? false,
           JSON.stringify({
             promptHint: app.promptHint,
-            exampleTitle: app.exampleTitle ?? "",
-            exampleSummary: app.exampleSummary ?? "",
           }),
           index,
         ],
@@ -1625,41 +1830,7 @@ export async function trySyncCreationCatalog() {
       }
     }
 
-    for (const [index, example] of creationExamples.entries()) {
-      await query(
-        `insert into app_examples(app_id, slug, title, summary, content_json, status, sort_order)
-         values (
-           (select id from apps where slug = $1 limit 1),
-           $2, $3, $4, $5::jsonb, 'active', $6
-         )
-         on conflict (slug) do update set
-           app_id = (select id from apps where slug = $1 limit 1),
-           title = excluded.title,
-           summary = excluded.summary,
-           content_json = excluded.content_json,
-           sort_order = excluded.sort_order,
-           updated_at = now()`,
-        [
-          example.appSlug,
-          example.slug,
-          example.title,
-          example.summary,
-          JSON.stringify({
-            appSlug: example.appSlug,
-            intro: example.intro,
-            highlight: example.highlight ?? "",
-            ctaLabel: example.ctaLabel ?? "",
-            tabs: example.tabs ?? [],
-            linkedExamples: example.linkedExamples ?? [],
-            exampleType: example.exampleType ?? "text",
-            sections: example.sections,
-            outputs: example.outputs ?? [],
-            imageResults: example.imageResults ?? [],
-          }),
-          index,
-        ],
-      );
-    }
+    await query("delete from app_examples");
 
     return true;
   } catch {
@@ -1752,8 +1923,6 @@ export async function tryListCreationCatalog() {
       description: row.description,
       promptHint: typeof row.metadata?.promptHint === "string" ? row.metadata.promptHint : "",
       resultType: row.result_type,
-      exampleTitle: typeof row.metadata?.exampleTitle === "string" ? row.metadata.exampleTitle : undefined,
-      exampleSummary: typeof row.metadata?.exampleSummary === "string" ? row.metadata.exampleSummary : undefined,
       fields: fieldsByAppId.get(row.id) ?? [],
     }));
 
@@ -1842,72 +2011,6 @@ export async function tryUpdateAdminCreationApp(input: {
 export async function tryGetCreationAppBySlug(slug: string) {
   const catalog = await tryListCreationCatalog();
   return catalog.apps.find((app) => app.slug === slug) ?? null;
-}
-
-export async function tryGetCreationExampleBySlug(slug: string) {
-  try {
-    const row = await query<{
-      slug: string;
-      title: string;
-      summary: string;
-      content_json: {
-        appSlug?: string;
-        intro?: string;
-        highlight?: string;
-        ctaLabel?: string;
-        tabs?: string[];
-        linkedExamples?: string[];
-        exampleType?: "text" | "image";
-        sections?: Array<{ id?: string; title: string; body: string; quote?: string }>;
-        outputs?: Array<{
-          id?: string;
-          title: string;
-          tag?: string;
-          body: string;
-          quote?: string;
-          viewMode?: "plain" | "wechat";
-          children?: Array<{ id?: string; title: string; body: string; quote?: string }>;
-        }>;
-        imageResults?: Array<{
-          id?: string;
-          title: string;
-          imageUrl: string;
-          badge?: string;
-          ratio?: string;
-          prompt?: string;
-        }>;
-      };
-    }>(
-      `select slug, title, summary, content_json
-       from app_examples
-       where slug = $1 and status = 'active'
-       limit 1`,
-      [slug],
-    );
-
-    if (row.rows[0]) {
-      return {
-        slug: row.rows[0].slug,
-        appSlug: row.rows[0].content_json?.appSlug ?? "",
-        title: row.rows[0].title,
-        summary: row.rows[0].summary,
-        intro: row.rows[0].content_json?.intro ?? "",
-        highlight: row.rows[0].content_json?.highlight ?? "",
-        ctaLabel: row.rows[0].content_json?.ctaLabel ?? "",
-        tabs: Array.isArray(row.rows[0].content_json?.tabs) ? row.rows[0].content_json.tabs : [],
-        linkedExamples: Array.isArray(row.rows[0].content_json?.linkedExamples) ? row.rows[0].content_json.linkedExamples : [],
-        exampleType: (row.rows[0].content_json?.exampleType === "image" ? "image" : "text") as "image" | "text",
-        sections: Array.isArray(row.rows[0].content_json?.sections) ? row.rows[0].content_json.sections : [],
-        outputs: Array.isArray(row.rows[0].content_json?.outputs) ? row.rows[0].content_json.outputs : [],
-        imageResults: Array.isArray(row.rows[0].content_json?.imageResults) ? row.rows[0].content_json.imageResults : [],
-      };
-    }
-  } catch {
-    // Fallback below.
-  }
-
-  const fallback = creationExamples.find((example) => example.slug === slug);
-  return fallback ?? null;
 }
 
 export async function tryGetAdminSummary() {
@@ -2413,6 +2516,211 @@ export async function tryGetAdminContentOverview() {
         quota_total: Number(row.quota_total ?? 0),
       })),
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function tryListPublishedViralContents(limit = 24) {
+  try {
+    const result = await query<{
+      id: string; title: string; platform: string; content_type: string; category: string;
+      tags: unknown; source_url: string; source_title: string; source_author: string;
+      thumbnail_url: string | null; media_url: string | null; embed_url: string | null;
+      article_body: string; summary: string; metric_label: string; metric_value: number | null;
+      metric_unit: string; insight: string; creation_scenes: unknown; risk_note: string;
+      status: string; is_pinned: boolean; is_featured: boolean; sort_order: number;
+      publish_at: string | null; expire_at: string | null; updated_at: string;
+      source_type: string; example_type: string; viral_score: number; fetched_at: string | null;
+    }>(
+      `select id, title, platform, content_type, category, tags, source_url, source_title,
+              source_author, thumbnail_url, media_url, embed_url, article_body, summary,
+              metric_label, metric_value, metric_unit, insight, creation_scenes, risk_note,
+              status, is_pinned, is_featured, sort_order, publish_at, expire_at, updated_at,
+              source_type, example_type, viral_score, fetched_at
+       from viral_contents
+       where source_type = 'manual'
+         and status = 'published'
+         and (publish_at is null or publish_at <= now())
+         and (expire_at is null or expire_at > now())
+       order by is_pinned desc, is_featured desc,
+                viral_score desc, sort_order asc, coalesce(publish_at, fetched_at, updated_at) desc
+       limit $1`,
+      [Math.min(Math.max(limit, 1), 100)],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryGetViralExampleCache() {
+  try {
+    const result = await query<{ items: unknown; fetched_at: string }>(
+      "select items, fetched_at from viral_example_cache where cache_key = 'public' limit 1",
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function trySaveViralExampleCache(items: unknown[]) {
+  try {
+    await query(
+      `insert into viral_example_cache(cache_key, items, fetched_at, updated_at)
+       values ('public', $1::jsonb, now(), now())
+       on conflict (cache_key) do update set items = excluded.items, fetched_at = excluded.fetched_at, updated_at = now()`,
+      [JSON.stringify(items)],
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function tryListAdminViralContents() {
+  try {
+    const result = await query<Record<string, unknown>>(
+      `select vc.*, coalesce(u.email, '') as updated_by_email
+       from viral_contents vc
+       left join users u on u.id = vc.updated_by
+       where vc.source_type = 'manual'
+       order by vc.is_pinned desc, vc.is_featured desc, vc.sort_order asc, vc.updated_at desc`,
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export type AdminViralCreator = {
+  id: string;
+  platform: string;
+  display_name: string;
+  profile_url: string | null;
+  bio: string;
+  status: string;
+  relevance_score: number;
+  quality_score: number;
+  discovery_evidence_count: number;
+  follower_count: number | null;
+  platform_work_count: number | null;
+  is_verified: boolean;
+  source_kind: string;
+  discovery_query: string | null;
+  refresh_status: string;
+  last_discovered_at: string;
+  last_refreshed_at: string | null;
+  discovered_work_count: number;
+  work_count: number;
+  latest_work_at: string | null;
+};
+
+export async function tryListAdminViralCreators() {
+  try {
+    const result = await query<AdminViralCreator>(
+      `select vc.id, vc.platform, vc.display_name, vc.profile_url, vc.bio, vc.status,
+              vc.relevance_score, vc.quality_score, vc.discovery_evidence_count, vc.follower_count,
+              vc.platform_work_count, vc.is_verified, vc.source_kind, vc.discovery_query, vc.refresh_status,
+              vc.last_discovered_at, vc.last_refreshed_at, vc.discovered_work_count,
+              count(vw.id)::integer as work_count, max(coalesce(vw.published_at, vw.last_seen_at)) as latest_work_at
+       from viral_creators vc
+       left join viral_works vw on vw.creator_id = vc.id
+       group by vc.id
+       order by case vc.status when 'active' then 0 when 'paused' then 1 else 2 end,
+                vc.relevance_score desc, vc.last_discovered_at desc`,
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryUpdateAdminViralCreatorStatus(id: string, status: "active" | "paused" | "excluded") {
+  try {
+    const result = await query<AdminViralCreator>(
+      `update viral_creators
+       set status = $2, updated_at = now()
+       where id = $1
+       returning id, platform, display_name, profile_url, bio, status, relevance_score,
+                 quality_score, discovery_evidence_count, follower_count, platform_work_count, is_verified,
+                 source_kind, discovery_query, refresh_status, last_discovered_at,
+                 last_refreshed_at, discovered_work_count, 0::integer as work_count,
+                 null::timestamptz as latest_work_at`,
+      [id, status],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryUpdateAdminViralCreatorStatuses(ids: string[], status: "active" | "paused" | "excluded") {
+  try {
+    const result = await query<{ id: string; display_name: string }>(
+      `update viral_creators
+       set status = $2, updated_at = now()
+       where id = any($1::uuid[])
+       returning id, display_name`,
+      [ids, status],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryUpsertAdminViralContent(input: {
+  id?: string; title: string; platform: string; contentType: string; category: string;
+  tags: string[]; sourceUrl: string; sourceTitle?: string; sourceAuthor?: string;
+  thumbnailUrl?: string | null; mediaUrl?: string | null; embedUrl?: string | null;
+  articleBody?: string; summary?: string; metricLabel?: string; metricValue?: number | null;
+  metricUnit?: string; insight?: string; creationScenes?: string[]; riskNote?: string;
+  status: string; isPinned?: boolean; isFeatured?: boolean; sortOrder?: number;
+  publishAt?: string | null; expireAt?: string | null; updatedBy: string;
+}) {
+  try {
+    const result = await query<Record<string, unknown>>(
+      `insert into viral_contents
+        (id, title, platform, content_type, category, tags, source_url, source_title, source_author,
+         thumbnail_url, media_url, embed_url, article_body, summary, metric_label, metric_value,
+         metric_unit, insight, creation_scenes, risk_note, status, is_pinned, is_featured,
+         sort_order, publish_at, expire_at, created_by, updated_by, reviewed_by)
+       values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6::jsonb, $7, $8, $9,
+         $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23,
+         $24, $25, $26, $27, $27, case when $21 = 'published' then $27 else null end)
+       on conflict (id) do update set
+         title = excluded.title, platform = excluded.platform, content_type = excluded.content_type,
+         category = excluded.category, tags = excluded.tags, source_url = excluded.source_url,
+         source_title = excluded.source_title, source_author = excluded.source_author,
+         thumbnail_url = excluded.thumbnail_url, media_url = excluded.media_url, embed_url = excluded.embed_url,
+         article_body = excluded.article_body, summary = excluded.summary, metric_label = excluded.metric_label,
+         metric_value = excluded.metric_value, metric_unit = excluded.metric_unit, insight = excluded.insight,
+         creation_scenes = excluded.creation_scenes, risk_note = excluded.risk_note, status = excluded.status,
+         is_pinned = excluded.is_pinned, is_featured = excluded.is_featured, sort_order = excluded.sort_order,
+         publish_at = excluded.publish_at, expire_at = excluded.expire_at, updated_by = excluded.updated_by,
+         reviewed_by = case when excluded.status = 'published' then excluded.updated_by else viral_contents.reviewed_by end,
+         updated_at = now()
+       returning *`,
+      [input.id ?? null, input.title, input.platform, input.contentType, input.category, JSON.stringify(input.tags), input.sourceUrl,
+        input.sourceTitle ?? '', input.sourceAuthor ?? '', input.thumbnailUrl ?? null, input.mediaUrl ?? null, input.embedUrl ?? null,
+        input.articleBody ?? '', input.summary ?? '', input.metricLabel ?? '热度待核验', input.metricValue ?? null, input.metricUnit ?? '',
+        input.insight ?? '', JSON.stringify(input.creationScenes ?? []), input.riskNote ?? '', input.status, input.isPinned ?? false,
+        input.isFeatured ?? false, input.sortOrder ?? 0, input.publishAt ?? null, input.expireAt ?? null, input.updatedBy],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryUpdateAdminViralContentStatus(id: string, status: string) {
+  try {
+    const result = await query<Record<string, unknown>>(
+      `update viral_contents set status = $2, updated_at = now() where id = $1 returning *`, [id, status],
+    );
+    return result.rows[0] ?? null;
   } catch {
     return null;
   }

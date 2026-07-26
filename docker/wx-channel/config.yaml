@@ -1,0 +1,14 @@
+# Based on nobiyou/wx_channel (MIT). This container is intentionally local-only:
+# the proxy injects the upstream open-source page adapter into a logged-in
+# Video Channels page, while the HTTP API is reachable only on the Compose network.
+port: 2025
+download_dir: /data/downloads
+records_file: records.csv
+cert_file: SunnyRoot.cer
+cloud_enabled: false
+radar_enabled: false
+metrics_enabled: false
+allowed_origins:
+  - "https://channels.weixin.qq.com"
+  - "https://weixin.qq.com"
+cert_install_delay: 0

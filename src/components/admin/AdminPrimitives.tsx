@@ -179,6 +179,8 @@ export function AdminEmptyState({ title, description }: { title: string; descrip
 export function AdminStatus({ value }: { value: string }) {
   const labels: Record<string, string> = {
     active: "正常",
+    paused: "已暂停",
+    excluded: "已排除",
     inactive: "已停用",
     suspended: "已停用",
     paid: "已支付",

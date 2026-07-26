@@ -89,6 +89,24 @@ type AdminAppUsage = {
   quota_total: number;
 };
 
+type AdminViralContent = {
+  id: string; title: string; platform: string; content_type: string; category: string; tags: string[];
+  source_url: string; source_title: string; source_author: string; thumbnail_url: string | null;
+  media_url: string | null; embed_url: string | null; article_body: string; summary: string;
+  metric_label: string; metric_value: number | null; metric_unit: string; insight: string;
+  creation_scenes: string[]; risk_note: string; status: string; is_pinned: boolean; is_featured: boolean;
+  sort_order: number; publish_at: string | null; expire_at: string | null; updated_at: string;
+};
+
+type AdminViralCreator = {
+  id: string; platform: string; display_name: string; profile_url: string | null; bio: string;
+  status: "active" | "paused" | "excluded" | string; relevance_score: number; source_kind: string;
+  quality_score: number; discovery_evidence_count: number; follower_count: number | null;
+  platform_work_count: number | null; is_verified: boolean;
+  discovery_query: string | null; refresh_status: string; last_discovered_at: string; last_refreshed_at: string | null;
+  discovered_work_count: number; work_count: number; latest_work_at: string | null;
+};
+
 type AdminAppRun = {
   id: string; status: string; error_message: string | null; quota_cost: number; model: string | null; created_at: string; completed_at: string | null; app_name: string | null; app_slug: string | null; user_email: string | null; work_id: string | null;
 };
@@ -252,10 +270,13 @@ type AffiliateRecord = {
 };
 
 type AffiliateLedgerRecord = { id: string; action: string; credits: number; created_at: string; source_order_id: string | null; user_email: string; source_email: string | null };
+type AffiliateStats = { visits: number; invitees: number; payers: number; accruedCredits: number };
 type SettingsTab = "general" | "legal" | "features" | "security" | "defaults" | "services" | "runtime" | "payment" | "email" | "backup";
 type ServiceHealth = { checks: Array<{ key: string; label: string; ok: boolean; required: boolean; latencyMs: number; error: string }>; lastStripeWebhook: { lastWebhookAt?: string; lastEventType?: string } | null; checkedAt: string };
 type ModelRuntimeStatus = { events: Array<{ id: string; provider: string; model: string; outcome: string; latency_ms: number; error_message: string; created_at: string }>; circuit: { failures: number; openUntil: number } };
 type BackupRecord = { id: string; filename: string; status: string; size_bytes: number; table_count: number; row_count: number; checksum: string; error_message: string | null; remote_key: string | null; remote_status: string; expires_at: string | null; trigger_type: string; created_at: string; completed_at: string | null; restored_at: string | null };
+type PaymentProvider = { id: string; name: string; providerKey: "stripe" | "airwallex" | "easypay" | "alipay" | "wxpay"; enabled: boolean; sortOrder: number; supportedMethods: string[]; config: Record<string, string>; minAmountCents: number; maxAmountCents: number; dailyLimitCents: number; refundEnabled: boolean; lastHealthStatus: string; lastError: string };
+type PaymentProviderForm = { id: string; name: string; providerKey: PaymentProvider["providerKey"]; enabled: boolean; sortOrder: number; supportedMethods: string; secretKey: string; publishableKey: string; webhookSecret: string; currency: string; configJson?: string };
 
 const defaultSettings = structuredClone(defaultSystemSettings) as Settings;
 const settingsTabs: Array<[SettingsTab, string]> = [['general','通用设置'],['legal','登录条款'],['features','功能开关'],['security','安全认证'],['defaults','用户默认值'],['services','服务状态'],['runtime','模型运行'],['payment','支付设置'],['email','邮件设置'],['backup','数据备份']];
@@ -277,6 +298,7 @@ export function AdminPageClient() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [affiliateRecords, setAffiliateRecords] = useState<AffiliateRecord[]>([]);
   const [affiliateLedger, setAffiliateLedger] = useState<AffiliateLedgerRecord[]>([]);
+  const [affiliateStats, setAffiliateStats] = useState<AffiliateStats>({ visits: 0, invitees: 0, payers: 0, accruedCredits: 0 });
   const [tab, setTab] = useState<AdminSectionId>("overview");
   const [error, setError] = useState("");
   const [userSearch, setUserSearch] = useState("");
@@ -295,13 +317,21 @@ export function AdminPageClient() {
   const [toast, setToast] = useState<AdminToastMessage | null>(null);
   const [confirmConfig, setConfirmConfig] = useState<AdminConfirmConfig | null>(null);
   const [confirmText, setConfirmText] = useState("");
-  const [contentView, setContentView] = useState<"works" | "apps" | "runs" | "compliance">("works");
+  const [viralContents, setViralContents] = useState<AdminViralContent[]>([]);
+  const [viralCreators, setViralCreators] = useState<AdminViralCreator[]>([]);
+  const [creatorSearch, setCreatorSearch] = useState("");
+  const [creatorPlatformFilter, setCreatorPlatformFilter] = useState("all");
+  const [creatorStatusFilter, setCreatorStatusFilter] = useState("all");
+  const [creatorSort, setCreatorSort] = useState<"relevance" | "recent" | "works">("relevance");
+  const [selectedCreatorIds, setSelectedCreatorIds] = useState<string[]>([]);
+  const [contentView, setContentView] = useState<"works" | "apps" | "runs" | "compliance" | "viral" | "creators">("works");
   const [commerceView, setCommerceView] = useState<"orders" | "plans" | "promos">("orders");
   const [supportView, setSupportView] = useState<"tickets" | "audit">("tickets");
   const [pageSize, setPageSize] = useState(20);
   const [pages, setPages] = useState<Partial<Record<AdminSectionId, number>>>({});
   const [settingsBaseline, setSettingsBaseline] = useState<Settings>(defaultSettings);
   const [announcementDrawerOpen, setAnnouncementDrawerOpen] = useState(false);
+  const [viralDrawerOpen, setViralDrawerOpen] = useState(false);
   const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
   const [promoDrawerOpen, setPromoDrawerOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<FeedbackTicket | null>(null);
@@ -312,6 +342,8 @@ export function AdminPageClient() {
   const [serviceHealth, setServiceHealth] = useState<ServiceHealth | null>(null);
   const [modelRuntime, setModelRuntime] = useState<ModelRuntimeStatus | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
+  const [paymentProviders, setPaymentProviders] = useState<PaymentProvider[]>([]);
+  const [providerForm, setProviderForm] = useState<PaymentProviderForm>({ id: "", name: "", providerKey: "stripe", enabled: false, sortOrder: 0, supportedMethods: "card", secretKey: "", publishableKey: "", webhookSecret: "", currency: "CNY", configJson: "{}" });
   const [turnstileSecret, setTurnstileSecret] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
   const [testEmailRecipient, setTestEmailRecipient] = useState("");
@@ -325,7 +357,7 @@ export function AdminPageClient() {
       const view = params.get("view");
       setTab(nextTab);
       if (nextTab === "users") setUserSearch(params.get("q") ?? "");
-      if (nextTab === "content" && ["works", "apps", "runs", "compliance"].includes(view ?? "")) setContentView(view as typeof contentView);
+      if (nextTab === "content" && ["works", "apps", "runs", "compliance", "viral", "creators"].includes(view ?? "")) setContentView(view as typeof contentView);
       if (nextTab === "commerce") {
         setOrderSearch(params.get("q") ?? "");
         setOrderStatusFilter(params.get("status") ?? "all");
@@ -354,6 +386,12 @@ export function AdminPageClient() {
     isPinned: false,
     linkUrl: "",
   });
+  const [viralForm, setViralForm] = useState({
+    id: "", title: "", platform: "抖音", contentType: "短视频", category: "健康医疗", tags: "",
+    sourceUrl: "", sourceTitle: "", sourceAuthor: "", thumbnailUrl: "", mediaUrl: "", articleBody: "",
+    summary: "", metricLabel: "热度待核验", metricValue: "", metricUnit: "", insight: "", creationScenes: "",
+    riskNote: "", status: "draft", isPinned: false, isFeatured: false, sortOrder: "0", publishAt: "", expireAt: "",
+  });
   const [promoForm, setPromoForm] = useState({
     code: "",
     rewardType: "credit",
@@ -375,7 +413,14 @@ export function AdminPageClient() {
     setError("");
     async function read<T>(path: string): Promise<T> {
       const response = await fetch(apiPath(path), { signal });
-      const payload = await response.json() as T & { error?: string };
+      const raw = await response.text();
+      let payload: (T & { error?: string }) | null = null;
+      try {
+        payload = raw ? JSON.parse(raw) as T & { error?: string } : null;
+      } catch {
+        throw new Error(`${path} 返回了无效响应（HTTP ${response.status}）`);
+      }
+      if (!payload) throw new Error(`${path} 返回了空响应（HTTP ${response.status}）`);
       if (!response.ok) throw new Error(payload.error ?? "后台数据加载失败");
       return payload;
     }
@@ -388,14 +433,18 @@ export function AdminPageClient() {
         const payload = await read<{ users?: AdminUser[] }>("/api/admin/users?limit=200");
         setUsers(payload.users ?? []);
       } else if (section === "content") {
-        const [contentPayload, appsPayload, runsPayload] = await Promise.all([
+        const [contentPayload, appsPayload, runsPayload, viralPayload, creatorsPayload] = await Promise.all([
           read<{ content?: ContentOverview }>("/api/admin/content"),
           read<{ apps?: AdminCreationApp[] }>("/api/admin/apps"),
           read<{ runs?: AdminAppRun[] }>("/api/admin/runs?limit=200"),
+          read<{ contents?: AdminViralContent[] }>("/api/admin/viral-contents"),
+          read<{ creators?: AdminViralCreator[] }>("/api/admin/viral-creators"),
         ]);
         setContentOverview(contentPayload.content ?? null);
         setCreationApps(appsPayload.apps ?? []);
         setAppRuns(runsPayload.runs ?? []);
+        setViralContents(viralPayload.contents ?? []);
+        setViralCreators(creatorsPayload.creators ?? []);
       } else if (section === "commerce") {
         const [summaryPayload, ordersPayload, plansPayload, promosPayload] = await Promise.all([
           read<{ summary?: Summary }>("/api/admin/summary"),
@@ -418,10 +467,11 @@ export function AdminPageClient() {
         setFeedbackTickets(feedbackPayload.tickets ?? []);
         setAuditLogs(auditPayload.logs ?? []);
       } else if (section === "settings") {
-        const [settingsPayload, affiliatesPayload, backupsPayload] = await Promise.all([
+        const [settingsPayload, affiliatesPayload, backupsPayload, providersPayload] = await Promise.all([
           read<{ settings?: Settings }>("/api/admin/settings"),
-          read<{ records?: AffiliateRecord[]; ledger?: AffiliateLedgerRecord[] }>("/api/admin/affiliates"),
+          read<{ records?: AffiliateRecord[]; ledger?: AffiliateLedgerRecord[]; stats?: AffiliateStats }>("/api/admin/affiliates"),
           read<{ backups?: BackupRecord[] }>("/api/admin/backups"),
+          read<{ providers?: PaymentProvider[] }>("/api/admin/payment-providers"),
         ]);
         const nextSettings = settingsPayload.settings ?? defaultSettings;
         setSettings(nextSettings);
@@ -429,7 +479,9 @@ export function AdminPageClient() {
         setPageSize(nextSettings.ui.tableDefaultPageSize);
         setAffiliateRecords(affiliatesPayload.records ?? []);
         setAffiliateLedger(affiliatesPayload.ledger ?? []);
+        setAffiliateStats(affiliatesPayload.stats ?? { visits: 0, invitees: 0, payers: 0, accruedCredits: 0 });
         setBackups(backupsPayload.backups ?? []);
+        setPaymentProviders(providersPayload.providers ?? []);
       }
       setLoadedSections((current) => ({ ...current, [section]: true }));
       setLastUpdatedAt(new Date());
@@ -528,6 +580,47 @@ export function AdminPageClient() {
     }
     await loadSection("content");
     showToast("创作应用已更新");
+  }
+
+  async function saveViralContent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const toIso = (value: string) => value ? new Date(value).toISOString() : null;
+    const response = await fetch(apiPath("/api/admin/viral-contents"), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: viralForm.id || undefined, title: viralForm.title, platform: viralForm.platform, contentType: viralForm.contentType,
+        category: viralForm.category, tags: viralForm.tags.split(/[、,\s]+/).map((item) => item.trim()).filter(Boolean), sourceUrl: viralForm.sourceUrl,
+        sourceTitle: viralForm.sourceTitle, sourceAuthor: viralForm.sourceAuthor, thumbnailUrl: viralForm.thumbnailUrl,
+        mediaUrl: viralForm.mediaUrl, articleBody: viralForm.articleBody, summary: viralForm.summary, metricLabel: viralForm.metricLabel,
+        metricValue: viralForm.metricValue ? Number(viralForm.metricValue) : null, metricUnit: viralForm.metricUnit, insight: viralForm.insight,
+        creationScenes: viralForm.creationScenes.split(/[、,\s]+/).map((item) => item.trim()).filter(Boolean), riskNote: viralForm.riskNote,
+        status: viralForm.status, isPinned: viralForm.isPinned, isFeatured: viralForm.isFeatured, sortOrder: Number(viralForm.sortOrder) || 0,
+        publishAt: toIso(viralForm.publishAt), expireAt: toIso(viralForm.expireAt),
+      }),
+    });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) return showToast(payload.error ?? "爆款资源保存失败", "error");
+    setViralDrawerOpen(false);
+    await loadSection("content");
+    showToast("爆款资源已保存");
+  }
+
+  async function updateViralContentStatus(id: string, status: string) {
+    const response = await fetch(apiPath("/api/admin/viral-contents"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, status }) });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) return showToast(payload.error ?? "爆款资源状态更新失败", "error");
+    await loadSection("content");
+    showToast("爆款资源状态已更新");
+  }
+
+  async function updateViralCreatorStatus(ids: string[], status: "active" | "paused" | "excluded") {
+    const response = await fetch(apiPath("/api/admin/viral-creators"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids, status }) });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) return showToast(payload.error ?? "作者状态更新失败", "error");
+    setSelectedCreatorIds([]);
+    await loadSection("content");
+    const countLabel = ids.length > 1 ? `${ids.length} 位作者` : "作者";
+    showToast(status === "active" ? `已将${countLabel}加入重点跟踪` : status === "paused" ? `已暂停${countLabel}跟踪` : `已将${countLabel}从候选池排除`);
   }
 
   async function terminateRun(runId: string) {
@@ -703,6 +796,35 @@ export function AdminPageClient() {
     showToast("系统配置已保存");
   }
 
+  async function savePaymentProvider(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    let extraConfig: Record<string, string> = {};
+    try { extraConfig = JSON.parse(providerForm.configJson || "{}"); } catch { return showToast("服务商 JSON 配置格式不正确", "error"); }
+    const response = await fetch(apiPath("/api/admin/payment-providers"), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: providerForm.id || undefined, name: providerForm.name, providerKey: providerForm.providerKey,
+        enabled: providerForm.enabled, sortOrder: providerForm.sortOrder,
+        supportedMethods: providerForm.supportedMethods.split(",").map((item) => item.trim()).filter(Boolean),
+        config: { ...extraConfig, ...(providerForm.providerKey === "stripe" ? { secretKey: providerForm.secretKey, publishableKey: providerForm.publishableKey, webhookSecret: providerForm.webhookSecret, currency: providerForm.currency } : {}) },
+        minAmountCents: 0, maxAmountCents: 0, dailyLimitCents: 0, refundEnabled: false,
+      }),
+    });
+    const payload = await response.json() as { provider?: PaymentProvider; error?: string };
+    if (!response.ok) return showToast(payload.error ?? "支付服务商保存失败", "error");
+    setPaymentProviders((current) => payload.provider ? [...current.filter((item) => item.id !== payload.provider?.id), payload.provider] : current);
+    setProviderForm({ id: "", name: "", providerKey: "stripe", enabled: false, sortOrder: 0, supportedMethods: "card", secretKey: "", publishableKey: "", webhookSecret: "", currency: "CNY", configJson: "{}" });
+    showToast("支付服务商已保存");
+  }
+
+  async function deletePaymentProvider(id: string) {
+    const response = await fetch(apiPath(`/api/admin/payment-providers?id=${encodeURIComponent(id)}`), { method: "DELETE" });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) return showToast(payload.error ?? "支付服务商删除失败", "error");
+    setPaymentProviders((current) => current.filter((item) => item.id !== id));
+    showToast("支付服务商已删除");
+  }
+
   async function refreshServiceHealth() {
     setActionKey("services");
     const response = await fetch(apiPath("/api/admin/services"));
@@ -778,6 +900,16 @@ export function AdminPageClient() {
     return matchesStatus && (!keyword || `${order.user_email} ${order.user_name} ${order.provider} ${order.id}`.toLowerCase().includes(keyword));
   });
   const filteredCreationApps = creationApps.filter((app) => appStatusFilter === "all" || app.status === appStatusFilter);
+  const filteredViralCreators = viralCreators.filter((creator) => {
+    const matchesPlatform = creatorPlatformFilter === "all" || creator.platform === creatorPlatformFilter;
+    const matchesStatus = creatorStatusFilter === "all" || creator.status === creatorStatusFilter;
+    const keyword = creatorSearch.trim().toLowerCase();
+    return matchesPlatform && matchesStatus && (!keyword || `${creator.display_name} ${creator.platform} ${creator.discovery_query ?? ""}`.toLowerCase().includes(keyword));
+  }).sort((left, right) => creatorSort === "recent"
+    ? new Date(right.last_discovered_at).getTime() - new Date(left.last_discovered_at).getTime()
+    : creatorSort === "works"
+      ? right.work_count - left.work_count || right.quality_score - left.quality_score
+      : right.quality_score - left.quality_score || right.relevance_score - left.relevance_score || new Date(right.last_discovered_at).getTime() - new Date(left.last_discovered_at).getTime());
   const filteredFeedbackTickets = feedbackTickets.filter((ticket) => {
     const keyword = feedbackSearch.trim().toLowerCase();
     const matchesStatus = feedbackStatusFilter === "all" || ticket.status === feedbackStatusFilter;
@@ -792,6 +924,7 @@ export function AdminPageClient() {
   const pagedUsers = useMemo(() => pageSlice(filteredUsers), [filteredUsers, pageSlice]);
   const pagedOrders = useMemo(() => pageSlice(filteredOrders), [filteredOrders, pageSlice]);
   const pagedApps = useMemo(() => pageSlice(filteredCreationApps), [filteredCreationApps, pageSlice]);
+  const pagedViralCreators = useMemo(() => pageSlice(filteredViralCreators), [filteredViralCreators, pageSlice]);
   const pagedTickets = useMemo(() => pageSlice(filteredFeedbackTickets), [filteredFeedbackTickets, pageSlice]);
   const pagedAuditLogs = useMemo(() => pageSlice(filteredAuditLogs), [filteredAuditLogs, pageSlice]);
   const settingsDirty = useMemo(() => JSON.stringify(settings) !== JSON.stringify(settingsBaseline) || Boolean(turnstileSecret || emailPassword || s3Secret || fallbackApiKey), [emailPassword, fallbackApiKey, s3Secret, settings, settingsBaseline, turnstileSecret]);
@@ -808,6 +941,8 @@ export function AdminPageClient() {
       downloadAdminCsv(`orders-${stamp}.csv`, [["订单号", "用户", "渠道", "状态", "金额", "点数", "创建时间"], ...filteredOrders.map((order) => [order.id, order.user_email, order.provider, order.status, order.amount_cents / 100, order.quota_amount, order.created_at])]);
     } else if (tab === "support") {
       downloadAdminCsv(`support-${stamp}.csv`, [["标题", "用户", "分类", "优先级", "状态", "更新时间"], ...filteredFeedbackTickets.map((ticket) => [ticket.title, ticket.user_email, ticket.category, ticket.priority, ticket.status, ticket.updated_at])]);
+    } else if (tab === "content" && contentView === "creators") {
+      downloadAdminCsv(`creator-pool-${stamp}.csv`, [["作者", "平台", "状态", "候选质量", "粉丝量", "平台作品", "已入库作品", "认证", "作者简介", "最近发现"], ...filteredViralCreators.map((creator) => [creator.display_name, creator.platform, creator.status, creator.quality_score, creator.follower_count, creator.platform_work_count, creator.work_count, creator.is_verified ? "已认证" : "未认证", creator.bio, creator.last_discovered_at])]);
     } else if (tab === "content") {
       downloadAdminCsv(`apps-${stamp}.csv`, [["应用", "标识", "状态", "点数", "运行次数", "排序"], ...filteredCreationApps.map((app) => [app.name, app.slug, app.status, app.points_cost, app.run_count, app.sort_order])]);
     }
@@ -912,6 +1047,7 @@ export function AdminPageClient() {
         onConfirmTextChange={setConfirmText}
       />
       <section className="adminMainSurface">
+        {tab === "settings" && loadedSections.settings ? <AffiliateStatsStrip stats={affiliateStats} /> : null}
         <div className="adminHeaderBar">
           <div>
             <h1>{adminMenuItems.find((item) => item.id === tab)?.label ?? "管理后台"}</h1>
@@ -1041,15 +1177,17 @@ export function AdminPageClient() {
             <button className={contentView === "apps" ? "active" : ""} onClick={() => setContentView("apps")} role="tab" type="button">应用管理</button>
             <button className={contentView === "runs" ? "active" : ""} onClick={() => setContentView("runs")} role="tab" type="button">运行任务</button>
             <button className={contentView === "compliance" ? "active" : ""} onClick={() => setContentView("compliance")} role="tab" type="button">合规分析</button>
+            <button className={contentView === "viral" ? "active" : ""} onClick={() => setContentView("viral")} role="tab" type="button">爆款资源</button>
+            <button className={contentView === "creators" ? "active" : ""} onClick={() => setContentView("creators")} role="tab" type="button">作者候选池</button>
           </div>
-          <div className="metricGrid adminMetrics">
+          {contentView === "works" ? <div className="metricGrid adminMetrics">
             <Metric label="作品总数" value={contentOverview?.totals.worksTotal ?? 0} />
             <Metric label="已使用作品" value={contentOverview?.totals.worksUsed ?? 0} />
             <Metric label="收藏作品" value={contentOverview?.totals.worksFavorite ?? 0} />
             <Metric label="创作运行" value={contentOverview?.totals.appRunsTotal ?? 0} />
             <Metric label="失败运行" value={contentOverview?.totals.appRunsFailed ?? 0} />
             <Metric label="合规报告" value={contentOverview?.totals.complianceReportsTotal ?? 0} />
-          </div>
+          </div> : null}
 
           {contentView === "works" ? <div className="adminGrid">
             <AdminPanel title="最近作品">
@@ -1153,6 +1291,80 @@ export function AdminPageClient() {
               {appRuns.length === 0 ? <div className="emptyState">当前没有失败或运行中的任务。</div> : null}
             </div>
           </AdminPanel> : null}
+
+          {contentView === "viral" ? <AdminPanel title="爆款资源运营">
+            <AdminToolbar>
+              <span>{viralContents.filter((item) => item.status === "published").length} 条已发布 · 人工内容会优先于自动热榜展示</span>
+              <button className="primaryButton" onClick={() => { setViralForm({ id: "", title: "", platform: "抖音", contentType: "短视频", category: "健康医疗", tags: "", sourceUrl: "", sourceTitle: "", sourceAuthor: "", thumbnailUrl: "", mediaUrl: "", articleBody: "", summary: "", metricLabel: "热度待核验", metricValue: "", metricUnit: "", insight: "", creationScenes: "", riskNote: "", status: "draft", isPinned: false, isFeatured: false, sortOrder: "0", publishAt: "", expireAt: "" }); setViralDrawerOpen(true); }} type="button">新增爆款</button>
+            </AdminToolbar>
+            <div className="tableList">
+              {viralContents.map((item) => <div className="tableRow" key={item.id}>
+                <div><strong>{item.title}</strong><span>{item.platform} · {item.content_type} · {item.category} · {item.is_pinned ? "置顶 · " : ""}{item.is_featured ? "重点推荐 · " : ""}{item.metric_label}{item.metric_value ? ` ${item.metric_value}${item.metric_unit}` : ""}</span><span>{item.insight || "尚未填写推荐角度"}</span></div>
+                <div className="rowActions"><AdminStatus value={item.status} /><button className="secondaryButton" onClick={() => { setViralForm({ id: item.id, title: item.title, platform: item.platform, contentType: item.content_type, category: item.category, tags: item.tags.join("、"), sourceUrl: item.source_url, sourceTitle: item.source_title, sourceAuthor: item.source_author, thumbnailUrl: item.thumbnail_url ?? "", mediaUrl: item.media_url ?? "", articleBody: item.article_body, summary: item.summary, metricLabel: item.metric_label, metricValue: item.metric_value?.toString() ?? "", metricUnit: item.metric_unit, insight: item.insight, creationScenes: item.creation_scenes.join("、"), riskNote: item.risk_note, status: item.status, isPinned: item.is_pinned, isFeatured: item.is_featured, sortOrder: item.sort_order.toString(), publishAt: item.publish_at ? item.publish_at.slice(0, 16) : "", expireAt: item.expire_at ? item.expire_at.slice(0, 16) : "" }); setViralDrawerOpen(true); }} type="button">编辑</button><button className="secondaryButton" onClick={() => void updateViralContentStatus(item.id, item.status === "published" ? "offline" : "published")} type="button">{item.status === "published" ? "下线" : "发布"}</button></div>
+              </div>)}
+              {viralContents.length === 0 ? <AdminEmptyState title="暂无人工爆款资源" description="自动热榜仍会正常展示；新增资源后可通过置顶和推荐角度影响用户创作。" /> : null}
+            </div>
+          </AdminPanel> : null}
+
+          {contentView === "creators" ? <AdminPanel title="各平台作者候选池">
+            <AdminToolbar>
+              <div className="adminToolbarFilters">
+                <input aria-label="搜索作者候选池" value={creatorSearch} onChange={(event) => { setCreatorSearch(event.target.value); updatePage(1); }} placeholder="搜索作者、平台或发现关键词" />
+                <select aria-label="作者候选池平台" value={creatorPlatformFilter} onChange={(event) => { setCreatorPlatformFilter(event.target.value); updatePage(1); }}><option value="all">全部平台</option>{[...new Set(viralCreators.map((creator) => creator.platform))].sort().map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select>
+                <select aria-label="作者候选池状态" value={creatorStatusFilter} onChange={(event) => { setCreatorStatusFilter(event.target.value); updatePage(1); }}>
+                  <option value="all">全部状态</option><option value="active">重点跟踪</option><option value="paused">暂停跟踪</option><option value="excluded">已排除</option>
+                </select>
+                <select aria-label="作者候选池排序" value={creatorSort} onChange={(event) => { setCreatorSort(event.target.value as typeof creatorSort); updatePage(1); }}>
+                  <option value="relevance">按候选质量</option><option value="recent">按最近发现</option><option value="works">按作品量</option>
+                </select>
+              </div>
+              <div className="adminToolbarActions"><span>{viralCreators.filter((item) => item.status === "active").length} 位重点跟踪 · {viralCreators.length} 位已入池</span></div>
+            </AdminToolbar>
+            <div className="creatorPoolMetrics" aria-label="作者候选池概况">
+              <div><span>重点跟踪</span><strong>{viralCreators.filter((item) => item.status === "active").length}</strong></div>
+              <div><span>待运营</span><strong>{viralCreators.filter((item) => item.status !== "active" && item.status !== "excluded").length}</strong></div>
+              <div><span>已获取简介</span><strong>{viralCreators.filter((item) => Boolean(item.bio.trim())).length}</strong></div>
+              <div><span>已沉淀作品</span><strong>{viralCreators.reduce((total, item) => total + item.work_count, 0)}</strong></div>
+            </div>
+            {selectedCreatorIds.length > 0 ? <div className="creatorBatchBar"><strong>已选 {selectedCreatorIds.length} 位作者</strong><div><button className="secondaryButton" onClick={() => void updateViralCreatorStatus(selectedCreatorIds, "active")} type="button">重点跟踪</button><button className="secondaryButton" onClick={() => void updateViralCreatorStatus(selectedCreatorIds, "paused")} type="button">暂停</button><button className="secondaryButton" onClick={() => requestConfirm({ title: `排除已选 ${selectedCreatorIds.length} 位作者？`, description: "历史作品和发现记录会保留，但这些作者不再出现在正常运营候选池。", confirmLabel: "确认排除", danger: true, onConfirm: () => updateViralCreatorStatus(selectedCreatorIds, "excluded") })} type="button">批量排除</button><button className="adminIconButton" aria-label="取消选择" title="取消选择" onClick={() => setSelectedCreatorIds([])} type="button">×</button></div></div> : null}
+            <div className="adminDataTable" style={{ "--admin-columns": "42px minmax(260px,1.35fr) 110px 110px 110px 110px 150px minmax(260px,auto)" } as CSSProperties}>
+              <div className="adminDataHeader"><label className="adminSelectCell"><input aria-label="选择当前页全部作者" checked={pagedViralCreators.length > 0 && pagedViralCreators.every((creator) => selectedCreatorIds.includes(creator.id))} type="checkbox" onChange={(event) => setSelectedCreatorIds((current) => event.target.checked ? [...new Set([...current, ...pagedViralCreators.map((creator) => creator.id)])] : current.filter((id) => !pagedViralCreators.some((creator) => creator.id === id)))} /></label><span>作者画像</span><span title="重点跟踪：纳入日常监测；暂停跟踪：保留记录但暂不处理；已排除：不再进入候选队列。">运营状态</span><span>粉丝量</span><span>平台作品</span><span>已入库</span><span>发现与刷新</span><span>操作</span></div>
+              {pagedViralCreators.map((creator) => <div className="adminDataRow" key={creator.id}>
+                <label className="adminSelectCell"><input aria-label={`选择 ${creator.display_name}`} checked={selectedCreatorIds.includes(creator.id)} type="checkbox" onChange={(event) => setSelectedCreatorIds((current) => event.target.checked ? [...new Set([...current, creator.id])] : current.filter((id) => id !== creator.id))} /></label>
+                <div className="adminDataCell"><strong>{creator.display_name}</strong><span>{creator.platform} · {creator.source_kind}{creator.discovery_query ? ` · ${creator.discovery_query}` : ""}</span><span>{creator.bio || "作者主页简介未获取"}</span></div>
+                <div><CreatorStatus value={creator.status} /></div>
+                <strong>{formatCreatorCount(creator.follower_count)}</strong>
+                <strong>{formatCreatorCount(creator.platform_work_count)}</strong>
+                <strong>{creator.work_count} 条</strong>
+                <div className="adminDataCell"><strong>{formatDate(creator.last_discovered_at)}</strong><span>{creator.last_refreshed_at ? `刷新 ${formatDate(creator.last_refreshed_at)}` : "未刷新"} · {creator.refresh_status}</span></div>
+                <div className="adminRowMenu">
+                  {creator.profile_url ? <a className="secondaryButton linkButton" href={creator.profile_url} target="_blank" rel="noreferrer">主页</a> : null}
+                  {creator.status !== "active" ? <button className="secondaryButton" onClick={() => void updateViralCreatorStatus([creator.id], "active")} type="button">重点跟踪</button> : null}
+                  {creator.status === "active" ? <button className="secondaryButton" onClick={() => void updateViralCreatorStatus([creator.id], "paused")} type="button">暂停</button> : null}
+                  {creator.status !== "excluded" ? <button className="secondaryButton" onClick={() => requestConfirm({ title: "从候选池排除该作者？", description: `${creator.display_name} 将停止出现在运营候选池；历史作品与发现记录会保留。`, confirmLabel: "确认排除", danger: true, onConfirm: () => updateViralCreatorStatus([creator.id], "excluded") })} type="button">排除</button> : null}
+                </div>
+              </div>)}
+              {!loading && filteredViralCreators.length === 0 ? <AdminEmptyState title="暂无匹配作者" description="爆款数据任务发现作者后，会自动沉淀到这里供运营筛选与跟踪。" /> : null}
+            </div>
+            <AdminPagination page={currentPage} pageSize={pageSize} pageSizeOptions={settings.ui.tablePageSizeOptions} total={filteredViralCreators.length} onPageChange={updatePage} onPageSizeChange={(size) => { setPageSize(size); updatePage(1); }} />
+          </AdminPanel> : null}
+
+          <AdminDrawer open={viralDrawerOpen} title={viralForm.id ? "编辑爆款资源" : "新增爆款资源"} description="发布后会优先展示在用户端爆款模块" onClose={() => setViralDrawerOpen(false)}>
+            <form className="stackForm" onSubmit={saveViralContent}>
+              <AdminField label="标题"><input required maxLength={160} value={viralForm.title} onChange={(event) => setViralForm((current) => ({ ...current, title: event.target.value }))} /></AdminField>
+              <div className="settingsFormGrid"><AdminField label="平台"><select value={viralForm.platform} onChange={(event) => setViralForm((current) => ({ ...current, platform: event.target.value }))}><option>抖音</option><option>视频号</option><option>小红书</option><option>公众号</option></select></AdminField><AdminField label="内容类型"><select value={viralForm.contentType} onChange={(event) => setViralForm((current) => ({ ...current, contentType: event.target.value }))}><option>短视频</option><option>爆文</option><option>图文</option><option>直播切片</option></select></AdminField><AdminField label="业务分类"><input required value={viralForm.category} onChange={(event) => setViralForm((current) => ({ ...current, category: event.target.value }))} /></AdminField><AdminField label="运营排序"><input min="0" type="number" value={viralForm.sortOrder} onChange={(event) => setViralForm((current) => ({ ...current, sortOrder: event.target.value }))} /></AdminField></div>
+              <AdminField label="来源链接"><input required type="url" value={viralForm.sourceUrl} onChange={(event) => setViralForm((current) => ({ ...current, sourceUrl: event.target.value }))} /></AdminField>
+              <AdminField label="标签" hint="用逗号或顿号分隔"><input value={viralForm.tags} onChange={(event) => setViralForm((current) => ({ ...current, tags: event.target.value }))} /></AdminField>
+              <AdminField label="推荐角度" hint="发布前必填，将用于用户端展示和 AI 二创参考"><textarea required value={viralForm.insight} onChange={(event) => setViralForm((current) => ({ ...current, insight: event.target.value }))} /></AdminField>
+              <AdminField label="内容摘要"><textarea value={viralForm.summary} onChange={(event) => setViralForm((current) => ({ ...current, summary: event.target.value }))} /></AdminField>
+              <AdminField label="文章正文/转写稿"><textarea rows={8} value={viralForm.articleBody} onChange={(event) => setViralForm((current) => ({ ...current, articleBody: event.target.value }))} /></AdminField>
+              <div className="settingsFormGrid"><AdminField label="封面地址"><input type="url" value={viralForm.thumbnailUrl} onChange={(event) => setViralForm((current) => ({ ...current, thumbnailUrl: event.target.value }))} /></AdminField><AdminField label="热度数值"><input min="0" type="number" value={viralForm.metricValue} onChange={(event) => setViralForm((current) => ({ ...current, metricValue: event.target.value }))} /></AdminField><AdminField label="热度单位"><input value={viralForm.metricUnit} onChange={(event) => setViralForm((current) => ({ ...current, metricUnit: event.target.value }))} /></AdminField></div>
+              <AdminField label="风险提示"><textarea value={viralForm.riskNote} onChange={(event) => setViralForm((current) => ({ ...current, riskNote: event.target.value }))} /></AdminField>
+              <div className="settingsFormGrid"><AdminField label="状态"><select value={viralForm.status} onChange={(event) => setViralForm((current) => ({ ...current, status: event.target.value }))}><option value="draft">草稿</option><option value="pending_review">待审核</option><option value="published">已发布</option><option value="offline">已下线</option></select></AdminField><AdminField label="开始展示"><input type="datetime-local" value={viralForm.publishAt} onChange={(event) => setViralForm((current) => ({ ...current, publishAt: event.target.value }))} /></AdminField><AdminField label="结束展示"><input type="datetime-local" value={viralForm.expireAt} onChange={(event) => setViralForm((current) => ({ ...current, expireAt: event.target.value }))} /></AdminField></div>
+              <label className="checkboxRow"><input checked={viralForm.isPinned} type="checkbox" onChange={(event) => setViralForm((current) => ({ ...current, isPinned: event.target.checked }))} />置顶</label><label className="checkboxRow"><input checked={viralForm.isFeatured} type="checkbox" onChange={(event) => setViralForm((current) => ({ ...current, isFeatured: event.target.checked }))} />重点推荐</label>
+              <button className="primaryButton" type="submit">保存爆款资源</button>
+            </form>
+          </AdminDrawer>
         </div>
       ) : null}
 
@@ -1263,13 +1475,13 @@ export function AdminPageClient() {
               {announcements.length === 0 ? <div className="emptyState">暂无公告。</div> : null}
             </div>
           </AdminPanel>
-          <AdminDrawer open={announcementDrawerOpen} title={announcementForm.id ? "编辑公告" : "新建公告"} description="公告可展示在全站、工作台或账单页" onClose={() => setAnnouncementDrawerOpen(false)}>
+          <AdminDrawer open={announcementDrawerOpen} title={announcementForm.id ? "编辑公告" : "新建公告"} description="公告可按用户访问场景投放" onClose={() => setAnnouncementDrawerOpen(false)}>
             <form className="stackForm" onSubmit={saveAnnouncement}>
               <AdminField label="公告标题"><input required value={announcementForm.title} onChange={(event) => setAnnouncementForm((current) => ({ ...current, title: event.target.value }))} /></AdminField>
               <AdminField label="公告内容"><textarea required value={announcementForm.content} onChange={(event) => setAnnouncementForm((current) => ({ ...current, content: event.target.value }))} /></AdminField>
               <AdminField label="跳转链接" hint="可选，使用完整的 https:// 地址。"><input value={announcementForm.linkUrl} onChange={(event) => setAnnouncementForm((current) => ({ ...current, linkUrl: event.target.value }))} /></AdminField>
               <AdminField label="类型"><select value={announcementForm.kind} onChange={(event) => setAnnouncementForm((current) => ({ ...current, kind: event.target.value }))}><option value="notice">通知</option><option value="campaign">活动</option><option value="update">产品更新</option></select></AdminField>
-              <AdminField label="展示位置"><select value={announcementForm.placement} onChange={(event) => setAnnouncementForm((current) => ({ ...current, placement: event.target.value }))}><option value="global">全站</option><option value="dashboard">工作台</option><option value="billing">账单页</option></select></AdminField>
+              <AdminField label="展示位置"><select value={announcementForm.placement} onChange={(event) => setAnnouncementForm((current) => ({ ...current, placement: event.target.value }))}><option value="global">全站</option><option value="dashboard">今日灵感</option><option value="billing">充值中心</option><option value="benefits">邀请有礼</option></select></AdminField>
               <AdminField label="发布状态"><select value={announcementForm.status} onChange={(event) => setAnnouncementForm((current) => ({ ...current, status: event.target.value }))}><option value="draft">保存草稿</option><option value="published">立即发布</option></select></AdminField>
               <label className="checkboxRow"><input checked={announcementForm.isPinned} type="checkbox" onChange={(event) => setAnnouncementForm((current) => ({ ...current, isPinned: event.target.checked }))} />置顶公告</label>
               <div className="adminAnnouncementPreview"><span>用户端预览</span><strong>{announcementForm.title || "公告标题"}</strong><p>{announcementForm.content || "公告内容会显示在这里。"}</p></div>
@@ -1350,6 +1562,7 @@ export function AdminPageClient() {
           </nav>
 
           <div aria-labelledby={`settings-tab-${settingsTab}`} id="settings-tabpanel" role="tabpanel">
+          {settingsTab === "payment" ? <><PaymentSettingsSwitches settings={settings} setSettings={setSettings} /><PaymentCancellationPanel settings={settings} setSettings={setSettings} /><PaymentProviderPanel providers={paymentProviders} form={providerForm} setForm={setProviderForm} onSave={savePaymentProvider} onDelete={deletePaymentProvider} /></> : null}
 
           {settingsTab === "general" ? <AdminPanel title="站点与维护">
             <div className="settingsFormGrid">
@@ -1367,6 +1580,7 @@ export function AdminPageClient() {
             <SettingsToggle title="维护模式" hint="开启后普通用户无法注册、登录、创作或下单，管理员仍可进入后台。" checked={settings.site.maintenanceMode} onChange={(checked) => setSettings((current) => ({ ...current, site: { ...current.site, maintenanceMode: checked } }))} />
             {settings.site.maintenanceMode ? <SettingsField label="维护提示"><textarea value={settings.site.maintenanceMessage} onChange={(event) => setSettings((current) => ({ ...current, site: { ...current.site, maintenanceMessage: event.target.value } }))} /></SettingsField> : null}
           </AdminPanel> : null}
+          {settingsTab === "features" ? <AdminPanel title="本地 Agent 发布开关"><SettingsToggle title="爆款二创本地 Agent" hint="兼容 Agent 已在线后再开启；此开关会同时作用于全部 Web 节点。" checked={settings.features.localAgentEnabled} onChange={(checked) => setSettings((current) => ({ ...current, features: { ...current.features, localAgentEnabled: checked } }))} /></AdminPanel> : null}
 
           {settingsTab === "legal" ? <div className="pageStack"><AdminPanel title="协议生效规则"><div className="settingsFormGrid"><SettingsField label="协议版本"><input value={settings.legal.termsVersion} onChange={(event) => setSettings((current) => ({ ...current, legal: { ...current.legal, termsVersion: event.target.value } }))} /></SettingsField><SettingsField label="更新日期"><input type="date" value={settings.legal.termsUpdatedAt} onChange={(event) => setSettings((current) => ({ ...current, legal: { ...current.legal, termsUpdatedAt: event.target.value } }))} /></SettingsField><SettingsField label="注册展示方式" hint="勾选模式更简洁；弹窗模式可在注册页内完整阅读。"><select value={settings.legal.displayMode} onChange={(event) => setSettings((current) => ({ ...current, legal: { ...current.legal, displayMode: event.target.value as SystemSettings["legal"]["displayMode"] } }))}><option value="checkbox">勾选确认</option><option value="modal">弹窗阅读</option></select></SettingsField></div><SettingsToggle title="启用登录条款" hint="注册时要求同意全部协议文档。" checked={settings.legal.termsEnabled} onChange={(checked) => setSettings((current) => ({ ...current, legal: { ...current.legal, termsEnabled: checked } }))} /><SettingsToggle title="要求老用户重新确认" hint="协议版本不一致的用户登录后必须确认新版本。" checked={settings.legal.requireReaccept} onChange={(checked) => setSettings((current) => ({ ...current, legal: { ...current.legal, requireReaccept: checked } }))} /><button className="secondaryButton" onClick={() => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: [...current.legal.documents, { slug: `document-${current.legal.documents.length + 1}`, title: "新协议文档", content: "## 文档说明\n\n请编辑协议正文。" }] } }))} type="button">新增协议文档</button></AdminPanel>{settings.legal.documents.map((document, index) => <AdminPanel key={`${document.slug}-${index}`} title={document.title || "协议文档"}><div className="settingsLegalEditor"><div className="settingsFormGrid"><SettingsField label="文档标识" hint={document.slug === "terms" || document.slug === "privacy" ? "核心文档不可删除" : "用于 /legal/标识 路由"}><input disabled={document.slug === "terms" || document.slug === "privacy"} value={document.slug} onChange={(event) => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: current.legal.documents.map((item, itemIndex) => itemIndex === index ? { ...item, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") } : item) } }))} /></SettingsField><SettingsField label="文档标题"><input value={document.title} onChange={(event) => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: current.legal.documents.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item) } }))} /></SettingsField></div><SettingsField label="Markdown 正文" hint={`公开地址：${document.slug === "terms" || document.slug === "privacy" ? `/${document.slug}` : `/legal/${document.slug}`}`}><textarea rows={16} value={document.content} onChange={(event) => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: current.legal.documents.map((item, itemIndex) => itemIndex === index ? { ...item, content: event.target.value } : item) } }))} /></SettingsField><div className="rowActions"><button className="secondaryButton" disabled={index === 0} onClick={() => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: moveItem(current.legal.documents, index, index - 1) } }))} type="button">上移</button><button className="secondaryButton" disabled={index === settings.legal.documents.length - 1} onClick={() => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: moveItem(current.legal.documents, index, index + 1) } }))} type="button">下移</button>{document.slug !== "terms" && document.slug !== "privacy" ? <button className="secondaryButton" onClick={() => setSettings((current) => ({ ...current, legal: { ...current.legal, documents: current.legal.documents.filter((_, itemIndex) => itemIndex !== index) } }))} type="button">删除</button> : null}</div></div></AdminPanel>)}</div> : null}
 
@@ -1431,6 +1645,10 @@ function TrendMetric({ label, value, current, previous }: { label: string; value
   );
 }
 
+function AffiliateStatsStrip({ stats }: { stats: AffiliateStats }) {
+  return <div className="affiliateMetrics adminAffiliateStats" aria-label="邀请返利漏斗"><div><span>链接访问</span><strong>{stats.visits}</strong></div><div><span>注册用户</span><strong>{stats.invitees}</strong></div><div><span>付费用户</span><strong>{stats.payers}</strong></div><div><span>累计返利</span><strong>{stats.accruedCredits} 点</strong></div></div>;
+}
+
 function AdminPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="panel adminPanelCard">
@@ -1440,6 +1658,40 @@ function AdminPanel({ title, children }: { title: string; children: React.ReactN
       <div className="sideBody">{children}</div>
     </section>
   );
+}
+
+function CreatorStatus({ value }: { value: string }) {
+  const labels: Record<string, { label: string; title: string }> = {
+    active: { label: "重点跟踪", title: "纳入日常监测与运营处理" },
+    paused: { label: "暂停跟踪", title: "保留作者记录，暂不进入日常处理队列" },
+    excluded: { label: "已排除", title: "不再进入候选队列，历史数据仍会保留" },
+  };
+  const status = labels[value] ?? { label: value, title: value };
+  return <span className={`adminStatus ${value}`} title={status.title}>{status.label}</span>;
+}
+
+function PaymentSettingsSwitches({ settings, setSettings }: { settings: Settings; setSettings: React.Dispatch<React.SetStateAction<Settings>> }) {
+  return <AdminPanel title="支付方式开关"><SettingsToggle title="启用 Airwallex" hint="需先配置对应服务商实例。" checked={settings.payment.enableAirwallex} onChange={(checked) => setSettings((current) => ({ ...current, payment: { ...current.payment, enableAirwallex: checked } }))} /><SettingsToggle title="启用支付宝" hint="需配置支付宝官方或 EasyPay 实例。" checked={settings.payment.enableAlipay} onChange={(checked) => setSettings((current) => ({ ...current, payment: { ...current.payment, enableAlipay: checked } }))} /><SettingsToggle title="启用微信支付" hint="需配置微信支付官方或 EasyPay 实例。" checked={settings.payment.enableWechat} onChange={(checked) => setSettings((current) => ({ ...current, payment: { ...current.payment, enableWechat: checked } }))} /><SettingsToggle title="启用手工转账" hint="手工订单必须经管理员审核后发放积分。" checked={settings.payment.enableManualTransfer} onChange={(checked) => setSettings((current) => ({ ...current, payment: { ...current.payment, enableManualTransfer: checked } }))} /></AdminPanel>;
+}
+
+function PaymentCancellationPanel({ settings, setSettings }: { settings: Settings; setSettings: React.Dispatch<React.SetStateAction<Settings>> }) {
+  return <AdminPanel title="取消频率限制"><SettingsToggle title="启用取消限制" hint="防止用户频繁创建并取消订单。" checked={settings.payment.cancelRateLimitEnabled} onChange={(checked) => setSettings((current) => ({ ...current, payment: { ...current.payment, cancelRateLimitEnabled: checked } }))} /><div className="settingsFormGrid"><SettingsNumber label="窗口时长（分钟）" value={settings.payment.cancelRateLimitWindowMinutes} min={1} max={10080} onChange={(value) => setSettings((current) => ({ ...current, payment: { ...current.payment, cancelRateLimitWindowMinutes: value } }))} /><SettingsNumber label="窗口内最大取消次数" value={settings.payment.cancelRateLimitMax} min={1} max={1000} onChange={(value) => setSettings((current) => ({ ...current, payment: { ...current.payment, cancelRateLimitMax: value } }))} /></div></AdminPanel>;
+}
+
+function PaymentProviderPanel({
+  providers,
+  form,
+  setForm,
+  onSave,
+  onDelete,
+}: {
+  providers: PaymentProvider[];
+  form: PaymentProviderForm;
+  setForm: React.Dispatch<React.SetStateAction<PaymentProviderForm>>;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  return <AdminPanel title="支付服务商实例"><form className="settingsFormGrid" onSubmit={onSave}><SettingsField label="服务商名称"><input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如 Stripe 主账号" /></SettingsField><SettingsField label="类型"><select value={form.providerKey} onChange={(event) => setForm((current) => ({ ...current, providerKey: event.target.value as PaymentProvider["providerKey"] }))}><option value="stripe">Stripe</option><option value="airwallex">Airwallex</option><option value="easypay">EasyPay</option><option value="alipay">支付宝官方</option><option value="wxpay">微信支付官方</option></select></SettingsField><SettingsField label="前台支付方式" hint="多个值用逗号分隔，例如 card,alipay"><input value={form.supportedMethods} onChange={(event) => setForm((current) => ({ ...current, supportedMethods: event.target.value }))} /></SettingsField><SettingsField label="Secret Key"><input type="password" value={form.secretKey} onChange={(event) => setForm((current) => ({ ...current, secretKey: event.target.value }))} /></SettingsField><SettingsField label="Publishable Key"><input value={form.publishableKey} onChange={(event) => setForm((current) => ({ ...current, publishableKey: event.target.value }))} /></SettingsField><SettingsField label="Webhook Secret"><input type="password" value={form.webhookSecret} onChange={(event) => setForm((current) => ({ ...current, webhookSecret: event.target.value }))} /></SettingsField><SettingsToggle title="启用此实例" hint="启用后仍需开启对应支付渠道。" checked={form.enabled} onChange={(checked) => setForm((current) => ({ ...current, enabled: checked }))} /><div className="rowActions"><button className="primaryButton" type="submit">保存服务商</button>{form.id ? <button className="secondaryButton" type="button" onClick={() => setForm({ id: "", name: "", providerKey: "stripe", enabled: false, sortOrder: 0, supportedMethods: "card", secretKey: "", publishableKey: "", webhookSecret: "", currency: "CNY" })}>取消编辑</button> : null}</div></form><div className="tableList">{providers.map((provider) => <div className="tableRow" key={provider.id}><div><strong>{provider.name}</strong><span>{provider.providerKey} · {provider.supportedMethods.join(", ")} · {provider.enabled ? "已启用" : "已停用"}</span></div><div className="rowActions"><button className="secondaryButton" type="button" onClick={() => setForm({ id: provider.id, name: provider.name, providerKey: provider.providerKey, enabled: provider.enabled, sortOrder: provider.sortOrder, supportedMethods: provider.supportedMethods.join(","), secretKey: "", publishableKey: "", webhookSecret: "", currency: "CNY" })}>编辑</button><button className="secondaryButton" type="button" onClick={() => void onDelete(provider.id)}>删除</button></div></div>)}{providers.length === 0 ? <AdminEmptyState title="暂无服务商实例" description="配置第一个 Stripe、Airwallex、EasyPay、支付宝或微信支付实例。" /> : null}</div></AdminPanel>;
 }
 
 function SettingsField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -1495,6 +1747,12 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatCreatorCount(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value <= 0) return "未获取";
+  if (value >= 10_000) return `${(value / 10_000).toFixed(value >= 100_000 ? 0 : 1)} 万`;
+  return value.toLocaleString("zh-CN");
 }
 
 function formatBytes(value: number) {

@@ -12,4 +12,8 @@ export type HotTopic = {
   sourceTitle?: string;
   sourcePublishedAt?: string;
   evidence?: string;
+  verification?: HotTopicVerification;
 };
+
+export type HotTopicVerification = { status: "ready" | "needs-review"; note: string };
+export type HotTopicCategoryStat = { category: string; count: number; ratio: number };

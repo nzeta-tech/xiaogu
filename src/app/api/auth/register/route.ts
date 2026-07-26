@@ -3,7 +3,7 @@ import { createSession } from "@/lib/auth/session";
 import { authInputSchema, registerUser } from "@/lib/auth/users";
 import { tryGetSystemSettings } from "@/lib/db/repositories";
 import { checkRateLimit, requestClientKey } from "@/lib/security/rate-limit";
-import { bindAffiliateInviter, ensureAffiliateAccount, validateAffiliateReferralCode } from "@/lib/affiliate/service";
+import { bindAffiliateInviter, ensureAffiliateAccount, recordAffiliateRegistrationContext, validateAffiliateReferralCode } from "@/lib/affiliate/service";
 import { createAndSendAuthToken } from "@/lib/auth/actions";
 import { tryGrantGiftCredits } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
@@ -87,8 +87,16 @@ export async function POST(request: Request) {
     await ensureAffiliateAccount(user.id);
     if (settings.affiliate.enabled && input.referralCode) {
       const binding = await bindAffiliateInviter(user.id, input.referralCode);
-      if (!binding.ok) return Response.json({ error: binding.error }, { status: 400 });
+      if (!binding.ok) {
+        // Registration has not issued a session yet. Remove the just-created user
+        // so a failed referral bind does not leave an apparently failed account.
+        await query("delete from users where id = $1", [user.id]);
+        return isJsonRequest
+          ? Response.json({ error: binding.error }, { status: 400 })
+          : redirectToRegister(request, requestUrl, binding.error, input.email, input.referralCode);
+      }
     }
+    await recordAffiliateRegistrationContext(user.id, requestClientKey(request));
     if (settings.defaults.signupCredits > 0) {
       await tryGrantGiftCredits({ userId: user.id, quotaAmount: settings.defaults.signupCredits, sourceType: "signup", sourceLabel: "新用户注册赠送" });
     }

@@ -90,7 +90,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [streamRetryKey, setStreamRetryKey] = useState(0);
   const workFrom = searchParams.get("from");
   const workReturnHref = workFrom === "admin" ? appPath("/admin?view=works#content") : workFrom === "dashboard" || workFrom === "today" ? appPath("/today") : appPath("/works");
-  const workReturnLabel = workFrom === "admin" ? "返回内容管理" : workFrom === "dashboard" || workFrom === "today" ? "返回今日工作台" : "返回创作历史";
+  const workReturnLabel = workFrom === "admin" ? "返回内容管理" : workFrom === "dashboard" || workFrom === "today" ? "返回今日灵感" : "返回创作历史";
   usePageMeta({
     title: work ? `${formatWorkTitle(work)} · 作品` : "作品详情",
     description: work ? `${formatAppLabel(work.platform)} / 审阅、优化与复用` : "正在加载作品",
@@ -331,6 +331,15 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   const batches = useMemo(() => {
     if (!work) return [];
+    if (work.platform === "link-remix") {
+      return chooseBatchSource([
+        parseLinkRemixOutput(streamState.content),
+        parseLinkRemixOutput(work.content),
+        parseLinkRemixOutput(work.app_run?.result_text || ""),
+        storedBatches,
+        resultJsonBatches,
+      ]);
+    }
     if (work.platform === "live-script") {
       const content = streamState.content || work.content || work.app_run?.result_text || "";
       return content.trim()
@@ -447,6 +456,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const isMarketingCopyWork = work?.platform === "marketing-copy";
   const isSimpleCopyWork = isTrafficCopyWork || isMarketingCopyWork;
   const isLeadCopyWork = work?.platform === "lead-copy";
+  const isLinkRemixWork = work?.platform === "link-remix";
   const isStructuredCopyWork = isWriteCopyWork || isLeadCopyWork;
   const isGeneralContentWork = work?.platform === "general-content";
   const isLetterWork = work?.platform === "letter";
@@ -616,6 +626,26 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   if (!work) {
     return <div className="pageStack"><section className="panel emptyState">没有找到这条作品。</section></div>;
+  }
+
+  if (isLinkRemixWork) {
+    return (
+      <LinkRemixWorkDetail
+        activeBatchId={resolvedBatchId}
+        activeItemIds={activeItemIds}
+        batches={batches}
+        copied={copied}
+        fontScale={fontScale}
+        onCopy={handleCopy}
+        onExport={handleExport}
+        onSelectBatch={switchBatch}
+        onSelectItem={switchBatchItem}
+        onSetFontScale={setFontScale}
+        returnHref={workReturnHref}
+        returnLabel={workReturnLabel}
+        work={work}
+      />
+    );
   }
 
   if (isImageWork) {
@@ -2408,6 +2438,221 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       {previewImage ? <PreviewImageModal previewImage={previewImage} onClose={() => setPreviewImage(null)} /> : null}
     </div>
   );
+}
+
+function LinkRemixWorkDetail({
+  activeBatchId,
+  activeItemIds,
+  batches,
+  copied,
+  fontScale,
+  onCopy,
+  onExport,
+  onSelectBatch,
+  onSelectItem,
+  onSetFontScale,
+  returnHref,
+  returnLabel,
+  work,
+}: {
+  activeBatchId: string;
+  activeItemIds: Record<string, string>;
+  batches: CreationOutputBatch[];
+  copied: CopyState;
+  fontScale: number;
+  onCopy: (key: string, text: string) => Promise<void>;
+  onExport: (title: string, body: string, options?: { viewMode?: CreationOutputViewMode; theme?: WechatTheme }) => void;
+  onSelectBatch: (batchId: string) => void;
+  onSelectItem: (batchId: string, itemId: string) => void;
+  onSetFontScale: (value: number | ((current: number) => number)) => void;
+  returnHref: string;
+  returnLabel: string;
+  work: WorkDetail;
+}) {
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const payload = work.app_run?.input_payload ?? {};
+  const sourcePlatform = formatInputValue("source_platform", payload.source_platform) || "待确认";
+  const sourceTitle = stringifySingleInputValue(payload.source_title) || "未读取到标题";
+  const sourceAuthor = stringifySingleInputValue(payload.source_author) || "账号待确认";
+  const sourceDate = stringifySingleInputValue(payload.source_published_at) || "发布时间待确认";
+  const sourceLikes = stringifySingleInputValue(payload.source_like_count) || "点赞数据待确认";
+  const sourceContentType = stringifySingleInputValue(payload.source_content_type) || "内容形态待确认";
+  const sourceEvidence = stringifySingleInputValue(payload.source_evidence);
+  const sourceText = stringifySingleInputValue(payload.source_text);
+  const sourceTranscript = stringifySingleInputValue(payload.source_transcript);
+  const sourceUrl = stringifySingleInputValue(payload.source_url);
+  const remixAdvice = stringifySingleInputValue(payload.remix_angle);
+  const activeBatch = batches.find((batch) => batch.id === activeBatchId) ?? batches[0];
+  const activeItemId = activeBatch && activeBatch.items.some((item) => item.id === activeItemIds[activeBatch.id])
+    ? activeItemIds[activeBatch.id]
+    : activeBatch?.items[0]?.id;
+  const activeItem = activeBatch?.items.find((item) => item.id === activeItemId) ?? activeBatch?.items[0];
+  const outputCount = batches.reduce((count, batch) => count + batch.items.length, 0);
+
+  return (
+    <div className="workDetailPage linkRemixWorkDetailPage">
+      <div className="page-content linkRemixShell">
+        <header className="linkRemixTopbar">
+          <a aria-label={returnLabel} className="linkRemixBack" href={returnHref}>←</a>
+          <div className="linkRemixTopbarTitle">
+            <span>爆款二创</span>
+            <strong>{formatWorkTitle(work)}</strong>
+          </div>
+          <div className="linkRemixTopbarStatus">
+            <i className={work.app_run?.status === "succeeded" ? "complete" : ""} />
+            {getWorkStatusLabel(work)}
+          </div>
+          <a className="linkRemixNewAction" href={appPath("/apps/link-remix?from=result")}>新建二创</a>
+        </header>
+
+        <section className="linkRemixSourceBand">
+          <div className="linkRemixSourceHeading">
+            <div>
+              <span>参考来源</span>
+              <h1>{sourceTitle}</h1>
+            <p>{sourcePlatform} · {sourceContentType} · {sourceAuthor} · {sourceDate}</p>
+            </div>
+            <div className="linkRemixEvidenceScore">
+              <span>详情页点赞</span>
+              <strong>{sourceLikes}</strong>
+            </div>
+          </div>
+          <div className="linkRemixSourceActions">
+            {sourceUrl ? <a href={sourceUrl} rel="noreferrer" target="_blank">打开原作品</a> : null}
+            <button onClick={() => setSourceOpen((current) => !current)} type="button">{sourceOpen ? "收起来源信息" : "查看来源与证据"}</button>
+          </div>
+          {sourceOpen ? (
+            <div className="linkRemixSourceDetails">
+              <div>
+                <span>事实证据</span>
+                <p>{sourceEvidence || "未提供可核验的事实证据，请在发布前补充确认。"}</p>
+              </div>
+              <div>
+                <span>作品文字内容</span>
+                <p>{sourceText || "未提取到作品文字内容。"}</p>
+              </div>
+              <div>
+                <span>语音转写</span>
+                <p>{sourceTranscript || "未识别到语音转写。"}</p>
+              </div>
+              {remixAdvice ? <div><span>补充想法建议</span><p>{remixAdvice}</p></div> : null}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="linkRemixWorkspace">
+          <aside className="linkRemixSidebar">
+            <div className="linkRemixSidebarBlock">
+              <span>发布渠道</span>
+              {batches.map((batch) => (
+                <button className={activeBatch?.id === batch.id ? "active" : ""} key={batch.id} onClick={() => onSelectBatch(batch.id)} type="button">
+                  <strong>{formatRemixChannelLabel(batch.label)}</strong>
+                  <em>{batch.items.length}</em>
+                </button>
+              ))}
+            </div>
+            <div className="linkRemixSidebarMeta">
+              <span>已生成</span><strong>{outputCount} 条内容</strong>
+              <span>阅读字号</span>
+              <div>
+                <button aria-label="减小字号" onClick={() => onSetFontScale((current) => Math.max(90, current - 10))} type="button">A-</button>
+                <button aria-label="恢复默认字号" onClick={() => onSetFontScale(100)} type="button">{fontScale}%</button>
+                <button aria-label="增大字号" onClick={() => onSetFontScale((current) => Math.min(130, current + 10))} type="button">A+</button>
+              </div>
+            </div>
+          </aside>
+
+          <main className="linkRemixMain">
+            {activeBatch ? (
+              <>
+                <div className="linkRemixContentHeader">
+                  <div><span>{formatRemixChannelLabel(activeBatch.label)}</span><h2>选择一个版本后直接发布</h2></div>
+                  {activeItem ? (
+                    <div className="linkRemixContentActions">
+                      <button onClick={() => void onCopy(activeItem.id, activeItem.body)} type="button">{copied[activeItem.id] ? "已复制" : "复制当前版本"}</button>
+                      <button onClick={() => onExport(activeItem.title, activeItem.body, { viewMode: activeItem.viewMode, theme: "default" })} type="button">导出 Word</button>
+                    </div>
+                  ) : null}
+                </div>
+                {activeBatch.items.length > 1 ? (
+                  <div aria-label="选择内容版本" className="linkRemixVersionTabs" role="tablist">
+                    {activeBatch.items.map((item, index) => (
+                      <button aria-selected={activeItem?.id === item.id} className={activeItem?.id === item.id ? "active" : ""} key={item.id} onClick={() => onSelectItem(activeBatch.id, item.id)} role="tab" type="button">
+                        {formatRemixVersionLabel(item.title, index)}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {activeItem ? (
+                  <article className="linkRemixDocument" style={{ fontSize: `${fontScale}%` }}>
+                    <div className="linkRemixDocumentMeta"><span>{activeItem.viewMode === "wechat" ? "公众号长文" : activeItem.viewMode === "xiaohongshu" ? "小红书笔记" : "可直接发布"}</span><strong>{activeItem.title}</strong></div>
+                    <MarkdownContent content={activeItem.body} />
+                  </article>
+                ) : <div className="linkRemixEmpty">该渠道还没有可用内容。</div>}
+              </>
+            ) : <div className="linkRemixEmpty">正在整理二创结果...</div>}
+          </main>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function formatRemixChannelLabel(label: string) {
+  if (/口播/.test(label)) return "口播文案";
+  if (/小红书/.test(label)) return "小红书";
+  if (/公众号/.test(label)) return "微信公众号";
+  if (/朋友圈/.test(label)) return "朋友圈";
+  return label;
+}
+
+function formatRemixVersionLabel(title: string, index: number) {
+  const normalized = title.replace(/\*+/g, "").replace(/^.*?[一二三四五六七八九十0-9]+[｜|：:]\s*/, "").trim();
+  return normalized ? `版本 ${index + 1} · ${normalized.slice(0, 16)}` : `版本 ${index + 1}`;
+}
+
+function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+  const headingPattern = /^#{1,3}\s+(.+?)\s*$/gm;
+  const headings = Array.from(normalized.matchAll(headingPattern));
+  const groups = new Map<string, CreationOutputBatch>();
+  const channelMeta = (heading: string): { key: string; label: string; viewMode: CreationOutputViewMode } | null => {
+    if (/口播文案/.test(heading)) return { key: "video", label: "口播文案", viewMode: "plain" };
+    if (/小红书笔记/.test(heading)) return { key: "xhs", label: "小红书", viewMode: "xiaohongshu" };
+    if (/微信公众号文章/.test(heading)) return { key: "wechat", label: "微信公众号", viewMode: "wechat" };
+    if (/朋友圈文案/.test(heading)) return { key: "moments", label: "朋友圈", viewMode: "plain" };
+    return null;
+  };
+
+  for (const [index, match] of headings.entries()) {
+    const heading = match[1].trim();
+    const meta = channelMeta(heading);
+    if (!meta) continue;
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < headings.length ? (headings[index + 1].index ?? normalized.length) : normalized.length;
+    const body = normalized.slice(start, end).trim();
+    if (!body) continue;
+    const batch = groups.get(meta.key) ?? {
+      id: `remix-${meta.key}`,
+      label: meta.label,
+      items: [],
+    };
+    const itemIndex = batch.items.length + 1;
+    const titleMatch = body.match(/^标题[:：]\s*\n?([^\n]+)/m);
+    batch.items.push({
+      id: `${batch.id}-${itemIndex}`,
+      title: titleMatch?.[1]?.trim() || heading,
+      body,
+      viewMode: meta.viewMode,
+      summary: body.replace(/\s+/g, " ").slice(0, 120),
+    });
+    groups.set(meta.key, batch);
+  }
+
+  return ["video", "xhs", "wechat", "moments"]
+    .map((key) => groups.get(key))
+    .filter((batch): batch is CreationOutputBatch => Boolean(batch));
 }
 
 function ResultWorkspaceBar({

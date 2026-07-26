@@ -9725,6 +9725,14 @@ a {
 .adminConsole progress::-webkit-progress-bar { background: #e2e8f0; }
 .adminConsole progress::-webkit-progress-value { background: #14b8a6; }
 
+.creatorPoolMetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 14px 0; border: 1px solid #dbe3ee; border-radius: 8px; overflow: hidden; background: #dbe3ee; }
+.creatorPoolMetrics > div { display: grid; gap: 4px; min-width: 0; padding: 11px 13px; background: #fff; }
+.creatorPoolMetrics span { color: #64748b; font-size: 11px; font-weight: 700; }
+.creatorPoolMetrics strong { color: #0f172a; font-size: 20px; line-height: 1.15; }
+.creatorBatchBar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0; padding: 9px 12px; border: 1px solid #99f6e4; border-radius: 8px; background: #f0fdfa; color: #115e59; font-size: 13px; }
+.creatorBatchBar > div { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.creatorBatchBar .secondaryButton { min-height: 32px; padding: 5px 9px; }
+
 @media (max-width: 760px) {
   .shell:has(.adminMobileSubnav) .mobileBrand { display: none; }
   .shell:has(.adminMobileSubnav) .appPageIdentity { min-width: 82px; }
@@ -9738,6 +9746,9 @@ a {
   .adminDrawer { width: 100vw; }
   .adminTodoGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .adminDrawerActionGrid { grid-template-columns: 1fr; }
+  .creatorPoolMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .creatorBatchBar { align-items: stretch; flex-direction: column; }
+  .creatorBatchBar > div { justify-content: flex-start; }
 }
 
 .alertPanel {
@@ -9848,6 +9859,86 @@ a {
   line-height: 1.7;
   margin: 10px 0 0;
   max-width: 720px;
+}
+
+.billingPaymentMethods {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.billingPromoForm {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 300px) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.billingPromoForm label {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.billingPromoForm input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.billingPromoForm > span {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.billingPromoForm > span.success { color: #0f766e; }
+.billingPromoForm > span.error { color: var(--danger); }
+
+.billingPaymentMethods > span {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.billingPaymentMethods > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.billingPaymentMethods button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.billingPaymentMethods button.active {
+  border-color: #0f766e;
+  background: #effcf9;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.billingPaymentMethods small {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .eyebrow {
@@ -10040,6 +10131,52 @@ a {
 .billingRow b {
   color: var(--brand);
   font-size: 13px;
+}
+
+.billingUsageHeader {
+  align-items: center;
+}
+
+.billingUsageToggle {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--brand);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.billingUsageToggle:hover {
+  border-color: var(--brand);
+  background: #f0fdfa;
+}
+
+.billingUsageList.expanded {
+  max-height: 360px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.billingUsageAmount {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.billingUsageAmount a {
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.billingUsageAmount a:hover {
+  text-decoration: underline;
 }
 
 .statusPill {
@@ -10643,6 +10780,20 @@ a {
   .billingSectionTitle {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .billingPaymentMethods {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .billingPromoForm {
+    grid-template-columns: 1fr auto;
+  }
+
+  .billingPromoForm label,
+  .billingPromoForm > span {
+    grid-column: 1 / -1;
   }
 
   .billingSectionTitle p {

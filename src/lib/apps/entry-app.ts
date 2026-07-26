@@ -5,10 +5,9 @@ export function getEntryAdjustedApp(app: CreationApp, entry: string): CreationAp
     return {
       ...app,
       emoji: "🎙️",
-      name: "录音稿拆解整理",
+      name: "录音转文字素材",
       description: "把完整录音逐字稿整理成清晰观点、可引用金句和适合不同平台发布的内容。",
       promptHint: "先忠实整理录音原意，再拆出可独立核验的观点片段、原话亮点和后续创作素材。",
-      exampleTitle: undefined,
       fields: [
         {
           id: "tone",
@@ -52,7 +51,6 @@ export function getEntryAdjustedApp(app: CreationApp, entry: string): CreationAp
       name: "增员面谈逐字稿",
       description: "根据候选人简历和团队优势，准备人物画像、面谈流程、关键问题与后续跟进话术。",
       promptHint: "按增员面谈逐字稿的页面语义执行：基于候选人简历，输出候选人画像、完整面谈流程、欢迎话术、应急话术、注意事项和后续跟进建议。",
-      exampleTitle: undefined,
       fields: [
         {
           id: "resume",
@@ -86,7 +84,6 @@ export function getEntryAdjustedApp(app: CreationApp, entry: string): CreationAp
       name: "增员跟踪",
       description: "分析候选人的面谈记录，梳理意向、顾虑和下一步动作，并生成持续跟进所需内容。",
       promptHint: "按增员跟踪页面执行：围绕候选人的沟通录音稿，提炼顾虑点、意向信号和下一步承接动作，再按所选类型输出一封信、候选人信息跟踪表、跟踪计划表和招募向公众号内容。",
-      exampleTitle: undefined,
       fields: [
         {
           id: "followup_notes",
@@ -119,7 +116,6 @@ export function getEntryAdjustedApp(app: CreationApp, entry: string): CreationAp
       requiresThinking: false,
       resultType: "image",
       promptHint: "围绕个人介绍、服务方向和目标人群，输出更适合传播和展示的个性名片内容。",
-      exampleTitle: undefined,
       fields: [
         {
           id: "current_state",
@@ -169,18 +165,4 @@ export function getEntryAdjustedApp(app: CreationApp, entry: string): CreationAp
   }
 
   return app;
-}
-
-export function shouldShowRealExample(appSlug: string, entry: string) {
-  if (entry === "voice-note-copy") return false;
-  if (entry === "recruit-script" || entry === "recruit-followup") return false;
-  if (entry === "personality-card") return false;
-  if (appSlug === "lead-copy") return false;
-  if (appSlug === "live-script") return false;
-  if (appSlug === "xiaohongshu-check") return false;
-  if (appSlug === "policy-diagnosis") return false;
-  if (appSlug === "ip-positioning") return false;
-  if (appSlug === "breakthrough") return false;
-  if (appSlug === "team-recruit") return false;
-  return true;
 }

@@ -1,4 +1,5 @@
 import type { HotTopic } from "./types";
+import { ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, validateHotTopic } from "./rules";
 
 type TavilyResult = {
   title?: string;
@@ -39,6 +40,7 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
     "医保 商业医疗险 养老 保险 政策 家庭风险 最新",
     "突发事故 暴雨 火灾 车祸 赔偿 医疗支出 家庭风险 最新",
     "年轻人 父母 孩子 老人 收入中断 健康风险 社会热点",
+    "国际财经 美联储 美股 汇率 原油 黄金 关税 全球市场 最新消息 家庭影响",
   ];
 
   const responses = await Promise.allSettled(queries.map((query) => tavilySearch(query, tavilyKey, options, 8)));
@@ -54,10 +56,14 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
     if (!title || seen.has(title)) continue;
     seen.add(title);
     candidates.push({ result, title });
-    if (candidates.length >= 12) break;
   }
 
-  return Promise.all(candidates.map(async ({ result, title }, index): Promise<HotTopic> => {
+  const international = candidates.find(({ title }) => inferHotTopicCategory(title) === "国际财经");
+  const selected = international
+    ? [international, ...candidates.filter((candidate) => candidate !== international).slice(0, 11)]
+    : candidates.slice(0, 12);
+
+  return Promise.all(selected.map(async ({ result, title }, index): Promise<HotTopic> => {
     const readerText = await readUrl(result.url ?? "");
     const evidence = summarizeEvidence(readerText || result.content || title);
     return {
@@ -66,16 +72,17 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
       summary: evidence || result.content || "来自实时搜索结果，建议发布前再次核验来源。",
       source: "实时搜索 · Tavily/Jina",
       heat: index < 3 ? "高" : "中",
-      category: inferSearchCategory(title),
-      insuranceRelevance: inferSearchRelevance(title),
+      category: inferHotTopicCategory(title),
+      insuranceRelevance: inferHotTopicRelevance(title),
       recommendedAngle: buildSearchAngle(title),
       riskNote: "引用最新信息时先核验来源和发布时间，不做收益、理赔或核保结果承诺。",
       sourceUrl: result.url,
       sourceTitle: result.title,
       sourcePublishedAt: result.published_date,
       evidence,
+      verification: validateHotTopic({ title, source: "实时搜索 · Tavily/Jina", sourceUrl: result.url, sourcePublishedAt: result.published_date, evidence }),
     };
-  }));
+  })).then((topics) => ensureInternationalFinanceCoverage(topics, 12));
 }
 
 async function enrichTopic(topic: HotTopic, tavilyKey: string, options: { refresh?: boolean }) {
@@ -95,6 +102,7 @@ async function enrichTopic(topic: HotTopic, tavilyKey: string, options: { refres
       sourceTitle,
       sourcePublishedAt: result.published_date,
       evidence,
+      verification: validateHotTopic({ title: topic.title, source: `${topic.source} · 搜索增强`, sourceUrl: result.url, sourcePublishedAt: result.published_date, evidence }),
       riskNote: `${topic.riskNote} 引用热点时建议标注来源，并避免把未经核实的讨论当作确定事实。`,
     };
   } catch {
@@ -171,7 +179,7 @@ function normalizeTitle(title: string) {
 }
 
 function isInsuranceRelevant(title: string) {
-  return /保险|医保|社保|养老|养老金|医疗|医院|药|健康|重疾|意外|车险|理赔|家庭|退休|护理|涨价|降价|裁员|倒闭|停产|赔偿|补偿|事故|火灾|暴雨|台风|教育|生育|住房|就业|收入|工资|物价|父母|孩子|老人|年轻人/.test(title);
+  return /保险|医保|社保|养老|养老金|医疗|医院|药|健康|重疾|意外|车险|理赔|家庭|退休|护理|涨价|降价|裁员|倒闭|停产|赔偿|补偿|事故|火灾|暴雨|台风|教育|生育|住房|就业|收入|工资|物价|父母|孩子|老人|年轻人|美联储|欧洲央行|日元|美元|美股|纳斯达克|标普500|道琼斯|日经|恒生|港股|全球市场|原油|黄金|关税|贸易战|全球经济|美债/.test(title);
 }
 
 function isProfessionalInsuranceResult(title: string, url = "") {
@@ -179,24 +187,8 @@ function isProfessionalInsuranceResult(title: string, url = "") {
   if (/youtube\.com|youtu\.be|\.pdf(\?|$)|download|uploads|research|paper/i.test(url)) return false;
   if (/YouTube|PDF|调研报告|研究报告|白皮书|论文|报告下载|大学经济学院|国务院办公厅关于|保险网|网上买保险|买保险推荐|推荐平台|保险商城|产品中心|app下载|百科|招商|招聘|太平洋保险|平安保险/.test(title)) return false;
   if (/配置指南|配置方案|需要配置多少保险|怎么买|哪种好|排行榜/.test(title)) return false;
-  if (!/(2025|2026|最新|今天|热搜|回应|发布|通知|政策|新规|调整|上涨|下降|涨价|降价|裁员|倒闭|停产|事故|赔偿|补偿|费用|负担|补贴|报销|医保|养老金|社保|改革|生育|教育|住房|就业|医疗|养老)/.test(title)) return false;
+  if (!/(2025|2026|最新|今天|热搜|回应|发布|通知|政策|新规|调整|上涨|下降|涨价|降价|裁员|倒闭|停产|事故|赔偿|补偿|费用|负担|补贴|报销|医保|养老金|社保|改革|生育|教育|住房|就业|医疗|养老|美联储|央行|美股|纳斯达克|标普|道琼斯|日经|恒生|港股|汇率|原油|黄金|关税|贸易战|全球市场|美债)/.test(title)) return false;
   return true;
-}
-
-function inferSearchCategory(title: string): string {
-  if (/医保|医疗|医院|药|健康|重疾|护理/.test(title)) return "健康医疗";
-  if (/养老|养老金|退休/.test(title)) return "养老规划";
-  if (/意外|车险|理赔|灾害|事故/.test(title)) return "意外与财产风险";
-  if (/裁员|倒闭|停产|工资|就业|收入/.test(title)) return "收入与企业主风险";
-  if (/涨价|降价|物价|住房|房贷|消费/.test(title)) return "家庭现金流";
-  if (/生育|教育|孩子|父母|老人/.test(title)) return "家庭责任";
-  if (/社保|政策|监管|新规|调整/.test(title)) return "政策与社保";
-  return "家庭保障";
-}
-
-function inferSearchRelevance(title: string): HotTopic["insuranceRelevance"] {
-  if (/医保|医疗|医院|药|健康|重疾|护理|养老|养老金|退休|社保|事故|火灾|暴雨|车祸|裁员|倒闭|停产|赔偿|补偿|生育/.test(title)) return "高";
-  return "中";
 }
 
 function buildSearchAngle(title: string): string {

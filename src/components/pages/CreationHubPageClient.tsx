@@ -20,6 +20,7 @@ type HubPayload = {
   };
   categories: Array<CreationCategory & { count: number }>;
   apps: CreationApp[];
+  appRuntime?: Record<string, { available: boolean; reason: string; lastSeenAt?: string | null }>;
 };
 
 function isHubPayload(value: unknown): value is HubPayload {
@@ -57,7 +58,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "write-copy",
     appSlug: "write-copy",
-    name: "写文案",
+    name: "多平台文案创作",
     emoji: "🎨",
     pointsLabel: "5",
     badge: "火",
@@ -67,9 +68,21 @@ const workspaceCards: WorkspaceCard[] = [
     goals: ["attention", "trust", "conversion"],
   },
   {
+    slug: "link-remix",
+    appSlug: "link-remix",
+    name: "爆款灵感改编",
+    emoji: "🔗",
+    pointsLabel: "8",
+    badge: "新",
+    description: "粘贴视频号、抖音、公众号或小红书作品链接，提炼内容结构，生成适合你的多平台原创文案。",
+    hint: "未填写修改建议时，会结合你的用户画像和账号特点完成二创。",
+    actionLabel: "使用",
+    goals: ["attention", "trust", "conversion"],
+  },
+  {
     slug: "image-card",
     appSlug: "image-card",
-    name: "做图",
+    name: "知识卡片制作（图片）",
     emoji: "🪄",
     pointsLabel: "5",
     badge: "火",
@@ -81,7 +94,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "video-script-polish",
     appSlug: "video-script-polish",
-    name: "口播文案精修",
+    name: "口播稿优化",
     emoji: "🔮",
     pointsLabel: "5",
     badge: "推荐",
@@ -93,7 +106,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "policy-renewal-card",
     appSlug: "policy-renewal-card",
-    name: "保单续保提醒卡",
+    name: "保单续保提醒卡（图片）",
     emoji: "🗓️",
     pointsLabel: "5",
     badge: "新",
@@ -163,7 +176,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "voice-note-copy",
     appSlug: "write-copy",
-    name: "录音稿拆解整理",
+    name: "录音转文字素材",
     emoji: "🎙️",
     pointsLabel: "5",
     description: "在保留录音原意的基础上，拆分出清晰观点、精彩原话和可继续加工的内容素材。",
@@ -174,7 +187,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "live-script",
     appSlug: "live-script",
-    name: "写直播稿",
+    name: "直播脚本生成",
     emoji: "🎬",
     pointsLabel: "5",
     description: "结合直播主题、目标观众、已有材料和互动目的，生成从开场到收尾的完整直播脚本。",
@@ -207,7 +220,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "wechat-images",
     appSlug: "wechat-images",
-    name: "公众号配图",
+    name: "文章配图生成",
     emoji: "🖼️",
     pointsLabel: "5",
     description: "分析公众号文章的章节节奏，为开篇、重点、转折和总结分别生成合适的配图。",
@@ -252,7 +265,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "ip-positioning",
     appSlug: "ip-positioning",
-    name: "IP定位",
+    name: "个人品牌定位",
     emoji: "🎯",
     pointsLabel: "5",
     badge: "必用！",
@@ -308,8 +321,13 @@ const workspaceCards: WorkspaceCard[] = [
 ];
 
 const hiddenWorkspaceCardSlugs = new Set([
+  "lead-copy",
   "wechat-article-polish",
   "lead-package",
+  "topic-picker",
+  "general-content",
+  "letter",
+  "xiaohongshu-check",
   "policy-diagnosis",
   "breakthrough",
   "personality-card",
@@ -348,6 +366,7 @@ export function CreationHubPageClient() {
   const [hubData, setHubData] = useState<HubPayload | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<WorkspaceCategory>("all");
   const [search, setSearch] = useState("");
+  const hasHubData = hubData !== null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -374,8 +393,30 @@ export function CreationHubPageClient() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (!hubData) return;
+    const controller = new AbortController();
+    async function refreshLinkRemixAvailability() {
+      try {
+        const response = await fetch(apiPath("/api/creation/link-remix/availability"), { cache: "no-store", signal: controller.signal });
+        if (!response.ok) return;
+        const runtime = await response.json() as { available?: boolean; reason?: string; lastSeenAt?: string | null };
+        if (typeof runtime.available !== "boolean") return;
+        const available = runtime.available;
+        setHubData((current) => current ? {
+          ...current,
+          appRuntime: { ...(current.appRuntime ?? {}), "link-remix": { available, reason: runtime.reason ?? "", lastSeenAt: runtime.lastSeenAt } },
+        } : current);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error("Failed to refresh local Agent availability", error);
+      }
+    }
+    const timer = window.setInterval(() => void refreshLinkRemixAvailability(), 15000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [hasHubData]);
+
   if (loading) {
-    return <div className="pageStack"><section className="panel emptyState">正在加载获客创作广场...</section></div>;
+    return <div className="pageStack"><section className="panel emptyState">正在加载轻松创作广场...</section></div>;
   }
 
   if (!hubData) {
@@ -405,16 +446,20 @@ export function CreationHubPageClient() {
           <a href={appPath("/works")}>{hubData.hub.worksView.draftCount.toLocaleString("zh-CN")} 篇作品</a>
         </div>
         <div className="workspaceFrequentGrid">
-          {frequentCards.map((card) => (
-            <a href={resolveWorkspaceHref(card)} key={`frequent-${card.slug}`}>
+          {frequentCards.map((card) => {
+            const unavailable = isWorkspaceCardUnavailable(card, hubData);
+            const content = <>
               <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true"><WorkspaceIcon card={card} /></span>
               <div>
                 <strong>{card.name}</strong>
-                <span>{getUsageCount(card, usageByApp) > 0 ? `已使用 ${getUsageCount(card, usageByApp)} 次` : getCardInspiration(card)}</span>
+                <span>{unavailable ? "功能暂不可用" : getUsageCount(card, usageByApp) > 0 ? `已使用 ${getUsageCount(card, usageByApp)} 次` : getCardInspiration(card)}</span>
               </div>
               <em aria-hidden="true">→</em>
-            </a>
-          ))}
+            </>;
+            return unavailable
+              ? <div aria-disabled="true" className="workspaceFrequentUnavailable" key={`frequent-${card.slug}`} title="功能暂不可用">{content}</div>
+              : <a href={resolveWorkspaceHref(card)} key={`frequent-${card.slug}`}>{content}</a>;
+          })}
         </div>
       </section>
 
@@ -442,8 +487,9 @@ export function CreationHubPageClient() {
           ))}
         </div>
         <div className="workspaceHubGrid">
-          {filteredCards.map((card) => (
-            <article className={`workspaceHubCard workspaceCard-${getWorkspaceCategory(card)} ${getCardThemeClass(card.badge)}`} key={card.slug}>
+          {filteredCards.map((card) => {
+            const unavailable = isWorkspaceCardUnavailable(card, hubData);
+            return <article className={`workspaceHubCard workspaceCard-${getWorkspaceCategory(card)} ${getCardThemeClass(card.badge)} ${unavailable ? "workspaceHubCardUnavailable" : ""}`} key={card.slug}>
               <div className="workspaceHubCardHeader">
                 <span className="workspaceHubCardIcon" aria-hidden="true"><WorkspaceIcon card={card} /></span>
                 <div>
@@ -461,12 +507,12 @@ export function CreationHubPageClient() {
 
               <div className="workspaceHubCardFooter">
                 <span>{card.pointsLabel} 积分 · {getCardOutputLabel(card)}</span>
-                <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>
-                  {resolveWorkspaceActionLabel(card)} <span aria-hidden="true">→</span>
-                </a>
+                {unavailable
+                  ? <button className="workspaceHubUseButton" disabled title="功能暂不可用" type="button">功能暂不可用</button>
+                  : <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>{resolveWorkspaceActionLabel(card)} <span aria-hidden="true">→</span></a>}
               </div>
             </article>
-          ))}
+          })}
         </div>
         {filteredCards.length === 0 ? <div className="workspaceCatalogEmpty">没有找到匹配的创作工具，试试其他目标或关键词。</div> : null}
       </section>
@@ -502,6 +548,10 @@ function resolveWorkspaceHref(card: WorkspaceCard) {
   return appPath(`/apps/${card.appSlug}?from=create&entry=${card.slug}`);
 }
 
+function isWorkspaceCardUnavailable(card: WorkspaceCard, hub: HubPayload) {
+  return hub.appRuntime?.[card.appSlug]?.available === false;
+}
+
 function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {
   return usageByApp.get(card.slug) ?? usageByApp.get(card.appSlug) ?? 0;
 }
@@ -531,6 +581,7 @@ function getWorkspaceCategoryLabel(card: WorkspaceCard) {
 function getCardInspiration(card: WorkspaceCard) {
   const inspirations: Record<string, string> = {
     "write-copy": "把一次客户提问，变成能发布的口播和朋友圈。",
+    "link-remix": "参考一条爆款作品，转化成适合自己账号的原创内容。",
     "image-card": "把复杂保险知识，做成一眼能看懂的知识卡片。",
     "policy-renewal-card": "把续费日期和金额整理成一张有温度、不会写错字的提醒卡。",
     "video-script-polish": "让平淡的开场更抓人，让表达更像真实说话。",

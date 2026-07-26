@@ -1,5 +1,7 @@
 import { getPool, query } from "@/lib/db/client";
 import { tryGetSystemSettings } from "@/lib/db/repositories";
+import { createHash } from "node:crypto";
+import { createAffiliateNotification } from "@/lib/affiliate/notifications";
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -42,9 +44,32 @@ export async function bindAffiliateInviter(userId: string, referralCode: string)
      returning inviter_id`,
     [userId, inviter.rows[0].user_id],
   );
-  return updated.rows[0]
-    ? { ok: true as const, inviterId: updated.rows[0].inviter_id }
-    : { ok: false as const, error: "已经绑定过邀请人" };
+  if (updated.rows[0]) {
+    await createAffiliateNotification({ userId: updated.rows[0].inviter_id, type: "referral_registered", eventKey: `referral:${userId}`, title: "好友已通过你的邀请注册", body: "你的好友已完成注册；对方充值后，你将按活动规则获得积分返利。" });
+    return { ok: true as const, inviterId: updated.rows[0].inviter_id };
+  }
+  return { ok: false as const, error: "已经绑定过邀请人" };
+}
+
+export async function recordAffiliateRegistrationContext(userId: string, clientKey: string) {
+  const ipHash = clientKey && clientKey !== "unknown" ? createHash("sha256").update(clientKey).digest("hex") : null;
+  if (!ipHash) return { flagged: false };
+  const result = await query<{ inviter_id: string | null }>("select inviter_id from affiliate_accounts where user_id = $1", [userId]);
+  const inviterId = result.rows[0]?.inviter_id;
+  const inviter = inviterId
+    ? await query<{ registration_ip_hash: string | null }>("select registration_ip_hash from affiliate_accounts where user_id = $1", [inviterId])
+    : { rows: [] as Array<{ registration_ip_hash: string | null }> };
+  const sameSource = Boolean(inviter.rows[0]?.registration_ip_hash && inviter.rows[0].registration_ip_hash === ipHash);
+  await query(
+    `update affiliate_accounts
+     set registration_ip_hash = $2,
+         risk_status = case when $3 then 'review' else risk_status end,
+         risk_reason = case when $3 then '邀请人与受邀人注册来源一致' else risk_reason end,
+         updated_at = now()
+     where user_id = $1`,
+    [userId, ipHash, sameSource],
+  );
+  return { flagged: sameSource };
 }
 
 export async function validateAffiliateReferralCode(referralCode: string) {
@@ -54,6 +79,15 @@ export async function validateAffiliateReferralCode(referralCode: string) {
   return result.rows[0]
     ? { ok: true as const, inviterId: result.rows[0].user_id }
     : { ok: false as const, error: "返利邀请码不存在" };
+}
+
+export async function recordAffiliateVisit(referralCode: string, userAgent = "") {
+  const normalized = normalizeReferralCode(referralCode);
+  if (!normalized) return false;
+  const result = await query<{ user_id: string }>("select user_id from affiliate_accounts where referral_code = $1", [normalized]);
+  if (!result.rows[0]) return false;
+  await query("insert into affiliate_visits(referral_code, user_agent) values ($1, $2)", [normalized, userAgent.slice(0, 500)]);
+  return true;
 }
 
 export async function getAffiliateDetail(userId: string) {
@@ -105,8 +139,8 @@ export async function accrueAffiliateCredits(input: { orderId: string; inviteeUs
   const client = await getPool().connect();
   try {
     await client.query("begin");
-    const invitee = await client.query<{ inviter_id: string | null; created_at: string; custom_rebate_rate_percent: string | null }>(
-      `select invitee.inviter_id, invitee.created_at, inviter.custom_rebate_rate_percent
+    const invitee = await client.query<{ inviter_id: string | null; created_at: string; custom_rebate_rate_percent: string | null; risk_status: string }>(
+      `select invitee.inviter_id, invitee.created_at, invitee.risk_status, inviter.custom_rebate_rate_percent
        from affiliate_accounts invitee
        left join affiliate_accounts inviter on inviter.user_id=invitee.inviter_id
        where invitee.user_id = $1 for update of invitee`,
@@ -116,6 +150,10 @@ export async function accrueAffiliateCredits(input: { orderId: string; inviteeUs
     if (!relation?.inviter_id) {
       await client.query("rollback");
       return { applied: false, credits: 0 };
+    }
+    if (relation.risk_status !== "clear") {
+      await client.query("rollback");
+      return { applied: false, credits: 0, reviewRequired: true };
     }
     if (settings.durationDays > 0 && Date.now() > new Date(relation.created_at).getTime() + settings.durationDays * 86_400_000) {
       await client.query("rollback");
@@ -156,6 +194,7 @@ export async function accrueAffiliateCredits(input: { orderId: string; inviteeUs
       [relation.inviter_id, credits, input.inviteeUserId, input.orderId, settings.freezeHours, JSON.stringify({ purchasedCredits: input.purchasedCredits, rebateRatePercent: effectiveRate })],
     );
     await client.query("commit");
+    await createAffiliateNotification({ userId: relation.inviter_id, type: "rebate_accrued", eventKey: `accrue:${input.orderId}`, title: "好友充值，返利已到账", body: `你的好友充值已完成，本次计提 ${credits} 点返利。${frozen ? `返利将在 ${settings.freezeHours} 小时后解冻。` : "返利已可转入积分。"}` });
     return { applied: true, credits, inviterId: relation.inviter_id };
   } catch (error) {
     await client.query("rollback");
@@ -215,6 +254,27 @@ export async function reverseAffiliateCredits(orderId: string) {
       await client.query("rollback");
       return { reversed: false, credits: 0 };
     }
+    // Normalize expired frozen accruals before calculating the reversal. Otherwise a
+    // refund that arrives after the freeze window can leave frozen_credits behind,
+    // allowing the revoked rebate to be thawed back into the balance later.
+    const expired = await client.query<{ credits: number }>(
+      `update affiliate_ledger
+       set frozen_until = null
+       where user_id = $1 and action = 'accrue' and frozen_until <= now()
+       returning credits`,
+      [row.user_id],
+    );
+    const expiredCredits = expired.rows.reduce((sum, item) => sum + Number(item.credits), 0);
+    if (expiredCredits > 0) {
+      await client.query(
+        `update affiliate_accounts
+         set frozen_credits = greatest(frozen_credits - $2, 0),
+             available_credits = available_credits + $2,
+             updated_at = now()
+         where user_id = $1`,
+        [row.user_id, expiredCredits],
+      );
+    }
     const account = await client.query<{ available_credits: number; frozen_credits: number }>(
       "select available_credits, frozen_credits from affiliate_accounts where user_id = $1 for update",
       [row.user_id],
@@ -242,6 +302,7 @@ export async function reverseAffiliateCredits(orderId: string) {
       [row.user_id, row.credits, row.source_user_id, orderId, JSON.stringify({ fromFrozen, fromAvailable, transferredShortfall })],
     );
     await client.query("commit");
+    await createAffiliateNotification({ userId: row.user_id, type: "rebate_reversed", eventKey: `reverse:${orderId}`, title: "返利已冲回", body: `关联订单退款，本次返利已冲回 ${row.credits} 点。` });
     return { reversed: true, credits: row.credits };
   } catch (error) {
     await client.query("rollback");
@@ -255,6 +316,7 @@ export async function listAdminAffiliateRecords() {
   const result = await query<AdminAffiliateRecord>(
     `select aa.user_id as invitee_id, invitee.email as invitee_email, aa.inviter_id,
             inviter.email as inviter_email, inviter_aff.referral_code, inviter_aff.custom_rebate_rate_percent, aa.created_at,
+            aa.risk_status, aa.risk_reason,
             coalesce(sum(case when al.action = 'accrue' then al.credits when al.action = 'reverse' then -al.credits else 0 end), 0)::text as accrued_credits
      from affiliate_accounts aa
      join users invitee on invitee.id = aa.user_id
@@ -262,7 +324,7 @@ export async function listAdminAffiliateRecords() {
      join affiliate_accounts inviter_aff on inviter_aff.user_id = aa.inviter_id
      left join affiliate_ledger al on al.user_id = aa.inviter_id and al.source_user_id = aa.user_id
      where aa.inviter_id is not null
-     group by aa.user_id, invitee.email, aa.inviter_id, inviter.email, inviter_aff.referral_code, inviter_aff.custom_rebate_rate_percent, aa.created_at
+     group by aa.user_id, invitee.email, aa.inviter_id, inviter.email, inviter_aff.referral_code, inviter_aff.custom_rebate_rate_percent, aa.created_at, aa.risk_status, aa.risk_reason
      order by aa.created_at desc limit 300`,
   );
   return result.rows.map((row) => ({ ...row, custom_rebate_rate_percent: row.custom_rebate_rate_percent === null ? null : Number(row.custom_rebate_rate_percent), accrued_credits: Number(row.accrued_credits) }));
@@ -276,6 +338,15 @@ export async function updateAffiliateCustomRate(userId: string, rate: number | n
     [userId, rate],
   );
   return result.rows[0] ? { userId: result.rows[0].user_id, rate: result.rows[0].custom_rebate_rate_percent === null ? null : Number(result.rows[0].custom_rebate_rate_percent) } : null;
+}
+
+export async function updateAffiliateRisk(userId: string, status: "clear" | "review" | "blocked", reason = "") {
+  const result = await query<{ user_id: string; risk_status: string; risk_reason: string }>(
+    `update affiliate_accounts set risk_status = $2, risk_reason = $3, updated_at = now()
+     where user_id = $1 returning user_id, risk_status, risk_reason`,
+    [userId, status, reason],
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function listAdminAffiliateLedger() {
@@ -293,19 +364,31 @@ export async function listAdminAffiliateLedger() {
   return result.rows;
 }
 
+export async function getAdminAffiliateStats() {
+  const result = await query<{ visits: string; invitees: string; payers: string; accrued_credits: string }>(
+    `select
+       (select count(*) from affiliate_visits) as visits,
+       (select count(*) from affiliate_accounts where inviter_id is not null) as invitees,
+       (select count(distinct source_user_id) from affiliate_ledger where action = 'accrue') as payers,
+       (select coalesce(sum(case when action = 'accrue' then credits when action = 'reverse' then -credits else 0 end), 0) from affiliate_ledger) as accrued_credits`,
+  );
+  const row = result.rows[0];
+  return { visits: Number(row?.visits ?? 0), invitees: Number(row?.invitees ?? 0), payers: Number(row?.payers ?? 0), accruedCredits: Number(row?.accrued_credits ?? 0) };
+}
+
 async function thawAffiliateCredits(userId: string) {
   const client = await getPool().connect();
   try {
     await client.query("begin");
-    const matured = await client.query<{ total: string }>(
+    const matured = await client.query<{ id: string; credits: number }>(
       `with thawed as (
          update affiliate_ledger set frozen_until = null
          where user_id = $1 and action = 'accrue' and frozen_until <= now()
-         returning credits
-       ) select coalesce(sum(credits), 0)::text as total from thawed`,
+         returning id, credits
+       ) select id, credits from thawed`,
       [userId],
     );
-    const credits = Number(matured.rows[0]?.total ?? 0);
+    const credits = matured.rows.reduce((sum, item) => sum + Number(item.credits), 0);
     if (credits > 0) {
       await client.query(
         `update affiliate_accounts set frozen_credits = greatest(frozen_credits - $2, 0),
@@ -314,6 +397,9 @@ async function thawAffiliateCredits(userId: string) {
       );
     }
     await client.query("commit");
+    for (const item of matured.rows) {
+      await createAffiliateNotification({ userId, type: "rebate_thawed", eventKey: `thaw:${item.id}`, title: "返利已解冻", body: `一笔 ${item.credits} 点返利已解冻，现在可以转入积分。` });
+    }
   } catch (error) {
     await client.query("rollback");
     throw error;

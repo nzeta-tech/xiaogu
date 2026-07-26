@@ -99,6 +99,8 @@ export async function executeCreationAppRun(input: {
       ? buildLeadCopyPrompt(effectiveApp.fields, values, effectiveApp.promptHint, caseContext, getMultiChannelCopyVariant(app.slug))
     : app.slug === "general-content"
       ? buildGeneralContentPrompt(values, caseContext, effectiveApp.promptHint)
+    : app.slug === "link-remix"
+      ? buildLinkRemixPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "xiaohongshu-check"
       ? buildXiaohongshuCheckPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "video-script-polish"
@@ -508,6 +510,79 @@ function buildGeneralContentPrompt(
     "原始内容：",
     source,
   ].filter(Boolean).join("\n\n");
+}
+
+function buildLinkRemixPrompt(
+  values: Record<string, FieldValue>,
+  caseContext: string[],
+  promptHint: string,
+) {
+  const platform = stringifyCreationFieldValue(values.source_platform).trim() || "未说明平台";
+  const url = stringifyCreationFieldValue(values.source_url).trim();
+  const sourceTitle = stringifyCreationFieldValue(values.source_title).trim();
+  const sourceAuthor = stringifyCreationFieldValue(values.source_author).trim();
+  const publishedAt = stringifyCreationFieldValue(values.source_published_at).trim();
+  const likeCount = stringifyCreationFieldValue(values.source_like_count).trim();
+  const contentType = stringifyCreationFieldValue(values.source_content_type).trim();
+  const topic = stringifyCreationFieldValue(values.source_topic).trim();
+  const tags = stringifyCreationFieldValue(values.source_tags).trim();
+  const evidence = stringifyCreationFieldValue(values.source_evidence).trim();
+  const sourceText = stringifyCreationFieldValue(values.source_text).trim();
+  const transcript = stringifyCreationFieldValue(values.source_transcript).trim();
+  const angle = stringifyCreationFieldValue(values.remix_angle).trim();
+  const targets = Array.isArray(values.targets) ? values.targets : [];
+  const wantsVideoScript = targets.includes("video_script");
+  const targetLabels: Record<string, string> = {
+    video_script: "口播文案（2篇）",
+    wechat_article: "微信公众号文章（1篇）",
+    xiaohongshu: "小红书笔记（2篇）",
+    moments: "朋友圈文案（3条）",
+  };
+  const selectedTypes = targets.map((target) => targetLabels[target] ?? target).join("、") || "按用户选择的渠道";
+
+  return [
+    "你现在在执行小谷应用：爆款二创。",
+    "这是一个面向保险顾问的内容再创作任务。链接可能只能提供有限的公开信息，因此不要声称已经读取到链接中不存在的全文、数据或画面。",
+    ...caseContext,
+    `应用提示：${promptHint}`,
+    `原作品平台：${platform}`,
+    `原作品链接：${url}`,
+    `原作品标题或开头：${sourceTitle || "未提供"}`,
+    `作者或账号：${sourceAuthor || "未提供"}`,
+    `详情页发布时间：${publishedAt || "未核验"}`,
+    `详情页点赞数：${likeCount || "未核验"}`,
+    `来源内容形态：${contentType || "未确认"}`,
+    `自动归类主题：${topic || "未确认"}`,
+    `自动提取标签：${tags || "未确认"}`,
+    `可核验事实证据摘要：${evidence || "未提供"}`,
+    `作品文字内容：${sourceText || "未提供"}`,
+    `作品语音转写：${transcript || "未提供"}`,
+    angle
+      ? `用户补充的想法建议：${angle}`
+      : "用户未补充想法建议，请结合用户的内容画像、保险顾问身份、目标客户和账号特点完成二创。",
+    `本次输出渠道：${selectedTypes}`,
+    "请先做参考作品预检：检查发布时间是否在研究时间前30天内且可核验；点赞数是否为详情页明确标注且严格大于1000；链接是否是单条作品而非检索页；作者和事实证据是否清楚；是否为重复搬运、纯产品推销、无法访问或证据不足。任何硬过滤项不满足时，明确标注“暂不纳入参考”，不要用猜测补齐。",
+    "对通过预检的作品，按40分元数据评分：主题匹配12分、信息增量8分、来源清晰度7分、证据线索6分、时效与适用性4分、可转写性3分。24分以下只作为待核验候选，不应直接套用。",
+    transcript ? "已有完整转写时，再按100分转写评分：信息增量30分、证据强度20分、实施具体性15分、来源接近度10分、主题相关性10分、风险边界8分、编辑可用性4分、时效与可迁移性3分；总分低于70分，或信息增量低于18分、证据强度低于10分时，标记为不建议采用。" : "未提供完整转写，不得声称已完成逐字稿级别分析。",
+    "通过预检后，提炼一个可迁移的内容骨架：核心话题、目标人群、开头钩子、论证顺序、情绪节奏和收束方式。随后完全换成用户指定的保险题材、场景和表达，不复刻原文标题、句子、案例、人物、数据或独特比喻。",
+    wantsVideoScript
+      ? [
+          "短视频口播创作要求：",
+          "1. 先在心中判断参考作品最接近哪一种口播母型：个人经历、客户/理赔故事、观点类比、问题回应、团队/职业使命、方案规划或其他；借鉴其叙事机制，不要照搬原视频表述。",
+          "2. 每条口播只选择一种钩子：结果、原话、场景、问题、对比或身份。前两句必须出现具体结果、具体人、具体场景、具体疑问或具体对比中的至少一项；禁止用“很多人都不知道”“你以为”“其实”这类模板开头。",
+          "3. 每条口播按“钩子 -> 代入 -> 转折 -> 真实证据/具体场景 -> 核心判断 -> 情绪收束 -> 轻承接”推进。不是每段都要讲产品；先讲人和处境，再自然落到保险的意义、规划逻辑或专业服务。",
+          "4. 两条必须采用不同的钩子和不同的切入路径：一条可偏真实场景或故事，另一条可偏问题、对比或观点；不得只是同一篇替换标题。",
+          "5. 句子要适合直接念：钩子和金句使用短句，叙事和解释使用中句；每1-2句形成自然停顿，避免书面腔、连续罗列和平均用力。",
+          "6. 每条只保留一个核心判断，并以一句可复述的金句收束。CTA 必须轻，优先评论关键词、私信沟通或预约梳理，不逼单、不制造焦虑。",
+          "7. 默认每条300-500字；素材本身明显适合金句/类比型时可压缩至80-150字，明显适合个人经历或案例型时可扩展至600字以内。",
+          "8. 输出时在“## 口播文案”下严格给出两条成稿，格式为“### 版本一｜[口播母型]”“### 版本二｜[口播母型]”。每条依次包含“标题：”“钩子类型：”“核心判断：”“正文：”“评论区承接：”，不要解释创作方法。",
+        ].join("\n")
+      : "",
+    "如果无法访问链接，只能基于平台、链接和用户指定题材完成原创选题与文案，并明确标注“参考链接内容待核验”，不要编造原作品细节。",
+    "所有保险产品、费率、收益、理赔、核保和政策信息都必须以用户提供且可核实的事实为准；缺少依据时写“待核实”或给出替换提示。不得承诺收益、保证理赔、制造恐慌或使用绝对化表述。",
+    "请按用户选择的渠道输出完整结果。每个渠道单独用 Markdown 二级标题分组，并给出可直接复制的正文；口播要有开场钩子和自然收口，小红书要有标题、正文和话题，公众号要有标题、导语和完整结构，朋友圈要分别短而真实。最后补充“参考作品评估”和“二创说明”：前者列出硬过滤结果、元数据得分、证据缺口和是否建议采用；后者只说明借鉴了哪些结构，不披露或复写原作品内容。",
+    "不要输出额外前言，不要输出 Markdown 表格，不要使用代码块。",
+  ].join("\n\n");
 }
 
 function buildLetterPrompt(

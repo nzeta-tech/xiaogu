@@ -23,6 +23,10 @@ export async function GET() {
     },
     payment: {
       enableStripe: settings.payment.enableStripe !== false,
+      enableAirwallex: settings.payment.enableAirwallex === true,
+      enableAlipay: settings.payment.enableAlipay === true,
+      enableWechat: settings.payment.enableWechat === true,
+      enableManualTransfer: settings.payment.enableManualTransfer === true,
       displayCreditPackages: settings.payment.displaySubscriptions !== false,
       purchaseNotice: String(settings.payment.purchaseNotice ?? ""),
       feeRatePercent: settings.payment.feeRatePercent,

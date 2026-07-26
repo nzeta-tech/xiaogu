@@ -1,0 +1,24 @@
+name: xiaogu-agent-prod
+
+services:
+  local-agent:
+    image: ${LOCAL_AGENT_IMAGE:?Set LOCAL_AGENT_IMAGE to the tested immutable Git SHA tag or digest}
+    environment:
+      LOCAL_AGENT_ID: ${LOCAL_AGENT_ID:-macbook-prod}
+      LOCAL_AGENT_VERSION: ${LOCAL_AGENT_VERSION:?Set LOCAL_AGENT_VERSION to the release Git SHA}
+      VIRAL_XHS_BROWSER_ENABLED: ${VIRAL_XHS_BROWSER_ENABLED:-0}
+      VIRAL_SOGOU_BROWSER_ENABLED: ${VIRAL_SOGOU_BROWSER_ENABLED:-0}
+      VIRAL_WECHAT_MP_DISCOVERY_ENABLED: ${VIRAL_WECHAT_MP_DISCOVERY_ENABLED:-0}
+      VIRAL_WERSS_ENABLED: ${VIRAL_WERSS_ENABLED:-0}
+      WERSS_ENABLED: ${WERSS_ENABLED:-0}
+      VIRAL_WECHATSOGOU_ENABLED: ${VIRAL_WECHATSOGOU_ENABLED:-0}
+    ports:
+      - "127.0.0.1:${LOCAL_AGENT_VNC_PORT:-6080}:6080"
+      - "127.0.0.1:${LOCAL_AGENT_WERSS_PORT:-8001}:8001"
+      - "127.0.0.1:${LOCAL_AGENT_WECHATSOGOU_PORT:-8010}:8010"
+
+  transcriber:
+    image: ${LOCAL_AGENT_TRANSCRIBER_IMAGE:?Set LOCAL_AGENT_TRANSCRIBER_IMAGE to the tested immutable tag or digest}
+
+  wx-channel:
+    image: ${LOCAL_AGENT_WX_CHANNEL_IMAGE:?Set LOCAL_AGENT_WX_CHANNEL_IMAGE to the tested immutable tag or digest}

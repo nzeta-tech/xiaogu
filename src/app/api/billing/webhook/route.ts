@@ -1,9 +1,10 @@
 import { grantCredits } from "@/lib/billing/openmeter";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
-import { tryGetOrderByProvider, tryMarkOrderPaidByProvider } from "@/lib/db/repositories";
+import { tryFinishWebhookEvent, tryGetOrderByProvider, tryGetPaymentProvider, tryListPaymentProviders, tryMarkOrderCompleted, tryMarkOrderPaidByProvider, tryRecordWebhookEvent } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
 import { constructStripeWebhookEvent } from "@/lib/payments/stripe";
 import { accrueAffiliateCredits } from "@/lib/affiliate/service";
+import { hashWebhookPayload } from "@/lib/payments/provider";
 
 export async function POST(request: Request) {
   const stripeSignature = request.headers.get("stripe-signature");
@@ -11,7 +12,11 @@ export async function POST(request: Request) {
   if (stripeSignature) {
     try {
       const payload = await request.text();
-      const event = constructStripeWebhookEvent(payload, stripeSignature);
+      const configuredProvider = (await tryListPaymentProviders()).find((provider) => provider.providerKey === "stripe" && provider.enabled);
+      const providerWithSecrets = configuredProvider ? await tryGetPaymentProvider(configuredProvider.id, true) : null;
+      const event = constructStripeWebhookEvent(payload, stripeSignature, providerWithSecrets ? { secretKey: providerWithSecrets.config.secretKey, webhookSecret: providerWithSecrets.config.webhookSecret } : undefined);
+      const eventRecord = await tryRecordWebhookEvent({ providerKey: "stripe", eventId: event.id, eventType: event.type, payloadHash: hashWebhookPayload(payload) });
+      if (!eventRecord.accepted) return Response.json({ received: true, duplicate: true, eventType: event.type });
       await query(
         `insert into system_settings(setting_key,setting_value,updated_at)
          values ('payment_health',$1::jsonb,now())
@@ -40,17 +45,21 @@ export async function POST(request: Request) {
           });
 
           if (!grant.ok) {
+            await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "failed", errorMessage: "credit grant failed" });
             return Response.json({ error: "积分发放失败，等待支付平台重试" }, { status: 502 });
           }
+          await tryMarkOrderCompleted(order.id);
           const affiliate = await accrueAffiliateCredits({
             orderId: order.id,
             inviteeUserId: order.user_id,
             purchasedCredits: order.quota_amount,
           });
+          await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "processed" });
           return Response.json({ received: true, eventType: event.type, order, grant, affiliate });
         }
       }
 
+      await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "processed" });
       return Response.json({ received: true, eventType: event.type });
     } catch {
       return Response.json({ error: "Stripe webhook signature verification failed" }, { status: 400 });

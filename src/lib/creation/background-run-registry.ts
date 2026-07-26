@@ -49,6 +49,16 @@ export function getBackgroundWorkRunPromise(workId: string) {
   return activeWorkRuns.get(workId)?.promise ?? null;
 }
 
+export async function waitForBackgroundWorkRunStart(workId: string, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const snapshot = activeWorkRuns.get(workId)?.snapshot;
+    if (!snapshot || snapshot.runId || snapshot.status === "error") return snapshot ?? null;
+    await sleep(25);
+  }
+  return activeWorkRuns.get(workId)?.snapshot ?? null;
+}
+
 export function subscribeToBackgroundWorkRun(workId: string, listener: (event: WorkRunEvent) => void) {
   const entry = activeWorkRuns.get(workId);
   if (!entry) return null;

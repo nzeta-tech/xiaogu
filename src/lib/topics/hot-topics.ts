@@ -1,6 +1,7 @@
 import { seedTopics } from "./seeds";
 import { discoverTopicsWithSearch, enrichTopicsWithSearch } from "./search-enrichment";
 import type { HotTopic } from "./types";
+import { ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, normalizeSourcePublishedAt, validateHotTopic } from "./rules";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 
 const platformMap: Record<string, string> = {
@@ -33,6 +34,9 @@ type RebangItem = {
   www_url?: string;
   mobile_url?: string;
   hot_value?: string | number;
+  timestamp?: string | number;
+  updateTime?: string | number;
+  publishedAt?: string | number;
 };
 
 type FreejkItem = {
@@ -41,6 +45,9 @@ type FreejkItem = {
   hot?: string | number;
   url?: string;
   mobileUrl?: string;
+  timestamp?: string | number;
+  updateTime?: string | number;
+  publishedAt?: string | number;
 };
 
 export async function getHotTopics(options: { refresh?: boolean; topicPreference?: string } = {}): Promise<HotTopic[]> {
@@ -77,10 +84,11 @@ export async function getHotTopics(options: { refresh?: boolean; topicPreference
           summary: item.desc?.trim() || "来自门户热榜，建议结合搜索结果补充背景。",
           source: platformMap[platform] ?? platform,
           heat: index < 2 ? "高" : "中",
-          category: inferCategory(title),
+          category: inferHotTopicCategory(title),
           insuranceRelevance: scoreInsuranceRelevance(title),
           recommendedAngle: buildInsuranceAngle(title),
           riskNote: "热点内容需先核实事实，保险建议应避免收益承诺和理赔承诺。",
+          verification: validateHotTopic({ title, source: platformMap[platform] ?? platform }),
         };
       });
     }),
@@ -98,7 +106,7 @@ export async function getHotTopics(options: { refresh?: boolean; topicPreference
     ...remoteTopics.filter((topic) => topic.insuranceRelevance !== "低"),
   ]), options.topicPreference);
 
-  if (candidateTopics.length > 0) return enrichTopicsWithSearch(candidateTopics.slice(0, 12), options);
+  if (candidateTopics.length > 0) return enrichTopicsWithSearch(candidateTopics, options);
   if (isDemoModeEnabled()) return seedTopics;
   throw new Error("话题来源暂不可用，请检查热榜或搜索服务配置");
 }
@@ -140,12 +148,14 @@ async function fetchRebangTopics(options: { refresh?: boolean }) {
           summary: item.desc?.trim() || `来自 Rebang 今日热榜「${source.name}」。`,
           source: `Rebang · ${source.name}`,
           heat: index < 3 ? "高" : "中",
-          category: inferCategory(title),
+          category: inferHotTopicCategory(title),
           insuranceRelevance: scoreInsuranceRelevance(title),
           recommendedAngle: buildInsuranceAngle(title),
           riskNote: "热榜信息需要结合原始来源核验，不把榜单热度直接等同于事实结论。",
           sourceUrl: item.www_url ?? item.mobile_url ?? source.url,
           sourceTitle: `Rebang 今日热榜 · ${source.name}`,
+          sourcePublishedAt: normalizeSourcePublishedAt(item.timestamp ?? item.updateTime ?? item.publishedAt),
+          verification: validateHotTopic({ title, source: `Rebang · ${source.name}`, sourceUrl: item.www_url ?? item.mobile_url ?? source.url, sourcePublishedAt: normalizeSourcePublishedAt(item.timestamp ?? item.updateTime ?? item.publishedAt) }),
         };
       });
     }),
@@ -189,12 +199,14 @@ async function fetchFreejkTopics(options: { refresh?: boolean }) {
           summary: item.desc?.trim() || `来自 ${source.name} 热榜，适合结合最新公开信息核验后转化为保险内容选题。`,
           source: `FreeJK · ${source.name}`,
           heat: index < 5 ? "高" : "中",
-          category: inferCategory(title),
+          category: inferHotTopicCategory(title),
           insuranceRelevance: scoreInsuranceRelevance(title),
           recommendedAngle: buildInsuranceAngle(title),
           riskNote: "热榜信息需要二次核验，不把网络热度直接等同于事实结论。",
           sourceUrl: item.url ?? item.mobileUrl,
           sourceTitle: `${source.name} 热榜`,
+          sourcePublishedAt: normalizeSourcePublishedAt(item.updateTime ?? item.timestamp ?? item.publishedAt),
+          verification: validateHotTopic({ title, source: `FreeJK · ${source.name}`, sourceUrl: item.url ?? item.mobileUrl, sourcePublishedAt: normalizeSourcePublishedAt(item.updateTime ?? item.timestamp ?? item.publishedAt) }),
         };
       });
     }),
@@ -249,26 +261,11 @@ function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "") {
     if (!selected.some((item) => item.title === topic.title)) selected.push(topic);
   }
 
-  return selected;
-}
-
-function inferCategory(title: string): string {
-  if (/医保|医疗|医院|药|病|体检|健康|癌|结节/.test(title)) return "健康医疗";
-  if (/退休|养老|养老金|社保|老龄/.test(title)) return "养老规划";
-  if (/暴雨|台风|地震|事故|火灾|车祸/.test(title)) return "意外与财产风险";
-  if (/裁员|失业|降薪|创业|企业|罢工|倒闭|破产|暴雷|危机|车企|实体店|价格倒挂/.test(title)) return "收入与企业主风险";
-  if (/涨价|物价|房贷|利率|消费|工资/.test(title)) return "家庭现金流";
-  if (/生育|教育|孩子|父母|老人|学校/.test(title)) return "家庭责任";
-  if (/航空|旅行|出行|航班/.test(title)) return "出行与意外风险";
-  return "社会热点";
+  return ensureInternationalFinanceCoverage([...selected, ...ranked], 12);
 }
 
 function scoreInsuranceRelevance(title: string): HotTopic["insuranceRelevance"] {
-  if (/医保|医疗|医院|药|病|体检|健康|癌|结节|退休|养老|养老金|社保|暴雨|台风|地震|事故|火灾|车祸|裁员|失业|赔偿|补偿|护理|生育|破产|倒闭|罢工|灾情|汛情/.test(title)) {
-    return "高";
-  }
-  if (/家庭|孩子|父母|年轻人|收入|消费|政策|风险|涨价|降价|工资|房贷|利率|物价|企业|教育|老人|暴雷|危机|停产|航空|车企|实体店|价格倒挂|学校|禁止/.test(title)) return "中";
-  return "低";
+  return inferHotTopicRelevance(title);
 }
 
 function topicScore(topic: HotTopic, topicPreference = "") {
@@ -278,6 +275,7 @@ function topicScore(topic: HotTopic, topicPreference = "") {
   if (/涨价|降价|裁员|倒闭|破产|停产|罢工|事故|赔偿|补偿|医保|养老金|退休|医院|药|癌|暴雨|台风|地震|火灾|车祸|生育|教育|房贷|物价|暴雷|危机/.test(topic.title)) score += 14;
   if (/家庭|父母|孩子|老人|年轻人|打工人|普通人|中年|收入|房贷|学校|实体店|航空|车企/.test(topic.title)) score += 9;
   if (/特斯拉|三星|日本车企|廉价航空|造车新势力|手机店|学校禁止|汛情|灾情/.test(topic.title)) score += 10;
+  if (topic.category === "国际财经") score += 6;
   if (/报告|研究|白皮书|论文|指数|论坛|会议/.test(topic.title)) score -= 14;
   if (matchesPreference(topic, topicPreference)) score += 18;
   if (topic.evidence || topic.sourceUrl) score += 4;

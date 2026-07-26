@@ -7,11 +7,12 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { listenForPageMeta, type PageMetaDetail } from "@/lib/client/page-meta";
 
 const platformNavItems = [
-  { id: "workbench", href: "/today", label: "今日", shortLabel: "今日工作台", icon: "home" },
-  { id: "creation", href: "/create", label: "获客创作", shortLabel: "获客创作", icon: "edit" },
+  { id: "workbench", href: "/today", label: "今日灵感", shortLabel: "今日灵感", icon: "home" },
+  { id: "creation", href: "/create", label: "轻松创作", shortLabel: "轻松创作", icon: "edit" },
   { id: "assets", href: "/works", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
   { id: "crm", href: "/avatar", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
   { id: "invite", href: "/rewards#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
+  { id: "billing", href: "/billing", label: "充值中心", shortLabel: "充值与订单", icon: "wallet" },
   { id: "growth", href: "/account", label: "用户中心", shortLabel: "权益与账户", icon: "sprout" },
 ];
 
@@ -299,6 +300,16 @@ function NavIcon({ name }: { name: string }) {
     );
   }
 
+  if (name === "wallet") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v14H6.5A2.5 2.5 0 0 1 4 16.5v-9Z" />
+        <path d="M4 8h14v8H4" />
+        <path d="M15 12h.01" />
+      </svg>
+    );
+  }
+
   if (name === "support") {
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -388,11 +399,15 @@ function isNavItemActive(pathname: string, itemId?: string, navigationSource?: s
   }
 
   if (itemId === "growth") {
-    return pathname === "/account" || pathname === "/billing";
+    return pathname === "/account";
   }
 
   if (itemId === "invite") {
     return pathname === "/rewards";
+  }
+
+  if (itemId === "billing") {
+    return pathname === "/billing";
   }
 
   if (itemId === "assets") {
@@ -415,12 +430,12 @@ function resolvePublicUrl(value: string) {
 }
 
 function getPageMeta(pathname: string, fallbackDescription: string): PageMetaDetail {
-  if (pathname === "/today") return { title: "今日工作台", description: "把今天的重要动作推进下去" };
-  if (pathname === "/create" || pathname.startsWith("/apps/")) return { title: "获客创作", description: "从想法到可发布内容" };
+  if (pathname === "/today") return { title: "今日灵感", description: "热点与爆款内容灵感" };
+  if (pathname === "/create" || pathname.startsWith("/apps/")) return { title: "轻松创作", description: "从想法到可发布内容" };
   if (pathname.startsWith("/works/") || pathname.startsWith("/examples/")) return { title: "作品详情", description: "审阅、优化与复用内容" };
   if (pathname === "/works") return { title: "创作历史", description: "管理作品与创作素材" };
   if (pathname === "/avatar" || pathname === "/questionnaire") return { title: "数字分身", description: "管理人设与表达偏好" };
-  if (pathname === "/billing") return { title: "会员与积分", description: "查看额度和购买记录" };
+  if (pathname === "/billing") return { title: "充值中心", description: "选择套餐、完成支付、查看订单" };
   if (pathname === "/rewards") return { title: "邀请有礼", description: "邀请好友、查看返利与活动奖励" };
   if (pathname === "/feedback") return { title: "反馈支持", description: "告诉我们你的使用感受" };
   if (pathname === "/account") return { title: "用户中心", description: "个人资料、经营数据与账号安全" };

@@ -1,16 +1,166 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      target: local-agent
     ports:
       - "3000:3000"
+      - "${VNC_BIND_ADDRESS:-127.0.0.1}:6080:6080"
+      - "${WERSS_BIND_ADDRESS:-127.0.0.1}:8001:8001"
+      - "${WECHATSOGOU_BIND_ADDRESS:-127.0.0.1}:8010:8010"
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      transcriber:
+        condition: service_healthy
+      wx-channel:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/insurance_content_agent
       REDIS_URL: redis://redis:6379
+      VIRAL_INSPECT_OPENAI_API_BASE: ${VIRAL_INSPECT_OPENAI_API_BASE:-https://api.openai.com/v1}
+      VIRAL_INSPECT_OPENAI_API_KEY: ${VIRAL_INSPECT_OPENAI_API_KEY:-}
+      VIRAL_INSPECT_OPENAI_MODEL: ${VIRAL_INSPECT_OPENAI_MODEL:-gpt-4o-mini}
+      VIRAL_DOUYIN_DOWNLOAD_ENABLED: ${VIRAL_DOUYIN_DOWNLOAD_ENABLED:-1}
+      VIRAL_WECHAT_INSPECT_API_BASE: ${VIRAL_WECHAT_INSPECT_API_BASE:-https://sph.litao.workers.dev/api/fetch_video_profile}
+      VIRAL_WECHAT_LOCAL_API_BASE: ${VIRAL_WECHAT_LOCAL_API_BASE:-}
+      VIRAL_WECHAT_CONTAINER_BROWSER_ENABLED: ${VIRAL_WECHAT_CONTAINER_BROWSER_ENABLED:-1}
+      VIRAL_WECHAT_CHANNEL_SOURCE_URLS: ${VIRAL_WECHAT_CHANNEL_SOURCE_URLS:-}
+      VIRAL_WECHAT_CDP_URL: ${VIRAL_WECHAT_CDP_URL:-http://127.0.0.1:9222}
+      VIRAL_WECHAT_BROWSER_PROFILE_DIR: ${VIRAL_WECHAT_BROWSER_PROFILE_DIR:-/data/wechat-profile}
+      VIRAL_WECHAT_DISCOVERY_ENABLED: ${VIRAL_WECHAT_DISCOVERY_ENABLED:-1}
+      VIRAL_WECHAT_DISCOVERY_API_BASE: ${VIRAL_WECHAT_DISCOVERY_API_BASE:-http://wx-channel:2026}
+      VIRAL_WECHAT_DISCOVERY_QUERIES: ${VIRAL_WECHAT_DISCOVERY_QUERIES:-保险,保险理赔,健康告知,养老规划}
+      VIRAL_WECHAT_DISCOVERY_MAX_ACCOUNTS: ${VIRAL_WECHAT_DISCOVERY_MAX_ACCOUNTS:-3}
+      VIRAL_WECHAT_DISCOVERY_MAX_WORKS: ${VIRAL_WECHAT_DISCOVERY_MAX_WORKS:-3}
+      VIRAL_WECHAT_DISCOVERY_TIMEOUT_MS: ${VIRAL_WECHAT_DISCOVERY_TIMEOUT_MS:-12000}
+      VIRAL_WECHAT_INSPECT_TIMEOUT_MS: ${VIRAL_WECHAT_INSPECT_TIMEOUT_MS:-30000}
+      VIRAL_XHS_INSPECT_API_BASE: ${VIRAL_XHS_INSPECT_API_BASE:-}
+      VIRAL_XHS_INSPECT_TIMEOUT_MS: ${VIRAL_XHS_INSPECT_TIMEOUT_MS:-30000}
+      VIRAL_XHS_BROWSER_ENABLED: ${VIRAL_XHS_BROWSER_ENABLED:-1}
+      VIRAL_XHS_CDP_URL: ${VIRAL_XHS_CDP_URL:-http://127.0.0.1:9223}
+      VIRAL_XHS_CDP_PORT: ${VIRAL_XHS_CDP_PORT:-9223}
+      VIRAL_XHS_BROWSER_PROFILE_DIR: ${VIRAL_XHS_BROWSER_PROFILE_DIR:-/data/xhs-profile}
+      VIRAL_MEDIA_DIR: ${VIRAL_MEDIA_DIR:-/tmp/xiaogu-viral-media}
+      VIRAL_TRANSCRIBE_API_BASE: ${VIRAL_TRANSCRIBE_API_BASE:-http://transcriber:8000}
+      VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS: ${VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS:-240000}
+      DOUYIN_COOKIES_FROM_BROWSER: ${DOUYIN_COOKIES_FROM_BROWSER:-chromium:/data/douyin-profile}
+      DOUYIN_BROWSER_PROFILE_DIR: ${DOUYIN_BROWSER_PROFILE_DIR:-/data/douyin-profile}
+      VIRAL_DOUYIN_BROWSER_ENABLED: ${VIRAL_DOUYIN_BROWSER_ENABLED:-1}
+      VIRAL_DOUYIN_BROWSER_PROFILE_DIR: ${VIRAL_DOUYIN_BROWSER_PROFILE_DIR:-/data/douyin-profile}
+      VIRAL_DOUYIN_CDP_PORT: ${VIRAL_DOUYIN_CDP_PORT:-9224}
+      VIRAL_SOGOU_BROWSER_ENABLED: ${VIRAL_SOGOU_BROWSER_ENABLED:-1}
+      VIRAL_SOGOU_CDP_URL: ${VIRAL_SOGOU_CDP_URL:-http://127.0.0.1:9225}
+      VIRAL_SOGOU_CDP_PORT: ${VIRAL_SOGOU_CDP_PORT:-9225}
+      VIRAL_SOGOU_BROWSER_PROFILE_DIR: ${VIRAL_SOGOU_BROWSER_PROFILE_DIR:-/data/sogou-profile}
+      VIRAL_WECHATSOGOU_ENABLED: ${VIRAL_WECHATSOGOU_ENABLED:-1}
+      VIRAL_WECHATSOGOU_API_BASE: ${VIRAL_WECHATSOGOU_API_BASE:-http://127.0.0.1:8010}
+      VIRAL_WECHATSOGOU_MAX_PAGES: ${VIRAL_WECHATSOGOU_MAX_PAGES:-2}
+      VIRAL_WERSS_ENABLED: ${VIRAL_WERSS_ENABLED:-1}
+      VIRAL_WERSS_API_BASE: ${VIRAL_WERSS_API_BASE:-http://127.0.0.1:8001}
+      VIRAL_WERSS_AUTHORIZATION: ${VIRAL_WERSS_AUTHORIZATION:-}
+      VIRAL_WECHAT_PROVIDER_TIMEOUT_MS: ${VIRAL_WECHAT_PROVIDER_TIMEOUT_MS:-12000}
+      VIRAL_WECHAT_PROVIDER_ARTICLE_LIMIT: ${VIRAL_WECHAT_PROVIDER_ARTICLE_LIMIT:-30}
+      WERSS_ENABLED: ${WERSS_ENABLED:-1}
+      WERSS_USERNAME: ${WERSS_USERNAME:-admin}
+      WERSS_PASSWORD: ${WERSS_PASSWORD:-change-me-before-production}
+      WERSS_GATHER_CONTENT: ${WERSS_GATHER_CONTENT:-True}
+      WERSS_GATHER_MODEL: ${WERSS_GATHER_MODEL:-app}
+      WECHATSOGOU_TIMEOUT_SECONDS: ${WECHATSOGOU_TIMEOUT_SECONDS:-12}
+      WECHATSOGOU_CAPTCHA_RETRIES: ${WECHATSOGOU_CAPTCHA_RETRIES:-1}
+      VIRAL_WECHAT_MP_DISCOVERY_ENABLED: ${VIRAL_WECHAT_MP_DISCOVERY_ENABLED:-1}
+      VIRAL_WECHAT_MP_CDP_URL: ${VIRAL_WECHAT_MP_CDP_URL:-http://127.0.0.1:9226}
+      VIRAL_WECHAT_MP_CDP_PORT: ${VIRAL_WECHAT_MP_CDP_PORT:-9226}
+      VIRAL_WECHAT_MP_BROWSER_PROFILE_DIR: ${VIRAL_WECHAT_MP_BROWSER_PROFILE_DIR:-/data/wechat-mp-profile}
+      VIRAL_WECHAT_MP_SEARCH_TIMEOUT_MS: ${VIRAL_WECHAT_MP_SEARCH_TIMEOUT_MS:-12000}
+      BROWSER_PROFILE_DIR: ${BROWSER_PROFILE_DIR:-/data/douyin-profile}
+      CONTAINER_BROWSER_CDP_PORT: ${CONTAINER_BROWSER_CDP_PORT:-9222}
+      CONTAINER_BROWSER_START_URL: ${CONTAINER_BROWSER_START_URL:-https://www.douyin.com/}
+      VIRAL_SEARCH_BROWSER_ENABLED: ${VIRAL_SEARCH_BROWSER_ENABLED:-1}
+      VIRAL_SEARCH_CDP_URL: ${VIRAL_SEARCH_CDP_URL:-http://127.0.0.1:9224}
+      VIRAL_SEARCH_BROWSER_TIMEOUT_MS: ${VIRAL_SEARCH_BROWSER_TIMEOUT_MS:-12000}
+      VIRAL_EXAMPLES_TIMEOUT_MS: ${VIRAL_EXAMPLES_TIMEOUT_MS:-12000}
+      VIRAL_PREPARATION_SECRET: ${VIRAL_PREPARATION_SECRET:-}
+      VIRAL_PREPARATION_INTERVAL_MS: ${VIRAL_PREPARATION_INTERVAL_MS:-21600000}
+      VIRAL_PREPARED_DATA_MAX_AGE_MS: ${VIRAL_PREPARED_DATA_MAX_AGE_MS:-108000000}
+      VIRAL_CREATOR_PROFILE_REFRESH_ENABLED: ${VIRAL_CREATOR_PROFILE_REFRESH_ENABLED:-1}
+      VIRAL_CREATOR_REFRESH_MAX_ACCOUNTS: ${VIRAL_CREATOR_REFRESH_MAX_ACCOUNTS:-8}
+      VIRAL_CREATOR_REFRESH_BROWSER_ACCOUNTS: ${VIRAL_CREATOR_REFRESH_BROWSER_ACCOUNTS:-3}
+      VIRAL_CREATOR_REFRESH_MAX_WORKS: ${VIRAL_CREATOR_REFRESH_MAX_WORKS:-10}
+      VIRAL_CREATOR_TARGET_PER_PLATFORM: ${VIRAL_CREATOR_TARGET_PER_PLATFORM:-100}
+      VIRAL_CREATOR_DISCOVERY_INTERVAL_MS: ${VIRAL_CREATOR_DISCOVERY_INTERVAL_MS:-86400000}
+      VIRAL_CREATOR_DISCOVERY_QUERIES: ${VIRAL_CREATOR_DISCOVERY_QUERIES:-}
+      VIRAL_SOGOU_ACCOUNT_SEARCH_MAX_PAGES: ${VIRAL_SOGOU_ACCOUNT_SEARCH_MAX_PAGES:-2}
+    volumes:
+      - douyin_profile:/data/douyin-profile
+      - wechat_profile:/data/wechat-profile
+      - xhs_profile:/data/xhs-profile
+      - sogou_profile:/data/sogou-profile
+      - wechat_mp_profile:/data/wechat-mp-profile
+      - viral_media:/tmp/xiaogu-viral-media
+      - wx_channel_data:/wx-channel:ro
+      - werss_data:/opt/werss/data
+
+  viral-worker:
+    build:
+      context: .
+      target: builder
+    env_file:
+      - .env
+    environment:
+      VIRAL_PREPARATION_URL: http://app:3000/api/internal/viral-data/prepare
+      VIRAL_PREPARATION_SECRET: ${VIRAL_PREPARATION_SECRET:-}
+      VIRAL_PREPARATION_INTERVAL_MS: ${VIRAL_PREPARATION_INTERVAL_MS:-21600000}
+      VIRAL_PREPARATION_TIMEOUT_MS: ${VIRAL_PREPARATION_TIMEOUT_MS:-300000}
+    command: ["node", "scripts/viral-data-worker.mjs"]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+
+  viral-creator-worker:
+    build:
+      context: .
+      target: builder
+    env_file:
+      - .env
+    environment:
+      VIRAL_CREATOR_DISCOVERY_URL: http://app:3000/api/internal/viral-data/discover-creators
+      VIRAL_PREPARATION_SECRET: ${VIRAL_PREPARATION_SECRET:-}
+      VIRAL_CREATOR_DISCOVERY_INTERVAL_MS: ${VIRAL_CREATOR_DISCOVERY_INTERVAL_MS:-86400000}
+      VIRAL_CREATOR_DISCOVERY_TIMEOUT_MS: ${VIRAL_CREATOR_DISCOVERY_TIMEOUT_MS:-300000}
+    command: ["node", "scripts/viral-creator-worker.mjs"]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+
+  wx-channel:
+    build:
+      context: .
+      dockerfile: docker/wx-channel/Dockerfile
+    volumes:
+      - wx_channel_data:/data
+
+  transcriber:
+    build:
+      context: .
+      dockerfile: docker/transcriber/Dockerfile
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-26214400}
+    volumes:
+      - whisper_models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   postgres:
     image: postgres:16-alpine
@@ -22,11 +172,21 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d insurance_content_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   migrate:
     build:
@@ -42,3 +202,12 @@ services:
 
 volumes:
   postgres_data:
+  douyin_profile:
+  wechat_profile:
+  xhs_profile:
+  sogou_profile:
+  wechat_mp_profile:
+  viral_media:
+  whisper_models:
+  wx_channel_data:
+  werss_data:

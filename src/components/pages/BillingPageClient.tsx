@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiPath } from "@/lib/client/url";
+import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 
 type Plan = {
@@ -30,7 +30,9 @@ type Usage = {
   id: string;
   action_type: string;
   quota_cost: number;
-  model?: string | null;
+  display_name: string;
+  work_id?: string | null;
+  work_title?: string | null;
   created_at: string;
 };
 
@@ -51,7 +53,7 @@ type Gift = {
 type BillingAnnouncement = { id: string; title: string; content: string; link_url?: string | null };
 
 export function BillingPageClient() {
-  usePageMeta({ title: "会员与积分 · 充值中心", description: "用户中心 / 额度、订单与用量" });
+  usePageMeta({ title: "充值中心", description: "选择套餐、完成支付、查看订单" });
   const searchParams = useSearchParams();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -61,9 +63,19 @@ export function BillingPageClient() {
   const [balance, setBalance] = useState<Balance>({});
   const [loading, setLoading] = useState(true);
   const [busyPlan, setBusyPlan] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoMessage, setPromoMessage] = useState("");
+  const [promoError, setPromoError] = useState(false);
+  const [promoBusy, setPromoBusy] = useState(false);
+  const [showAllUsage, setShowAllUsage] = useState(false);
   const [error, setError] = useState("");
+  const [checkoutNotice, setCheckoutNotice] = useState("");
+  const [paymentProvider, setPaymentProvider] = useState<"stripe" | "alipay" | "wechat" | "manual">("stripe");
   const [commerceConfig, setCommerceConfig] = useState({
     enableStripe: true,
+    enableAlipay: false,
+    enableWechat: false,
+    enableManualTransfer: false,
     displayCreditPackages: true,
     purchaseNotice: "充值成功后积分会自动到账，可在本页查看订单和用量明细。",
     feeRatePercent: 0,
@@ -75,7 +87,15 @@ export function BillingPageClient() {
   const totalPurchased = paidOrders.reduce((sum, order) => sum + order.quota_amount, 0);
   const totalUsed = usage.reduce((sum, item) => sum + item.quota_cost, 0);
   const totalGifted = gifts.reduce((sum, item) => sum + item.quota_amount, 0);
+  const visibleUsage = showAllUsage ? usage : usage.slice(0, 5);
   const balanceLabel = balance.balance && balance.balance >= Number.MAX_SAFE_INTEGER ? "已开通" : `${balance.balance ?? 0} 点`;
+  const paymentMethods = [
+    commerceConfig.enableAlipay ? { provider: "alipay" as const, label: "支付宝" } : null,
+    commerceConfig.enableWechat ? { provider: "wechat" as const, label: "微信支付" } : null,
+    commerceConfig.enableStripe ? { provider: "stripe" as const, label: "在线支付" } : null,
+    commerceConfig.enableManualTransfer ? { provider: "manual" as const, label: "转账充值" } : null,
+  ].filter((method): method is { provider: "stripe" | "alipay" | "wechat" | "manual"; label: string } => method !== null);
+  const activePaymentProvider = paymentMethods.some((method) => method.provider === paymentProvider) ? paymentProvider : paymentMethods[0]?.provider;
 
   async function loadAll(signal?: AbortSignal) {
     setLoading(true);
@@ -112,19 +132,20 @@ export function BillingPageClient() {
   }
 
   async function buyPlan(plan: Plan) {
-    if (!commerceConfig.enableStripe) {
-      setError("在线支付暂未开放，请联系平台客服。");
+    if (!activePaymentProvider) {
+      setError("当前暂未开放充值方式，请联系平台客服。");
       return;
     }
     setBusyPlan(plan.code);
     setError("");
+    setCheckoutNotice("");
     try {
       const response = await fetch(apiPath("/api/billing/orders"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ planCode: plan.code, provider: "stripe" }),
+        body: JSON.stringify({ planCode: plan.code, provider: activePaymentProvider }),
       });
-      const payload = (await response.json()) as { checkout?: { url?: string | null }; error?: string };
+      const payload = (await response.json()) as { checkout?: { url?: string | null; instructions?: string }; error?: string };
       if (payload.checkout?.url) {
         window.location.assign(payload.checkout.url);
         return;
@@ -133,9 +154,40 @@ export function BillingPageClient() {
         setError(payload.error ?? "暂时无法创建支付订单。");
         return;
       }
+      if (payload.checkout?.instructions) setCheckoutNotice(payload.checkout.instructions);
       await loadAll();
     } finally {
       setBusyPlan("");
+    }
+  }
+
+  async function redeemPromoCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!promoCode.trim()) return;
+    setPromoBusy(true);
+    setPromoMessage("");
+    setPromoError(false);
+    try {
+      const response = await fetch(apiPath("/api/promo/redeem"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: promoCode }),
+      });
+      const payload = (await response.json()) as { redemption?: { rewardType?: string; creditAmount?: number; discountPercent?: number; code?: string }; error?: string };
+      if (!response.ok) {
+        setPromoMessage(payload.error ?? "兑换失败，请检查优惠码后重试。");
+        setPromoError(true);
+        return;
+      }
+      const redemption = payload.redemption;
+      setPromoMessage(redemption?.rewardType === "discount"
+        ? `优惠码已生效：下一笔充值可抵扣 ${redemption.discountPercent ?? 0}%。`
+        : `兑换成功：已到账 ${redemption?.creditAmount ?? 0} 点。`);
+      setPromoCode("");
+      await loadAll();
+      window.dispatchEvent(new Event("ica:conversations-updated"));
+    } finally {
+      setPromoBusy(false);
     }
   }
 
@@ -153,8 +205,8 @@ export function BillingPageClient() {
       <section className="billingHero">
         <div>
           <span className="eyebrow">充值中心</span>
-          <h1>充值、订单和额度，都放在这里看</h1>
-          <p>这个页面同时承担充值入口和经营账本的角色。支付成功后自动入账，也能直接查看订单、用量和赠送记录。</p>
+          <h1>为创作补充额度</h1>
+          <p>选择额度包与支付方式；支付完成后自动到账，订单、用量和赠送记录也会集中保留在这里。</p>
         </div>
         <button className="secondaryButton" onClick={() => void loadAll()} disabled={loading}>
           {loading ? "刷新中" : "刷新账单"}
@@ -162,6 +214,7 @@ export function BillingPageClient() {
       </section>
 
       {error ? <div className="alertPanel">{error}</div> : null}
+      {checkoutNotice ? <div className="successPanel">订单已创建：{checkoutNotice}</div> : null}
       {announcements.map((item) => <div className="panel" key={item.id}><strong>{item.title}</strong><p>{item.content}</p>{item.link_url ? <a href={item.link_url}>查看详情</a> : null}</div>)}
       {searchParams.get("checkout") === "success" ? <div className="successPanel">支付已完成，积分到账可能需要几秒，点击“刷新账单”即可更新。</div> : null}
       {searchParams.get("checkout") === "cancel" ? <div className="alertPanel">支付已取消，订单仍会保留，可从订单记录继续支付。</div> : null}
@@ -180,6 +233,21 @@ export function BillingPageClient() {
             <h2>选择适合当前运营强度的额度包</h2>
           </div>
           <p>{commerceConfig.purchaseNotice}</p>
+        </div>
+
+        <form className="billingPromoForm" onSubmit={redeemPromoCode}>
+          <label htmlFor="billing-promo-code">优惠码</label>
+          <input id="billing-promo-code" value={promoCode} onChange={(event) => setPromoCode(event.target.value.toUpperCase())} placeholder="输入优惠码或活动码" />
+          <button className="secondaryButton" disabled={promoBusy || !promoCode.trim()} type="submit">{promoBusy ? "兑换中" : "兑换"}</button>
+          {promoMessage ? <span className={promoError ? "error" : "success"}>{promoMessage}</span> : null}
+        </form>
+
+        <div className="billingPaymentMethods" aria-label="支付方式">
+          <span>支付方式</span>
+          <div role="radiogroup" aria-label="选择支付方式">
+            {paymentMethods.map((method) => <button aria-checked={activePaymentProvider === method.provider} className={activePaymentProvider === method.provider ? "active" : ""} key={method.provider} onClick={() => setPaymentProvider(method.provider)} role="radio" type="button">{method.label}</button>)}
+            {paymentMethods.length === 0 ? <small>当前暂未开放在线充值，请联系平台客服。</small> : null}
+          </div>
         </div>
 
         <div className="pricingGrid">
@@ -201,7 +269,7 @@ export function BillingPageClient() {
                 <li>短视频口播稿生成</li>
                 <li>文案改写与合规提示</li>
               </ul>
-              <button className={plan.recommended ? "primaryButton" : "secondaryButton"} onClick={() => buyPlan(plan)} disabled={Boolean(busyPlan) || !commerceConfig.enableStripe}>
+              <button className={plan.recommended ? "primaryButton" : "secondaryButton"} onClick={() => void buyPlan(plan)} disabled={Boolean(busyPlan) || !activePaymentProvider}>
                 {busyPlan === plan.code ? "创建订单中" : "立即充值"}
               </button>
             </article>
@@ -239,19 +307,22 @@ export function BillingPageClient() {
         </section>
 
         <section className="panel">
-          <div className="panelHeader">
-            <h2>最近用量</h2>
-            <p>每次智能体调用都会记录 quota 成本。</p>
+          <div className="panelHeader billingUsageHeader">
+            <div>
+              <h2>账单明细</h2>
+              <p>记录每次创作与内容服务的额度消耗。</p>
+            </div>
+            {usage.length > 5 ? <button className="billingUsageToggle" onClick={() => setShowAllUsage((current) => !current)} type="button">{showAllUsage ? "收起" : `查看全部 (${usage.length})`}</button> : null}
           </div>
-          <div className="billingList">
+          <div className={`billingList billingUsageList ${showAllUsage ? "expanded" : ""}`}>
             {usage.length === 0 ? <div className="emptyState">暂无用量流水。</div> : null}
-            {usage.slice(0, 8).map((item) => (
+            {visibleUsage.map((item) => (
               <div className="billingRow" key={item.id}>
                 <div>
-                  <strong>{formatAction(item.action_type)}</strong>
-                  <span>{item.model ?? "未记录模型"} · {formatDate(item.created_at)}</span>
+                  <strong>{item.display_name}</strong>
+                  <span>{item.work_title ? `${item.work_title} · ` : ""}{formatDate(item.created_at)}</span>
                 </div>
-                <b>-{item.quota_cost} 点</b>
+                <div className="billingUsageAmount"><b>-{item.quota_cost} 点</b>{item.work_id ? <a href={appPath(`/works/${item.work_id}?from=billing&entry=billing`)}>查看作品</a> : null}</div>
               </div>
             ))}
           </div>
@@ -314,14 +385,4 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function formatAction(action: string) {
-  const labels: Record<string, string> = {
-    discover_topics: "热点发现",
-    write_script: "文案生成",
-    rewrite_script: "文案改写",
-    compliance_check: "合规检查",
-  };
-  return labels[action] ?? action;
 }
