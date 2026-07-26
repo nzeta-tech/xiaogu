@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Pool } from "pg";
+import { createRequire } from "node:module";
+
+const require = createRequire(fs.existsSync("/app/server.js") ? "/app/server.js" : import.meta.url);
+const { Pool } = require("pg");
 
 const databaseUrl = process.env.DATABASE_URL;
 

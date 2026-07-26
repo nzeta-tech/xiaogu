@@ -1,4 +1,8 @@
-import pg from "pg";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+
+const require = createRequire(fs.existsSync("/app/server.js") ? "/app/server.js" : import.meta.url);
+const pg = require("pg");
 
 const action = process.argv[2];
 if (!new Set(["enable", "disable", "status"]).has(action)) {
