@@ -96,7 +96,7 @@ export async function downloadDouyinPublic(url: string) {
   let stdout = "";
   try {
     const result = await execFileAsync(executable, args, {
-      timeout: Number(process.env.DOUYIN_DOWNLOAD_TIMEOUT_MS ?? 90000),
+      timeout: Number(process.env.DOUYIN_DOWNLOAD_TIMEOUT_MS ?? 300000),
       maxBuffer: 2 * 1024 * 1024,
       env: { ...process.env, PATH: `${process.env.PATH ?? ""}:/usr/local/bin:/usr/bin` },
     });
