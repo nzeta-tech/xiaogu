@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseResolvedWechatChannelsMedia } from "./wechat-channels-container.ts";
+import { parseResolvedWechatChannelsMedia, parseWechatChannelsSphMedia } from "./wechat-channels-container.ts";
 
 test("accepts a signed finder media URL with a numeric decrypt key", () => {
   const result = parseResolvedWechatChannelsMedia({
@@ -30,6 +30,30 @@ test("rejects media URLs outside the finder CDN allowlist", () => {
 test("rejects non-numeric decrypt keys", () => {
   const result = parseResolvedWechatChannelsMedia({
     data: { resolved: [{ url: "https://finder.video.qq.com/video", key: "not-a-key" }] },
+  });
+
+  assert.equal(result, null);
+});
+
+test("accepts a directly playable SPH media URL without a decrypt key", () => {
+  const result = parseWechatChannelsSphMedia({
+    data: {
+      feedInfo: {
+        description: "作品标题",
+        videoUrl: "https://finder.video.qq.com/example/stodownload?token=temporary&sign=temporary",
+        coverUrl: "https://finder.video.qq.com/example/cover.jpg",
+      },
+      authorInfo: { nickname: "作者" },
+    },
+  });
+
+  assert.equal(result?.decryptKey, "");
+  assert.equal(result?.author, "作者");
+});
+
+test("rejects SPH media outside the finder CDN allowlist", () => {
+  const result = parseWechatChannelsSphMedia({
+    data: { feedInfo: { videoUrl: "https://example.com/video.mp4" } },
   });
 
   assert.equal(result, null);

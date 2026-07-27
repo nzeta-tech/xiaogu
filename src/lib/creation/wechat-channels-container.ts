@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 type ContainerInspectionResult =
   | { status: "success"; payload: Record<string, unknown> }
   | { status: "needs_login"; reason: string }
@@ -13,15 +15,39 @@ type ResolvedWechatChannelsMedia = {
   coverUrl: string;
 };
 
+type CdpCookie = { name?: string; value?: string; domain?: string };
+
+// Mirrors the pinned wx_channel SPH worker adapter. Cookies are supplied only
+// from the local browser session and never leave the Agent result boundary.
+const yuanbaoParseHeaders = {
+  accept: "application/json, text/plain, */*",
+  "content-type": "application/json",
+  origin: "https://yuanbao.tencent.com",
+  referer: "https://yuanbao.tencent.com/chat/naQivTmsDa/cf4d0079-ed1b-4c55-a3f3-2ca1379727d1",
+  "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36",
+  "t-userid": "b9575f6b0a8c4a55a08096904a5ef20a",
+  "x-agentid": "naQivTmsDa/cf4d0079-ed1b-4c55-a3f3-2ca1379727d1",
+  "x-commit-tag": "72282a0d",
+  "x-device-id": "1921b001708100d7fa31002b9646bd0cc15a3e2e1f",
+  "x-hy92": "e963067ffa31002b9646bd0c03000008b1951a",
+  "x-hy93": "1921b001708100d7fa31002b9646bd0cc15a3e2e1f",
+  "x-id": "b9575f6b0a8c4a55a08096904a5ef20a",
+  "x-instance-id": "5",
+  "x-language": "zh-CN",
+  "x-platform": "mac",
+  "x-requested-with": "XMLHttpRequest",
+  "x-source": "web",
+  "x-webversion": "2.69.0",
+};
+
 /**
- * Video Channel's former Yuanbao parsing API is no longer available. The
- * public finder-preview page does expose the same public metadata after the
- * container browser has been authenticated, so read it from the rendered DOM.
+ * The public finder-preview page supplies stable metadata. Media resolution
+ * uses wx_channel's Cookie backend protocol with the local browser session,
+ * then falls back to its outer share resolver.
  */
 export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: string): Promise<ContainerInspectionResult> {
   if (process.env.VIRAL_WECHAT_CONTAINER_BROWSER_ENABLED === "0") return { status: "unavailable" };
   const cdpBase = (process.env.VIRAL_WECHAT_CDP_URL ?? "http://127.0.0.1:9222").replace(/\/$/, "");
-  const resolvedMediaPromise = resolveWechatChannelsMedia(sourceUrl);
   let pageId = "";
   try {
     const opened = await fetch(`${cdpBase}/json/new?${encodeURIComponent(sourceUrl)}`, {
@@ -54,7 +80,7 @@ export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: strin
       });
       const metadata = parseMetadata((evaluated.result as Record<string, unknown> | undefined)?.value);
       if (metadata.title && metadata.author && metadata.publishedDate) {
-        const resolvedMedia = await resolvedMediaPromise;
+        const resolvedMedia = await resolveWechatChannelsMedia(sourceUrl, target.webSocketDebuggerUrl);
         return {
           status: "success",
           payload: {
@@ -82,8 +108,10 @@ export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: strin
   }
 }
 
-async function resolveWechatChannelsMedia(sourceUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
+async function resolveWechatChannelsMedia(sourceUrl: string, cdpUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
   if (process.env.VIRAL_WECHAT_DISCOVERY_ENABLED !== "1") return null;
+  const browserResolved = await resolveWechatChannelsMediaWithBrowserCookie(sourceUrl, cdpUrl);
+  if (browserResolved) return browserResolved;
   const base = process.env.VIRAL_WECHAT_DISCOVERY_API_BASE?.trim();
   if (!base) return null;
   try {
@@ -99,6 +127,78 @@ async function resolveWechatChannelsMedia(sourceUrl: string): Promise<ResolvedWe
   } catch {
     return null;
   }
+}
+
+async function resolveWechatChannelsMediaWithBrowserCookie(sourceUrl: string, cdpUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
+  try {
+    const cdpResult = await sendCdpCommand(cdpUrl, "Network.getAllCookies", {});
+    const cookies = Array.isArray(cdpResult.cookies) ? cdpResult.cookies.map(cookieValue).filter(Boolean) as Required<CdpCookie>[] : [];
+    const tencentCookies = cookies.filter((cookie) => cookie.domain === ".tencent.com" || cookie.domain === "yuanbao.tencent.com");
+    if (!tencentCookies.some((cookie) => cookie.name === "hy_token")) return null;
+    const cookieHeader = tencentCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+
+    const parseResponse = await fetch("https://yuanbao.tencent.com/api/weixin/get_parse_result", {
+      method: "POST",
+      headers: { ...yuanbaoParseHeaders, cookie: cookieHeader },
+      body: JSON.stringify({ type: "video_channel_url", url: sourceUrl, scene: 1 }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!parseResponse.ok) return null;
+    const parsePayload = await parseResponse.json() as Record<string, unknown>;
+    if (numberValue(parsePayload.code) !== 0) return null;
+    const parseData = recordValue(parsePayload.data);
+    const playableUrl = new URL(stringValue(parseData.playable_url));
+    if (playableUrl.protocol !== "https:" || playableUrl.hostname !== "channels.weixin.qq.com") return null;
+    const token = playableUrl.searchParams.get("token")?.trim() ?? "";
+    const exportId = playableUrl.searchParams.get("eid")?.trim() || stringValue(parseData.wx_export_id);
+    if (!token || !exportId) return null;
+
+    const rid = `${Math.floor(Date.now() / 1000).toString(16)}-${randomBytes(4).toString("hex")}`;
+    const referer = new URL("https://channels.weixin.qq.com/finder-preview/pages/feed");
+    for (const [key, value] of Object.entries({ entry_card_type: "48", comment_scene: "39", appid: "0", token, entry_scene: "0", eid: exportId })) {
+      referer.searchParams.set(key, value);
+    }
+    const feedUrl = new URL("https://channels.weixin.qq.com/finder-preview/api/feed/get_feed_info");
+    feedUrl.searchParams.set("_rid", rid);
+    feedUrl.searchParams.set("_pageUrl", "https://channels.weixin.qq.com/finder-preview/pages/feed");
+    const feedResponse = await fetch(feedUrl, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json",
+        origin: "https://channels.weixin.qq.com",
+        referer: referer.toString(),
+        "user-agent": yuanbaoParseHeaders["user-agent"],
+      },
+      body: JSON.stringify({ baseReq: { generalToken: token }, exportId }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!feedResponse.ok) return null;
+    const feedPayload = await feedResponse.json() as Record<string, unknown>;
+    if (numberValue(feedPayload.errCode) !== 0) return null;
+    return parseWechatChannelsSphMedia(feedPayload);
+  } catch {
+    return null;
+  }
+}
+
+export function parseWechatChannelsSphMedia(payload: Record<string, unknown>): ResolvedWechatChannelsMedia | null {
+  const data = recordValue(payload.data);
+  const feed = recordValue(data.feedInfo);
+  const author = recordValue(data.authorInfo);
+  const h264 = recordValue(feed.h264VideoInfo);
+  const h265 = recordValue(feed.h265VideoInfo);
+  const url = [feed.originVideoUrl, feed.videoUrl, h264.videoUrl, h265.videoUrl]
+    .map(stringValue)
+    .find(isAllowedWechatMediaUrl) ?? "";
+  if (!url) return null;
+  return {
+    url,
+    decryptKey: "",
+    title: stringValue(feed.description),
+    author: stringValue(author.nickname),
+    coverUrl: stringValue(feed.coverUrl),
+  };
 }
 
 export function parseResolvedWechatChannelsMedia(payload: Record<string, unknown>): ResolvedWechatChannelsMedia | null {
@@ -128,6 +228,16 @@ function isAllowedWechatMediaUrl(value: string) {
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+
+function cookieValue(value: unknown): Required<CdpCookie> | null {
+  const cookie = recordValue(value);
+  const name = stringValue(cookie.name);
+  const domain = stringValue(cookie.domain);
+  const rawValue = typeof cookie.value === "string" ? cookie.value : "";
+  return name && domain && rawValue ? { name, domain, value: rawValue } : null;
+}
+
+function numberValue(value: unknown) { return typeof value === "number" ? value : Number.NaN; }
 
 function parseMetadata(value: unknown) {
   try {
