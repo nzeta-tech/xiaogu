@@ -13,6 +13,7 @@ const leaseSeconds = boundedNumber("LOCAL_AGENT_LEASE_SECONDS", 600, 60, 1800);
 const capabilities = (process.env.LOCAL_AGENT_CAPABILITIES || "source.inspect").split(",").map((value) => value.trim()).filter(Boolean);
 const heartbeatIntervalMs = boundedNumber("LOCAL_AGENT_HEARTBEAT_INTERVAL_MS", 15000, 5000, 60000);
 const transcriptBatchMs = boundedNumber("LOCAL_AGENT_TRANSCRIPT_BATCH_MS", 400, 300, 1000);
+const maxTranscribeBytes = boundedNumber("LOCAL_AGENT_MAX_TRANSCRIBE_BYTES", 100 * 1024 * 1024, 1 * 1024 * 1024, 500 * 1024 * 1024);
 const protocolVersion = boundedNumber("LOCAL_AGENT_PROTOCOL_VERSION", 1, 1, 1000);
 const readyFile = process.env.LOCAL_AGENT_READY_FILE || "/tmp/local-agent.ready";
 let activeTaskCount = 0;
@@ -63,7 +64,7 @@ async function executeLeasedTask(task, leaseToken) {
     console.log(`[local-agent] completed ${task.id}`);
   } catch (error) {
     const message = messageOf(error);
-    const retryable = !/unsupported task type|invalid task payload/i.test(message);
+    const retryable = !/unsupported task type|invalid task payload|transcription limit/i.test(message);
     console.error(`[local-agent] task ${task.id} failed: ${message}`);
     await remote(`/api/internal/local-agent/tasks/${task.id}/fail`, { agentId, leaseToken, error: message, retryable }).catch((reportError) => {
       console.error(`[local-agent] could not report failure ${task.id}: ${messageOf(reportError)}`);
@@ -111,9 +112,9 @@ async function streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecrypt
   });
   if (!response.ok) throw new Error(`video download HTTP ${response.status}`);
   const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > 25 * 1024 * 1024) throw new Error("video file exceeds the local transcription limit");
+  if (declaredLength > maxTranscribeBytes) throw new Error("video file exceeds the local transcription limit");
   const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > 25 * 1024 * 1024) throw new Error("video file exceeds the local transcription limit");
+  if (bytes.byteLength > maxTranscribeBytes) throw new Error("video file exceeds the local transcription limit");
 
   await publishTaskEvent(task, leaseToken, "status", { message: "正在识别语音..." });
   const form = new FormData();

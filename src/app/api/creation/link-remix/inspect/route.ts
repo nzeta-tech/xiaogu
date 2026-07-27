@@ -540,9 +540,9 @@ async function transcribePublicMedia(mediaUrl: string) {
     const mediaResponse = await fetch(mediaUrl, { signal: AbortSignal.timeout(15000) });
     if (!mediaResponse.ok) return "";
     const contentLength = Number(mediaResponse.headers.get("content-length") ?? 0);
-    if (contentLength > 25 * 1024 * 1024) return "";
+    if (contentLength > 100 * 1024 * 1024) return "";
     const bytes = await mediaResponse.arrayBuffer();
-    if (bytes.byteLength > 25 * 1024 * 1024) return "";
+    if (bytes.byteLength > 100 * 1024 * 1024) return "";
     const form = new FormData();
     form.append("file", new Blob([bytes], { type: mediaResponse.headers.get("content-type") ?? "video/mp4" }), "source-media.mp4");
     form.append("language", "zh");

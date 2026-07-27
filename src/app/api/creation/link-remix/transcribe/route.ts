@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         const media = await fetch(mediaUrl, { signal: AbortSignal.timeout(30000) });
         if (!media.ok) throw new Error("视频文件暂时无法下载。");
         const bytes = await media.arrayBuffer();
-        if (bytes.byteLength > 25 * 1024 * 1024) throw new Error("视频文件超过本地转写大小限制。");
+        if (bytes.byteLength > 100 * 1024 * 1024) throw new Error("视频文件超过本地转写大小限制。");
         send({ type: "status", message: "正在识别语音..." });
         const form = new FormData();
         form.append("file", new Blob([bytes], { type: media.headers.get("content-type") ?? "video/mp4" }), "source-media.mp4");

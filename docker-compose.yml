@@ -154,7 +154,7 @@ services:
       dockerfile: docker/transcriber/Dockerfile
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-26214400}
+      WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-104857600}
     ports:
       - "127.0.0.1:${VIRAL_TRANSCRIBER_PORT:-8000}:8000"
     volumes:

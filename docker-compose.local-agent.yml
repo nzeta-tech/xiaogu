@@ -70,7 +70,7 @@ services:
     image: ${LOCAL_AGENT_TRANSCRIBER_IMAGE:-xiaogu/transcriber:development}
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-26214400}
+      WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-104857600}
     volumes:
       - local_agent_whisper:/models
     healthcheck:

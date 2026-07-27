@@ -55,7 +55,7 @@ export async function transcribeDownloadedDouyin(videoFile: string) {
   const target = path.join(path.resolve(douyinMediaDir), path.basename(videoFile));
   try {
     const info = await stat(target);
-    if (!info.isFile() || info.size > 25 * 1024 * 1024) return "";
+    if (!info.isFile() || info.size > 100 * 1024 * 1024) return "";
     const form = new FormData();
     form.append("file", new Blob([await readFile(target)], { type: "video/mp4" }), path.basename(target));
     form.append("language", "zh");

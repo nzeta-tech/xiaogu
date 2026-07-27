@@ -10,7 +10,7 @@ from faster_whisper import WhisperModel
 app = FastAPI()
 model = None
 MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
-MAX_UPLOAD_BYTES = int(os.getenv("WHISPER_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+MAX_UPLOAD_BYTES = int(os.getenv("WHISPER_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
 
 
 def get_model():
