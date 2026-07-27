@@ -34,6 +34,7 @@ NEW_USERS_CURSOR_FILE="${NEW_USERS_CURSOR_FILE:-$STATE_DIR/new-users.cursor}"
 PAID_ORDERS_CURSOR_FILE="${PAID_ORDERS_CURSOR_FILE:-$STATE_DIR/paid-orders.cursor}"
 FAILED_ORDERS_CURSOR_FILE="${FAILED_ORDERS_CURSOR_FILE:-$STATE_DIR/failed-orders.cursor}"
 PENDING_ORDER_ALERTED_FILE="${PENDING_ORDER_ALERTED_FILE:-$STATE_DIR/pending-orders.alerted}"
+MODEL_FAILURE_ALERTED_FILE="${MODEL_FAILURE_ALERTED_FILE:-$STATE_DIR/model-failures.alerted}"
 PROJECT_DIR="${PROJECT_DIR:-/home/ubuntu/insurance-content-agent}"
 ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env}"
 DB_CONTAINER="${DB_CONTAINER:-insurance-content-agent-postgres-1}"
@@ -45,6 +46,9 @@ FAILED_ORDERS_ENABLED="${FAILED_ORDERS_ENABLED:-true}"
 PENDING_ORDERS_ENABLED="${PENDING_ORDERS_ENABLED:-true}"
 PENDING_ORDER_THRESHOLD_MINUTES="${PENDING_ORDER_THRESHOLD_MINUTES:-1}"
 BUSINESS_MONITOR_BATCH_LIMIT="${BUSINESS_MONITOR_BATCH_LIMIT:-10}"
+MODEL_FAILURES_ENABLED="${MODEL_FAILURES_ENABLED:-true}"
+MODEL_FAILURE_WINDOW_MINUTES="${MODEL_FAILURE_WINDOW_MINUTES:-5}"
+MODEL_FAILURE_THRESHOLD="${MODEL_FAILURE_THRESHOLD:-1}"
 TZ="${TZ:-Asia/Shanghai}"
 
 log() {
@@ -159,13 +163,22 @@ feature_enabled() {
 
 psql_query() {
   local sql="$1"
-  local monitor_database_url=""
+  local monitor_database_url="${MONITOR_DATABASE_URL:-}"
+  if [[ -n "$monitor_database_url" ]]; then
+    # node-postgres accepts sslmode=no-verify, while libpq/psql requires the
+    # equivalent non-verifying TLS mode to be spelled sslmode=require.
+    monitor_database_url="${monitor_database_url//sslmode=no-verify/sslmode=require}"
+    docker exec "$DB_CONTAINER" \
+      psql "$monitor_database_url" -X -v ON_ERROR_STOP=1 -At -F $'\t' -c "$sql"
+    return
+  fi
+
   (
     set -a
     # shellcheck disable=SC1090
     . "$ENV_FILE"
     set +a
-    monitor_database_url="${MONITOR_DATABASE_URL:-${RDS_DATABASE_URL:-}}"
+    monitor_database_url="${RDS_DATABASE_URL:-}"
     if [[ -n "$monitor_database_url" ]]; then
       docker exec "$DB_CONTAINER" \
         psql "$monitor_database_url" -X -v ON_ERROR_STOP=1 -At -F $'\t' -c "$sql"
@@ -539,6 +552,55 @@ ${summary}"
   fi
 }
 
+check_model_failures() {
+  feature_enabled "$MODEL_FAILURES_ENABLED" || return 0
+
+  local window_minutes threshold rows count latest_id latest_time provider model outcome latency error previous_id
+  window_minutes="${MODEL_FAILURE_WINDOW_MINUTES//[^0-9]/}"
+  threshold="${MODEL_FAILURE_THRESHOLD//[^0-9]/}"
+  [[ -n "$window_minutes" && "$window_minutes" -gt 0 ]] || window_minutes=5
+  [[ -n "$threshold" && "$threshold" -gt 0 ]] || threshold=1
+
+  rows="$(psql_query "
+select
+  (select count(*) from model_runtime_events where created_at >= now() - interval '${window_minutes} minute' and outcome in ('error', 'timeout'))::text,
+  coalesce(id::text, ''),
+  coalesce(to_char(created_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS'), ''),
+  coalesce(provider, ''),
+  coalesce(model, ''),
+  coalesce(outcome, ''),
+  coalesce(latency_ms::text, '0'),
+  left(coalesce(error_message, ''), 180)
+from model_runtime_events
+where created_at >= now() - interval '${window_minutes} minute'
+  and outcome in ('error', 'timeout')
+order by created_at desc
+limit 1;
+" 2>&1)" || {
+    log "model-failure query failed: $rows"
+    return 1
+  }
+  [[ -n "$rows" ]] || return 0
+
+  IFS=$'\t' read -r count latest_id latest_time provider model outcome latency error <<<"$rows"
+  [[ -n "$latest_id" && "$count" -ge "$threshold" ]] || return 0
+
+  previous_id="$(read_state "$MODEL_FAILURE_ALERTED_FILE" "")"
+  if [[ -z "$previous_id" ]]; then
+    write_state "$MODEL_FAILURE_ALERTED_FILE" "$latest_id"
+    log "model-failure alert baseline initialized: $latest_id"
+    return 0
+  fi
+  [[ "$previous_id" == "$latest_id" ]] && return 0
+
+  send_business_summary "小谷模型生成异常告警" "过去 ${window_minutes} 分钟模型失败数: ${count}（阈值: ${threshold}）
+最新事件: ${latest_time}
+服务商: ${provider:-"-"} · 模型: ${model:-"-"}
+结果: ${outcome:-"-"} · 耗时: ${latency:-"0"} ms
+错误: ${error:-"-"}"
+  write_state "$MODEL_FAILURE_ALERTED_FILE" "$latest_id"
+}
+
 run_business_monitor() {
   local previous_state
   previous_state="$(read_state "$BUSINESS_ERROR_STATE_FILE" "ok")"
@@ -606,6 +668,10 @@ run_check() {
   fi
 
   if ! run_business_monitor; then
+    overall_status=1
+  fi
+
+  if ! check_model_failures; then
     overall_status=1
   fi
 

@@ -38,6 +38,8 @@ DB_NAME=insurance_content_agent
 DB_USER=postgres
 # Optional when production app reads/writes an external RDS instead of the local Postgres container:
 # MONITOR_DATABASE_URL=postgresql://user:password@host:5432/insurance_content_agent?sslmode=no-verify
+# Quote a real value if it contains shell-special characters, such as !, (, or $.
+# MONITOR_DATABASE_URL='postgresql://user:password@host:5432/insurance_content_agent?sslmode=no-verify'
 
 # Thresholds are intentionally set to 1 for the first rollout.
 NEW_USERS_ENABLED=true
@@ -46,6 +48,9 @@ FAILED_ORDERS_ENABLED=true
 PENDING_ORDERS_ENABLED=true
 PENDING_ORDER_THRESHOLD_MINUTES=1
 BUSINESS_MONITOR_BATCH_LIMIT=10
+MODEL_FAILURES_ENABLED=true
+MODEL_FAILURE_WINDOW_MINUTES=5
+MODEL_FAILURE_THRESHOLD=1
 TZ=Asia/Shanghai
 EOF
   sudo chmod 0600 "$ENV_DIR/monitor.env"
