@@ -16155,6 +16155,91 @@ a {
   gap: 14px;
 }
 
+.imageCardAppPage .imageStylePicker {
+  display: grid;
+  gap: 14px;
+}
+
+.imageCardAppPage .imageStyleMostUsed,
+.wechatImagesAppPage .imageStyleMostUsed {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e3eaf4;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.imageCardAppPage .imageStyleMostUsed > span,
+.wechatImagesAppPage .imageStyleMostUsed > span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.imageCardAppPage .imageStyleMostUsed > div,
+.wechatImagesAppPage .imageStyleMostUsed > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.imageCardAppPage .imageStyleMostUsedItem,
+.wechatImagesAppPage .imageStyleMostUsedItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #dbe4f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.imageCardAppPage .imageStyleMostUsedItem i,
+.wechatImagesAppPage .imageStyleMostUsedItem i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #93c5fd;
+}
+
+.imageCardAppPage .imageStyleMostUsedItem:hover,
+.imageCardAppPage .imageStyleMostUsedItem.active,
+.wechatImagesAppPage .imageStyleMostUsedItem:hover,
+.wechatImagesAppPage .imageStyleMostUsedItem.active {
+  border-color: #3b82f6;
+  background: #f4f8ff;
+  color: #2563eb;
+}
+
+.imageCardAppPage .imageStyleMostUsedItem.active i,
+.wechatImagesAppPage .imageStyleMostUsedItem.active i {
+  background: #2563eb;
+}
+
+.imageCardAppPage .wechatStylesMoreButton {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid #d7dee9;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.imageCardAppPage .wechatStylesMoreButton:hover {
+  border-color: #3b82f6;
+  color: #2563eb;
+}
+
 .creationAppPage .imageStyleCard {
   position: relative;
   display: grid;
@@ -21524,6 +21609,59 @@ a {
   line-height: 1.5;
 }
 
+.wechatImagesAppPage .wechatStyleAlternatives {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.wechatImagesAppPage .wechatStyleAlternatives > span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wechatImagesAppPage .wechatStyleAlternatives > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wechatImagesAppPage .wechatStyleAlternatives button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d7e5e0;
+  border-radius: 6px;
+  background: #fff;
+  color: #45635c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wechatImagesAppPage .wechatStyleAlternatives button:hover,
+.wechatImagesAppPage .wechatStyleAlternatives button.active {
+  border-color: #156d57;
+  background: #f1faf7;
+  color: #156d57;
+}
+
+.wechatImagesAppPage .imageStyleMostUsed > span,
+.wechatImagesAppPage .imageStyleMostUsedItem:hover,
+.wechatImagesAppPage .imageStyleMostUsedItem.active {
+  color: #156d57;
+}
+
+.wechatImagesAppPage .imageStyleMostUsedItem:hover,
+.wechatImagesAppPage .imageStyleMostUsedItem.active {
+  border-color: #156d57;
+  background: #f1faf7;
+}
+
+.wechatImagesAppPage .imageStyleMostUsedItem.active i {
+  background: #156d57;
+}
+
 .wechatImagesAppPage .wechatStyleRecommended {
   position: absolute;
   top: 8px;
@@ -21629,6 +21767,31 @@ a {
   min-height: 0;
   overflow-y: auto;
   padding: 18px 20px 22px;
+}
+
+.wechatStyleLibraryGroups {
+  display: grid;
+  gap: 20px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+}
+
+.wechatStyleLibraryGroup {
+  display: grid;
+  gap: 10px;
+}
+
+.wechatStyleLibraryGroup h3 {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wechatStyleLibraryGroups .wechatStyleLibraryGrid {
+  overflow: visible;
+  padding: 0;
 }
 
 .wechatStyleLibraryItem {

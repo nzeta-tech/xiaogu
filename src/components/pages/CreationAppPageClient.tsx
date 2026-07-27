@@ -15,6 +15,16 @@ import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/err
 
 type FieldValue = string | string[];
 
+const IMAGE_CARD_STYLE_USAGE_KEY = "image-card:style-usage";
+const IMAGE_CARD_LEGACY_RECENT_STYLES_KEY = "image-card:recent-styles";
+const WECHAT_IMAGE_STYLE_USAGE_KEY = "wechat-images:style-usage";
+const WECHAT_STYLE_GROUPS = [
+  { label: "专业可信", values: ["documentary", "landscape", "fine-line", "city-detail", "retro-print"] },
+  { label: "知识梳理", values: ["abstract", "eastern-line", "simple-story", "loose-sketch", "colored-pencil"] },
+  { label: "场景叙事", values: ["warm-drawing", "playful-collage", "paper-story", "city-sunset", "vivid-illustration"] },
+  { label: "情绪与品牌", values: ["cinematic-light", "painted", "watercolor", "ink", "quiet-drama", "soft-healing"] },
+];
+
 type SpeechRecognitionEventLike = Event & {
   resultIndex?: number;
   results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }>;
@@ -102,6 +112,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [sourceInspectMessage, setSourceInspectMessage] = useState("");
   const [sourcePreview, setSourcePreview] = useState<{ mediaUrl?: string; thumbnailUrl?: string }>({});
   const [showAllWechatStyles, setShowAllWechatStyles] = useState(false);
+  const [showAllImageCardStyles, setShowAllImageCardStyles] = useState(false);
+  const [imageCardStyleUsage, setImageCardStyleUsage] = useState<Record<string, number>>({});
+  const [wechatImageStyleUsage, setWechatImageStyleUsage] = useState<Record<string, number>>({});
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -123,7 +136,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
   const wechatArticle = typeof values.article === "string" ? values.article : "";
   const wechatArticleAnalysis = useMemo(() => analyzeWechatArticle(wechatArticle), [wechatArticle]);
-  const wechatStyleRecommendation = useMemo(() => recommendWechatImageStyle(wechatArticle), [wechatArticle]);
+  const wechatStyleRecommendations = useMemo(() => recommendWechatImageStyles(wechatArticle), [wechatArticle]);
+  const wechatStyleRecommendation = wechatStyleRecommendations[0] ?? { value: "", label: "", reason: "" };
   const wechatStyleOptions = pageApp.fields.find((field) => field.id === "style")?.options ?? [];
   const visibleFields = (isWechatImages
     ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
@@ -158,10 +172,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }, [voiceFieldId, voicePaused]);
 
   useEffect(() => {
-    if (!showAllWechatStyles) return;
+    if (!showAllWechatStyles && !showAllImageCardStyles) return;
     const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowAllWechatStyles(false);
+      if (event.key === "Escape") {
+        setShowAllWechatStyles(false);
+        setShowAllImageCardStyles(false);
+      }
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", handleKeyDown);
@@ -169,7 +186,38 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [showAllWechatStyles]);
+  }, [showAllWechatStyles, showAllImageCardStyles]);
+
+  useEffect(() => {
+    if (!isImageCard) return;
+    try {
+      const savedUsage = JSON.parse(window.localStorage.getItem(IMAGE_CARD_STYLE_USAGE_KEY) ?? "null");
+      if (savedUsage && typeof savedUsage === "object" && !Array.isArray(savedUsage)) {
+        setImageCardStyleUsage(Object.fromEntries(Object.entries(savedUsage).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0)));
+        return;
+      }
+      const legacyRecent = JSON.parse(window.localStorage.getItem(IMAGE_CARD_LEGACY_RECENT_STYLES_KEY) ?? "[]");
+      if (Array.isArray(legacyRecent)) {
+        const migratedUsage = Object.fromEntries(legacyRecent.filter((value): value is string => typeof value === "string").slice(0, 3).map((value, index) => [value, 3 - index]));
+        setImageCardStyleUsage(migratedUsage);
+        window.localStorage.setItem(IMAGE_CARD_STYLE_USAGE_KEY, JSON.stringify(migratedUsage));
+      }
+    } catch {
+      window.localStorage.removeItem(IMAGE_CARD_STYLE_USAGE_KEY);
+    }
+  }, [isImageCard]);
+
+  useEffect(() => {
+    if (!isWechatImages) return;
+    try {
+      const savedUsage = JSON.parse(window.localStorage.getItem(WECHAT_IMAGE_STYLE_USAGE_KEY) ?? "null");
+      if (savedUsage && typeof savedUsage === "object" && !Array.isArray(savedUsage)) {
+        setWechatImageStyleUsage(Object.fromEntries(Object.entries(savedUsage).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0)));
+      }
+    } catch {
+      window.localStorage.removeItem(WECHAT_IMAGE_STYLE_USAGE_KEY);
+    }
+  }, [isWechatImages]);
 
   useEffect(() => {
     if (!isImageCard && !isPersonalityCardEntry && !isWechatImages && !isPolicyRenewalCard) return;
@@ -279,6 +327,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       return;
     }
 
+    if (isImageCard && typeof values.style === "string") recordImageCardStyleUsage(values.style);
+    if (isWechatImages && typeof values.style === "string") recordWechatImageStyleUsage(values.style);
     router.push(appPath(`/works/${payload.work.id}?from=creation-works&entry=${workspaceEntry || app.slug}`));
   }
 
@@ -290,6 +340,26 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         return { ...current, [fieldId]: nextValue, ...(primary ? { avatar_visual_asset_ids: [primary.id], avatar_visual_mode: "yes" } : {}) };
       }
       return { ...current, [fieldId]: nextValue };
+    });
+  }
+
+  function selectImageCardStyle(nextValue: string) {
+    updateField("style", nextValue);
+  }
+
+  function recordImageCardStyleUsage(styleValue: string) {
+    setImageCardStyleUsage((current) => {
+      const nextUsage = { ...current, [styleValue]: (current[styleValue] ?? 0) + 1 };
+      window.localStorage.setItem(IMAGE_CARD_STYLE_USAGE_KEY, JSON.stringify(nextUsage));
+      return nextUsage;
+    });
+  }
+
+  function recordWechatImageStyleUsage(styleValue: string) {
+    setWechatImageStyleUsage((current) => {
+      const nextUsage = { ...current, [styleValue]: (current[styleValue] ?? 0) + 1 };
+      window.localStorage.setItem(WECHAT_IMAGE_STYLE_USAGE_KEY, JSON.stringify(nextUsage));
+      return nextUsage;
     });
   }
 
@@ -1179,9 +1249,15 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   uploadSuccess: uploadSuccess[field.id] ?? "",
                   uploading: Boolean(uploadingFields[field.id]),
                   onFileChange: (fileList) => handleFileChange(field.id, fileList),
-                  styleOptionLimit: isWechatImages && field.id === "style" ? 6 : undefined,
-                  styleRecommendation: isWechatImages && field.id === "style" ? wechatStyleRecommendation : undefined,
-                  onShowAllStyles: isWechatImages && field.id === "style" ? () => setShowAllWechatStyles(true) : undefined,
+                  styleOptionLimit: (isWechatImages && field.id === "style") ? 5 : (isImageCard && field.id === "style" ? 5 : undefined),
+                  styleRecommendation: isWechatImages && field.id === "style" && wechatStyleRecommendations.length ? wechatStyleRecommendation : undefined,
+                  styleRecommendations: isWechatImages && field.id === "style" ? wechatStyleRecommendations : undefined,
+                  mostUsedStyleValues: isWechatImages && field.id === "style" ? Object.entries(wechatImageStyleUsage).sort(([, leftCount], [, rightCount]) => rightCount - leftCount).slice(0, 3).map(([styleValue]) => styleValue) : isImageCard && field.id === "style" ? Object.entries(imageCardStyleUsage)
+                    .sort(([, leftCount], [, rightCount]) => rightCount - leftCount)
+                    .slice(0, 3)
+                    .map(([styleValue]) => styleValue) : undefined,
+                  onShowAllStyles: isWechatImages && field.id === "style" ? () => setShowAllWechatStyles(true) : isImageCard && field.id === "style" ? () => setShowAllImageCardStyles(true) : undefined,
+                  onStyleSelect: isImageCard && field.id === "style" ? selectImageCardStyle : undefined,
                 })}
                 {app.slug === "link-remix" && field.id === "source_url" ? (
                   <div className="linkRemixInspectControls">
@@ -1344,11 +1420,27 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         <WechatStyleLibrary
           options={wechatStyleOptions}
           recommendation={wechatStyleRecommendation}
+          groups={WECHAT_STYLE_GROUPS}
           selectedValue={typeof values.style === "string" ? values.style : ""}
           onClose={() => setShowAllWechatStyles(false)}
           onSelect={(nextValue) => {
             updateField("style", nextValue);
             setShowAllWechatStyles(false);
+          }}
+        />
+      ) : null}
+
+      {isImageCard && showAllImageCardStyles ? (
+        <WechatStyleLibrary
+          options={pageApp.fields.find((field) => field.id === "style")?.options ?? []}
+          recommendation={{ value: "", label: "", reason: "" }}
+          eyebrow="全部风格"
+          title="按发布任务选择画面"
+          selectedValue={typeof values.style === "string" ? values.style : ""}
+          onClose={() => setShowAllImageCardStyles(false)}
+          onSelect={(nextValue) => {
+            selectImageCardStyle(nextValue);
+            setShowAllImageCardStyles(false);
           }}
         />
       ) : null}
@@ -1564,41 +1656,54 @@ function WechatStyleLibrary({
   options,
   selectedValue,
   recommendation,
+  eyebrow = "视觉风格库",
+  title = "选择整篇文章的统一风格",
+  groups,
   onSelect,
   onClose,
 }: {
   options: NonNullable<CreationApp["fields"][number]["options"]>;
   selectedValue: string;
   recommendation: WechatStyleRecommendation;
+  eyebrow?: string;
+  title?: string;
+  groups?: Array<{ label: string; values: string[] }>;
   onSelect: (value: string) => void;
   onClose: () => void;
 }) {
+  const styleItem = (option: NonNullable<CreationApp["fields"][number]["options"]>[number]) => {
+    const active = selectedValue === option.value;
+    const recommended = recommendation.value === option.value;
+    return (
+      <button className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => onSelect(option.value)} type="button">
+        {/* Preview assets come from configurable URLs; native img keeps them flexible here. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {option.previewUrl ? <img alt={option.label} src={option.previewUrl} /> : <span className="wechatStyleLibraryPlaceholder" />}
+        <strong>{option.label}</strong>
+        {recommended ? <em>推荐</em> : null}
+        {active ? <i>✓</i> : null}
+      </button>
+    );
+  };
+
   return (
     <div className="wechatStyleLibraryBackdrop">
       <section aria-label="全部视觉风格" aria-modal="true" className="wechatStyleLibrary" role="dialog">
         <header>
           <div>
-            <span>视觉风格库</span>
-            <h2>选择整篇文章的统一风格</h2>
+            <span>{eyebrow}</span>
+            <h2>{title}</h2>
           </div>
           <button aria-label="关闭风格库" onClick={onClose} title="关闭" type="button">×</button>
         </header>
-        <div className="wechatStyleLibraryGrid">
-          {options.map((option) => {
-            const active = selectedValue === option.value;
-            const recommended = recommendation.value === option.value;
-            return (
-              <button className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => onSelect(option.value)} type="button">
-                {/* Preview assets come from configurable URLs; native img keeps them flexible here. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {option.previewUrl ? <img alt={option.label} src={option.previewUrl} /> : <span className="wechatStyleLibraryPlaceholder" />}
-                <strong>{option.label}</strong>
-                {recommended ? <em>推荐</em> : null}
-                {active ? <i>✓</i> : null}
-              </button>
-            );
-          })}
-        </div>
+        {groups ? (
+          <div className="wechatStyleLibraryGroups">
+            {groups.map((group) => {
+              const groupOptions = group.values.map((value) => options.find((option) => option.value === value)).filter((option): option is NonNullable<typeof option> => Boolean(option));
+              return <section className="wechatStyleLibraryGroup" key={group.label}><h3>{group.label}</h3><div className="wechatStyleLibraryGrid">{groupOptions.map(styleItem)}</div></section>;
+            })}
+          </div>
+        ) : <div className="wechatStyleLibraryGrid">{options.map(styleItem)}</div>}
       </section>
     </div>
   );
@@ -1709,21 +1814,42 @@ function summarizeWechatParagraph(value: string) {
   return `${normalized.slice(0, 41)}…`;
 }
 
-function recommendWechatImageStyle(article: string): WechatStyleRecommendation {
+function recommendWechatImageStyles(article: string): WechatStyleRecommendation[] {
   const text = article.toLowerCase();
+  if (!text.trim()) return [];
   if (/数据|比例|结构|步骤|清单|方法|逻辑|对比/.test(text)) {
-    return { value: "abstract", label: "几何抽象", reason: "文章偏知识拆解，几何画面更容易承接结构和观点。" };
+    return [
+      { value: "abstract", label: "知识结构拆解", reason: "文章偏知识拆解，结构化画面更容易承接观点。" },
+      { value: "documentary", label: "专业解读配图", reason: "保持阅读克制，适合专业说明。" },
+      { value: "eastern-line", label: "理性要点说明", reason: "用轻量线描突出关键关系。" },
+    ];
   }
   if (/家庭|孩子|父母|陪伴|温暖|成长|生活/.test(text)) {
-    return { value: "warm-drawing", label: "温暖手绘", reason: "文章包含家庭与生活场景，手绘表达更亲和，也更适合正文阅读。" };
+    return [
+      { value: "warm-drawing", label: "家庭保障科普", reason: "文章包含家庭与生活场景，亲和的手绘表达更适合正文阅读。" },
+      { value: "soft-healing", label: "温暖关系表达", reason: "适合情感更强的段落收束。" },
+      { value: "paper-story", label: "亲子成长叙事", reason: "适合以生活片段推进的文章。" },
+    ];
   }
   if (/城市|职场|创业|商业|房产|资产/.test(text)) {
-    return { value: "landscape", label: "城市风景", reason: "文章包含城市或商业议题，场景化画面更容易建立真实感。" };
+    return [
+      { value: "landscape", label: "城市与职场议题", reason: "文章包含城市或商业议题，场景化画面更容易建立真实感。" },
+      { value: "documentary", label: "专业解读配图", reason: "适合承接客观分析与专业信息。" },
+      { value: "city-detail", label: "城市生活观察", reason: "适合从细节切入的观点文章。" },
+    ];
   }
   if (/情绪|焦虑|选择|改变|故事|人生/.test(text)) {
-    return { value: "cinematic-light", label: "电影光影", reason: "文章偏故事和情绪推进，光影画面更适合承接转折。" };
+    return [
+      { value: "cinematic-light", label: "故事与情绪转折", reason: "文章偏故事和情绪推进，光影画面更适合承接转折。" },
+      { value: "quiet-drama", label: "深度观点阅读", reason: "适合保留思考感与留白。" },
+      { value: "watercolor", label: "温柔观点表达", reason: "适合较柔和的情绪段落。" },
+    ];
   }
-  return { value: "documentary", label: "自然纪实", reason: "适配大多数公众号正文，画面克制、真实，不会抢正文信息。" };
+  return [
+    { value: "documentary", label: "专业解读配图", reason: "适配大多数公众号正文，画面克制、真实，不会抢正文信息。" },
+    { value: "abstract", label: "知识结构拆解", reason: "适合有明确观点和层次的文章。" },
+    { value: "warm-drawing", label: "家庭保障科普", reason: "适合更亲和的阅读语气。" },
+  ];
 }
 
 function supportsVoice(fieldId: string) {
@@ -1817,7 +1943,10 @@ function renderField({
   onFileChange,
   styleOptionLimit,
   styleRecommendation,
+  styleRecommendations,
+  mostUsedStyleValues,
   onShowAllStyles,
+  onStyleSelect,
 }: {
   field: CreationApp["fields"][number];
   value: FieldValue;
@@ -1834,7 +1963,10 @@ function renderField({
   onFileChange: (fileList: FileList | null) => void;
   styleOptionLimit?: number;
   styleRecommendation?: WechatStyleRecommendation;
+  styleRecommendations?: WechatStyleRecommendation[];
+  mostUsedStyleValues?: string[];
   onShowAllStyles?: () => void;
+  onStyleSelect?: (value: string) => void;
 }) {
   if (field.type === "textarea") {
     if ((isImageCard || field.id === "article") && field.id === "source") {
@@ -1961,6 +2093,7 @@ function renderField({
       const visibleStyleOptions = styleOptionLimit && selectedStyle && !initialStyleOptions.some((option) => option.value === selectedStyle.value)
         ? [...initialStyleOptions.slice(0, -1), selectedStyle]
         : initialStyleOptions;
+      const mostUsedStyleOptions = mostUsedStyleValues?.map((styleValue) => styleOptions.find((option) => option.value === styleValue)).filter((option): option is NonNullable<typeof option> => Boolean(option)) ?? [];
       return (
         <div className="imageStylePicker">
           {styleRecommendation ? (
@@ -1968,6 +2101,31 @@ function renderField({
               <span>智能推荐</span>
               <strong>{styleRecommendation.label}</strong>
               <p>{styleRecommendation.reason}</p>
+            </div>
+          ) : null}
+          {styleRecommendations && styleRecommendations.length > 1 ? (
+            <div className="wechatStyleAlternatives">
+              <span>本文适配</span>
+              <div>
+                {styleRecommendations.map((recommendation) => (
+                  <button className={value === recommendation.value ? "active" : ""} key={recommendation.value} onClick={() => (onStyleSelect ?? onChange)(recommendation.value)} type="button">
+                    {recommendation.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {mostUsedStyleOptions.length ? (
+            <div className="imageStyleMostUsed">
+              <span>最常使用</span>
+              <div>
+                {mostUsedStyleOptions.map((option) => (
+                  <button className={value === option.value ? "imageStyleMostUsedItem active" : "imageStyleMostUsedItem"} key={option.value} onClick={() => (onStyleSelect ?? onChange)(option.value)} type="button">
+                    <i aria-hidden="true" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
           <div className="imageStyleGrid">
@@ -1978,7 +2136,7 @@ function renderField({
                 <button
                   className={active ? "imageStyleCard active" : "imageStyleCard"}
                   key={option.value}
-                  onClick={() => onChange(option.value)}
+                  onClick={() => (onStyleSelect ?? onChange)(option.value)}
                   type="button"
                 >
                   {/* Style previews come from the admin-configurable asset library. */}
@@ -1993,7 +2151,7 @@ function renderField({
           </div>
           {styleOptionLimit && styleOptions.length > visibleStyleOptions.length && onShowAllStyles ? (
             <button className="wechatStylesMoreButton" onClick={onShowAllStyles} type="button">
-              查看全部 {styleOptions.length} 种风格
+              更多风格
             </button>
           ) : null}
         </div>
