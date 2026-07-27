@@ -14,6 +14,7 @@ const capabilities = (process.env.LOCAL_AGENT_CAPABILITIES || "source.inspect").
 const heartbeatIntervalMs = boundedNumber("LOCAL_AGENT_HEARTBEAT_INTERVAL_MS", 15000, 5000, 60000);
 const transcriptBatchMs = boundedNumber("LOCAL_AGENT_TRANSCRIPT_BATCH_MS", 400, 300, 1000);
 const maxTranscribeBytes = boundedNumber("LOCAL_AGENT_MAX_TRANSCRIBE_BYTES", 100 * 1024 * 1024, 1 * 1024 * 1024, 500 * 1024 * 1024);
+const mediaDownloadTimeoutMs = boundedNumber("LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS", 300000, 30000, 600000);
 const protocolVersion = boundedNumber("LOCAL_AGENT_PROTOCOL_VERSION", 1, 1, 1000);
 const readyFile = process.env.LOCAL_AGENT_READY_FILE || "/tmp/local-agent.ready";
 let activeTaskCount = 0;
@@ -108,7 +109,7 @@ async function streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecrypt
   const mediaSource = isEncryptedWechatMedia ? buildWechatMediaProxyUrl(mediaUrl, mediaDecryptKey) : isLocalMedia ? `${executorBase}${mediaUrl}` : mediaUrl;
   const response = await fetch(mediaSource, {
     headers: isLocalMedia ? { authorization: `Bearer ${token}` } : undefined,
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(mediaDownloadTimeoutMs),
   });
   if (!response.ok) throw new Error(`video download HTTP ${response.status}`);
   const declaredLength = Number(response.headers.get("content-length") || 0);
