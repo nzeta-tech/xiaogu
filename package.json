@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:topics": "node --experimental-strip-types --test src/lib/topics/rules.test.mjs",
-    "test:viral": "node --experimental-strip-types --test src/lib/viral-scoring.test.mjs src/lib/viral-creator-sources.test.mjs src/lib/wechat-provider-adapters.test.mjs src/lib/creation/link-remix-source.test.mjs",
+    "test:viral": "node --experimental-strip-types --test src/lib/viral-scoring.test.mjs src/lib/viral-creator-sources.test.mjs src/lib/wechat-provider-adapters.test.mjs src/lib/creation/link-remix-source.test.mjs src/lib/creation/wechat-channels-container.test.mjs",
     "viral:worker": "node scripts/viral-data-worker.mjs",
     "viral:creator-worker": "node scripts/viral-creator-worker.mjs",
     "local-agent": "node scripts/local-agent.mjs",

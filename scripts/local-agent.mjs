@@ -91,7 +91,7 @@ async function executeTask(task, leaseToken) {
   if (!response.ok) throw new Error(result.error || `local executor HTTP ${response.status}`);
   if (!result.fields || typeof result.fields !== "object") throw new Error("local executor returned an invalid result");
   if (typeof result.mediaUrl === "string" && result.mediaUrl) {
-    const transcript = await streamMediaTranscription(task, leaseToken, result.mediaUrl);
+    const transcript = await streamMediaTranscription(task, leaseToken, result.mediaUrl, result.mediaDecryptKey);
     if (transcript) {
       result.fields.source_transcript = transcript;
       result.note = `${result.note || "作品信息已回填。"} 本地语音转写已完成。`;
@@ -100,10 +100,12 @@ async function executeTask(task, leaseToken) {
   return sanitizeResult(result);
 }
 
-async function streamMediaTranscription(task, leaseToken, mediaUrl) {
+async function streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecryptKey) {
   await publishTaskEvent(task, leaseToken, "status", { message: "正在获取视频音频..." });
   const isLocalMedia = mediaUrl.startsWith("/");
-  const response = await fetch(isLocalMedia ? `${executorBase}${mediaUrl}` : mediaUrl, {
+  const isEncryptedWechatMedia = typeof mediaDecryptKey === "string" && /^\d+$/.test(mediaDecryptKey) && isAllowedWechatMediaUrl(mediaUrl);
+  const mediaSource = isEncryptedWechatMedia ? buildWechatMediaProxyUrl(mediaUrl, mediaDecryptKey) : isLocalMedia ? `${executorBase}${mediaUrl}` : mediaUrl;
+  const response = await fetch(mediaSource, {
     headers: isLocalMedia ? { authorization: `Bearer ${token}` } : undefined,
     signal: AbortSignal.timeout(30000),
   });
@@ -179,10 +181,28 @@ function publishTaskEvent(task, leaseToken, eventType, payload) {
 
 function sanitizeResult(result) {
   const clean = { ...result };
+  delete clean.mediaDecryptKey;
   for (const key of ["mediaUrl", "thumbnailUrl"]) {
-    if (typeof clean[key] === "string" && clean[key].startsWith("/api/")) delete clean[key];
+    if (typeof clean[key] === "string" && (clean[key].startsWith("/api/") || (key === "mediaUrl" && isAllowedWechatMediaUrl(clean[key])))) delete clean[key];
   }
   return clean;
+}
+
+function buildWechatMediaProxyUrl(mediaUrl, decryptKey) {
+  const base = (process.env.VIRAL_WECHAT_DISCOVERY_API_BASE || "http://wx-channel:2026").replace(/\/$/, "");
+  const proxy = new URL("/api/video/stream", `${base}/`);
+  proxy.searchParams.set("url", mediaUrl);
+  proxy.searchParams.set("key", decryptKey);
+  return proxy.toString();
+}
+
+function isAllowedWechatMediaUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && /(^|\.)finder\.video\.qq\.com$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 async function remote(path, payload) {

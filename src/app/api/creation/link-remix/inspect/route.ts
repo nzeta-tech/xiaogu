@@ -326,6 +326,7 @@ async function wechatChannelsPayloadResponse(sourceUrl: string, payload: Record<
   const h265 = (feed.h265VideoInfo && typeof feed.h265VideoInfo === "object" ? feed.h265VideoInfo : {}) as Record<string, unknown>;
   const description = stringValue(feed.description);
   const mediaUrl = stringValue(feed.videoUrl) || stringValue(feed.originVideoUrl) || stringValue(h264.videoUrl) || stringValue(h265.videoUrl);
+  const mediaDecryptKey = stringValue(feed.mediaDecryptKey);
   const fields = Object.fromEntries(
     Object.entries({
       source_type: "unknown",
@@ -350,6 +351,7 @@ async function wechatChannelsPayloadResponse(sourceUrl: string, payload: Record<
     finalUrl: sourceUrl,
     thumbnailUrl: stringValue(feed.coverUrl),
     mediaUrl,
+    mediaDecryptKey,
     fields,
     note: deferTranscription && mediaUrl
       ? `${prefix}，正在准备本地语音转写。`

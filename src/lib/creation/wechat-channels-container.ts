@@ -5,6 +5,14 @@ type ContainerInspectionResult =
 
 type CdpPage = { id?: string; webSocketDebuggerUrl?: string };
 
+type ResolvedWechatChannelsMedia = {
+  url: string;
+  decryptKey: string;
+  title: string;
+  author: string;
+  coverUrl: string;
+};
+
 /**
  * Video Channel's former Yuanbao parsing API is no longer available. The
  * public finder-preview page does expose the same public metadata after the
@@ -13,6 +21,7 @@ type CdpPage = { id?: string; webSocketDebuggerUrl?: string };
 export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: string): Promise<ContainerInspectionResult> {
   if (process.env.VIRAL_WECHAT_CONTAINER_BROWSER_ENABLED === "0") return { status: "unavailable" };
   const cdpBase = (process.env.VIRAL_WECHAT_CDP_URL ?? "http://127.0.0.1:9222").replace(/\/$/, "");
+  const resolvedMediaPromise = resolveWechatChannelsMedia(sourceUrl);
   let pageId = "";
   try {
     const opened = await fetch(`${cdpBase}/json/new?${encodeURIComponent(sourceUrl)}`, {
@@ -45,17 +54,20 @@ export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: strin
       });
       const metadata = parseMetadata((evaluated.result as Record<string, unknown> | undefined)?.value);
       if (metadata.title && metadata.author && metadata.publishedDate) {
+        const resolvedMedia = await resolvedMediaPromise;
         return {
           status: "success",
           payload: {
             data: {
               feedInfo: {
-                description: metadata.title,
-                coverUrl: metadata.coverUrl,
+                description: resolvedMedia?.title || metadata.title,
+                coverUrl: resolvedMedia?.coverUrl || metadata.coverUrl,
                 createtime: dateToUnixSeconds(metadata.publishedDate),
                 pageText: metadata.text,
+                videoUrl: resolvedMedia?.url || "",
+                mediaDecryptKey: resolvedMedia?.decryptKey || "",
               },
-              authorInfo: { nickname: metadata.author },
+              authorInfo: { nickname: resolvedMedia?.author || metadata.author },
             },
           },
         };
@@ -68,6 +80,53 @@ export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: strin
   } finally {
     if (pageId) fetch(`${cdpBase}/json/close/${pageId}`).catch(() => {});
   }
+}
+
+async function resolveWechatChannelsMedia(sourceUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
+  if (process.env.VIRAL_WECHAT_DISCOVERY_ENABLED !== "1") return null;
+  const base = process.env.VIRAL_WECHAT_DISCOVERY_API_BASE?.trim();
+  if (!base) return null;
+  try {
+    const response = await fetch(`${base.replace(/\/$/, "")}/api/channels/share/resolve`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ urls: [sourceUrl], mode: "page" }),
+      signal: AbortSignal.timeout(Number(process.env.VIRAL_WECHAT_DISCOVERY_TIMEOUT_MS ?? 70_000)),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as Record<string, unknown>;
+    return parseResolvedWechatChannelsMedia(payload);
+  } catch {
+    return null;
+  }
+}
+
+export function parseResolvedWechatChannelsMedia(payload: Record<string, unknown>): ResolvedWechatChannelsMedia | null {
+  const data = recordValue(payload.data);
+  const item = Array.isArray(data.resolved) ? recordValue(data.resolved[0]) : {};
+  const url = stringValue(item.url);
+  const decryptKey = stringValue(item.key);
+  if (!isAllowedWechatMediaUrl(url) || !/^\d+$/.test(decryptKey)) return null;
+  return {
+    url,
+    decryptKey,
+    title: stringValue(item.title),
+    author: stringValue(item.authorName),
+    coverUrl: stringValue(item.coverUrl),
+  };
+}
+
+function isAllowedWechatMediaUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && /(^|\.)finder\.video\.qq\.com$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function parseMetadata(value: unknown) {

@@ -36,6 +36,7 @@ export type SourceInspectResult = {
   finalUrl?: string;
   thumbnailUrl?: string;
   mediaUrl?: string;
+  mediaDecryptKey?: string;
   fields: Record<string, string>;
   note?: string;
 };
