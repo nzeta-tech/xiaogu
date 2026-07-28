@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   outputFileTracingRoot: path.join(__dirname),
+  generateBuildId: async () => process.env.XIAOGU_BUILD_ID || "local",
   turbopack: process.env.NODE_ENV !== "production" ? {
     root: process.cwd(),
   } : undefined,
