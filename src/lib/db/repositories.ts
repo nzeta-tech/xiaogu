@@ -2531,13 +2531,14 @@ export async function tryListPublishedViralContents(limit = 24) {
       metric_unit: string; insight: string; creation_scenes: unknown; risk_note: string;
       status: string; is_pinned: boolean; is_featured: boolean; sort_order: number;
       publish_at: string | null; expire_at: string | null; updated_at: string;
-      source_type: string; example_type: string; viral_score: number; fetched_at: string | null;
+      source_type: string; example_type: string; viral_score: number; fetched_at: string | null; has_local_cover: boolean;
     }>(
       `select id, title, platform, content_type, category, tags, source_url, source_title,
               source_author, thumbnail_url, media_url, embed_url, article_body, summary,
               metric_label, metric_value, metric_unit, insight, creation_scenes, risk_note,
               status, is_pinned, is_featured, sort_order, publish_at, expire_at, updated_at,
-              source_type, example_type, viral_score, fetched_at
+              source_type, example_type, viral_score, fetched_at,
+              exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id) as has_local_cover
        from viral_contents
        where source_type = 'manual'
          and status = 'published'

@@ -210,6 +210,7 @@ function ViralExampleCover({ item }: { item: ViralExample }) {
 
 function buildThumbnailUrl(sourceUrl?: string) {
   if (!sourceUrl) return undefined;
+  if (sourceUrl.startsWith("/api/")) return apiPath(sourceUrl);
   const normalizedUrl = sourceUrl.startsWith("//") ? `https:${sourceUrl}` : sourceUrl;
   return apiPath(`/api/assets/image-proxy?url=${encodeURIComponent(normalizedUrl)}`);
 }

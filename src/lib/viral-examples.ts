@@ -160,7 +160,7 @@ function databaseRowToExample(row: Awaited<ReturnType<typeof tryListPublishedVir
     id: row.id, title: row.title, platform: row.platform as ViralExample["platform"],
     type: row.example_type === "爆文" || row.content_type === "爆文" ? "爆文" : "短视频", sourceUrl: row.source_url,
     sourceTitle: row.source_title, authorName: row.source_author || undefined,
-    excerpt: row.summary || undefined, thumbnailUrl: row.thumbnail_url ?? undefined, mediaUrl: row.media_url ?? undefined,
+    excerpt: row.summary || undefined, thumbnailUrl: row.has_local_cover ? `/api/viral-covers/${row.id}` : row.thumbnail_url ?? undefined, mediaUrl: row.media_url ?? undefined,
     embedUrl: row.embed_url ?? undefined, articleBody: row.article_body || undefined,
     fetchedAt: row.fetched_at ?? row.updated_at, publishedAt: row.publish_at ?? undefined, metricLabel: row.metric_label,
     metricValue: row.metric_value ?? undefined, metricUnit: row.metric_unit || undefined, category: row.category,
