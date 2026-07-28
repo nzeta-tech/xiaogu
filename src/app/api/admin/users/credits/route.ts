@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { tryCreateAdminAuditLog, tryGrantGiftCredits } from "@/lib/db/repositories";
+import { queueCreditChangeEmail } from "@/lib/billing/notifications";
 
 const schema = z.object({
   userId: z.string().uuid(),
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
   });
 
   if (!gift) return Response.json({ error: "赠送额度失败" }, { status: 503 });
+  await queueCreditChangeEmail({ eventKey: `gift:${gift.id}`, userId: input.userId, deltaCredits: gift.quota_amount, changeKind: "admin_gift", changeLabel: input.note });
 
   await tryCreateAdminAuditLog({
     adminUserId: user.id,

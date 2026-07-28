@@ -9474,3 +9474,133 @@ body .linkRemixAppPage .creationStickyAction .submitButton:disabled {
     height: 180px;
   }
 }
+
+/* The sidebar leaves too little usable width for the split view on compact desktops. */
+@media (max-width: 1180px) {
+  .xiaoguLightTheme .inspirationWorkbench {
+    height: auto !important;
+    grid-template-rows: none;
+    overflow: visible !important;
+  }
+
+  .xiaoguLightTheme .main:has(.inspirationWorkbench:not(.viralExpanded)) {
+    overflow: auto !important;
+  }
+
+  .inspirationSplitLayout {
+    height: auto;
+    max-height: none;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    overflow: visible;
+  }
+
+  .inspirationSplitLayout > :is(.todayOpportunity, .viralExamplesSection) {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .inspirationSplitLayout .todayOpportunity {
+    position: static;
+  }
+
+  .inspirationSplitLayout .todayOpportunityList {
+    grid-template-rows: none;
+    overflow: visible;
+  }
+
+  .inspirationSplitLayout .todayOpportunityRow {
+    min-height: 64px;
+  }
+
+  .inspirationSplitLayout .viralExamplesContent,
+  .inspirationSplitLayout .viralExamplesList {
+    overflow: visible;
+  }
+
+  .inspirationSplitLayout .viralExamplesList {
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+  }
+
+  .xiaoguLightTheme .inspirationWorkbench .viralExampleCard {
+    height: auto;
+  }
+}
+
+/* A single wide card keeps source covers, titles, and the remix action readable on phones. */
+.todayOpportunityMoreButton {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .inspirationSplitLayout .viralExamplesList,
+  .inspirationSplitLayout .viralExamplesList.expanded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inspirationSplitLayout .todayOpportunityRow:nth-child(n + 5) {
+    display: none;
+  }
+
+  .inspirationSplitLayout .todayOpportunity.topicsExpanded .todayOpportunityRow:nth-child(n + 5) {
+    display: grid;
+  }
+
+  .todayOpportunityMoreButton {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 10px;
+    padding: 0 12px;
+    border: 1px solid #bdebe2;
+    border-radius: 5px;
+    background: #f7fffb;
+    color: #11634f;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 750;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1180px) {
+  .inspirationSplitLayout .todayOpportunity {
+    display: grid;
+    height: min(520px, calc(100dvh - 150px));
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .inspirationSplitLayout .todayOpportunityList {
+    grid-template-rows: repeat(10, minmax(64px, 1fr));
+    overflow-y: auto;
+  }
+
+  .todayOpportunityMoreButton {
+    display: none;
+  }
+}
+
+/* Keep each desktop topic row tall enough for both its title and category. */
+@media (min-width: 1181px) {
+  .inspirationSplitLayout .todayOpportunityList {
+    grid-template-rows: none;
+    grid-auto-rows: 72px;
+    overflow-y: auto;
+    padding-right: 2px;
+    scrollbar-width: thin;
+  }
+
+  .inspirationSplitLayout .todayOpportunityRow {
+    min-height: 72px;
+  }
+}
+
+/* Remote video covers can expire; use the image error event to fall back before black shows. */
+.viralExampleCover img.viralCoverImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

@@ -34,6 +34,7 @@ export function WorkbenchPageClient() {
   const [viralPlatform, setViralPlatform] = useState<"全部" | ViralExample["platform"]>("全部");
   const [selectedArticle, setSelectedArticle] = useState<ViralExample | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<HotTopic | null>(null);
+  const [topicsExpanded, setTopicsExpanded] = useState(false);
   const [viralExpanded, setViralExpanded] = useState(false);
   const [linkRemixAvailable, setLinkRemixAvailable] = useState<boolean | null>(null);
 
@@ -120,7 +121,7 @@ export function WorkbenchPageClient() {
   return (
     <div className={`pageStack workbenchPage inspirationWorkbench ${viralExpanded ? "viralExpanded" : ""}`}>
       <div className="inspirationSplitLayout">
-      <section className="todayOpportunity" aria-labelledby="today-opportunity-title">
+      <section className={`todayOpportunity ${topicsExpanded ? "topicsExpanded" : ""}`} aria-labelledby="today-opportunity-title">
         <div className="todayOpportunityHeader">
           <div>
             <span>今日选题</span>
@@ -133,20 +134,23 @@ export function WorkbenchPageClient() {
         ) : overviewError ? (
           <div className="workbenchEmptyState"><strong>今日热点暂时加载失败</strong><span>请刷新页面重试，或先从个人画像生成一组选题。</span><a href={appPath("/apps/topic-picker?from=today&entry=topic-picker")}>先生成选题</a></div>
         ) : topics.length > 0 ? (
-          <div className="todayOpportunityList">
-            {topics.map((topic, index) => (
-              <article className={`todayOpportunityRow ${index < 3 ? "featured" : ""} ${selectedTopic?.id === topic.id ? "selected" : ""} heat-${topic.heat}`} key={topic.id}>
-                <span className="todayOpportunityRank">{String(index + 1).padStart(2, "0")}</span>
-                <div className="todayOpportunityRowBody">
-                  <button className="todayOpportunitySelect" onClick={() => setSelectedTopic(topic)} aria-pressed={selectedTopic?.id === topic.id}>
-                    <strong>{topic.title}</strong>
-                    <span>{getHotTopicDisplayCategory(topic)} · {topic.heat}热度</span>
-                  </button>
-                </div>
-                <div className="todayOpportunityActions"><a href={buildTopicCreationHref(topic)}>灵感创作 <span aria-hidden="true">→</span></a></div>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className="todayOpportunityList">
+              {topics.map((topic, index) => (
+                <article className={`todayOpportunityRow ${index < 3 ? "featured" : ""} ${selectedTopic?.id === topic.id ? "selected" : ""} heat-${topic.heat}`} key={topic.id}>
+                  <span className="todayOpportunityRank">{String(index + 1).padStart(2, "0")}</span>
+                  <div className="todayOpportunityRowBody">
+                    <button className="todayOpportunitySelect" onClick={() => setSelectedTopic(topic)} aria-pressed={selectedTopic?.id === topic.id}>
+                      <strong>{topic.title}</strong>
+                      <span>{getHotTopicDisplayCategory(topic)} · {topic.heat}热度</span>
+                    </button>
+                  </div>
+                  <div className="todayOpportunityActions"><a href={buildTopicCreationHref(topic)}>灵感创作 <span aria-hidden="true">→</span></a></div>
+                </article>
+              ))}
+            </div>
+            {topics.length > 4 ? <button className="todayOpportunityMoreButton" onClick={() => setTopicsExpanded((expanded) => !expanded)} aria-expanded={topicsExpanded}>{topicsExpanded ? "收起热点" : `查看全部热点 (${topics.length})`}</button> : null}
+          </>
         ) : (
           <div className="workbenchEmptyState">
             <strong>今日机会正在整理</strong>
@@ -199,12 +203,14 @@ function buildViralCreationHref(item: ViralExample) {
 
 function ViralExampleCover({ item }: { item: ViralExample }) {
   const thumbnailUrl = buildThumbnailUrl(item.thumbnailUrl);
-  const coverStyle = thumbnailUrl ? { "--viral-thumbnail": `url(${thumbnailUrl})` } as CSSProperties : undefined;
-  return <a className={`viralExampleCover ${thumbnailUrl ? "hasThumbnail" : "withoutThumbnail"}`} href={item.sourceUrl} target="_blank" rel="noreferrer" aria-label={`打开${item.platform}原作品`} style={coverStyle}>
-    {thumbnailUrl ? <span className="viralCoverImage" aria-hidden="true" /> : null}
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const hasThumbnail = Boolean(thumbnailUrl) && !thumbnailFailed;
+  const coverStyle = hasThumbnail ? { "--viral-thumbnail": `url(${thumbnailUrl})` } as CSSProperties : undefined;
+  return <a className={`viralExampleCover ${hasThumbnail ? "hasThumbnail" : "withoutThumbnail"}`} href={item.sourceUrl} target="_blank" rel="noreferrer" aria-label={`打开${item.platform}原作品`} style={coverStyle}>
+    {hasThumbnail ? <img className="viralCoverImage" src={thumbnailUrl} alt="" onError={() => setThumbnailFailed(true)} /> : null}
     <span className="viralCoverBadge">{item.platform}</span>
     <span className="viralCoverType">{item.type === "爆文" ? "图文参考" : "视频参考"}</span>
-    {!thumbnailUrl ? <strong>精选内容参考</strong> : null}
+    {!hasThumbnail ? <strong>精选内容参考</strong> : null}
   </a>;
 }
 

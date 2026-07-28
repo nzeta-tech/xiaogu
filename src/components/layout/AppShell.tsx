@@ -107,6 +107,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const customUserNavItems = siteConfig.customNavItems.filter((item) => item.visibility === "user").sort((a, b) => a.sortOrder - b.sortOrder).map((item) => ({ ...item, href: item.url, shortLabel: item.label, icon: "help" }));
   const customAdminNavItems = siteConfig.customNavItems.filter((item) => item.visibility === "admin").sort((a, b) => a.sortOrder - b.sortOrder);
   const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, ...customUserNavItems, adminNavItem] : [...platformNavItems, ...customUserNavItems];
+  const mobileNavItems = role === "admin" ? [...platformNavItems, adminNavItem] : platformNavItems;
   const pageMeta = pageMetaOverride ?? getPageMeta(pathname, siteConfig.siteSubtitle);
 
   return (
@@ -220,7 +221,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="mobileAppNav" aria-label="移动端主导航">
-          {platformNavItems.map((item) => (
+          {mobileNavItems.map((item) => (
             <a className={isNavItemActive(pathname, item.id, navigationSource) ? "active" : ""} href={appPath(item.href)} key={`mobile-${item.id}`}>
               <span aria-hidden="true"><NavIcon name={item.icon} /></span>
               <strong>{item.label}</strong>

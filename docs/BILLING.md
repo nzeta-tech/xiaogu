@@ -47,6 +47,19 @@
 
 生产环境必须先校验支付平台签名，再调用 `grantCredits`，不能信任前端传入的 `userId` 或 `quotaAmount`。
 
+## 积分到账邮件
+
+充值、手工转账审核通过、管理员补发或标记到账、管理员赠送和注册赠送都会写入可去重的邮件发件箱。退款积分回收和支付订单超时关闭也会通知用户。邮件发送不会阻塞支付 webhook；SMTP 临时不可用时会按退避策略重试最多 6 次。
+
+部署环境应每分钟调用一次下列受保护接口，处理失败重试和服务重启期间遗留的待发邮件：
+
+```text
+POST /api/internal/credit-notifications/dispatch
+Authorization: Bearer ${CREDIT_NOTIFICATION_SECRET}
+```
+
+`CREDIT_NOTIFICATION_SECRET` 未配置时可使用 `CRON_SECRET`。在后台“系统设置 -> 邮件”配置并启用 SMTP 后，可编辑积分变动邮件模板；模板变量包括 `{{name}}`、`{{changeLabel}}`、`{{delta}}`、`{{balance}}`、`{{orderId}}` 和 `{{url}}`。
+
 ## 当前套餐
 
 - 基础包：99 元 / 300 点

@@ -6,6 +6,7 @@ import { checkRateLimit, requestClientKey } from "@/lib/security/rate-limit";
 import { bindAffiliateInviter, ensureAffiliateAccount, recordAffiliateRegistrationContext, validateAffiliateReferralCode } from "@/lib/affiliate/service";
 import { createAndSendAuthToken } from "@/lib/auth/actions";
 import { tryGrantGiftCredits } from "@/lib/db/repositories";
+import { queueCreditChangeEmail } from "@/lib/billing/notifications";
 import { query } from "@/lib/db/client";
 import { verifyTurnstile } from "@/lib/security/turnstile";
 import { safeAuthRedirect } from "@/lib/auth/redirect";
@@ -98,7 +99,8 @@ export async function POST(request: Request) {
     }
     await recordAffiliateRegistrationContext(user.id, requestClientKey(request));
     if (settings.defaults.signupCredits > 0) {
-      await tryGrantGiftCredits({ userId: user.id, quotaAmount: settings.defaults.signupCredits, sourceType: "signup", sourceLabel: "新用户注册赠送" });
+      const gift = await tryGrantGiftCredits({ userId: user.id, quotaAmount: settings.defaults.signupCredits, sourceType: "signup", sourceLabel: "新用户注册赠送" });
+      if (gift) await queueCreditChangeEmail({ eventKey: `gift:${gift.id}`, userId: user.id, deltaCredits: gift.quota_amount, changeKind: "signup_gift", changeLabel: gift.source_label });
     }
     if (settings.auth.emailVerificationEnabled) {
       let emailSent = true;

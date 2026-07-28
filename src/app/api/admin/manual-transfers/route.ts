@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { grantCredits } from "@/lib/billing/openmeter";
 import { accrueAffiliateCredits } from "@/lib/affiliate/service";
+import { queueCreditChangeEmail } from "@/lib/billing/notifications";
 import { tryCreateAdminAuditLog, tryGetOrderForCreditRetry, tryListManualReviews, tryMarkOrderCompleted, tryReviewManualTransfer, tryUpdateAdminOrderStatus } from "@/lib/db/repositories";
 
 async function requireAdmin() { const user = await requireSessionUser(); if (user instanceof Response) return user; return user.role === "admin" ? user : Response.json({ error: "无权审核手工转账" }, { status: 403 }); }
@@ -31,6 +32,7 @@ export async function PATCH(request: Request) {
   const grant = await grantCredits({ customerId: order.user_id, amount: order.quota_amount, reason: "manual_transfer_approved", eventId: `manual:${order.id}`, metadata: { orderId: order.id } });
   if (!grant.ok) return Response.json({ error: "积分发放失败，可稍后重试" }, { status: 502 });
   await tryMarkOrderCompleted(order.id);
+  await queueCreditChangeEmail({ eventKey: `payment:${order.id}`, userId: order.user_id, orderId: order.id, deltaCredits: order.quota_amount, changeKind: "purchase", changeLabel: "充值" });
   await accrueAffiliateCredits({ orderId: order.id, inviteeUserId: order.user_id, purchasedCredits: order.quota_amount });
   await tryCreateAdminAuditLog({ adminUserId: user.id, action: "manual_transfer.approve", targetType: "order", targetId: order.id, detail: { note: parsed.data.note ?? "" } });
   return Response.json({ ok: true, grant });

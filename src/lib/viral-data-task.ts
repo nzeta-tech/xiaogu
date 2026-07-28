@@ -2,7 +2,8 @@ import type { PoolClient } from "pg";
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/db/client";
 import { canonicalizeViralSourceUrl, discoverPlatformViralData, discoverPlatformViralExamples } from "@/lib/viral-examples";
-import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRun, getLatestViralDataRun, publishViralDataRun, recordViralDiscovery } from "@/lib/viral-data-repository";
+import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRun, getLatestViralDataRun, listTopDouyinDeepVerificationCandidates, publishViralDataRun, recordViralDiscovery } from "@/lib/viral-data-repository";
+import { enqueueLocalAgentTask, isDouyinDeepVerificationAvailable } from "@/lib/local-agent/repository";
 import { buildViralSourceIdentity, isInsuranceFinanceRelevant } from "@/lib/viral-scoring";
 
 const viralPreparationLockId = 2_023_072_600;
@@ -53,6 +54,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
 
     const evaluatedPlatforms = [...new Set(discovery.candidates.map((item) => item.platform))];
     const published = await publishViralDataRun(runId, prepared, evaluatedPlatforms, discovery.candidates.length);
+    const deepVerificationQueued = await queueTopDouyinDeepVerifications(runId);
     return {
       started: true as const,
       succeeded: true as const,
@@ -60,6 +62,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
       discoveredCount: discovery.candidates.length,
       creatorDiscoveredCount: discovery.creators.length,
       eligibleCount: prepared.length,
+      deepVerificationQueued,
       ...published,
     };
   } catch (error) {
@@ -70,6 +73,20 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
     if (lockClient && locked) await lockClient.query("select pg_advisory_unlock($1)", [viralPreparationLockId]).catch(() => undefined);
     lockClient?.release();
   }
+}
+
+async function queueTopDouyinDeepVerifications(runId: string) {
+  if (!await isDouyinDeepVerificationAvailable()) return 0;
+  const configured = Number(process.env.VIRAL_DOUYIN_DEEP_VERIFY_LIMIT ?? 3);
+  const candidates = await listTopDouyinDeepVerificationCandidates(runId, Number.isFinite(configured) ? configured : 3);
+  await Promise.all(candidates.map((candidate, index) => enqueueLocalAgentTask({
+    taskType: "douyin.deep_verify",
+    payload: { workId: candidate.work_id, url: candidate.source_url },
+    dedupeKey: candidate.work_id,
+    priority: 80 - index,
+    maxAttempts: 1,
+  })));
+  return candidates.length;
 }
 
 export function deduplicatePreparedItems(items: Awaited<ReturnType<typeof discoverPlatformViralExamples>>) {

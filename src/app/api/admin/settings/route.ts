@@ -49,6 +49,7 @@ const schema = z.object({
     verificationSubject: z.string().trim().min(1).max(200), verificationBody: z.string().trim().min(1).max(5000),
     passwordResetSubject: z.string().trim().min(1).max(200), passwordResetBody: z.string().trim().min(1).max(5000),
     lowBalanceSubject: z.string().trim().min(1).max(200), lowBalanceBody: z.string().trim().min(1).max(5000),
+    creditChangeSubject: z.string().trim().min(1).max(200), creditChangeBody: z.string().trim().min(1).max(5000),
   }).optional(),
   backup: z.object({
     retentionCount: z.number().int().min(1).max(100), scheduleEnabled: z.boolean(), intervalHours: z.number().int().min(1).max(720), cronExpression: z.string().trim().min(5).max(120).refine(isValidCron, "Cron 表达式无效"), retentionDays: z.number().int().min(0).max(3650),

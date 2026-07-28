@@ -107,7 +107,7 @@ docker compose -f docker-compose.local-agent.yml -f docker-compose.local-agent.t
 docker compose -f docker-compose.local-agent.yml -f docker-compose.local-agent.test.yml logs -f local-agent
 ```
 
-Use `http://127.0.0.1:6080/vnc.html` for one-time platform login and verification.
+Use `http://127.0.0.1:16080/vnc.html` for one-time test-stack platform login and verification.
 WeRSS and WechatSogou remain part of the local Agent image and are available on
 localhost ports `8001` and `8010`; they are not standalone provider deployments.
 
@@ -119,7 +119,7 @@ login. The executor and task poller are critical siblings; either process
 exiting terminates the container so Docker can restart it.
 
 Before enabling delegation on AWS, apply `migrations/028_local_agent_tasks.sql`
-through `migrations/032_local_agent_release_control.sql`. Migration 032 leaves
+through `migrations/033_douyin_deep_verification.sql`. Migration 032 leaves
 the database-backed `features.localAgentEnabled` gate off. Enable it only after
 all three Web nodes and a protocol-compatible production Agent pass release
 probes. This single database value switches all Web nodes consistently.
@@ -130,3 +130,19 @@ offline discovery, but those providers are weak dependencies of online remix.
 The production override disables their processes by default; set the matching
 `VIRAL_*_ENABLED` and `WERSS_ENABLED` variables only for an offline collection
 run or provider maintenance window.
+
+## Douyin Deep Verification
+
+`douyin.deep_verify` is an optional local-only capability for the second stage
+of the viral candidate pipeline. The server keeps broad platform discovery and
+viral scoring, then leases at most `VIRAL_DOUYIN_DEEP_VERIFY_LIMIT` (default
+`3`) top Douyin candidates from a run to an eligible local Agent.
+
+The Docker Agent calls `DOUYIN_NATIVE_VERIFY_API_BASE` on the macOS host. Its
+bridge exposes `GET /health` and `POST /verify` with a canonical Douyin URL,
+then invokes the signed-in desktop app through Accessibility APIs and returns
+`canonical_url`, `published_at`, `like_count`, and `filter_evidence`. It rejects
+anything with `like_count <= 1000` before invoking yt-dlp or Faster-Whisper.
+The server persists the independent `viral_score` and an article-material state
+(`discovered`, `metadata_verified`, `transcript_verified`, `evidence_ready`, or
+`rejected`) plus `article_evidence_score` on `viral_works`.

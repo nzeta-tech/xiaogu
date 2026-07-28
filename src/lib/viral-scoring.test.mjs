@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildViralSourceIdentity, calculateCreatorQuality, calculateViralScore, isInsuranceFinanceRelevant } from "./viral-scoring.ts";
+import { buildDouyinDeepVerificationResult, calculateArticleEvidenceScore } from "./douyin-deep-verification.ts";
 
 test("relative outperformance and growth increase the viral score", () => {
   const fetchedAt = new Date().toISOString();
@@ -45,4 +46,33 @@ test("creator quality rewards repeated evidence, profile completeness and author
   assert.ok(established.total > sparse.total);
   assert.equal(established.completeness, 100);
   assert.ok(established.authority > sparse.authority);
+});
+
+test("Douyin deep verification rejects likes at or below the strict 1000 gate", () => {
+  const result = buildDouyinDeepVerificationResult({
+    canonicalUrl: "https://www.douyin.com/video/123456789",
+    publishedAt: "2026-07-27T12:00:00Z",
+    likeCount: 1000,
+    filterEvidence: { filter_state_proof: "accessibility_state" },
+  });
+  assert.equal(result.status, "rejected");
+  assert.equal(result.rejectionReason, "likes_not_above_1000");
+});
+
+test("Douyin deep verification only becomes article-ready with verified metadata and a usable transcript", () => {
+  const result = buildDouyinDeepVerificationResult({
+    canonicalUrl: "https://www.douyin.com/video/123456789",
+    publishedAt: "2026-07-27T12:00:00Z",
+    likeCount: 1001,
+    filterEvidence: { filter_state_proof: "accessibility_state", filter_confirmation_succeeded: true },
+    transcript: "保险知识".repeat(180),
+  });
+  assert.equal(result.status, "evidence_ready");
+  assert.ok(result.evidenceScore >= 70);
+  assert.ok(calculateArticleEvidenceScore({
+    publishedAt: "2026-07-27T12:00:00Z",
+    likeCount: 1001,
+    filterEvidence: { verified: true },
+    transcript: "保险知识".repeat(180),
+  }) >= 70);
 });

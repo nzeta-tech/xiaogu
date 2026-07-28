@@ -1,4 +1,5 @@
 import { tryGetSystemSettings, tryListExpiredPendingOrders, tryReleaseDiscountRedemption } from "@/lib/db/repositories";
+import { queuePaymentTimeoutEmail } from "@/lib/billing/notifications";
 
 export async function POST(request: Request) {
   const expected = process.env.PAYMENT_RECONCILE_SECRET || process.env.CRON_SECRET;
@@ -6,5 +7,6 @@ export async function POST(request: Request) {
   const settings = await tryGetSystemSettings();
   const orders = await tryListExpiredPendingOrders(settings.payment.orderTimeoutMinutes);
   await Promise.all(orders.map((order) => tryReleaseDiscountRedemption(order.id)));
+  await Promise.all(orders.map((order) => queuePaymentTimeoutEmail({ eventKey: `payment-timeout:${order.id}`, userId: order.user_id, orderId: order.id })));
   return Response.json({ ok: true, expired: orders.length, orders });
 }

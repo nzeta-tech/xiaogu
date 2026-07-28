@@ -7,6 +7,7 @@ import { isDemoModeEnabled } from "@/lib/config/runtime";
 import { accrueAffiliateCredits } from "@/lib/affiliate/service";
 import { calculatePaymentAmounts, paymentAmountAllowed } from "@/lib/payments/amounts";
 import { createProviderPayment } from "@/lib/payments/provider";
+import { queueCreditChangeEmail, queuePaymentTimeoutEmail } from "@/lib/billing/notifications";
 
 const createOrderSchema = z
   .object({
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
   }
   const expiredOrderIds = await tryExpirePendingOrders(user.id, settings.payment.orderTimeoutMinutes);
   await Promise.all(expiredOrderIds.map((orderId) => tryReleaseDiscountRedemption(orderId)));
+  await Promise.all(expiredOrderIds.map((orderId) => queuePaymentTimeoutEmail({ eventKey: `payment-timeout:${orderId}`, userId: user.id, orderId })));
   if (await tryCountPendingOrders(user.id) >= settings.payment.maxPendingOrders) {
     return Response.json({ error: "待支付订单过多，请先完成或等待旧订单超时" }, { status: 429 });
   }
@@ -128,6 +130,7 @@ export async function POST(request: Request) {
       metadata: { planCode: plan.code, orderId: order?.id ?? "demo-order" },
     });
     if (order) {
+      await queueCreditChangeEmail({ eventKey: `payment:${order.id}`, userId: user.id, orderId: order.id, deltaCredits: effectivePlan.quotaAmount, changeKind: "purchase", changeLabel: "充值" });
       await accrueAffiliateCredits({ orderId: order.id, inviteeUserId: user.id, purchasedCredits: effectivePlan.quotaAmount });
     }
   }

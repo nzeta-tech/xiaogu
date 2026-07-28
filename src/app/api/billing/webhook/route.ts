@@ -4,6 +4,7 @@ import { tryFinishWebhookEvent, tryGetOrderByProvider, tryGetPaymentProvider, tr
 import { query } from "@/lib/db/client";
 import { constructStripeWebhookEvent } from "@/lib/payments/stripe";
 import { accrueAffiliateCredits } from "@/lib/affiliate/service";
+import { queueCreditChangeEmail } from "@/lib/billing/notifications";
 import { hashWebhookPayload } from "@/lib/payments/provider";
 
 export async function POST(request: Request) {
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
             return Response.json({ error: "积分发放失败，等待支付平台重试" }, { status: 502 });
           }
           await tryMarkOrderCompleted(order.id);
+          await queueCreditChangeEmail({ eventKey: `payment:${order.id}`, userId: order.user_id, orderId: order.id, deltaCredits: order.quota_amount, changeKind: "purchase", changeLabel: "充值" });
           const affiliate = await accrueAffiliateCredits({
             orderId: order.id,
             inviteeUserId: order.user_id,

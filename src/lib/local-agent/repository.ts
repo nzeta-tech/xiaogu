@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getPool, query } from "@/lib/db/client";
 import { LOCAL_AGENT_PROTOCOL_VERSION, type LinkRemixAvailability, type LocalAgentHeartbeat, type LocalAgentTask, type LocalAgentTaskEvent, type LocalAgentTaskEventType, type LocalAgentTaskType } from "@/lib/local-agent/contracts";
+import { buildDouyinDeepVerificationResult, isDouyinDeepVerificationResult } from "@/lib/douyin-deep-verification";
 
 type TaskRow = {
   id: string; task_type: LocalAgentTaskType; status: LocalAgentTask["status"]; priority: number;
@@ -57,6 +58,24 @@ export async function getLinkRemixAvailability(): Promise<LinkRemixAvailability>
   return row
     ? { available: true, reason: "", lastSeenAt: row.last_seen_at, enabled: true, protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION }
     : { available: false, reason: "功能暂不可用", lastSeenAt: null, enabled: true, protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION };
+}
+
+export async function isDouyinDeepVerificationAvailable() {
+  if (!await isLocalAgentDelegationEnabled()) return false;
+  const timeoutSeconds = Math.min(Math.max(Number(process.env.LOCAL_AGENT_OFFLINE_AFTER_SECONDS) || 45, 20), 300);
+  const result = await query<{ agent_id: string }>(
+    `select agent_id from local_agent_nodes
+     where status in ('ready','busy')
+       and last_seen_at > now()-($1||' seconds')::interval
+       and capabilities->>'douyin.deep_verify'='true'
+       and protocol_version=$2
+       and health->>'douyinNative'='healthy'
+       and health->>'ytDlp'='healthy'
+       and health->>'transcriber'='healthy'
+     order by last_seen_at desc limit 1`,
+    [timeoutSeconds, LOCAL_AGENT_PROTOCOL_VERSION],
+  ).catch(() => ({ rows: [] as Array<{ agent_id: string }> }));
+  return Boolean(result.rows[0]);
 }
 
 export async function getLocalAgentReleaseStatus() {
@@ -170,13 +189,91 @@ export async function heartbeatLocalAgentTask(id: string, agentId: string, lease
 }
 
 export async function completeLocalAgentTask(id: string, agentId: string, leaseToken: string, resultPayload: Record<string, unknown>) {
-  const result = await query<{ id: string }>(
-    `update local_agent_tasks set status='succeeded',result=$4,error_message=null,completed_at=now(),
-     lease_token_hash=null,lease_expires_at=null,updated_at=now()
-     where id=$1 and status='leased' and agent_id=$2 and lease_token_hash=$3 and lease_expires_at>now() returning id`,
-    [id, agentId, hashToken(leaseToken), resultPayload],
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const result = await client.query<{ id: string; task_type: LocalAgentTaskType; payload: Record<string, unknown> }>(
+      `update local_agent_tasks set status='succeeded',result=$4,error_message=null,completed_at=now(),
+       lease_token_hash=null,lease_expires_at=null,updated_at=now()
+       where id=$1 and status='leased' and agent_id=$2 and lease_token_hash=$3 and lease_expires_at>now()
+       returning id,task_type,payload`,
+      [id, agentId, hashToken(leaseToken), resultPayload],
+    );
+    const task = result.rows[0];
+    if (!task) {
+      await client.query("commit");
+      return false;
+    }
+    if (task.task_type === "douyin.deep_verify") {
+      await persistDouyinDeepVerification(client, task.payload, resultPayload, id);
+    }
+    await client.query("commit");
+    return true;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function persistDouyinDeepVerification(
+  client: PoolClient,
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>,
+  taskId: string,
+) {
+  const workId = typeof payload.workId === "string" ? payload.workId : "";
+  if (!workId || !isDouyinDeepVerificationResult(result)) {
+    throw new Error("Invalid Douyin deep verification result");
+  }
+  const normalized = buildDouyinDeepVerificationResult({
+    canonicalUrl: typeof result.canonicalUrl === "string" ? result.canonicalUrl : "",
+    publishedAt: typeof result.publishedAt === "string" ? result.publishedAt : undefined,
+    likeCount: typeof result.likeCount === "number" ? result.likeCount : undefined,
+    filterEvidence: result.filterEvidence && typeof result.filterEvidence === "object"
+      ? result.filterEvidence as Record<string, unknown>
+      : undefined,
+    transcript: typeof result.transcript === "string" ? result.transcript : undefined,
+    note: typeof result.note === "string" ? result.note : undefined,
+  });
+  const evidence = {
+    task_id: taskId,
+    video_id: normalized.videoId ?? null,
+    published_at: normalized.publishedAt ?? null,
+    like_count: normalized.likeCount ?? null,
+    filter_evidence: normalized.filterEvidence ?? {},
+    rejection_reason: normalized.rejectionReason ?? null,
+    transcript_characters: normalized.transcript?.replace(/\s+/g, "").length ?? 0,
+    verified_at: new Date().toISOString(),
+  };
+  const updated = await client.query<{ id: string }>(
+    `update viral_works set
+       source_url = coalesce(nullif($2,''), source_url),
+       published_at = coalesce($3::timestamptz, published_at),
+       article_material_status = $4,
+       article_evidence_score = $5,
+       article_evidence = article_evidence || $6::jsonb,
+       article_evidence_updated_at = now(),
+       updated_at = now()
+     where id=$1 and platform='抖音'
+     returning id`,
+    [workId, normalized.canonicalUrl ?? "", normalized.publishedAt ?? null, normalized.status,
+      normalized.evidenceScore, JSON.stringify(evidence)],
   );
-  return Boolean(result.rows[0]);
+  if (!updated.rows[0]) throw new Error("Douyin work was not found for deep verification");
+  await client.query(
+    `update viral_contents set
+       source_url = coalesce(nullif($2,''), source_url),
+       publish_at = coalesce($3::timestamptz, publish_at),
+       metric_label = case when $4::integer is null then metric_label else '点赞' end,
+       metric_value = coalesce($4::integer, metric_value),
+       risk_note = case when $5='rejected' then '未通过文章素材硬门槛：'||coalesce($6,'数据核验失败') else risk_note end,
+       updated_at = now()
+     where work_id=$1`,
+    [workId, normalized.canonicalUrl ?? "", normalized.publishedAt ?? null, normalized.likeCount ?? null,
+      normalized.status, normalized.rejectionReason ?? null],
+  );
 }
 
 export async function failLocalAgentTask(id: string, agentId: string, leaseToken: string, errorMessage: string, retryable: boolean) {

@@ -1153,9 +1153,9 @@ export async function tryCountPendingOrders(userId: string) {
 
 export async function tryListExpiredPendingOrders(timeoutMinutes: number) {
   try {
-    const result = await query<{ id: string; provider: string; provider_order_id: string | null }>(
+    const result = await query<{ id: string; user_id: string; provider: string; provider_order_id: string | null }>(
       `update orders set status='expired', expired_at=now() where status='pending' and created_at < now() - ($1 || ' minutes')::interval
-       returning id,provider,provider_order_id`, [timeoutMinutes],
+       returning id,user_id,provider,provider_order_id`, [timeoutMinutes],
     );
     return result.rows;
   } catch { return []; }
@@ -1227,7 +1227,7 @@ export async function tryGetLocalQuotaBalance(userId: string | null) {
          select coalesce(sum(quota_amount), 0) as total
          from orders
          where user_id = $1
-           and status = 'paid'
+           and status in ('paid', 'completed')
        ),
        gifts as (
          select coalesce(sum(quota_amount), 0) as total
@@ -3183,6 +3183,83 @@ export async function tryGrantGiftCredits(input: {
     return result.rows[0] ?? null;
   } catch {
     return null;
+  }
+}
+
+export async function tryQueueCreditChangeEmail(input: {
+  eventKey: string;
+  userId: string;
+  deltaCredits: number;
+  changeKind: string;
+  changeLabel: string;
+  orderId?: string | null;
+  subjectOverride?: string;
+  bodyOverride?: string;
+}) {
+  try {
+    const result = await query<{ id: string }>(
+      `with grants as (
+         select coalesce(sum(quota_amount), 0) total from orders where user_id=$2 and status in ('paid', 'completed')
+       ), gifts as (
+         select coalesce(sum(quota_amount), 0) total from gift_records where user_id=$2 and status='granted'
+       ), usage as (
+         select coalesce(sum(quota_cost), 0) total from usage_logs where user_id=$2
+       )
+       insert into credit_change_email_outbox(event_key,user_id,order_id,change_kind,change_label,subject_override,body_override,delta_credits,balance_after)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,greatest((select total from grants)+(select total from gifts)-(select total from usage),0))
+       on conflict(event_key) do nothing
+       returning id`,
+      [input.eventKey, input.userId, input.orderId ?? null, input.changeKind, input.changeLabel, input.subjectOverride ?? "", input.bodyOverride ?? "", input.deltaCredits],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function tryClaimCreditChangeEmails(limit = 20) {
+  try {
+    const result = await query<{
+      id: string; email: string; name: string; order_id: string | null; change_kind: string; change_label: string; subject_override: string; body_override: string;
+      delta_credits: number; balance_after: number;
+    }>(
+      `with candidates as (
+         select id from credit_change_email_outbox
+         where attempts < 6 and (
+           (status in ('pending','failed') and next_attempt_at <= now())
+           or (status='sending' and locked_at < now() - interval '15 minutes')
+         )
+         order by created_at asc limit $1 for update skip locked
+       )
+       update credit_change_email_outbox outbox
+       set status='sending', attempts=outbox.attempts+1, locked_at=now(), last_error=''
+       from candidates join users on users.id=outbox.user_id
+       where outbox.id=candidates.id and users.status='active'
+       returning outbox.id,users.email,users.name,outbox.order_id,outbox.change_kind,outbox.change_label,outbox.subject_override,outbox.body_override,outbox.delta_credits,outbox.balance_after`,
+      [Math.max(1, Math.min(limit, 100))],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function tryFinishCreditChangeEmail(input: { id: string; error?: string }) {
+  try {
+    if (!input.error) {
+      await query("update credit_change_email_outbox set status='sent', sent_at=now(), locked_at=null, last_error='' where id=$1", [input.id]);
+      return true;
+    }
+    await query(
+      `update credit_change_email_outbox
+       set status='failed', locked_at=null, last_error=$2,
+           next_attempt_at=now() + (least(3600, power(2, attempts)::int * 60) * interval '1 second')
+       where id=$1`,
+      [input.id, input.error.slice(0, 1000)],
+    );
+    return true;
+  } catch {
+    return false;
   }
 }
 

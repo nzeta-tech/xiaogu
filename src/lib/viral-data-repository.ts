@@ -228,6 +228,24 @@ export async function publishViralDataRun(runId: string, preparedItems: Prepared
   }
 }
 
+export async function listTopDouyinDeepVerificationCandidates(runId: string, limit: number) {
+  const result = await query<{ work_id: string; source_url: string }>(
+    `select vc.work_id,vc.source_url
+     from viral_contents vc
+     join viral_works vw on vw.id=vc.work_id
+     where vc.data_run_id=$1
+       and vc.source_type='automatic'
+       and vc.status='published'
+       and vc.platform='抖音'
+       and coalesce(vc.metric_value,0)>1000
+       and vw.article_material_status='discovered'
+     order by vc.viral_score desc,vc.fetched_at desc
+     limit $2`,
+    [runId, Math.min(Math.max(limit, 1), 10)],
+  );
+  return result.rows;
+}
+
 async function upsertCreator(client: PoolClient, item: ViralExample) {
   const displayName = item.authorName?.trim();
   if (!displayName) return null;
@@ -249,11 +267,16 @@ async function upsertCreator(client: PoolClient, item: ViralExample) {
 }
 
 async function upsertWork(client: PoolClient, item: ViralExample, sourceKey: string, creatorId: string | null) {
+  const belowDouyinLikeGate = item.platform === "抖音"
+    && item.metricValue !== undefined
+    && Number.isFinite(item.metricValue)
+    && item.metricValue <= 1000;
   const result = await client.query<{ id: string }>(
     `insert into viral_works
       (creator_id, platform, source_key, source_url, title, excerpt, thumbnail_url, example_type,
-       content_type, category, tags, relevance_score, published_at, first_seen_at, last_seen_at, metadata)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $14, $15::jsonb)
+       content_type, category, tags, relevance_score, published_at, first_seen_at, last_seen_at, metadata,
+       article_material_status, article_evidence)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $14, $15::jsonb, $16, $17::jsonb)
      on conflict (source_key) do update set
        creator_id = coalesce(excluded.creator_id, viral_works.creator_id),
        source_url = excluded.source_url, title = excluded.title, excerpt = excluded.excerpt,
@@ -262,11 +285,18 @@ async function upsertWork(client: PoolClient, item: ViralExample, sourceKey: str
        category = excluded.category, tags = excluded.tags,
        relevance_score = greatest(viral_works.relevance_score, excluded.relevance_score),
        published_at = coalesce(excluded.published_at, viral_works.published_at),
+       article_material_status = case
+         when viral_works.article_material_status='discovered' and excluded.article_material_status='rejected' then 'rejected'
+         else viral_works.article_material_status
+       end,
+       article_evidence = viral_works.article_evidence || excluded.article_evidence,
        last_seen_at = excluded.last_seen_at, updated_at = now(), metadata = viral_works.metadata || excluded.metadata
      returning id`,
     [creatorId, item.platform, sourceKey, item.sourceUrl, item.title, item.excerpt ?? "", item.thumbnailUrl ?? null,
       item.type, item.contentType, item.category, JSON.stringify(item.tags), inferRelevanceScore(item),
-      validDateOrNull(item.publishedAt), validDate(item.fetchedAt), JSON.stringify({ sourceTitle: item.sourceTitle ?? item.title })],
+      validDateOrNull(item.publishedAt), validDate(item.fetchedAt), JSON.stringify({ sourceTitle: item.sourceTitle ?? item.title }),
+      belowDouyinLikeGate ? "rejected" : "discovered",
+      JSON.stringify(belowDouyinLikeGate ? { rejection_reason: "likes_not_above_1000", observed_like_count: item.metricValue } : {})],
   );
   return result.rows[0].id;
 }

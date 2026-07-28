@@ -4,6 +4,7 @@ import { grantCredits, revokeCredits } from "@/lib/billing/openmeter";
 import { refundStripeCheckoutSession } from "@/lib/payments/stripe";
 import { tryCreateAdminAuditLog, tryListAdminOrders, tryReleaseDiscountRedemption, tryUpdateAdminOrderStatus } from "@/lib/db/repositories";
 import { accrueAffiliateCredits, reverseAffiliateCredits } from "@/lib/affiliate/service";
+import { queueCreditChangeEmail } from "@/lib/billing/notifications";
 import { filterAndPaginateAdminRows, parseAdminListQuery } from "@/lib/admin/list-query";
 
 const updateSchema = z.object({
@@ -39,6 +40,7 @@ export async function PATCH(request: Request) {
   const allowedTransitions: Record<string, string[]> = {
     pending: ["paid", "failed", "cancelled"],
     paid: ["refunded"],
+    completed: ["refunded"],
     failed: [],
     cancelled: [],
     refunded: [],
@@ -64,19 +66,20 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "积分发放失败，订单状态已回滚" }, { status: 502 });
     }
     await accrueAffiliateCredits({ orderId: current.id, inviteeUserId: current.user_id, purchasedCredits: current.quota_amount });
+    await queueCreditChangeEmail({ eventKey: `payment:${current.id}`, userId: current.user_id, orderId: current.id, deltaCredits: current.quota_amount, changeKind: "purchase", changeLabel: "充值" });
     await tryCreateAdminAuditLog({ adminUserId: user.id, action: "order.mark_paid", targetType: "order", targetId: current.id, detail: { from: current.status } });
     return Response.json({ order: paidOrder, mode: "server" });
   }
 
   if (input.status === "refunded") {
-    if (current.status !== "paid") {
-      return Response.json({ error: "只有已支付订单可以退款" }, { status: 409 });
+    if (current.status !== "paid" && current.status !== "completed") {
+      return Response.json({ error: "只有已支付或已完成订单可以退款" }, { status: 409 });
     }
     if (current.provider === "stripe") {
       if (!current.provider_order_id) return Response.json({ error: "订单缺少 Stripe 会话编号" }, { status: 409 });
       await refundStripeCheckoutSession(current.provider_order_id);
     }
-    const refundedOrder = await tryUpdateAdminOrderStatus({ ...input, expectedStatus: "paid" });
+    const refundedOrder = await tryUpdateAdminOrderStatus({ ...input, expectedStatus: current.status });
     if (!refundedOrder) return Response.json({ error: "退款已执行，但本地订单状态更新失败，请立即人工核对" }, { status: 502 });
     const revocation = await revokeCredits({
       customerId: current.user_id,
@@ -93,6 +96,7 @@ export async function PATCH(request: Request) {
       detail: { provider: current.provider, creditsRevoked: revocation.ok, affiliateReversal },
     });
     if (!revocation.ok) return Response.json({ error: "退款已完成，但远程积分回收失败，请人工核对", order: refundedOrder }, { status: 502 });
+    await queueCreditChangeEmail({ eventKey: `refund:${current.id}`, userId: current.user_id, orderId: current.id, deltaCredits: -current.quota_amount, changeKind: "refund", changeLabel: "订单退款，积分已回收" });
     return Response.json({ order: refundedOrder, mode: "server" });
   }
 

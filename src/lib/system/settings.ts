@@ -111,6 +111,8 @@ export type SystemSettings = {
     passwordResetBody: string;
     lowBalanceSubject: string;
     lowBalanceBody: string;
+    creditChangeSubject: string;
+    creditChangeBody: string;
   };
   backup: {
     retentionCount: number;
@@ -269,6 +271,8 @@ AI 结果可能存在遗漏或错误。用户在对外发布或用于客户沟�
     passwordResetBody: "{{name}}，你好。请在 {{hours}} 小时内打开以下链接完成密码重置：\n{{url}}\n如果不是你本人操作，请忽略此邮件。",
     lowBalanceSubject: "小谷：创作积分余额提醒",
     lowBalanceBody: "{{name}}，你好。你当前剩余 {{balance}} 点创作积分，已达到提醒阈值 {{threshold}} 点。\n前往账单页充值：{{url}}",
+    creditChangeSubject: "小谷：{{changeLabel}}，积分已变动",
+    creditChangeBody: "{{name}}，你好。{{changeLabel}}已完成，本次变动 {{delta}} 点，当前可用创作积分为 {{balance}} 点。\n订单号：{{orderId}}\n查看账单：{{url}}",
   },
   backup: {
     retentionCount: 10, scheduleEnabled: false, intervalHours: 24, cronExpression: "0 2 * * *", retentionDays: 14,

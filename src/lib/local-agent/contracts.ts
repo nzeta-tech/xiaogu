@@ -5,6 +5,7 @@ export const localAgentTaskTypes = [
   "work.discover",
   "work.enrich",
   "metrics.snapshot",
+  "douyin.deep_verify",
 ] as const;
 
 export const LOCAL_AGENT_PROTOCOL_VERSION = 1;
@@ -39,6 +40,11 @@ export type SourceInspectResult = {
   mediaDecryptKey?: string;
   fields: Record<string, string>;
   note?: string;
+};
+
+export type DouyinDeepVerifyTaskPayload = {
+  workId: string;
+  url: string;
 };
 
 export type LocalAgentTask = {

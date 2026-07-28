@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { grantCredits } from "@/lib/billing/openmeter";
 import { accrueAffiliateCredits } from "@/lib/affiliate/service";
+import { queueCreditChangeEmail } from "@/lib/billing/notifications";
 import { tryFinishWebhookEvent, tryGetOrderByProvider, tryGetPaymentProvider, tryListPaymentProviders, tryMarkOrderCompleted, tryMarkOrderPaidByProvider, tryRecordWebhookEvent } from "@/lib/db/repositories";
 
 function sign(values: Record<string, string>, key: string) {
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
   const grant = await grantCredits({ customerId: order.user_id, amount: order.quota_amount, reason: "easypay_payment_success", eventId: `easypay:${eventId}`, metadata: { orderId: order.id, providerOrderId: values.trade_no ?? "" } });
   if (!grant.ok) { await tryFinishWebhookEvent({ providerKey: "easypay", eventId, status: "failed", errorMessage: "credit grant failed" }); return new Response("fail", { status: 502 }); }
   await tryMarkOrderCompleted(order.id);
+  await queueCreditChangeEmail({ eventKey: `payment:${order.id}`, userId: order.user_id, orderId: order.id, deltaCredits: order.quota_amount, changeKind: "purchase", changeLabel: "充值" });
   await accrueAffiliateCredits({ orderId: order.id, inviteeUserId: order.user_id, purchasedCredits: order.quota_amount });
   await tryFinishWebhookEvent({ providerKey: "easypay", eventId, status: "processed" });
   return new Response("success");
