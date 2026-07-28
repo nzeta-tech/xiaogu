@@ -3229,12 +3229,12 @@ export async function tryClaimCreditChangeEmails(limit = 20) {
            (status in ('pending','failed') and next_attempt_at <= now())
            or (status='sending' and locked_at < now() - interval '15 minutes')
          )
-         order by created_at asc limit $1 for update skip locked
+         order by created_at asc for update skip locked limit $1
        )
        update credit_change_email_outbox outbox
        set status='sending', attempts=outbox.attempts+1, locked_at=now(), last_error=''
-       from candidates join users on users.id=outbox.user_id
-       where outbox.id=candidates.id and users.status='active'
+       from candidates, users
+       where outbox.id=candidates.id and users.id=outbox.user_id and users.status='active'
        returning outbox.id,users.email,users.name,outbox.order_id,outbox.change_kind,outbox.change_label,outbox.subject_override,outbox.body_override,outbox.delta_credits,outbox.balance_after`,
       [Math.max(1, Math.min(limit, 100))],
     );
