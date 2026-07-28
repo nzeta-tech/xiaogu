@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import assert from "node:assert/strict";
 
 const [repoPath, releaseSha, baseUrl] = process.argv.slice(2);
