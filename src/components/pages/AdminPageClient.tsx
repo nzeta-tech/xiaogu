@@ -211,6 +211,11 @@ type AuditLog = {
   admin_name: string | null;
 };
 
+type OutboxMessage = {
+  id: string; event_key: string; change_kind: string; change_label: string; delta_credits: number; balance_after: number;
+  status: string; attempts: number; last_error: string; created_at: string; sent_at: string | null; user_name: string; user_email: string;
+};
+
 type Announcement = {
   id: string;
   title: string;
@@ -288,6 +293,7 @@ export function AdminPageClient() {
   const [creationApps, setCreationApps] = useState<AdminCreationApp[]>([]);
   const [feedbackTickets, setFeedbackTickets] = useState<FeedbackTicket[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [outboxMessages, setOutboxMessages] = useState<OutboxMessage[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [contentOverview, setContentOverview] = useState<ContentOverview | null>(null);
@@ -295,6 +301,7 @@ export function AdminPageClient() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [planForm, setPlanForm] = useState<Plan>({ code: "", name: "", quotaAmount: 100, amountCents: 9900, currency: "CNY", description: "", recommended: false, status: "active", sortOrder: 0 });
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null);
+  const [creditAmounts, setCreditAmounts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [affiliateRecords, setAffiliateRecords] = useState<AffiliateRecord[]>([]);
   const [affiliateLedger, setAffiliateLedger] = useState<AffiliateLedgerRecord[]>([]);
@@ -308,7 +315,8 @@ export function AdminPageClient() {
   const [feedbackStatusFilter, setFeedbackStatusFilter] = useState("all");
   const [feedbackSearch, setFeedbackSearch] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
-  const [grantAmount, setGrantAmount] = useState(100);
+  const [outboxSearch, setOutboxSearch] = useState("");
+  const [outboxStatusFilter, setOutboxStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [feedbackReplies, setFeedbackReplies] = useState<Record<string, string>>({});
   const [loadedSections, setLoadedSections] = useState<Partial<Record<AdminSectionId, boolean>>>({});
@@ -368,6 +376,10 @@ export function AdminPageClient() {
         if (["tickets", "audit"].includes(view ?? "")) setSupportView(view as typeof supportView);
         if (view === "audit") setAuditSearch(params.get("q") ?? "");
         else setFeedbackSearch(params.get("q") ?? "");
+      }
+      if (nextTab === "outbox") {
+        setOutboxSearch(params.get("q") ?? "");
+        setOutboxStatusFilter(params.get("status") ?? "all");
       }
     }
 
@@ -466,6 +478,9 @@ export function AdminPageClient() {
         ]);
         setFeedbackTickets(feedbackPayload.tickets ?? []);
         setAuditLogs(auditPayload.logs ?? []);
+      } else if (section === "outbox") {
+        const payload = await read<{ messages?: OutboxMessage[] }>("/api/admin/outbox?limit=200");
+        setOutboxMessages(payload.messages ?? []);
       } else if (section === "settings") {
         const [settingsPayload, affiliatesPayload, backupsPayload, providersPayload] = await Promise.all([
           read<{ settings?: Settings }>("/api/admin/settings"),
@@ -541,7 +556,7 @@ export function AdminPageClient() {
     const response = await fetch(apiPath("/api/admin/users/credits"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId, quotaAmount, note: "运营赠送" }),
+      body: JSON.stringify({ userId, quotaAmount, note: "后台充值" }),
     });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) {
@@ -549,7 +564,21 @@ export function AdminPageClient() {
       return;
     }
     await loadSection("users");
-    showToast(`已赠送 ${quotaAmount} 点`);
+    showToast(`已充值 ${quotaAmount} 点`);
+  }
+
+  function confirmCreditGrant(user: AdminUser) {
+    const quotaAmount = Number(creditAmounts[user.id] ?? "100");
+    if (!Number.isInteger(quotaAmount) || quotaAmount < 1) {
+      showToast("请输入至少 1 点的整数充值金额", "error");
+      return;
+    }
+    requestConfirm({
+      title: "确认充值积分？",
+      description: `将向 ${user.email} 充值 ${quotaAmount} 点，操作会写入审计日志。`,
+      confirmLabel: `充值 ${quotaAmount} 点`,
+      onConfirm: () => grantCredits(user.id, quotaAmount),
+    });
   }
 
   async function updateOrder(orderId: string, status: string) {
@@ -919,6 +948,11 @@ export function AdminPageClient() {
     const keyword = auditSearch.trim().toLowerCase();
     return !keyword || `${log.action} ${log.target_type} ${log.target_id} ${log.admin_email ?? ""}`.toLowerCase().includes(keyword);
   });
+  const filteredOutboxMessages = outboxMessages.filter((message) => {
+    const keyword = outboxSearch.trim().toLowerCase();
+    const matchesStatus = outboxStatusFilter === "all" || message.status === outboxStatusFilter;
+    return matchesStatus && (!keyword || `${message.user_name} ${message.user_email} ${message.change_label} ${message.change_kind}`.toLowerCase().includes(keyword));
+  });
   const currentPage = pages[tab] ?? 1;
   const pageSlice = useCallback(<T,>(items: T[]) => items.slice((currentPage - 1) * pageSize, currentPage * pageSize), [currentPage, pageSize]);
   const pagedUsers = useMemo(() => pageSlice(filteredUsers), [filteredUsers, pageSlice]);
@@ -927,6 +961,7 @@ export function AdminPageClient() {
   const pagedViralCreators = useMemo(() => pageSlice(filteredViralCreators), [filteredViralCreators, pageSlice]);
   const pagedTickets = useMemo(() => pageSlice(filteredFeedbackTickets), [filteredFeedbackTickets, pageSlice]);
   const pagedAuditLogs = useMemo(() => pageSlice(filteredAuditLogs), [filteredAuditLogs, pageSlice]);
+  const pagedOutboxMessages = useMemo(() => pageSlice(filteredOutboxMessages), [filteredOutboxMessages, pageSlice]);
   const settingsDirty = useMemo(() => JSON.stringify(settings) !== JSON.stringify(settingsBaseline) || Boolean(turnstileSecret || emailPassword || s3Secret || fallbackApiKey), [emailPassword, fallbackApiKey, s3Secret, settings, settingsBaseline, turnstileSecret]);
 
   function updatePage(page: number) {
@@ -941,6 +976,8 @@ export function AdminPageClient() {
       downloadAdminCsv(`orders-${stamp}.csv`, [["订单号", "用户", "渠道", "状态", "金额", "点数", "创建时间"], ...filteredOrders.map((order) => [order.id, order.user_email, order.provider, order.status, order.amount_cents / 100, order.quota_amount, order.created_at])]);
     } else if (tab === "support") {
       downloadAdminCsv(`support-${stamp}.csv`, [["标题", "用户", "分类", "优先级", "状态", "更新时间"], ...filteredFeedbackTickets.map((ticket) => [ticket.title, ticket.user_email, ticket.category, ticket.priority, ticket.status, ticket.updated_at])]);
+    } else if (tab === "outbox") {
+      downloadAdminCsv(`outbox-${stamp}.csv`, [["收件人", "姓名", "通知类型", "变动", "余额", "状态", "尝试次数", "创建时间", "发送时间", "错误"], ...filteredOutboxMessages.map((message) => [message.user_email, message.user_name, message.change_label, message.delta_credits, message.balance_after, message.status, message.attempts, message.created_at, message.sent_at ?? "", message.last_error])]);
     } else if (tab === "content" && contentView === "creators") {
       downloadAdminCsv(`creator-pool-${stamp}.csv`, [["作者", "平台", "状态", "候选质量", "粉丝量", "平台作品", "已入库作品", "认证", "作者简介", "最近发现"], ...filteredViralCreators.map((creator) => [creator.display_name, creator.platform, creator.status, creator.quality_score, creator.follower_count, creator.platform_work_count, creator.work_count, creator.is_verified ? "已认证" : "未认证", creator.bio, creator.last_discovered_at])]);
     } else if (tab === "content") {
@@ -989,8 +1026,12 @@ export function AdminPageClient() {
       if (feedbackStatusFilter !== "all") url.searchParams.set("status", feedbackStatusFilter);
       url.searchParams.set("view", supportView);
     }
+    if (tab === "outbox") {
+      if (outboxSearch) url.searchParams.set("q", outboxSearch);
+      if (outboxStatusFilter !== "all") url.searchParams.set("status", outboxStatusFilter);
+    }
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [auditSearch, commerceView, contentView, feedbackSearch, feedbackStatusFilter, orderSearch, orderStatusFilter, supportView, tab, userSearch]);
+  }, [auditSearch, commerceView, contentView, feedbackSearch, feedbackStatusFilter, orderSearch, orderStatusFilter, outboxSearch, outboxStatusFilter, supportView, tab, userSearch]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setHasSavedView(Boolean(window.localStorage.getItem(`admin-saved-view:${tab}`))), 0);
@@ -1056,8 +1097,8 @@ export function AdminPageClient() {
           <div className="adminHeaderActions">
             <span>{lastUpdatedAt ? `${lastUpdatedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 更新` : "等待同步"}</span>
             {hasSavedView ? <button className="secondaryButton" onClick={applySavedView} type="button">应用视图</button> : null}
-            {["users", "content", "commerce", "support"].includes(tab) ? <button className="secondaryButton" onClick={saveCurrentView} type="button">保存视图</button> : null}
-            {["users", "content", "commerce", "support"].includes(tab) ? <button className="secondaryButton" onClick={exportCurrentView} type="button">导出 CSV</button> : null}
+            {["users", "content", "commerce", "support", "outbox"].includes(tab) ? <button className="secondaryButton" onClick={saveCurrentView} type="button">保存视图</button> : null}
+            {["users", "content", "commerce", "support", "outbox"].includes(tab) ? <button className="secondaryButton" onClick={exportCurrentView} type="button">导出 CSV</button> : null}
             <button className="secondaryButton" onClick={() => void loadSection(tab)} disabled={loading} type="button">{loading ? "刷新中…" : "刷新"}</button>
           </div>
         </div>
@@ -1127,7 +1168,7 @@ export function AdminPageClient() {
           <AdminToolbar actions={selectedUserIds.length ? <><span>已选 {selectedUserIds.length} 人</span><button className="secondaryButton" onClick={() => requestConfirm({ title: "批量停用用户？", description: `${selectedUserIds.length} 个用户将无法继续登录，历史数据会保留。`, confirmLabel: "批量停用", danger: true, requireText: "停用", onConfirm: () => updateUsersBatch("suspended") })} type="button">批量停用</button><button className="secondaryButton" onClick={() => void updateUsersBatch("active")} type="button">批量恢复</button></> : undefined}>
             <input aria-label="搜索用户" value={userSearch} placeholder="搜索姓名、邮箱、角色或状态" onChange={(event) => { setUserSearch(event.target.value); updatePage(1); }} />
           </AdminToolbar>
-          <div className="adminDataTable" style={{ "--admin-columns": "42px minmax(250px,1.5fr) 110px 110px 120px minmax(250px,auto)" } as CSSProperties}>
+          <div className="adminDataTable" style={{ "--admin-columns": "42px minmax(250px,1.5fr) 110px 110px 120px minmax(370px,auto)" } as CSSProperties}>
             <div className="adminDataHeader"><label className="adminSelectCell"><input aria-label="选择当前页所有用户" checked={pagedUsers.length > 0 && pagedUsers.every((user) => selectedUserIds.includes(user.id))} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...new Set([...current, ...pagedUsers.map((user) => user.id)])] : current.filter((id) => !pagedUsers.some((user) => user.id === id)))} /></label><span>用户</span><span>角色</span><span>状态</span><span>可用积分</span><span>操作</span></div>
             {pagedUsers.map((user) => (
               <div className="adminDataRow" key={user.id}>
@@ -1138,6 +1179,8 @@ export function AdminPageClient() {
                 <div className="adminDataCell"><strong>{user.current_balance ?? 0} 点</strong><span>消费 ¥{((user.order_total ?? 0) / 100).toFixed(0)}</span></div>
                 <div className="adminRowMenu">
                   <button className="secondaryButton" onClick={() => void loadUserDetail(user.id)} type="button">查看详情</button>
+                  <input aria-label={`为 ${user.email} 充值的积分数量`} className="adminCreditAmountInput" inputMode="numeric" min="1" step="1" type="number" value={creditAmounts[user.id] ?? "100"} onChange={(event) => setCreditAmounts((current) => ({ ...current, [user.id]: event.target.value }))} />
+                  <button className="primaryButton" onClick={() => confirmCreditGrant(user)} type="button">充值</button>
                   <button className="secondaryButton" onClick={() => requestConfirm({ title: user.status === "active" ? "停用这个用户？" : "恢复这个用户？", description: `${user.email} ${user.status === "active" ? "将无法继续登录和创作，历史数据会保留。" : "将重新获得登录和使用权限。"}`, confirmLabel: user.status === "active" ? "确认停用" : "确认恢复", danger: user.status === "active", onConfirm: () => updateUser(user.id, { status: user.status === "active" ? "suspended" : "active" }) })} type="button">{user.status === "active" ? "停用" : "恢复"}</button>
                 </div>
               </div>
@@ -1152,11 +1195,9 @@ export function AdminPageClient() {
             onClose={() => setSelectedUserDetail(null)}
             footer={selectedUserDetail ? <>
               <button className="secondaryButton" onClick={() => requestConfirm({ title: selectedUserDetail.user.role === "admin" ? "取消管理员权限？" : "授予管理员权限？", description: `权限变更将立即作用于 ${selectedUserDetail.user.email}。`, confirmLabel: "确认变更", danger: selectedUserDetail.user.role === "admin", requireText: selectedUserDetail.user.role === "admin" ? "确认" : undefined, onConfirm: () => updateUser(selectedUserDetail.user.id, { role: selectedUserDetail.user.role === "admin" ? "broker" : "admin" }) })} type="button">{selectedUserDetail.user.role === "admin" ? "取消管理员" : "设为管理员"}</button>
-              <button className="primaryButton" onClick={() => requestConfirm({ title: "确认赠送积分？", description: `将向 ${selectedUserDetail.user.email} 赠送 ${grantAmount} 点，操作会写入审计日志。`, confirmLabel: `赠送 ${grantAmount} 点`, onConfirm: () => grantCredits(selectedUserDetail.user.id, grantAmount) })} type="button">赠送积分</button>
             </> : undefined}
           >
             {selectedUserDetail ? <div className="pageStack">
-              <AdminField label="本次赠送积分" hint="赠送记录会进入用户额度明细和管理员审计日志。"><input min="1" type="number" value={grantAmount} onChange={(event) => setGrantAmount(Math.max(Number(event.target.value), 1))} /></AdminField>
               <div className="metricGrid adminMetrics">
                 <Metric label="可用积分" value={selectedUserDetail.balance} />
                 <Metric label="付费金额" value={`¥${(selectedUserDetail.totals.orderAmountCents / 100).toFixed(0)}`} />
@@ -1543,6 +1584,36 @@ export function AdminPageClient() {
               </div>
             </div> : null}
           </AdminDrawer>
+        </div>
+      ) : null}
+
+      {tab === "outbox" ? (
+        <div className="pageStack">
+          <div className="metricGrid adminMetrics">
+            <Metric label="已发送" value={outboxMessages.filter((message) => message.status === "sent").length} />
+            <Metric label="待发送" value={outboxMessages.filter((message) => message.status === "pending" || message.status === "sending").length} />
+            <Metric label="发送失败" value={outboxMessages.filter((message) => message.status === "failed").length} />
+          </div>
+          <AdminPanel title="系统通知发件箱">
+            <AdminToolbar>
+              <input aria-label="搜索发件箱" value={outboxSearch} onChange={(event) => { setOutboxSearch(event.target.value); updatePage(1); }} placeholder="搜索收件人、姓名或通知类型" />
+              <select aria-label="邮件状态" value={outboxStatusFilter} onChange={(event) => { setOutboxStatusFilter(event.target.value); updatePage(1); }}>
+                <option value="all">全部状态</option><option value="pending">待发送</option><option value="sending">发送中</option><option value="sent">已发送</option><option value="failed">发送失败</option>
+              </select>
+            </AdminToolbar>
+            <div className="adminDataTable" style={{ "--admin-columns": "minmax(230px,1.45fr) minmax(180px,1.1fr) 100px 120px 150px" } as CSSProperties}>
+              <div className="adminDataHeader"><span>收件人</span><span>通知内容</span><span>状态</span><span>投递</span><span>时间</span></div>
+              {pagedOutboxMessages.map((message) => <div className="adminDataRow" key={message.id}>
+                <div className="adminDataCell"><strong>{message.user_name}</strong><span>{message.user_email}</span></div>
+                <div className="adminDataCell"><strong>{message.change_label || "积分变动"}</strong><span>{message.delta_credits >= 0 ? "+" : ""}{message.delta_credits} 点 · 余额 {message.balance_after} 点</span>{message.last_error ? <small>{message.last_error}</small> : null}</div>
+                <div><AdminStatus value={message.status} /></div>
+                <div className="adminDataCell"><strong>第 {message.attempts} 次</strong><span>{message.status === "failed" ? "将在退避后重试" : "系统通知"}</span></div>
+                <div className="adminDataCell"><strong>{formatDate(message.sent_at ?? message.created_at)}</strong><span>{message.sent_at ? "发送完成" : "创建时间"}</span></div>
+              </div>)}
+              {!loading && filteredOutboxMessages.length === 0 ? <AdminEmptyState title="没有匹配的邮件" description="调整搜索条件或状态筛选后重试。" /> : null}
+            </div>
+            <AdminPagination page={currentPage} pageSize={pageSize} pageSizeOptions={settings.ui.tablePageSizeOptions} total={filteredOutboxMessages.length} onPageChange={updatePage} onPageSizeChange={(size) => { setPageSize(size); updatePage(1); }} />
+          </AdminPanel>
         </div>
       ) : null}
 

@@ -2222,6 +2222,37 @@ export async function tryListAdminAuditLogs(limit = 100) {
   }
 }
 
+export async function tryListAdminCreditChangeEmailOutbox(limit = 300) {
+  try {
+    const result = await query<{
+      id: string;
+      event_key: string;
+      change_kind: string;
+      change_label: string;
+      delta_credits: number;
+      balance_after: number;
+      status: string;
+      attempts: number;
+      last_error: string;
+      created_at: string;
+      sent_at: string | null;
+      user_name: string;
+      user_email: string;
+    }>(
+      `select o.id,o.event_key,o.change_kind,o.change_label,o.delta_credits,o.balance_after,
+              o.status,o.attempts,o.last_error,o.created_at,o.sent_at,u.name as user_name,u.email as user_email
+       from credit_change_email_outbox o
+       join users u on u.id=o.user_id
+       order by o.created_at desc
+       limit $1`,
+      [Math.min(Math.max(limit, 1), 500)],
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
+}
+
 export async function tryCreateFeedbackTicket(input: {
   userId: string | null;
   title: string;

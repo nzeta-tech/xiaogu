@@ -369,6 +369,7 @@ function AdminSectionIcon({ name }: { name: AdminSectionId }) {
     commerce: <><path d="M7 4h10M8 8h8M12 4v16M7.5 14h9" /></>,
     growth: <><path d="M4 18V11M10 18V7M16 18V3M3 18h18" /></>,
     support: <><path d="M4 5h16v12H8l-4 3zM8 9h8M8 13h5" /></>,
+    outbox: <><rect x="4" y="5" width="16" height="14" rx="1" /><path d="m5 7 7 5 7-5M8 3h8" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.4 6a8 8 0 0 0-1.5.9l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2.1l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.5.9l.3 2.6h4l.3-2.6a8 8 0 0 0 1.5-.9l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1Z" /></>,
   };
 
