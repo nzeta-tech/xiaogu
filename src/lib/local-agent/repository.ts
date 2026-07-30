@@ -60,6 +60,27 @@ export async function getLinkRemixAvailability(): Promise<LinkRemixAvailability>
     : { available: false, reason: "功能暂不可用", lastSeenAt: null, enabled: true, protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION };
 }
 
+export async function getPptAvailability(): Promise<LinkRemixAvailability> {
+  if (process.env.LOCAL_AGENT_ENABLED !== "1" || !await isLocalAgentDelegationEnabled()) {
+    return { available: false, reason: "PPT暂时不可用", lastSeenAt: null, enabled: false, protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION };
+  }
+  const timeoutSeconds = Math.min(Math.max(Number(process.env.LOCAL_AGENT_OFFLINE_AFTER_SECONDS) || 45, 20), 300);
+  const result = await query<{ last_seen_at: string }>(
+    `select last_seen_at from local_agent_nodes
+     where status in ('ready','busy')
+       and last_seen_at > now()-($1||' seconds')::interval
+       and capabilities->>'ppt.generate'='true'
+       and protocol_version=$2
+       and health->>'codexCli'='healthy'
+     order by last_seen_at desc limit 1`,
+    [timeoutSeconds, LOCAL_AGENT_PROTOCOL_VERSION],
+  ).catch(() => ({ rows: [] as Array<{ last_seen_at: string }> }));
+  const row = result.rows[0];
+  return row
+    ? { available: true, reason: "", lastSeenAt: row.last_seen_at, enabled: true, protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION }
+    : { available: false, reason: "PPT暂时不可用", lastSeenAt: null, enabled: true, protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION };
+}
+
 export async function isDouyinDeepVerificationAvailable() {
   if (!await isLocalAgentDelegationEnabled()) return false;
   const timeoutSeconds = Math.min(Math.max(Number(process.env.LOCAL_AGENT_OFFLINE_AFTER_SECONDS) || 45, 20), 300);

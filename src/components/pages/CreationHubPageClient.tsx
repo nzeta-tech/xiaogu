@@ -409,22 +409,26 @@ export function CreationHubPageClient() {
   useEffect(() => {
     if (!hubData) return;
     const controller = new AbortController();
-    async function refreshLinkRemixAvailability() {
+    async function refreshAgentAvailability() {
       try {
-        const response = await fetch(apiPath("/api/creation/link-remix/availability"), { cache: "no-store", signal: controller.signal });
-        if (!response.ok) return;
-        const runtime = await response.json() as { available?: boolean; reason?: string; lastSeenAt?: string | null };
-        if (typeof runtime.available !== "boolean") return;
-        const available = runtime.available;
+        const entries = await Promise.all(["link-remix", "ppt-maker"].map(async (appSlug) => {
+          const path = appSlug === "ppt-maker" ? "/api/creation/ppt/availability" : "/api/creation/link-remix/availability";
+          const response = await fetch(apiPath(path), { cache: "no-store", signal: controller.signal });
+          const runtime = await response.json().catch(() => ({})) as { available?: boolean; reason?: string; lastSeenAt?: string | null };
+          return typeof runtime.available === "boolean" ? [appSlug, runtime] as const : null;
+        }));
+        const appRuntime = Object.fromEntries(entries.filter((entry): entry is readonly [string, { available: boolean; reason?: string; lastSeenAt?: string | null }] => entry !== null).map(([appSlug, runtime]) => [appSlug, { available: runtime.available, reason: runtime.reason ?? "", lastSeenAt: runtime.lastSeenAt }]));
+        if (Object.keys(appRuntime).length === 0) return;
         setHubData((current) => current ? {
           ...current,
-          appRuntime: { ...(current.appRuntime ?? {}), "link-remix": { available, reason: runtime.reason ?? "", lastSeenAt: runtime.lastSeenAt } },
+          appRuntime: { ...(current.appRuntime ?? {}), ...appRuntime },
         } : current);
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) console.error("Failed to refresh local Agent availability", error);
       }
     }
-    const timer = window.setInterval(() => void refreshLinkRemixAvailability(), 15000);
+    void refreshAgentAvailability();
+    const timer = window.setInterval(() => void refreshAgentAvailability(), 15000);
     return () => { controller.abort(); window.clearInterval(timer); };
   }, [hasHubData]);
 
@@ -465,12 +469,12 @@ export function CreationHubPageClient() {
               <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true"><WorkspaceIcon card={card} /></span>
               <div>
                 <strong>{card.name}</strong>
-                <span>{unavailable ? "功能暂不可用" : getUsageCount(card, usageByApp) > 0 ? `已使用 ${getUsageCount(card, usageByApp)} 次` : getCardInspiration(card)}</span>
+                <span>{unavailable ? getUnavailableLabel(card) : getUsageCount(card, usageByApp) > 0 ? `已使用 ${getUsageCount(card, usageByApp)} 次` : getCardInspiration(card)}</span>
               </div>
               <em aria-hidden="true">→</em>
             </>;
             return unavailable
-              ? <div aria-disabled="true" className="workspaceFrequentUnavailable" key={`frequent-${card.slug}`} title="功能暂不可用">{content}</div>
+              ? <div aria-disabled="true" className="workspaceFrequentUnavailable" key={`frequent-${card.slug}`} title={getUnavailableLabel(card)}>{content}</div>
               : <a href={resolveWorkspaceHref(card)} key={`frequent-${card.slug}`}>{content}</a>;
           })}
         </div>
@@ -521,7 +525,7 @@ export function CreationHubPageClient() {
               <div className="workspaceHubCardFooter">
                 <span>{card.pointsLabel} 积分 · {getCardOutputLabel(card)}</span>
                 {unavailable
-                  ? <button className="workspaceHubUseButton" disabled title="功能暂不可用" type="button">功能暂不可用</button>
+                  ? <button className="workspaceHubUseButton" disabled title={getUnavailableLabel(card)} type="button">{getUnavailableLabel(card)}</button>
                   : <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>{resolveWorkspaceActionLabel(card)} <span aria-hidden="true">→</span></a>}
               </div>
             </article>
@@ -563,6 +567,10 @@ function resolveWorkspaceHref(card: WorkspaceCard) {
 
 function isWorkspaceCardUnavailable(card: WorkspaceCard, hub: HubPayload) {
   return hub.appRuntime?.[card.appSlug]?.available === false;
+}
+
+function getUnavailableLabel(card: WorkspaceCard) {
+  return card.appSlug === "ppt-maker" ? "PPT暂时不可用" : "功能暂不可用";
 }
 
 function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {

@@ -1,6 +1,6 @@
 import { requireSessionUser } from "@/lib/auth/session";
 import { tryGetCreationHubData, tryGetCreationWorksView, tryListCreationCatalog, trySyncCreationCatalog } from "@/lib/db/repositories";
-import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
+import { getLinkRemixAvailability, getPptAvailability } from "@/lib/local-agent/repository";
 
 export async function GET(request: Request) {
   const user = await requireSessionUser();
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
 
   const hub = await tryGetCreationHubData(user.id);
   const catalog = await tryListCreationCatalog();
-  const linkRemix = await getLinkRemixAvailability();
+  const [linkRemix, pptMaker] = await Promise.all([getLinkRemixAvailability(), getPptAvailability()]);
   if (!hub) {
     return Response.json({ error: "广场数据暂不可用" }, { status: 503 });
   }
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     hub,
     categories: catalog.categories,
     apps: catalog.apps,
-    appRuntime: { "link-remix": linkRemix },
+    appRuntime: { "link-remix": linkRemix, "ppt-maker": pptMaker },
     mode: "server",
   });
 }
