@@ -25,7 +25,8 @@ let stopping = false;
 let readyForTasks = false;
 let availableCapabilityNames = [];
 
-await waitForExecutor();
+const needsExecutor = capabilities.some((capability) => capability !== "ppt.generate");
+if (needsExecutor) await waitForExecutor();
 await sendPresenceHeartbeat().catch((error) => console.error(`[local-agent] initial presence heartbeat failed: ${messageOf(error)}`));
 const presenceTimer = setInterval(() => sendPresenceHeartbeat().catch((error) => console.error(`[local-agent] presence heartbeat failed: ${messageOf(error)}`)), heartbeatIntervalMs);
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -352,7 +353,9 @@ async function waitForExecutor() {
 async function sendPresenceHeartbeat(forcedStatus) {
   const health = await collectHealth();
   const sourceReady = health.executor === "healthy" && health.transcriber === "healthy" && health.chromium === "healthy" && health.wechatChannel === "healthy" && health.ytDlp === "healthy";
-  const pptReady = health.executor === "healthy" && health.codexCli === "healthy";
+  // PPT creation is completed by the host Codex CLI and uploads directly to
+  // the Web completion endpoint; it does not need the container executor.
+  const pptReady = health.codexCli === "healthy";
   availableCapabilityNames = [
     ...(capabilities.includes("source.inspect") && sourceReady ? ["source.inspect"] : []),
     ...(capabilities.includes("douyin.deep_verify") && sourceReady && health.douyinNative === "healthy" ? ["douyin.deep_verify"] : []),

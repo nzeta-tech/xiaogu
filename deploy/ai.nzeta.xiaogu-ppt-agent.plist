@@ -6,7 +6,7 @@
   <string>ai.nzeta.xiaogu-ppt-agent</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/a2251/Documents/vibe-coding/insurance-content-agent/scripts/run-production-ppt-agent.sh</string>
+    <string>/Users/a2251/.xiaogu-agent/bin/run-production-ppt-agent.sh</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
