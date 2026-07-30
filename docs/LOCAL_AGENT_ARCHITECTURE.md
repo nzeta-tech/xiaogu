@@ -84,10 +84,34 @@ Local `.env`:
 LOCAL_AGENT_BASE_URL=https://<existing-alb-or-domain>
 LOCAL_AGENT_TOKEN=<same-long-random-token-as-aws>
 LOCAL_AGENT_ID=xiaogu-local
-LOCAL_AGENT_CAPABILITIES=source.inspect
+LOCAL_AGENT_CAPABILITIES=source.inspect,ppt.generate
 LOCAL_AGENT_PROTOCOL_VERSION=1
 WHISPER_MODEL=small
+CODEX_CLI_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
+CODEX_CLI_MODEL=gpt-5.6-sol
+PPT_TASK_TIMEOUT_MS=900000
+# Optional. Required when the local network reaches ChatGPT only through a proxy.
+CODEX_CLI_PROXY_URL=http://127.0.0.1:7890
 ```
+
+### PPT generation
+
+`ppt.generate` is a user-owned, asynchronous creation task. The Web service
+parses accepted TXT/MD/DOCX/PDF material and places a size-bounded structured
+brief in the task payload. The local Agent creates an isolated temporary
+directory, writes `brief.json`, and invokes the configured Codex CLI there with
+`--model "$CODEX_CLI_MODEL" --skip-git-repo-check`; the model defaults to
+`gpt-5.6-sol` and the task directory is intentionally isolated, not a Git checkout.
+The CLI must create `output/result.pptx`; the Agent checks that it is a ZIP
+based Office file before returning it to the authenticated completion endpoint.
+
+The Agent must never interpolate user material into a shell command, grant a
+task access outside its temporary directory, or retain the task directory after
+completion. `CODEX_CLI_BIN` must point to a CLI authenticated on the local
+machine; `ppt.generate` is advertised only when `codex --version` succeeds.
+If the local operating system uses a proxy, set `CODEX_CLI_PROXY_URL` so the
+CLI receives explicit proxy variables rather than relying on GUI-only proxy
+settings.
 
 Production and test are deliberately isolated:
 

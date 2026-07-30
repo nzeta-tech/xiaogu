@@ -35,7 +35,7 @@ export type CreationApp = {
   requiresThinking?: boolean;
   description: string;
   promptHint: string;
-  resultType: "text" | "image-plan" | "image";
+  resultType: "text" | "image-plan" | "image" | "presentation";
   fields: CreationField[];
 };
 
@@ -62,6 +62,20 @@ export const creationCategories: CreationCategory[] = [
 ];
 
 export const creationApps: CreationApp[] = [
+  {
+    id: "ppt-maker",
+    slug: "ppt-maker",
+    name: "PPT轻松制作",
+    emoji: "📊",
+    category: "content",
+    points: 12,
+    badge: "新",
+    featured: true,
+    description: "输入主题或上传资料，由本地 PPT 引擎生成可下载、可编辑的演示文稿。",
+    promptHint: "将资料整理为结构清晰、表达克制且符合保险内容边界的演示文稿。",
+    resultType: "presentation",
+    fields: [],
+  },
   {
     id: "write-copy",
     slug: "write-copy",

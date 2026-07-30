@@ -216,6 +216,13 @@ type OutboxMessage = {
   status: string; attempts: number; last_error: string; created_at: string; sent_at: string | null; user_name: string; user_email: string;
 };
 
+type OutboxMessageDetail = OutboxMessage & {
+  order_id: string | null;
+  subject: string;
+  text: string;
+  contentStored: boolean;
+};
+
 type Announcement = {
   id: string;
   title: string;
@@ -344,6 +351,7 @@ export function AdminPageClient() {
   const [promoDrawerOpen, setPromoDrawerOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<FeedbackTicket | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<AdminOrderDetail | null>(null);
+  const [selectedOutboxMessage, setSelectedOutboxMessage] = useState<OutboxMessageDetail | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [hasSavedView, setHasSavedView] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
@@ -725,6 +733,38 @@ export function AdminPageClient() {
     }
     await loadSection("support");
     showToast("反馈工单已更新");
+  }
+
+  async function openOutboxMessage(id: string) {
+    setActionKey(`outbox-detail-${id}`);
+    const response = await fetch(apiPath(`/api/admin/outbox/${id}`));
+    const payload = await response.json() as { message?: OutboxMessageDetail; error?: string };
+    if (!response.ok) showToast(payload.error ?? "邮件详情加载失败", "error");
+    else setSelectedOutboxMessage(payload.message ?? null);
+    setActionKey("");
+  }
+
+  async function resendOutboxMessage(message: Pick<OutboxMessage, "id" | "user_email">) {
+    setActionKey(`outbox-resend-${message.id}`);
+    const response = await fetch(apiPath(`/api/admin/outbox/${message.id}/resend`), { method: "POST" });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) showToast(payload.error ?? "邮件重新发送失败", "error");
+    else {
+      setSelectedOutboxMessage(null);
+      await loadSection("outbox");
+      showToast("邮件已重新加入发送队列");
+    }
+    setActionKey("");
+  }
+
+  function confirmOutboxResend(message: Pick<OutboxMessage, "id" | "user_email">) {
+    requestConfirm({
+      title: "确认再次发送邮件？",
+      description: `将向 ${message.user_email} 再次发送此通知，并新增一条发件箱记录。`,
+      confirmLabel: "确认再次发送",
+      requireText: "发送",
+      onConfirm: () => resendOutboxMessage(message),
+    });
   }
 
   async function savePlan(event: FormEvent<HTMLFormElement>) {
@@ -1601,19 +1641,26 @@ export function AdminPageClient() {
                 <option value="all">全部状态</option><option value="pending">待发送</option><option value="sending">发送中</option><option value="sent">已发送</option><option value="failed">发送失败</option>
               </select>
             </AdminToolbar>
-            <div className="adminDataTable" style={{ "--admin-columns": "minmax(230px,1.45fr) minmax(180px,1.1fr) 100px 120px 150px" } as CSSProperties}>
-              <div className="adminDataHeader"><span>收件人</span><span>通知内容</span><span>状态</span><span>投递</span><span>时间</span></div>
+            <div className="adminDataTable" style={{ "--admin-columns": "minmax(220px,1.4fr) minmax(180px,1.1fr) 100px 120px 150px 176px" } as CSSProperties}>
+              <div className="adminDataHeader"><span>收件人</span><span>通知内容</span><span>状态</span><span>投递</span><span>时间</span><span>操作</span></div>
               {pagedOutboxMessages.map((message) => <div className="adminDataRow" key={message.id}>
                 <div className="adminDataCell"><strong>{message.user_name}</strong><span>{message.user_email}</span></div>
                 <div className="adminDataCell"><strong>{message.change_label || "积分变动"}</strong><span>{message.delta_credits >= 0 ? "+" : ""}{message.delta_credits} 点 · 余额 {message.balance_after} 点</span>{message.last_error ? <small>{message.last_error}</small> : null}</div>
                 <div><AdminStatus value={message.status} /></div>
                 <div className="adminDataCell"><strong>第 {message.attempts} 次</strong><span>{message.status === "failed" ? "将在退避后重试" : "系统通知"}</span></div>
                 <div className="adminDataCell"><strong>{formatDate(message.sent_at ?? message.created_at)}</strong><span>{message.sent_at ? "发送完成" : "创建时间"}</span></div>
+                <div className="rowActions"><button className="secondaryButton" disabled={actionKey === `outbox-detail-${message.id}`} onClick={() => void openOutboxMessage(message.id)} type="button">{actionKey === `outbox-detail-${message.id}` ? "加载中" : "查看详情"}</button><button className="secondaryButton" onClick={() => confirmOutboxResend(message)} type="button">再次发送</button></div>
               </div>)}
               {!loading && filteredOutboxMessages.length === 0 ? <AdminEmptyState title="没有匹配的邮件" description="调整搜索条件或状态筛选后重试。" /> : null}
             </div>
             <AdminPagination page={currentPage} pageSize={pageSize} pageSizeOptions={settings.ui.tablePageSizeOptions} total={filteredOutboxMessages.length} onPageChange={updatePage} onPageSizeChange={(size) => { setPageSize(size); updatePage(1); }} />
           </AdminPanel>
+          <AdminDrawer open={Boolean(selectedOutboxMessage)} title="邮件详情" description={selectedOutboxMessage?.user_email} onClose={() => setSelectedOutboxMessage(null)} footer={selectedOutboxMessage ? <><button className="secondaryButton" onClick={() => setSelectedOutboxMessage(null)} type="button">关闭</button><button className="primaryButton" disabled={actionKey === `outbox-resend-${selectedOutboxMessage.id}`} onClick={() => confirmOutboxResend(selectedOutboxMessage)} type="button">{actionKey === `outbox-resend-${selectedOutboxMessage.id}` ? "发送中" : "再次发送"}</button></> : null}>
+            {selectedOutboxMessage ? <div className="pageStack">
+              <AdminPanel title="投递信息"><Row title="收件人" meta={`${selectedOutboxMessage.user_name} · ${selectedOutboxMessage.user_email}`} /><Row title="积分变动" meta={`${selectedOutboxMessage.change_label || "积分变动"} · ${selectedOutboxMessage.delta_credits >= 0 ? "+" : ""}${selectedOutboxMessage.delta_credits} 点 · 余额 ${selectedOutboxMessage.balance_after} 点`} /><Row title="发送状态" meta={`${selectedOutboxMessage.status} · 已尝试 ${selectedOutboxMessage.attempts} 次 · ${formatDate(selectedOutboxMessage.sent_at ?? selectedOutboxMessage.created_at)}`} /></AdminPanel>
+              <AdminPanel title="邮件内容"><AdminField label="主题"><input readOnly value={selectedOutboxMessage.subject} /></AdminField><AdminField label="正文" hint={selectedOutboxMessage.contentStored ? "此内容已随邮件记录保存。" : "历史记录未保存正文，以下按当前邮件模板生成预览。"}><textarea readOnly rows={12} value={selectedOutboxMessage.text} /></AdminField></AdminPanel>
+            </div> : null}
+          </AdminDrawer>
         </div>
       ) : null}
 

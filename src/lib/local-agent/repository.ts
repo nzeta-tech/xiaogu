@@ -138,6 +138,12 @@ export async function leaseLocalAgentTask(input: { agentId: string; capabilities
        values($1,$2,'reset',$3)`,
       [updated.rows[0].id, updated.rows[0].attempt_count, { message: "本地 Agent 已领取任务。" }],
     );
+    if (updated.rows[0].task_type === "ppt.generate") {
+      await client.query(
+        "update presentation_jobs set status='running',error_message=null,updated_at=now() where task_id=$1 and status='queued'",
+        [updated.rows[0].id],
+      );
+    }
     await client.query("commit");
     return { task: mapTask(updated.rows[0]), leaseToken, leaseExpiresInSeconds: input.leaseSeconds };
   } catch (error) {

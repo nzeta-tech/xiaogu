@@ -1,6 +1,6 @@
 import { query } from "@/lib/db/client";
 import { sendSystemEmail, systemUrl } from "@/lib/email/mailer";
-import { tryClaimCreditChangeEmails, tryFinishCreditChangeEmail, tryGetSystemSettings, tryQueueCreditChangeEmail } from "@/lib/db/repositories";
+import { tryClaimCreditChangeEmails, tryFinishCreditChangeEmail, tryGetSystemSettings, tryPersistCreditChangeEmailContent, tryQueueCreditChangeEmail } from "@/lib/db/repositories";
 
 export async function maybeSendLowBalanceNotification(userId: string) {
   const settings = await tryGetSystemSettings();
@@ -50,19 +50,13 @@ export async function dispatchCreditChangeEmails(limit = 20) {
   let sent = 0;
   let failed = 0;
   for (const message of messages) {
-    const values = {
-      name: message.name,
-      delta: `${message.delta_credits > 0 ? "+" : ""}${message.delta_credits}`,
-      balance: String(message.balance_after),
-      changeLabel: message.change_label || "积分变动",
-      orderId: message.order_id ?? "-",
-      url: systemUrl("/billing"),
-    };
+    const email = renderCreditChangeEmail(settings, message);
     try {
+      await tryPersistCreditChangeEmailContent({ id: message.id, subject: email.subject, body: email.text });
       await sendSystemEmail({
         to: message.email,
-        subject: render(message.subject_override || settings.email.creditChangeSubject, values),
-        text: render(message.body_override || settings.email.creditChangeBody, values),
+        subject: email.subject,
+        text: email.text,
       });
       await tryFinishCreditChangeEmail({ id: message.id });
       sent += 1;
@@ -72,6 +66,19 @@ export async function dispatchCreditChangeEmails(limit = 20) {
     }
   }
   return { sent, failed, skipped: false };
+}
+
+export async function previewCreditChangeEmail(input: {
+  name: string;
+  orderId?: string | null;
+  changeLabel: string;
+  deltaCredits: number;
+  balanceAfter: number;
+  subjectOverride?: string;
+  bodyOverride?: string;
+}) {
+  const settings = await tryGetSystemSettings();
+  return renderCreditChangeEmail(settings, input);
 }
 
 export async function queueCreditChangeEmail(input: {
@@ -102,4 +109,34 @@ export async function queuePaymentTimeoutEmail(input: { eventKey: string; userId
 
 function render(template: string, values: Record<string, string>) {
   return template.replace(/\{\{(name|balance|threshold|url|delta|changeLabel|orderId)\}\}/g, (_match, key: string) => values[key] ?? "");
+}
+
+function renderCreditChangeEmail(settings: Awaited<ReturnType<typeof tryGetSystemSettings>>, input: {
+  name: string;
+  order_id?: string | null;
+  orderId?: string | null;
+  change_label?: string;
+  changeLabel?: string;
+  delta_credits?: number;
+  deltaCredits?: number;
+  balance_after?: number;
+  balanceAfter?: number;
+  subject_override?: string;
+  subjectOverride?: string;
+  body_override?: string;
+  bodyOverride?: string;
+}) {
+  const deltaCredits = input.delta_credits ?? input.deltaCredits ?? 0;
+  const values = {
+    name: input.name,
+    delta: `${deltaCredits > 0 ? "+" : ""}${deltaCredits}`,
+    balance: String(input.balance_after ?? input.balanceAfter ?? 0),
+    changeLabel: input.change_label ?? input.changeLabel ?? "积分变动",
+    orderId: input.order_id ?? input.orderId ?? "-",
+    url: systemUrl("/billing"),
+  };
+  return {
+    subject: render(input.subject_override || input.subjectOverride || settings.email.creditChangeSubject, values),
+    text: render(input.body_override || input.bodyOverride || settings.email.creditChangeBody, values),
+  };
 }

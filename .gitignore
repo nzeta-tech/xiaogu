@@ -17,3 +17,5 @@ data/*.db
 *.tsbuildinfo
 # Local UI verification screenshots
 tmp-*.png
+# Local Codex CLI PPT acceptance artifacts; production generates these per task.
+codex-ppt-demo/

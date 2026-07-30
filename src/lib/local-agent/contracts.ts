@@ -6,6 +6,7 @@ export const localAgentTaskTypes = [
   "work.enrich",
   "metrics.snapshot",
   "douyin.deep_verify",
+  "ppt.generate",
 ] as const;
 
 export const LOCAL_AGENT_PROTOCOL_VERSION = 1;

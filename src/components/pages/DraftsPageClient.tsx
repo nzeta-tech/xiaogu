@@ -335,7 +335,8 @@ function WorkCard(props: {
   onArchive: () => void;
 }) {
   const { item } = props;
-  const href = appPath(`/works/${item.id}?from=creation-works&entry=${item.platform}`);
+  const pptJobId = item.platform === "ppt-maker" ? extractPptJobId(item.content) : "";
+  const href = pptJobId ? appPath(`/apps/ppt-maker/result/${pptJobId}`) : appPath(`/works/${item.id}?from=creation-works&entry=${item.platform}`);
   const openItem = (event: React.MouseEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("a,button,input")) return;
     window.location.href = href;
@@ -419,12 +420,13 @@ function formatPlatformLabel(platform: string) {
     "write-copy": "写文案", "image-card": "做图", "wechat-images": "公众号配图", "policy-renewal-card": "续保提醒卡", "lead-copy": "引流文案",
     "traffic-copy": "流量文案", "marketing-copy": "营销文案", "video-script-polish": "口播精修",
     "wechat-article-polish": "公众号精修", "topic-picker": "热点选题", "general-content": "通用创作",
-    "xiaohongshu-check": "小红书合规检测", letter: "信件创作",
+    "xiaohongshu-check": "小红书合规检测", letter: "信件创作", "ppt-maker": "PPT轻松制作",
   };
   return labels[platform] || "其他创作";
 }
 
 function buildWorkDescriptor(item: DraftItem) {
+  if (item.platform === "ppt-maker") return "PPT轻松制作 · 可下载 PPTX";
   const imageDescriptor = buildImageDescriptor(item);
   if (imageDescriptor) return imageDescriptor;
 
@@ -452,6 +454,7 @@ function buildOutputDescriptor(content: string) {
 }
 
 function buildWorkSummary(item: DraftItem) {
+  if (item.platform === "ppt-maker") return item.content.includes("已完成") ? "PPT 已生成，可下载后继续编辑。" : "PPT 正在由本地 Agent 制作，点击可查看进度。";
   if (["image-card", "wechat-images", "policy-renewal-card"].includes(item.platform)) {
     const imageSummary = buildImageSummary(item.content);
     if (imageSummary) return imageSummary;
@@ -468,6 +471,10 @@ function buildWorkSummary(item: DraftItem) {
   }
 
   return "";
+}
+
+function extractPptJobId(content: string) {
+  return content.match(/PPT_JOB_ID:\s*([0-9a-f-]{36})/i)?.[1] ?? "";
 }
 
 function buildImageSummary(content: string) {
@@ -552,6 +559,7 @@ function isWeakPreview(value: string, label: string) {
 }
 
 function platformSymbol(platform: string) {
+  if (platform === "ppt-maker") return "P";
   if (platform === "policy-renewal-card") return "续";
   if (platform.includes("image")) return "图";
   if (platform.includes("check")) return "检";

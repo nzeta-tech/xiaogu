@@ -2622,7 +2622,7 @@ function formatRemixVersionLabel(title: string, index: number) {
 }
 
 function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
+  const normalized = stripLinkRemixAuditTail(content.replace(/\r\n/g, "\n")).trim();
   if (!normalized) return [];
   // Channel groups are always H2 headings. H3 headings are versions within a
   // channel, so they must not terminate the channel's content.
@@ -2679,6 +2679,11 @@ function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
   return ["video", "xhs", "wechat", "moments"]
     .map((key) => groups.get(key))
     .filter((batch): batch is CreationOutputBatch => Boolean(batch));
+}
+
+function stripLinkRemixAuditTail(content: string) {
+  const auditStart = content.search(/(?:^|\n)(?:#{1,3}\s*)?(?:参考作品评估|二创说明|硬过滤结果|元数据评分[（(]40分[）)])/m);
+  return auditStart >= 0 ? content.slice(0, auditStart).trimEnd() : content;
 }
 
 function ResultWorkspaceBar({

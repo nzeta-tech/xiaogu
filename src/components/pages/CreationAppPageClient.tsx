@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getCreationAppFamily,
@@ -1209,7 +1209,19 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         ) : null}
 
         <form className={isLinkRemix ? "create-form creationForm targetCreateForm linkRemixCreateForm" : isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
-          {visibleFields.map((field, index) => (
+          {visibleFields.map((field, index) => {
+            const voicePanel = voiceFieldId === field.id ? (
+              <VoiceInputPanel
+                elapsed={voiceElapsed}
+                paused={voicePaused}
+                onCancel={cancelVoiceInput}
+                onFinish={finishVoiceInput}
+                onPause={pauseVoiceInput}
+                onResume={() => startVoiceInput(field.id)}
+              />
+            ) : null;
+
+            return (
             <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix })} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
@@ -1234,6 +1246,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   ) : null}
                 </strong>
               </span>
+              {field.type !== "text_or_file" ? voicePanel : null}
               <span className="field-content">
                 {renderField({
                   field,
@@ -1243,6 +1256,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   voiceActive: voiceFieldId === field.id,
                   voiceSupported,
                   onVoiceInput: () => startVoiceInput(field.id),
+                  voicePanel,
                   openFilePicker,
                   uploadName: uploadNames[field.id] ?? "",
                   uploadError: uploadErrors[field.id] ?? "",
@@ -1266,16 +1280,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                     {sourcePreview.mediaUrl ? <video className="linkRemixSourcePreview" controls preload="metadata" poster={sourcePreview.thumbnailUrl} src={sourcePreview.mediaUrl} /> : null}
                   </div>
                 ) : null}
-                {voiceFieldId === field.id ? (
-                  <VoiceInputPanel
-                    elapsed={voiceElapsed}
-                    paused={voicePaused}
-                    onCancel={cancelVoiceInput}
-                    onFinish={finishVoiceInput}
-                    onPause={pauseVoiceInput}
-                    onResume={() => startVoiceInput(field.id)}
-                  />
-                ) : null}
                 {field.helper && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，暂不支持图片</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "reference_image" ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
@@ -1284,7 +1288,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 ) : null}
               </span>
             </label>
-          ))}
+            );
+          })}
 
           {isLinkRemix ? <RemixMetadataPanel values={values} onChange={updateField} /> : null}
 
@@ -1935,6 +1940,7 @@ function renderField({
   voiceActive,
   voiceSupported,
   onVoiceInput,
+  voicePanel,
   openFilePicker,
   uploadName,
   uploadError,
@@ -1955,6 +1961,7 @@ function renderField({
   voiceActive: boolean;
   voiceSupported: boolean;
   onVoiceInput: () => void;
+  voicePanel: ReactNode;
   openFilePicker: (fieldId: string) => void;
   uploadName: string;
   uploadError: string;
@@ -2025,6 +2032,7 @@ function renderField({
             </button>
             <span className="voice-multi-hint">可多次添加</span>
           </div>
+          {voicePanel}
           <textarea
             className="creationTextarea el-textarea__inner"
             onChange={(event) => onChange(event.target.value)}

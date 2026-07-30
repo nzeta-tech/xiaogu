@@ -32,6 +32,7 @@ import {
 import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
+import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
 
 type FieldValue = CreationFieldValue;
 
@@ -90,6 +91,9 @@ export async function executeCreationAppRun(input: {
   }
 
   const caseContext = buildCreationPromptContext(app, entry);
+  const linkRemixResearch = app.slug === "link-remix"
+    ? await buildLinkRemixResearchContext(values)
+    : "";
 
   const prompt = isPolicyRenewalCard
     ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
@@ -100,7 +104,7 @@ export async function executeCreationAppRun(input: {
     : app.slug === "general-content"
       ? buildGeneralContentPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "link-remix"
-      ? buildLinkRemixPrompt(values, caseContext, effectiveApp.promptHint)
+      ? buildLinkRemixPrompt(values, caseContext, effectiveApp.promptHint, linkRemixResearch)
     : app.slug === "xiaohongshu-check"
       ? buildXiaohongshuCheckPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "video-script-polish"
@@ -530,6 +534,7 @@ function buildLinkRemixPrompt(
   values: Record<string, FieldValue>,
   caseContext: string[],
   promptHint: string,
+  researchContext = "",
 ) {
   const platform = stringifyCreationFieldValue(values.source_platform).trim() || "未说明平台";
   const url = stringifyCreationFieldValue(values.source_url).trim();
@@ -571,14 +576,15 @@ function buildLinkRemixPrompt(
     `可核验事实证据摘要：${evidence || "未提供"}`,
     `作品文字内容：${sourceText || "未提供"}`,
     `作品语音转写：${transcript || "未提供"}`,
+    researchContext,
     angle
       ? `用户补充的想法建议：${angle}`
       : "用户未补充想法建议，请结合用户的内容画像、保险顾问身份、目标客户和账号特点完成二创。",
     `本次输出渠道：${selectedTypes}`,
-    "请先做参考作品预检：检查发布时间是否在研究时间前30天内且可核验；点赞数是否为详情页明确标注且严格大于1000；链接是否是单条作品而非检索页；作者和事实证据是否清楚；是否为重复搬运、纯产品推销、无法访问或证据不足。任何硬过滤项不满足时，明确标注“暂不纳入参考”，不要用猜测补齐。",
-    "对通过预检的作品，按40分元数据评分：主题匹配12分、信息增量8分、来源清晰度7分、证据线索6分、时效与适用性4分、可转写性3分。24分以下只作为待核验候选，不应直接套用。",
-    transcript ? "已有完整转写时，再按100分转写评分：信息增量30分、证据强度20分、实施具体性15分、来源接近度10分、主题相关性10分、风险边界8分、编辑可用性4分、时效与可迁移性3分；总分低于70分，或信息增量低于18分、证据强度低于10分时，标记为不建议采用。" : "未提供完整转写，不得声称已完成逐字稿级别分析。",
-    "通过预检后，提炼一个可迁移的内容骨架：核心话题、目标人群、开头钩子、论证顺序、情绪节奏和收束方式。随后完全换成用户指定的保险题材、场景和表达，不复刻原文标题、句子、案例、人物、数据或独特比喻。",
+    "先在内部做参考作品预检：检查发布时间是否在研究时间前30天内且可核验；点赞数是否为详情页明确标注且严格大于1000；链接是否是单条作品而非检索页；作者和事实证据是否清楚；是否为重复搬运、纯产品推销、无法访问或证据不足。任何硬过滤项不满足时，不把该作品的具体数据、案例或产品结论作为事实依据，也不要用猜测补齐；不得在最终渠道正文输出预检过程或结论。",
+    "仅供内部判断时，可按40分元数据评分：主题匹配12分、信息增量8分、来源清晰度7分、证据线索6分、时效与适用性4分、可转写性3分。24分以下时只借鉴可迁移结构，不直接套用具体事实。",
+    transcript ? "已有完整转写时，仅供内部判断可按100分转写评分：信息增量30分、证据强度20分、实施具体性15分、来源接近度10分、主题相关性10分、风险边界8分、编辑可用性4分、时效与可迁移性3分；总分低于70分，或信息增量低于18分、证据强度低于10分时，只保留结构与用户问题，不直接沿用具体结论。" : "未提供完整转写，不得声称已完成逐字稿级别分析。",
+    "采用高保真结构改写：尽量保留原作的核心矛盾、目标人群、钩子类型、论证顺序、信息单元数量、情绪节奏和 CTA 位置；随后完全换成原创表达。对每个原作信息单元，优先保留可核验事实；不能直接使用但已有补充检索资料的，用同等具体的可信事实、场景或行动步骤替代；只有收益承诺、产品结论、不可核验案例、原句和独特比喻必须删除。不得用“风险、规划、现金流、安全感”等泛化词替代原作全部具体内容。",
     wantsVideoScript
       ? [
           "短视频口播创作要求：",
@@ -592,9 +598,9 @@ function buildLinkRemixPrompt(
           "8. 输出时在“## 口播文案”下严格给出两条成稿，格式为“### 版本一｜[口播母型]”“### 版本二｜[口播母型]”。每条依次包含“标题：”“钩子类型：”“核心判断：”“正文：”“评论区承接：”，不要解释创作方法。",
         ].join("\n")
       : "",
-    "如果无法访问链接，只能基于平台、链接和用户指定题材完成原创选题与文案，并明确标注“参考链接内容待核验”，不要编造原作品细节。",
+    "如果无法访问链接，只能基于平台、链接、转写、补充检索资料和用户指定题材完成原创选题与文案；不要编造原作品细节。不要在任何可发布渠道正文中输出“参考链接内容待核验”、评分、过滤结论、证据缺口、二创说明或你的分析过程。",
     "所有保险产品、费率、收益、理赔、核保和政策信息都必须以用户提供且可核实的事实为准；缺少依据时写“待核实”或给出替换提示。不得承诺收益、保证理赔、制造恐慌或使用绝对化表述。",
-    "请按用户选择的渠道输出完整结果。每个渠道单独用 Markdown 二级标题分组，并给出可直接复制的正文；口播要有开场钩子和自然收口，小红书要有标题、正文和话题，公众号要有标题、导语和完整结构，朋友圈要分别短而真实。最后补充“参考作品评估”和“二创说明”：前者列出硬过滤结果、元数据得分、证据缺口和是否建议采用；后者只说明借鉴了哪些结构，不披露或复写原作品内容。",
+    "请按用户选择的渠道输出完整结果。每个渠道单独用 Markdown 二级标题分组，并给出可直接复制的正文；口播要有开场钩子和自然收口，小红书要有标题、正文和话题，公众号要有标题、导语和完整结构，朋友圈要分别短而真实。只输出这些可发布渠道，不要输出参考作品评估、二创说明、评分、证据缺口或任何分析报告。",
     "不要输出额外前言，不要输出 Markdown 表格，不要使用代码块。",
   ].join("\n\n");
 }

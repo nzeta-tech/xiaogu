@@ -2253,6 +2253,42 @@ export async function tryListAdminCreditChangeEmailOutbox(limit = 300) {
   }
 }
 
+export async function tryGetAdminCreditChangeEmailOutbox(id: string) {
+  try {
+    const result = await query<{
+      id: string;
+      event_key: string;
+      user_id: string;
+      order_id: string | null;
+      change_kind: string;
+      change_label: string;
+      subject_override: string;
+      body_override: string;
+      delta_credits: number;
+      balance_after: number;
+      status: string;
+      attempts: number;
+      last_error: string;
+      created_at: string;
+      sent_at: string | null;
+      user_name: string;
+      user_email: string;
+      user_status: string;
+    }>(
+      `select o.id,o.event_key,o.user_id,o.order_id,o.change_kind,o.change_label,o.subject_override,o.body_override,
+              o.delta_credits,o.balance_after,o.status,o.attempts,o.last_error,o.created_at,o.sent_at,
+              u.name as user_name,u.email as user_email,u.status as user_status
+       from credit_change_email_outbox o
+       join users u on u.id=o.user_id
+       where o.id=$1`,
+      [id],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function tryCreateFeedbackTicket(input: {
   userId: string | null;
   title: string;
@@ -3287,6 +3323,21 @@ export async function tryFinishCreditChangeEmail(input: { id: string; error?: st
            next_attempt_at=now() + (least(3600, power(2, attempts)::int * 60) * interval '1 second')
        where id=$1`,
       [input.id, input.error.slice(0, 1000)],
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function tryPersistCreditChangeEmailContent(input: { id: string; subject: string; body: string }) {
+  try {
+    await query(
+      `update credit_change_email_outbox
+       set subject_override=case when subject_override='' then $2 else subject_override end,
+           body_override=case when body_override='' then $3 else body_override end
+       where id=$1`,
+      [input.id, input.subject, input.body],
     );
     return true;
   } catch {

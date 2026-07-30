@@ -56,6 +56,18 @@ const workspaceCategories: Array<{ id: WorkspaceCategory; label: string; descrip
 
 const workspaceCards: WorkspaceCard[] = [
   {
+    slug: "ppt-maker",
+    appSlug: "ppt-maker",
+    name: "PPT轻松制作",
+    emoji: "📊",
+    pointsLabel: "12",
+    badge: "新",
+    description: "输入主题或上传资料，自动生成可下载、可编辑的汇报 PPT。",
+    hint: "本地 Agent 会调用你的 Codex CLI 设计、生成并检查成品。",
+    actionLabel: "使用",
+    goals: ["trust", "conversion", "brand"],
+  },
+  {
     slug: "write-copy",
     appSlug: "write-copy",
     name: "多平台文案创作",
@@ -338,6 +350,7 @@ const hiddenWorkspaceCardSlugs = new Set([
 const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCardSlugs.has(card.slug));
 
 const workspaceIconUrls: Record<string, string> = {
+  "ppt-maker": "/icons/creation/landscape.webp",
   "write-copy": "/icons/creation/book-pencil.webp",
   "image-card": "/icons/creation/palette.webp",
   "video-script-polish": "/icons/creation/microphone.webp",
