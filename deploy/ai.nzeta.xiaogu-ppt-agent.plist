@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.nzeta.xiaogu-ppt-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/a2251/Documents/vibe-coding/insurance-content-agent/scripts/run-production-ppt-agent.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/a2251/.xiaogu-agent/logs/ppt-agent.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/a2251/.xiaogu-agent/logs/ppt-agent.err.log</string>
+</dict>
+</plist>
