@@ -21,6 +21,9 @@ export LOCAL_AGENT_VERSION=${PPT_AGENT_VERSION:-$(basename "$(readlink "$HOME/.x
 export LOCAL_AGENT_CAPABILITIES=ppt.generate
 export LOCAL_AGENT_EXECUTOR_URL=${LOCAL_AGENT_EXECUTOR_URL:-$LOCAL_AGENT_BASE_URL}
 export CODEX_CLI_BIN="$codex_bin"
+# Codex invokes the companion `rg` binary while working. The ChatGPT.app
+# bundle is not on launchd's default PATH, so make the bundled tools visible.
+export PATH="$(dirname "$codex_bin"):$PATH"
 export CODEX_CLI_MODEL=${CODEX_CLI_MODEL:-gpt-5.6-sol}
 export CODEX_CLI_PROXY_URL=${CODEX_CLI_PROXY_URL:-http://127.0.0.1:7890}
 export PPT_TASK_TIMEOUT_MS=${PPT_TASK_TIMEOUT_MS:-600000}
