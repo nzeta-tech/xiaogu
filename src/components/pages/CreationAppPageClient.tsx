@@ -131,7 +131,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
   const creationFrom = searchParams.get("from");
   const creationReturnHref = creationFrom === "dashboard" || creationFrom === "today" ? appPath("/today") : appPath("/create");
-  const creationReturnLabel = creationFrom === "dashboard" || creationFrom === "today" ? "返回今日灵感" : "返回轻松创作";
+  const creationReturnLabel = creationFrom === "dashboard" || creationFrom === "today" ? "返回今日灵感" : "返回创作广场";
   const experienceCopy = getAppExperienceCopy(app.slug, workspaceEntry);
   const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
   const wechatArticle = typeof values.article === "string" ? values.article : "";
@@ -153,7 +153,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
   usePageMeta({
     title: `${pageApp.name} · 新建创作`,
-    description: `轻松创作 / ${pageApp.name}`,
+    description: `创作广场 / ${pageApp.name}`,
     status: loading ? "生成中" : draftStatus === "saved" ? "已保存" : "",
   });
 
@@ -761,7 +761,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         <div className="page-content">
         <div className="page-back-bar pageBackBar">
           <a className="back-btn backLink" href={creationReturnHref}>← {creationReturnLabel}</a>
-          <span className="subpageBreadcrumb">轻松创作 / {pageApp.name}</span>
+          <span className="subpageBreadcrumb">创作广场 / {pageApp.name}</span>
         </div>
 
         <section className={isImageCard ? "app-info-card imageCardHero" : isWriteCopy ? "app-info-card writeCopyHeroCard" : isWechatImages ? "app-info-card wechatImagesHeroCard" : isXiaohongshuCheck ? "app-info-card xiaohongshuCheckHeroCard" : isWechatArticlePolish ? "app-info-card wechatArticlePolishHeroCard" : isLiveScript ? "app-info-card liveScriptHeroCard" : "app-info-card"}>

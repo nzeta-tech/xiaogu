@@ -26,6 +26,6 @@ export CODEX_CLI_BIN="$codex_bin"
 export PATH="$(dirname "$codex_bin"):$PATH"
 export CODEX_CLI_MODEL=${CODEX_CLI_MODEL:-gpt-5.6-sol}
 export CODEX_CLI_PROXY_URL=${CODEX_CLI_PROXY_URL:-http://127.0.0.1:7890}
-export PPT_TASK_TIMEOUT_MS=${PPT_TASK_TIMEOUT_MS:-600000}
+export PPT_TASK_TIMEOUT_MS=${PPT_TASK_TIMEOUT_MS:-1800000}
 
 exec "$node_bin" "$agent_script"

@@ -108,7 +108,7 @@ async function executePresentationTask(task, leaseToken) {
     const codexEnv = { ...(proxy ? { ...process.env, HTTPS_PROXY: process.env.HTTPS_PROXY || proxy, HTTP_PROXY: process.env.HTTP_PROXY || proxy, ALL_PROXY: process.env.ALL_PROXY || proxy } : process.env), CODEX_CLI_COMMAND: process.env.CODEX_CLI_BIN || "codex", CODEX_CLI_MODEL: process.env.CODEX_CLI_MODEL || "gpt-5.6-sol", CODEX_CLI_PROMPT: prompt };
     // Codex appends stdin to its prompt when it detects an open stream. `execFile`
     // keeps that stream open on this host, so close it at the shell boundary.
-    await execFileAsync("/bin/sh", ["-c", "exec \"$CODEX_CLI_COMMAND\" exec --model \"$CODEX_CLI_MODEL\" --skip-git-repo-check --sandbox workspace-write \"$CODEX_CLI_PROMPT\" </dev/null"], { cwd: dir, env: codexEnv, timeout: boundedNumber("PPT_TASK_TIMEOUT_MS", 600000, 120000, 1800000), maxBuffer: 2 * 1024 * 1024 });
+    await execFileAsync("/bin/sh", ["-c", "exec \"$CODEX_CLI_COMMAND\" exec --model \"$CODEX_CLI_MODEL\" --skip-git-repo-check --sandbox workspace-write \"$CODEX_CLI_PROMPT\" </dev/null"], { cwd: dir, env: codexEnv, timeout: boundedNumber("PPT_TASK_TIMEOUT_MS", 1800000, 120000, 1800000), maxBuffer: 2 * 1024 * 1024 });
     const pptx = await readFile(path.join(dir, "output", "result.pptx"));
     if (pptx.length < 1024 || !pptx.subarray(0, 2).equals(Buffer.from("PK"))) throw new Error("Codex did not produce a valid PPTX");
     await execFileAsync("unzip", ["-t", path.join(dir, "output", "result.pptx")], { timeout: 20000, maxBuffer: 256 * 1024 });

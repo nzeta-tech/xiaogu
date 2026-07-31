@@ -8,7 +8,7 @@ import { listenForPageMeta, type PageMetaDetail } from "@/lib/client/page-meta";
 
 const platformNavItems = [
   { id: "workbench", href: "/today", label: "今日灵感", shortLabel: "今日灵感", icon: "home" },
-  { id: "creation", href: "/create", label: "轻松创作", shortLabel: "轻松创作", icon: "edit" },
+  { id: "creation", href: "/create", label: "创作广场", shortLabel: "创作广场", icon: "edit" },
   { id: "assets", href: "/works", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
   { id: "crm", href: "/avatar", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
   { id: "invite", href: "/rewards#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
@@ -433,7 +433,7 @@ function resolvePublicUrl(value: string) {
 
 function getPageMeta(pathname: string, fallbackDescription: string): PageMetaDetail {
   if (pathname === "/today") return { title: "今日灵感", description: "热点与爆款内容灵感" };
-  if (pathname === "/create" || pathname.startsWith("/apps/")) return { title: "轻松创作", description: "从想法到可发布内容" };
+  if (pathname === "/create" || pathname.startsWith("/apps/")) return { title: "创作广场", description: "从想法到可发布内容" };
   if (pathname.startsWith("/works/") || pathname.startsWith("/examples/")) return { title: "作品详情", description: "审阅、优化与复用内容" };
   if (pathname === "/works") return { title: "创作历史", description: "管理作品与创作素材" };
   if (pathname === "/avatar" || pathname === "/questionnaire") return { title: "数字分身", description: "管理人设与表达偏好" };

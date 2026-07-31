@@ -63,7 +63,7 @@ const workspaceCards: WorkspaceCard[] = [
     pointsLabel: "12",
     badge: "新",
     description: "输入主题或上传资料，自动生成可下载、可编辑的汇报 PPT。",
-    hint: "本地 Agent 会调用你的 Codex CLI 设计、生成并检查成品。",
+    hint: "输入想法或上传资料，轻松生成一份可下载、可编辑的专业 PPT。",
     actionLabel: "使用",
     goals: ["trust", "conversion", "brand"],
   },
@@ -433,7 +433,7 @@ export function CreationHubPageClient() {
   }, [hasHubData]);
 
   if (loading) {
-    return <div className="pageStack"><section className="panel emptyState">正在加载轻松创作广场...</section></div>;
+    return <div className="pageStack"><section className="panel emptyState">正在加载创作广场...</section></div>;
   }
 
   if (!hubData) {
