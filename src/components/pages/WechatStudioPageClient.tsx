@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { articleDocx } from "@/lib/client/docx";
@@ -33,6 +34,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
   const [topic, setTopic] = useState("");
   const [audience, setAudience] = useState("young-family");
   const [tone, setTone] = useState("professional");
+  const [lengthMode, setLengthMode] = useState<"minimal" | "standard" | "long">("minimal");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [style, setStyle] = useState(styles[0]?.value ?? "documentary");
@@ -50,6 +52,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
   const [saveStatus, setSaveStatus] = useState<"" | "saving" | "saved" | "error">("");
   const [restoring, setRestoring] = useState(true);
   const [copyNotice, setCopyNotice] = useState("");
+  const [fullImage, setFullImage] = useState<{ url: string; label: string } | null>(null);
 
   const wordCount = useMemo(() => content.replace(/\s/g, "").length, [content]);
   const allImages = useMemo(() => [...images, ...uploadedImages], [images, uploadedImages]);
@@ -61,6 +64,18 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
       .then(setAccount)
       .catch(() => setAccount(null));
   }, []);
+
+  useEffect(() => {
+    if (!fullImage) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setFullImage(null); };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [fullImage]);
 
   useEffect(() => {
     const restoredId = new URLSearchParams(window.location.search).get("workId")?.trim() ?? "";
@@ -81,6 +96,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
           if (typeof state.topic === "string") setTopic(state.topic);
           if (typeof state.audience === "string") setAudience(state.audience);
           if (typeof state.tone === "string") setTone(state.tone);
+          if (state.lengthMode === "minimal" || state.lengthMode === "standard" || state.lengthMode === "long") setLengthMode(state.lengthMode);
           if (typeof state.title === "string") setTitle(state.title);
           if (typeof state.content === "string") setContent(state.content);
           if (typeof state.style === "string") setStyle(state.style);
@@ -128,7 +144,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
       const resolvedWorkId = await ensureStudioWork();
       const response = await fetch(apiPath("/api/creation/apps/wechat-studio/stream"), {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ values: { topic, audience, tone }, workId: resolvedWorkId }),
+        body: JSON.stringify({ values: { topic, audience, tone, lengthMode }, workId: resolvedWorkId }),
       });
       if (!response.ok || !response.body) throw new Error("文章生成失败，请稍后再试。");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let raw = ""; let buffer = "";
@@ -157,16 +173,20 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     if (!content.trim()) { setMessage("请先生成或粘贴文章内容。 "); return; }
     setLoading("assets"); setMessage("");
     try {
+      const resolvedWorkId = workId || await ensureStudioWork();
       const [imagesResponse, coverResponse] = await Promise.all([fetch(apiPath("/api/creation/apps/wechat-images"), {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ values: { article: `${title}\n\n${content}`, style, studio_parent: "wechat-studio" } }),
+        body: JSON.stringify({ values: { article: `${title}\n\n${content}`, style, studio_parent: "wechat-studio", studio_work_id: resolvedWorkId } }),
       }), fetch(apiPath("/api/creation/apps/wechat-cover"), {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ values: { title, summary: content.slice(0, 1600), style: styles.find((item) => item.value === style)?.label || style, ratio: "2.35:1", studio_parent: "wechat-studio" } }),
+        body: JSON.stringify({ values: { title, summary: content.slice(0, 1600), style, ratio: "2.35:1", studio_parent: "wechat-studio", studio_work_id: resolvedWorkId } }),
       })]);
       const [payload, coverPayload] = await Promise.all([imagesResponse.json() as Promise<{ images?: GeneratedImage[]; imageSections?: Array<{ index: number; title: string }>; error?: string }>, coverResponse.json() as Promise<{ images?: GeneratedImage[]; error?: string }>]);
       if (!imagesResponse.ok || !payload.images?.length || !coverResponse.ok || !coverPayload.images?.[0]) throw new Error(payload.error || coverPayload.error || "视觉素材生成失败，请稍后再试。");
-      setImages(payload.images.map((image, index) => ({ ...image, sectionIndex: payload.imageSections?.[index]?.index ?? index, sectionTitle: payload.imageSections?.[index]?.title }))); setCover(coverPayload.images[0]);
+      const nextImages = payload.images.map((image, index) => ({ ...image, sectionIndex: payload.imageSections?.[index]?.index ?? index, sectionTitle: payload.imageSections?.[index]?.title }));
+      const nextCover = coverPayload.images[0];
+      setImages(nextImages); setCover(nextCover);
+      await saveStudioProgress(resolvedWorkId, "visual", {}, { images: nextImages, cover: nextCover });
       setStyleUsage((current) => { const next = { ...current, [style]: (current[style] ?? 0) + 1 }; window.localStorage.setItem(STYLE_USAGE_KEY, JSON.stringify(next)); return next; });
       setMessage("AI 封面与正文配图已生成；你可以继续上传自己的图片，或进入发布预览。 ");
     } catch (error) { setMessage(error instanceof Error ? error.message : "网络连接失败，请重试。"); }
@@ -191,8 +211,8 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     finally { setLoading(""); }
   }
 
-  function studioState(tab = activeTab, overrides: { title?: string; content?: string } = {}) {
-    return { topic, audience, tone, title: overrides.title ?? title, content: overrides.content ?? content, style, layout, images, uploadedImages, cover, activeTab: tab, updatedAt: new Date().toISOString() };
+  function studioState(tab = activeTab, overrides: { title?: string; content?: string } = {}, stateOverrides: { images?: GeneratedImage[]; uploadedImages?: GeneratedImage[]; cover?: GeneratedImage | null } = {}) {
+    return { topic, audience, tone, lengthMode, title: overrides.title ?? title, content: overrides.content ?? content, style, layout, images: stateOverrides.images ?? images, uploadedImages: stateOverrides.uploadedImages ?? uploadedImages, cover: stateOverrides.cover === undefined ? cover : stateOverrides.cover, activeTab: tab, updatedAt: new Date().toISOString() };
   }
 
   async function ensureStudioWork() {
@@ -206,12 +226,12 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     return id;
   }
 
-  async function saveStudioProgress(id = workId, tab = activeTab, overrides: { title?: string; content?: string } = {}) {
+  async function saveStudioProgress(id = workId, tab = activeTab, overrides: { title?: string; content?: string } = {}, stateOverrides: { images?: GeneratedImage[]; uploadedImages?: GeneratedImage[]; cover?: GeneratedImage | null } = {}) {
     if (!id) return;
     setSaveStatus("saving");
     const nextTitle = overrides.title ?? title;
     const nextContent = overrides.content ?? content;
-    const response = await fetch(apiPath(`/api/works/${id}`), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "draft", title: nextTitle || "公众号文章创作｜未完成", content: nextContent, contentJson: { batches: [], wechatStudioState: studioState(tab, overrides) } }) });
+    const response = await fetch(apiPath(`/api/works/${id}`), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "draft", title: nextTitle || "公众号文章创作｜未完成", content: nextContent, contentJson: { batches: [], wechatStudioState: studioState(tab, overrides, stateOverrides) } }) });
     setSaveStatus(response.ok ? "saved" : "error");
   }
 
@@ -303,7 +323,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     <div className="page-back-bar pageBackBar"><a className="back-btn backLink" href={appPath("/create")}>← 返回创作广场</a><span className="subpageBreadcrumb">创作广场 / 公众号文章创作</span></div>
     <section className="wechatStudioHero">
       <div><span>微信公众号创作工作台</span><h1>一篇好文章，从想法到发布</h1><p>先把真实想法说清楚，剩下的文案、配图与发布流程交给我们。</p></div>
-      <div className="wechatStudioSteps" role="tablist"><button className={activeTab === "write" ? "active" : ""} onClick={() => void moveToTab("write")} type="button"><i>1</i>填写内容</button><b>→</b><button className={activeTab === "article" ? "active" : ""} onClick={() => void moveToTab("article")} disabled={!content} type="button"><i>2</i>预览文章</button><b>→</b><button className={activeTab === "visual" ? "active" : ""} onClick={() => void moveToTab("visual")} disabled={!content} type="button"><i>3</i>选择配图</button><b>→</b><button className={activeTab === "layout" ? "active" : ""} onClick={() => void moveToTab("layout")} disabled={!allImages.length} type="button"><i>4</i>整体版式</button><b>→</b><button className={activeTab === "draft" ? "active" : ""} onClick={() => void moveToTab("draft")} disabled={!allImages.length} type="button"><i>5</i>预览发布</button></div>
+      <div className="wechatStudioSteps" role="tablist"><button className={activeTab === "write" ? "active" : ""} onClick={() => void moveToTab("write")} type="button"><i>1</i>填写内容</button><b>→</b><button className={activeTab === "article" ? "active" : ""} onClick={() => void moveToTab("article")} disabled={!content} type="button"><i>2</i>预览文章</button><b>→</b><button className={activeTab === "visual" ? "active" : ""} onClick={() => void moveToTab("visual")} disabled={!content} type="button"><i>3</i>选择配图</button><b>→</b><button className={activeTab === "layout" ? "active" : ""} onClick={() => void moveToTab("layout")} disabled={!cover} type="button"><i>4</i>整体版式</button><b>→</b><button className={activeTab === "draft" ? "active" : ""} onClick={() => void moveToTab("draft")} disabled={!cover} type="button"><i>5</i>预览发布</button></div>
       {workId ? <small className={`studioSaveStatus ${saveStatus}`}>{saveStatus === "saving" ? "正在保存…" : saveStatus === "error" ? "保存失败，请重试" : "已保存到作品历史"}</small> : null}
     </section>
     {activeTab === "write" && <main className="wechatStudioLayout">
@@ -311,6 +331,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
         <div className="studioSectionTitle"><div><span>文章创作</span><h2>从一个真实想法开始</h2></div><em>{app.points} 积分 / 篇</em></div>
         <label className="studioTopic"><span>这篇文章想讲什么</span><textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="写下主题、真实经历、读者的问题，或必须保留的观点。越具体，文章越像你。" maxLength={6000} /></label>
         <div className="studioChoices"><fieldset><legend>写给谁看</legend>{app.fields.find((field) => field.id === "audience")?.options?.map((option) => <button type="button" className={audience === option.value ? "active" : ""} onClick={() => setAudience(option.value)} key={option.value}>{option.label}</button>)}</fieldset><fieldset><legend>文章写作风格 <small>只影响文字，不影响配图</small></legend>{app.fields.find((field) => field.id === "tone")?.options?.map((option) => <button type="button" className={tone === option.value ? "active" : ""} onClick={() => setTone(option.value)} key={option.value}>{option.label}</button>)}</fieldset></div>
+        <fieldset className="studioLengthChoices"><legend>正文篇幅</legend>{([['minimal', '极简', '约 600 字 · 推荐'], ['standard', '常规', '约 1200 字'], ['long', '长文', '约 1800 字']] as const).map(([value, label, description]) => <button type="button" className={lengthMode === value ? "active" : ""} onClick={() => setLengthMode(value)} key={value}><strong>{label}</strong><span>{description}</span></button>)}</fieldset>
         <div className="studioStepActions"><span />{content ? <><button className="studioSecondary" type="button" onClick={generateArticle} disabled={Boolean(loading)}>{loading === "article" ? "正在重新生成…" : "重新生成"}</button><button className="studioPrimary" type="button" onClick={() => void moveToTab("article")}>继续使用已有文章 →</button></> : <button className="studioPrimary" type="button" onClick={generateArticle} disabled={Boolean(loading)}>{loading === "article" ? "正在写文章…" : "生成文章初稿 →"}</button>}</div>
       </section>
       <aside className="wechatStudioAside"><span>本次会帮你完成</span><strong>标题、开场、正文结构、收尾行动和阅读节奏</strong><p>所有涉及数据、案例、产品规则的内容，都建议在发布前再核对一次。</p></aside>
@@ -320,18 +341,20 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
       <div className="studioSectionTitle"><div><span>文章配图</span><h2>选择配图风格</h2></div><b className="studioSelectedStyle">已选：{styles.find((item) => item.value === style)?.label}</b></div>
       <div className="studioVisualStyle"><div className="studioVisualStyleHead"><div><p>封面与正文配图会沿用同一视觉方向。真实样例可横向滑动查看。</p></div></div><div className="studioStyleGallery" aria-label="配图风格">{orderedStyles.map((item) => <button aria-pressed={style === item.value} className={`studioStyleCard ${style === item.value ? "active" : ""}`} type="button" onClick={() => setStyle(item.value)} key={item.value}><img src={item.preview} alt={`${item.label}样例`} /><div className="studioStyleCardTitle"><strong>{item.label}</strong>{styleUsage[item.value] ? <em>你常用</em> : item.recommended ? <em>推荐</em> : null}{style === item.value ? <i className="studioStyleCheck" aria-hidden="true">✓</i> : null}</div><span>{item.description}</span></button>)}</div></div>
       <div className="studioAssetSources"><section><span>AI 生成（可选）</span><strong>固定生成 1 张横版封面；正文按大章节生成，每章 1 张、最多 5 张</strong><button className="studioPrimary" type="button" onClick={generateImages} disabled={Boolean(loading)}>{loading === "assets" ? "正在按章节生成…" : images.length ? "重新生成 AI 配图" : "生成封面与配图"}</button></section><section><span>上传自己的图片（可选）</span><strong>最多上传 8 张，可与 AI 配图一起使用</strong><label className="studioUploadButton">上传正文配图<input accept="image/*" multiple type="file" onChange={(event) => void uploadArticleImages(event.target.files)} /></label><label className="studioUploadButton">上传文章封面<input accept="image/*" type="file" onChange={(event) => void uploadCover(event.target.files?.[0])} /></label></section></div>
-      {cover ? <div className="studioGeneratedCover"><span>文章封面</span><div className="studioCoverPreview"><img src={cover.url} alt="公众号文章封面" /><div className="studioImageActions"><button type="button" onClick={() => void downloadImage(cover, "文章封面")}>下载</button><button type="button" onClick={() => setCover(null)}>移除</button></div></div></div> : null}
-      {allImages.length > 0 ? <div className="studioGeneratedImages"><span>正文配图 · {allImages.length} 张</span><div className="studioImageGrid">{allImages.map((image, index) => <figure key={image.id}><img src={image.url} alt="文章配图" />{image.sectionTitle ? <figcaption>对应章节：{image.sectionTitle}</figcaption> : <figcaption>用户上传配图</figcaption>}<div className="studioImageActions"><button type="button" onClick={() => void downloadImage(image, image.sectionTitle || `正文配图-${index + 1}`)}>下载</button><button type="button" onClick={() => image.id.startsWith("upload-") ? setUploadedImages((current) => current.filter((item) => item.id !== image.id)) : setImages((current) => current.filter((item) => item.id !== image.id))}>移除</button></div></figure>)}</div></div> : <p className="studioAssetEmpty">还没有配图。你可以上传自己的图片、使用 AI 生成，或者两种方式一起用。</p>}
-      <div className="studioStepActions"><button className="studioSecondary" type="button" onClick={() => void moveToTab("article")}>← 上一步</button>{allImages.length ? <button className="studioPrimary" type="button" onClick={() => void moveToTab("layout")}>下一步：选择整体版式 →</button> : null}</div>
+      {cover ? <div className="studioGeneratedCover"><span>文章封面</span><div className="studioCoverPreview"><img src={cover.url} alt="公众号文章封面" /><div className="studioImageActions"><button type="button" onClick={() => setFullImage({ url: cover.url, label: "文章封面" })}>查看全图</button><button type="button" onClick={() => void downloadImage(cover, "文章封面")}>下载</button><button type="button" onClick={() => setCover(null)}>移除</button></div></div></div> : null}
+      {allImages.length > 0 ? <div className="studioGeneratedImages"><span>正文配图 · {allImages.length} 张</span><div className="studioImageGrid">{allImages.map((image, index) => <figure key={image.id}><img src={image.url} alt="文章配图" />{image.sectionTitle ? <figcaption>对应章节：{image.sectionTitle}</figcaption> : <figcaption>用户上传配图</figcaption>}<div className="studioImageActions"><button type="button" onClick={() => setFullImage({ url: image.url, label: image.sectionTitle || `正文配图 ${index + 1}` })}>查看全图</button><button type="button" onClick={() => void downloadImage(image, image.sectionTitle || `正文配图-${index + 1}`)}>下载</button><button type="button" onClick={() => image.id.startsWith("upload-") ? setUploadedImages((current) => current.filter((item) => item.id !== image.id)) : setImages((current) => current.filter((item) => item.id !== image.id))}>移除</button></div></figure>)}</div></div> : <p className="studioAssetEmpty">还没有配图。你可以上传自己的图片、使用 AI 生成，或者两种方式一起用。</p>}
+      <div className="studioStepActions studioVisualNext"><button className="studioSecondary" type="button" onClick={() => void moveToTab("article")}>← 上一步</button><div><small className={cover ? "ready" : "missing"}>{cover ? allImages.length ? "封面和正文配图已准备好" : "封面已准备好，正文配图可选" : "还缺少文章封面：请生成封面或上传一张封面"}</small><button className="studioPrimary" type="button" onClick={() => void moveToTab("layout")} disabled={!cover}>下一步：选择整体版式 →</button></div></div>
     </section>}
     {activeTab === "layout" && content && <section className="wechatStudioEditor"><div className="studioSectionTitle"><div><span>整体版式</span><h2>选择文章排版</h2></div><b className="studioSelectedStyle">已选：{layouts.find((item) => item.value === layout)?.label}</b></div><p className="studioLayoutHint">左侧选择模板，右侧会立即呈现你的真实文章效果；只改变排版，不改变内容。</p><div className="studioLayoutWorkspace"><div className="studioLayoutGrid">{layouts.map((item) => <button aria-pressed={layout === item.value} className={`studioLayoutCard layout-${item.value} ${layout === item.value ? "active" : ""}`} key={item.value} onClick={() => setLayout(item.value)} type="button"><i><img src={item.preview} alt={`${item.label}模板样例`} /></i><div className="studioLayoutCardTitle"><strong>{item.label}</strong>{layout === item.value ? <u>✓ 已选</u> : null}</div><small>{item.description}</small></button>)}</div><aside className={`studioLayoutLive studioLayout-${layout}`}><div className="studioLayoutLiveHead"><span>实时预览</span><em>{layouts.find((item) => item.value === layout)?.label}</em></div>{cover ? <div className="studioLayoutLiveCover"><img src={cover.url} alt="文章封面预览" /></div> : null}<h1>{title}</h1><ArticleWithImages content={content} images={allImages} /></aside></div><div className="studioStepActions"><button className="studioSecondary" type="button" onClick={() => void moveToTab("visual")}>← 上一步</button><button className="studioPrimary" type="button" onClick={() => void moveToTab("draft")}>下一步：预览发布 →</button></div></section>}
     {activeTab === "draft" && content && <section className={`wechatStudioEditor studioDraftPreview studioLayout-${layout}`}><div className="studioSectionTitle"><div><span>草稿预览与编辑</span><h2>确认文章发布效果</h2></div><div className="studioDocumentActions"><button type="button" onClick={() => void copyArticle()}>复制</button><button type="button" onClick={downloadArticle}>下载</button><button className="studioSecondary" type="button" onClick={() => void moveToTab("layout")}>返回版式</button></div></div>{cover && <div className="studioCoverPreview"><img src={cover.url} alt="公众号文章封面" /><button type="button" onClick={() => setCover(null)}>移除封面</button></div>}<label><span>文章标题</span><input className="studioCenteredTitleInput" value={title} onChange={(event) => setTitle(event.target.value)} /></label><ArticleWithImages content={content} images={allImages} /><div className="studioPublishBar"><div><span>{publishState === "published" ? "已提交发布" : publishState === "draft" ? "已进入草稿箱" : account?.connected ? `已连接 · ${account.accountName || "公众号"}` : "尚未连接公众号"}</span><strong>{account?.connected ? "确认无误后，一键送到你的公众号" : "连接公众号后，即可将文章一键送入草稿箱"}</strong></div><div><button className="studioDraft" type="button" onClick={() => publish("draft")} disabled={Boolean(loading) || !account?.connected}>存入草稿箱</button><button className="studioPrimary" type="button" onClick={() => publish("publish")} disabled={Boolean(loading) || !account?.connected}>{loading === "publish" ? "提交中…" : "一键发布到公众号"}</button></div></div></section>}
     {message && <p className={`studioMessage ${message.includes("失败") || message.includes("请先") ? "error" : ""}`}>{message}</p>}
     {copyNotice ? <div className={`studioCopyToast ${copyNotice.includes("失败") ? "error" : ""}`} role="status"><b>{copyNotice.includes("失败") ? "!" : "✓"}</b>{copyNotice}</div> : null}
+    {fullImage ? createPortal(<div className="studioFullImageBackdrop" role="presentation" onMouseDown={() => setFullImage(null)}><section className="studioFullImageDialog" role="dialog" aria-modal="true" aria-label={`${fullImage.label}全图预览`} onMouseDown={(event) => event.stopPropagation()}><header><strong>{fullImage.label}</strong><button type="button" aria-label="关闭全图预览" onClick={() => setFullImage(null)}>×</button></header><div><img src={fullImage.url} alt={`${fullImage.label}全图`} /></div></section></div>, document.body) : null}
   </div>;
 }
 
 function ArticleWithImages({ content, images }: { content: string; images: GeneratedImage[] }) {
+  const [draggingImageId, setDraggingImageId] = useState("");
   const sections = splitRenderedSections(content);
   const usedIds = new Set<string>();
   const before = images.filter((image) => image.sectionIndex === -1);
@@ -347,14 +370,14 @@ function ArticleWithImages({ content, images }: { content: string; images: Gener
   before.forEach((image) => usedIds.add(image.id));
   const remaining = images.filter((image) => !usedIds.has(image.id));
   const completeMove = (sectionIndex: number) => {
-    const imageId = document.documentElement.dataset.wechatDraggingImage;
+    const imageId = draggingImageId;
     if (!imageId) return;
-    delete document.documentElement.dataset.wechatDraggingImage;
+    setDraggingImageId("");
     document.querySelectorAll(".studioDraggableFigure.moving,.studioArticleDropZone.dragOver").forEach((element) => element.classList.remove("moving", "dragOver"));
     window.dispatchEvent(new CustomEvent("wechat-studio:image-move", { detail: { imageId, sectionIndex } }));
   };
-  const figures = (items: GeneratedImage[], prefix: string) => items.map((image, index) => <figure className="studioDraggableFigure" draggable={false} onPointerDown={(event) => { event.preventDefault(); document.querySelectorAll(".studioDraggableFigure.moving").forEach((element) => element.classList.remove("moving")); document.documentElement.dataset.wechatDraggingImage = image.id; event.currentTarget.classList.add("moving"); }} key={image.id}><img draggable={false} src={image.url} alt={`${prefix} ${index + 1}`} /><figcaption>按住拖动，或点击后再点目标位置</figcaption></figure>);
-  const dropZone = (sectionIndex: number, label: string) => <div className="studioArticleDropZone" onPointerEnter={(event) => { if (document.documentElement.dataset.wechatDraggingImage) event.currentTarget.classList.add("dragOver"); }} onPointerLeave={(event) => event.currentTarget.classList.remove("dragOver")} onPointerUp={(event) => { event.preventDefault(); completeMove(sectionIndex); }} onClick={() => completeMove(sectionIndex)}><span>放到这里 · {label}</span></div>;
+  const figures = (items: GeneratedImage[], prefix: string) => items.map((image, index) => <figure className={`studioDraggableFigure ${draggingImageId === image.id ? "moving" : ""}`} draggable={false} onPointerDown={(event) => { event.preventDefault(); setDraggingImageId(image.id); }} key={image.id}><img draggable={false} src={image.url} alt={`${prefix} ${index + 1}`} /><figcaption>按住拖动，或点击后再点目标位置</figcaption></figure>);
+  const dropZone = (sectionIndex: number, label: string) => <div className="studioArticleDropZone" onPointerEnter={(event) => { if (draggingImageId) event.currentTarget.classList.add("dragOver"); }} onPointerLeave={(event) => event.currentTarget.classList.remove("dragOver")} onPointerUp={(event) => { event.preventDefault(); completeMove(sectionIndex); }} onClick={() => completeMove(sectionIndex)}><span>放到这里 · {label}</span></div>;
   return <article className="studioMarkdownArticle studioArticlePreview">{dropZone(-1, "文章开头")}{figures(before, "文首配图")}{sections.map((section, index) => <div className="studioArticleSection" key={`${index}-${section.content.slice(0, 18)}`}><ReactMarkdown>{section.content}</ReactMarkdown>{dropZone(index, `${section.title}之后`)}{figures(after[index], `${section.title}配图`)}</div>)}{dropZone(999, "文章末尾")}{figures(remaining, "文末配图")}</article>;
 }
 

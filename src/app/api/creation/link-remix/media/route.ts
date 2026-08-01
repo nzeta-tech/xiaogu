@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const target = path.join(path.resolve(douyinMediaDir), file);
   try {
     const info = await stat(target);
-    if (!info.isFile() || info.size > 100 * 1024 * 1024) throw new Error("invalid_file");
+    if (!info.isFile() || info.size > 200 * 1024 * 1024) throw new Error("invalid_file");
     const bytes = await readFile(target);
     const type = /\.mp4$/i.test(file) ? "video/mp4" : /\.png$/i.test(file) ? "image/png" : "image/jpeg";
     return new Response(bytes, { headers: { "content-type": type, "content-length": String(bytes.length), "cache-control": "private, max-age=3600" } });

@@ -15,7 +15,7 @@ const leaseSeconds = boundedNumber("LOCAL_AGENT_LEASE_SECONDS", 600, 60, 1800);
 const capabilities = (process.env.LOCAL_AGENT_CAPABILITIES || "source.inspect").split(",").map((value) => value.trim()).filter(Boolean);
 const heartbeatIntervalMs = boundedNumber("LOCAL_AGENT_HEARTBEAT_INTERVAL_MS", 15000, 5000, 60000);
 const transcriptBatchMs = boundedNumber("LOCAL_AGENT_TRANSCRIPT_BATCH_MS", 400, 300, 1000);
-const maxTranscribeBytes = boundedNumber("LOCAL_AGENT_MAX_TRANSCRIBE_BYTES", 100 * 1024 * 1024, 1 * 1024 * 1024, 500 * 1024 * 1024);
+const maxTranscribeBytes = boundedNumber("LOCAL_AGENT_MAX_TRANSCRIBE_BYTES", 200 * 1024 * 1024, 1 * 1024 * 1024, 500 * 1024 * 1024);
 const mediaDownloadTimeoutMs = boundedNumber("LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS", 300000, 30000, 600000);
 const protocolVersion = boundedNumber("LOCAL_AGENT_PROTOCOL_VERSION", 1, 1, 1000);
 const nativeDouyinVerifierBase = process.env.DOUYIN_NATIVE_VERIFY_API_BASE?.trim().replace(/\/$/, "") || "";
@@ -125,7 +125,7 @@ async function inspectSource(task, leaseToken, url, userId) {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ url, agentUserId: userId, deferTranscription: true }),
-    signal: AbortSignal.timeout(boundedNumber("LOCAL_AGENT_TASK_TIMEOUT_MS", 900000, 60000, 1800000)),
+    signal: AbortSignal.timeout(boundedNumber("LOCAL_AGENT_TASK_TIMEOUT_MS", 1_200_000, 60000, 1800000)),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `local executor HTTP ${response.status}`);
@@ -230,7 +230,7 @@ async function streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecrypt
   const upstream = await fetch(`${transcriberBase}/transcribe/stream`, {
     method: "POST",
     body: form,
-    signal: AbortSignal.timeout(boundedNumber("LOCAL_AGENT_TASK_TIMEOUT_MS", 900000, 60000, 1800000)),
+    signal: AbortSignal.timeout(boundedNumber("LOCAL_AGENT_TASK_TIMEOUT_MS", 1_200_000, 60000, 1800000)),
   });
   if (!upstream.ok || !upstream.body) throw new Error(`local transcriber HTTP ${upstream.status}`);
 

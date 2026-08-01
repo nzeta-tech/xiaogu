@@ -540,9 +540,9 @@ async function transcribePublicMedia(mediaUrl: string) {
     const mediaResponse = await fetch(mediaUrl, { signal: AbortSignal.timeout(15000) });
     if (!mediaResponse.ok) return "";
     const contentLength = Number(mediaResponse.headers.get("content-length") ?? 0);
-    if (contentLength > 100 * 1024 * 1024) return "";
+    if (contentLength > 200 * 1024 * 1024) return "";
     const bytes = await mediaResponse.arrayBuffer();
-    if (bytes.byteLength > 100 * 1024 * 1024) return "";
+    if (bytes.byteLength > 200 * 1024 * 1024) return "";
     const form = new FormData();
     form.append("file", new Blob([bytes], { type: mediaResponse.headers.get("content-type") ?? "video/mp4" }), "source-media.mp4");
     form.append("language", "zh");
@@ -551,7 +551,7 @@ async function transcribePublicMedia(mediaUrl: string) {
       const response = await fetch(`${localBase.replace(/\/$/, "")}/transcribe`, {
         method: "POST",
         body: form,
-        signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 240000)),
+        signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 1_200_000)),
       });
       if (!response.ok) return "";
       const payload = await response.json() as { text?: string };

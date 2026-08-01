@@ -55,7 +55,7 @@ export async function transcribeDownloadedDouyin(videoFile: string) {
   const target = path.join(path.resolve(douyinMediaDir), path.basename(videoFile));
   try {
     const info = await stat(target);
-    if (!info.isFile() || info.size > 100 * 1024 * 1024) return "";
+    if (!info.isFile() || info.size > 200 * 1024 * 1024) return "";
     const form = new FormData();
     form.append("file", new Blob([await readFile(target)], { type: "video/mp4" }), path.basename(target));
     form.append("language", "zh");
@@ -63,7 +63,7 @@ export async function transcribeDownloadedDouyin(videoFile: string) {
     if (localBase) {
       const localResponse = await fetch(`${localBase.replace(/\/$/, "")}/transcribe`, {
         method: "POST", body: form,
-        signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 240000)),
+        signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 1_200_000)),
       });
       if (localResponse.ok) {
         const payload = await localResponse.json() as { text?: string };

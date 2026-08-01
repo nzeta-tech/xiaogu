@@ -1,7 +1,7 @@
 import { requireSessionUser } from "@/lib/auth/session";
 import { getOwnedLocalAgentTask, listOwnedLocalAgentTaskEvents } from "@/lib/local-agent/repository";
 
-export const maxDuration = 600;
+export const maxDuration = 1200;
 
 export async function GET(request: Request, context: { params: Promise<{ taskId: string }> }) {
   const user = await requireSessionUser();

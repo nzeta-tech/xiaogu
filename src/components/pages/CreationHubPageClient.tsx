@@ -369,6 +369,7 @@ const workspaceCardPriority = new Map([
   ["image-card", 1],
   ["wechat-studio", 2],
   ["ppt-maker", 3],
+  ["link-remix", 4],
 ]);
 
 const workspaceIconUrls: Record<string, string> = {

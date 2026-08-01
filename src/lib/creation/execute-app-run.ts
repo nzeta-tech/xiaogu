@@ -498,10 +498,12 @@ function buildLiveScriptPrompt(
 }
 
 function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext: string[]) {
+  const lengthMode = stringifyCreationFieldValue(values.lengthMode);
+  const lengthBrief = lengthMode === "standard" ? "常规模式：约 1200 字，使用 3-4 个二级标题。" : lengthMode === "long" ? "长文模式：约 1800 字，使用 4-5 个二级标题。" : "极简模式：约 600 字，使用 2 个二级标题。";
   return [
     "你正在为微信公众号创作一篇完整长文，不是短视频口播稿、小红书笔记或销售话术。",
     ...caseContext,
-    "第一行仅输出 Markdown 一级标题。随后以一个具体问题、场景或判断开篇，再用 3-4 个 Markdown 二级标题展开；每段 2-4 句，全文约 1200-1800 字。",
+    `第一行仅输出 Markdown 一级标题。随后以一个具体问题、场景或判断开篇。${lengthBrief}每段 2-4 句，字数允许上下浮动约 10%，不要为了凑字数重复观点。`,
     "语言自然、完整、有阅读节奏。禁止‘家人们’‘你知道吗’等口播表达，禁止表情、强推销、焦虑营销和编号清单堆砌。",
     "不得编造数据、案例、产品规则或经历；保险内容不承诺收益、承保或理赔。结尾给温和自然的行动建议。只输出可直接发布的文章，不解释过程或附配图建议。",
     `目标读者：${stringifyCreationFieldValue(values.audience) || "普通读者"}。`,

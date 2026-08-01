@@ -1208,10 +1208,11 @@ export function AdminPageClient() {
           <AdminToolbar actions={selectedUserIds.length ? <><span>已选 {selectedUserIds.length} 人</span><button className="secondaryButton" onClick={() => requestConfirm({ title: "批量停用用户？", description: `${selectedUserIds.length} 个用户将无法继续登录，历史数据会保留。`, confirmLabel: "批量停用", danger: true, requireText: "停用", onConfirm: () => updateUsersBatch("suspended") })} type="button">批量停用</button><button className="secondaryButton" onClick={() => void updateUsersBatch("active")} type="button">批量恢复</button></> : undefined}>
             <input aria-label="搜索用户" value={userSearch} placeholder="搜索姓名、邮箱、角色或状态" onChange={(event) => { setUserSearch(event.target.value); updatePage(1); }} />
           </AdminToolbar>
-          <div className="adminDataTable" style={{ "--admin-columns": "42px minmax(250px,1.5fr) 110px 110px 120px minmax(370px,auto)" } as CSSProperties}>
-            <div className="adminDataHeader"><label className="adminSelectCell"><input aria-label="选择当前页所有用户" checked={pagedUsers.length > 0 && pagedUsers.every((user) => selectedUserIds.includes(user.id))} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...new Set([...current, ...pagedUsers.map((user) => user.id)])] : current.filter((id) => !pagedUsers.some((user) => user.id === id)))} /></label><span>用户</span><span>角色</span><span>状态</span><span>可用积分</span><span>操作</span></div>
-            {pagedUsers.map((user) => (
+          <div className="adminDataTable" style={{ "--admin-columns": "54px 42px minmax(250px,1.5fr) 110px 110px 120px minmax(370px,auto)" } as CSSProperties}>
+            <div className="adminDataHeader"><span>序号</span><label className="adminSelectCell"><input aria-label="选择当前页所有用户" checked={pagedUsers.length > 0 && pagedUsers.every((user) => selectedUserIds.includes(user.id))} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...new Set([...current, ...pagedUsers.map((user) => user.id)])] : current.filter((id) => !pagedUsers.some((user) => user.id === id)))} /></label><span>用户</span><span>角色</span><span>状态</span><span>可用积分</span><span>操作</span></div>
+            {pagedUsers.map((user, index) => (
               <div className="adminDataRow" key={user.id}>
+                <div className="adminDataCell">{(currentPage - 1) * pageSize + index + 1}</div>
                 <label className="adminSelectCell"><input aria-label={`选择 ${user.email}`} checked={selectedUserIds.includes(user.id)} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...current, user.id] : current.filter((id) => id !== user.id))} /></label>
                 <div className="adminDataCell"><strong>{user.email}</strong><span>{user.name} · 注册于 {formatDate(user.created_at)}</span></div>
                 <div><AdminStatus value={user.role} /></div>

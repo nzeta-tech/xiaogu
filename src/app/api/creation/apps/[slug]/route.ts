@@ -127,6 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
           style: stringifyValue(values.style) || app.name,
           ratio: stringifyValue(values.ratio) || (app.slug === "wechat-images" ? "3:2" : "1:1"),
           count: wechatImagePlan?.prompts.length ?? 1,
+          budgetMs: isWechatStudioInternalStep ? 270000 : undefined,
           variantPrompts: wechatImagePlan?.prompts,
           referenceImages: [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
           })
@@ -301,6 +302,8 @@ function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext
   const audience = stringifyValue(values.audience) || "普通读者";
   const tone = stringifyValue(values.tone) || "专业但易懂";
   const topic = stringifyValue(values.topic);
+  const lengthMode = stringifyValue(values.lengthMode);
+  const lengthBrief = lengthMode === "standard" ? "常规模式：全文约 1200 字，分 3-4 个二级标题。" : lengthMode === "long" ? "长文模式：全文约 1800 字，分 4-5 个二级标题。" : "极简模式：全文约 600 字，分 2 个二级标题。";
   return [
     "你正在为微信公众号写一篇完整长文，不是短视频口播稿，不是小红书笔记，也不是营销话术。",
     ...caseContext,
@@ -309,9 +312,9 @@ function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext
     "文章结构：",
     "1. 第一行只输出一个 Markdown 一级标题（不加‘标题：’）。",
     "2. 用一个具体场景、提问或反常识判断开篇，约 150 字，迅速交代读者为何值得读。",
-    "3. 正文分 3-4 个 Markdown 二级标题，每节 250-450 字；以完整段落自然论证，有具体场景才写具体场景，没有依据不得虚构案例、数据或经历。",
+    `3. ${lengthBrief}以完整段落自然论证，有具体场景才写具体场景，没有依据不得虚构案例、数据或经历。`,
     "4. 结尾回扣核心判断，给一个温和、自然的行动建议；不得强迫私信、购买或制造焦虑。",
-    "5. 总字数约 1200-1800 字。段落应适合公众号阅读，每段 2-4 句。",
+    "5. 字数允许上下浮动约 10%，不要为了凑字数重复观点。段落应适合公众号阅读，每段 2-4 句。",
     "6. 保险相关表达须合规：不承诺收益、承保或理赔；产品、案例与数据不确定时明确提示需要核验。",
     `目标读者：${audience}。`,
     `文章气质：${tone}。`,
@@ -572,7 +575,13 @@ function buildImagePlan(appName: string, fields: CreationField[], values: Record
 }
 
 function buildImagePrompt(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string) {
-  const lines = [`你现在在执行小谷图片类应用：${appName}。请生成适合获客内容场景的视觉图。`, ...caseContext, caseContext.length > 0 ? "" : "", hint];
+  const isWechatArticleVisual = appName === "文章配图生成" || appName === "公众号文章封面";
+  const lines = [
+    `你现在在执行小谷图片类应用：${appName}。${isWechatArticleVisual ? "请生成准确服务文章主题和阅读理解的编辑视觉。" : "请生成适合内容传播场景的视觉图。"}`,
+    ...caseContext,
+    caseContext.length > 0 ? "" : "",
+    hint,
+  ];
   const styleValue = stringifyValue(values.style);
   for (const field of fields) {
     const value = values[field.id];
@@ -587,7 +596,13 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
   if (styleDirective) {
     lines.push(`风格细化：${styleDirective}`);
   }
-  lines.push("要求：突出标题可读性、层级清晰、适合知识卡片或公众号配图。避免夸张营销海报风，整体要像专业内容创作者的卡片。除非风格明确要求，否则不要做成 3D 渲染、商业海报、科技发布会大屏或过度写实电商物料。\n");
+  if (appName === "文章配图生成") {
+    lines.push("用途要求：这是微信公众号正文中的编辑配图。视觉内容必须由当前章节决定，可以是纯图片、人物或事件场景、编辑插画、概念解释图、信息图或知识卡片，不预设行业和题材。画面本身足以表达时优先纯视觉；流程、分类、对比、方法、数据关系或知识框架需要解释时，可以加入从正文准确提炼的短标题、关键词和标签。允许使用服务构图、知识组织或短文字的合理留白，但不要无意义空白、长段文字、编造信息、图库式万能概念图和无语义装饰。\n");
+  } else if (appName === "公众号文章封面") {
+    lines.push("用途要求：这是微信公众号文章的横版封面。根据全文主题选择最准确的主视觉类型，不预设人物、行业或生活场景；提炼一个核心对象、关系、变化或问题，用一个明确主视觉和少量支持细节呈现，不要把标题名词简单摆成一排。画面不得出现任何文字、数字、Logo 或水印；主体放在左侧或中央，保留适度呼吸空间，但不能让空白成为画面主体。避免与正文无关的万能商务隐喻和图库模板。\n");
+  } else {
+    lines.push("要求：突出标题可读性、层级清晰、适合知识卡片或公众号配图。避免夸张营销海报风，整体要像专业内容创作者的卡片。除非风格明确要求，否则不要做成 3D 渲染、商业海报、科技发布会大屏或过度写实电商物料。\n");
+  }
   return lines.join("\n");
 }
 
@@ -595,6 +610,27 @@ function getImageStyleDirective(style: string, appName: string) {
   if (!style) return "";
 
   const directives: Record<string, string> = {
+    documentary: "纪实编辑摄影风格，真实可信的环境、自然光与克制色彩；根据正文选择人物、事件、空间、自然或物件作为主体。画面要有可阅读的现场细节和真实使用痕迹，像深度报道的配图；不要棚拍摆拍、概念物品陈列或大面积无意义留白。",
+    abstract: "编辑型概念插画，用清晰的空间关系、尺度对比、路径阻断或结构变化表达抽象判断。每个视觉元素必须对应章节中的一个具体概念，构图完整、信息密度适中；不要只放几何装饰、通用箭头或无意义图标。",
+    "warm-drawing": "温暖叙事插画，柔和手绘质感、自然细节、不过度煽情。根据正文决定是否出现人物；有人物时呈现真实行动，没有人物时用环境、物件或自然关系讲清主题。所有元素都应服务章节观点。",
+    "cinematic-light": "电影感纪实画面，用人物处境、动作停顿和环境光线表达章节转折。保留真实空间和关键物件，明暗有层次但不过分戏剧化；不要空镜、背影剪影或只靠氛围灯光代替内容。",
+    landscape: "环境叙事型摄影或插画，通过地点特征、空间尺度、自然条件或人与环境的关系表达观点。地点必须由正文决定，避免只有天际线、远景和背影的通用素材。",
+    "eastern-line": "克制的东方线描编辑插画，少量低饱和设色，以人物动作、器物关系和空间留白表达判断。留白用于强化主体而非排字，避免只有山水、云雾和装饰纹样。",
+    "simple-story": "简洁的叙事插画，一个清楚场景、一个核心动作、少量关键道具，人物表情自然。元素虽少但每个都对应正文信息，避免通用图标和空泛姿势。",
+    "loose-sketch": "编辑手稿式知识插画，用一幅主场景配少量局部观察或过程细节，线条松弛但信息明确。不要做成带大量文字的课堂板书或普通信息卡。",
+    "playful-collage": "有真实内容依据的编辑拼贴，把章节中的人物、地点、票据、物件或行动组合成有因果关系的画面。拼贴服务叙事，不使用随机贴纸、无关装饰和纯氛围色块。",
+    painted: "有出版物质感的厚涂或综合材料插画，主体明确、细节真实、色彩克制，适合品牌专题和深度文章。避免奢华材质堆砌、金色边框和广告主视觉。",
+    watercolor: "轻水彩叙事插画，透明色层和自然纸张质感，围绕具体人物动作与生活细节表达温柔观点。不要只有植物、窗光和模糊色块。",
+    "colored-pencil": "彩铅编辑手记风，以观察性的具体场景、对象关系或过程细节呈现经验与判断，线条细腻、配色温和。不要画成儿童简笔画或泛化桌面静物。",
+    "fine-line": "精细线稿编辑插画，通过局部剖面、对象对比和人物动作解释专业要点，少量重点色，结构清楚。不要生成带文字的流程图或图标墙。",
+    ink: "现代水墨叙事插画，以具体人物、器物和空间关系承载东方克制感，墨色层次清晰。避免只画空山远景、书法字和装饰性云雾。",
+    "paper-story": "纸张拼贴叙事插画，用正文中的主体、场景线索、时间痕迹或过程片段构成一个具体故事瞬间，层次丰富但不幼稚。避免随机便签和无关贴纸。",
+    "city-detail": "城市生活细节摄影或编辑插画，聚焦一个具体街区、室内空间或工作场景中的真实行为与物件，以小见大。不要只给宏观城市风光。",
+    "quiet-drama": "安静但有张力的深度报道影像，以克制构图表现人物面对选择、损失或变化的具体时刻。细节比表情更重要，避免夸张悲伤、舞台灯光和空洞暗色。",
+    "city-sunset": "城市故事的收束画面，保留清楚的人物行动、地点与结果线索，傍晚光线只用于统一情绪。不要用纯夕阳、天际线或孤独背影代替内容。",
+    "soft-healing": "柔和克制的纪实或插画，以正文中的关系、过程、恢复、陪伴或安静变化为视觉核心，环境真实、光线温暖。不要强行加入家庭人物或模板化治愈动作。",
+    "retro-print": "复古报刊印刷插画，有限色、网点和纸张纹理，以具体事件、物件状态和对比关系形成专题画面。不要生成报纸文字、宣传口号或纯装饰版式。",
+    "vivid-illustration": "明快的编辑叙事插画，颜色鲜明但不幼稚，用夸张适度的尺度与动作突出章节冲突。所有元素都应来自正文含义，避免随机卡通符号和营销贴纸。",
     illustration: "暖米色纸张底，铅笔线稿加轻水彩晕染，手绘边框、星星、植物、书本、窗景等温暖小元素穿插。版式像手绘栏目页或知识海报，标题圆润醒目，信息模块有手工描边和轻微不规则感，整体亲和治愈，不要做成 3D 物件拼贴。",
     whiteboard: "真实白板拍照感，白色板面带反光与边框，蓝红马克笔手写，方框、波浪线、圈画标注明显。像老师或顾问在白板上现场写出来的内容，不要做成数码平板字效。",
     zen: "米白宣纸或墙面底，淡墨、浅褐、灰绿低饱和配色，山水、留白、云雾或植物点缀自然出现。版式安静克制，像东方意境海报，不要现代商务科技图表感。",

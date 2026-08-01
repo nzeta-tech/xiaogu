@@ -4,12 +4,14 @@ const IMAGE_REQUEST_TIMEOUT_MS = clampDuration(process.env.IMAGE_REQUEST_TIMEOUT
 const IMAGE_GENERATION_BUDGET_MS = clampDuration(process.env.IMAGE_GENERATION_BUDGET_MS, 600000, IMAGE_REQUEST_TIMEOUT_MS, 900000);
 const IMAGE_REQUEST_MAX_ATTEMPTS = 2;
 const IMAGE_RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const IMAGE_GENERATION_CONCURRENCY = Math.max(1, Math.min(2, Number(process.env.IMAGE_GENERATION_CONCURRENCY) || 2));
 
 export async function generateImageSet(input: {
   prompt: string;
   style: string;
   ratio: string;
   count?: number;
+  budgetMs?: number;
   referenceImages?: string[];
   variantPrompts?: string[];
 }) {
@@ -46,6 +48,7 @@ export async function generateImageSet(input: {
     prompt: input.prompt,
     ratio: input.ratio,
     desiredCount,
+    budgetMs: input.budgetMs,
     referenceImages: input.referenceImages ?? [],
     variantPrompts: input.variantPrompts ?? [],
   });
@@ -74,49 +77,59 @@ async function requestCompatibleImages(input: {
   prompt: string;
   ratio: string;
   desiredCount: number;
+  budgetMs?: number;
   referenceImages: string[];
   variantPrompts: string[];
 }) {
-  const singles: Array<{ id: string; url: string }> = [];
-  const deadlineAt = Date.now() + IMAGE_GENERATION_BUDGET_MS;
+  const singles: Array<{ id: string; url: string } | null> = Array.from({ length: input.desiredCount }, () => null);
+  const requestedBudgetMs = input.budgetMs == null
+    ? IMAGE_GENERATION_BUDGET_MS
+    : Math.min(Math.max(input.budgetMs, 60000), IMAGE_GENERATION_BUDGET_MS);
+  const deadlineAt = Date.now() + requestedBudgetMs;
   const sizeCandidates = buildPreferredSizeCandidates(input.ratio);
+  let nextIndex = 0;
 
-  for (let index = 0; index < input.desiredCount; index += 1) {
-    if (Date.now() >= deadlineAt) {
-      console.warn("image generation budget exhausted before completing image set", {
-        desiredCount: input.desiredCount,
-        generatedCount: singles.length,
-        budgetMs: IMAGE_GENERATION_BUDGET_MS,
-      });
-      break;
-    }
+  async function worker() {
+    while (nextIndex < input.desiredCount) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (Date.now() >= deadlineAt) {
+        console.warn("image generation budget exhausted before completing image set", {
+          desiredCount: input.desiredCount,
+          generatedCount: singles.filter(Boolean).length,
+          budgetMs: requestedBudgetMs,
+        });
+        return;
+      }
 
-    const variantPrompt = input.variantPrompts[index] || input.prompt;
-    const image =
-      input.referenceImages.length > 0
-        ? await requestSingleImageWithReferenceImages({
-            endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/edits`,
-            apiKey: input.apiKey,
-            model: input.model,
-            prompt: variantPrompt,
-            sizeCandidates,
-            deadlineAt,
-            referenceImages: input.referenceImages,
-          })
-        : await requestSingleImageWithFallbackSizes({
-            endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/generations`,
-            apiKey: input.apiKey,
-            model: input.model,
-            prompt: variantPrompt,
-            sizeCandidates,
-            deadlineAt,
-          });
-    if (image) singles.push({ ...image, id: `image-${index + 1}` });
-    if (image && index < input.desiredCount - 1) {
-      await sleep(1500);
+      const variantPrompt = input.variantPrompts[index] || input.prompt;
+      const image =
+        input.referenceImages.length > 0
+          ? await requestSingleImageWithReferenceImages({
+              endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/edits`,
+              apiKey: input.apiKey,
+              model: input.model,
+              prompt: variantPrompt,
+              sizeCandidates,
+              deadlineAt,
+              referenceImages: input.referenceImages,
+            })
+          : await requestSingleImageWithFallbackSizes({
+              endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/generations`,
+              apiKey: input.apiKey,
+              model: input.model,
+              prompt: variantPrompt,
+              sizeCandidates,
+              deadlineAt,
+            });
+      if (image) singles[index] = { ...image, id: `image-${index + 1}` };
+      if (image && nextIndex < input.desiredCount) await sleep(750);
     }
   }
-  return singles;
+
+  const workerCount = Math.min(IMAGE_GENERATION_CONCURRENCY, input.desiredCount);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return singles.filter((image): image is { id: string; url: string } => Boolean(image));
 }
 
 async function requestSingleImageWithReferenceImages(input: {

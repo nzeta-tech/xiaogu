@@ -39,14 +39,14 @@ export async function POST(request: Request) {
         const media = await fetch(mediaUrl, { signal: AbortSignal.timeout(30000) });
         if (!media.ok) throw new Error("视频文件暂时无法下载。");
         const bytes = await media.arrayBuffer();
-        if (bytes.byteLength > 100 * 1024 * 1024) throw new Error("视频文件超过本地转写大小限制。");
+        if (bytes.byteLength > 200 * 1024 * 1024) throw new Error("视频文件超过本地转写大小限制。");
         send({ type: "status", message: "正在识别语音..." });
         const form = new FormData();
         form.append("file", new Blob([bytes], { type: media.headers.get("content-type") ?? "video/mp4" }), "source-media.mp4");
         form.append("language", "zh");
         const base = process.env.VIRAL_TRANSCRIBE_API_BASE?.trim();
         if (!base) throw new Error("本地语音转写服务尚未启用。");
-        const upstream = await fetch(`${base.replace(/\/$/, "")}/transcribe/stream`, { method: "POST", body: form, signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 240000)) });
+        const upstream = await fetch(`${base.replace(/\/$/, "")}/transcribe/stream`, { method: "POST", body: form, signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 1_200_000)) });
         if (!upstream.ok || !upstream.body) throw new Error("本地语音转写服务暂不可用。");
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
