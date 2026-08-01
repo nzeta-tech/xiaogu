@@ -15,6 +15,7 @@ type WorkDetail = {
   content_json?: {
     batches?: CreationOutputBatch[];
     wechatStudioState?: WechatStudioWorkState;
+    presentationJobId?: string;
   } | null;
   platform: string;
   status: string;
@@ -467,6 +468,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const imageRetryable = streamState.retryable || Boolean(work?.app_run?.result_json?.retryable);
   const isPolicyRenewalCardWork = work?.platform === "policy-renewal-card";
   const isWechatStudioWork = work?.platform === "wechat-studio";
+  const isPptMakerWork = work?.platform === "ppt-maker";
   const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || isPolicyRenewalCardWork;
   const defaultWatermark = typeof work?.app_run?.input_payload?.signature === "string" ? work.app_run.input_payload.signature.trim() : "";
   const effectiveWatermark = watermarkEnabled ? (watermarkText.trim() || defaultWatermark) : "";
@@ -680,6 +682,39 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             <h1>{articleTitle}</h1>
             <ReadOnlyWechatArticle content={articleContent} images={articleImages} />
           </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (isPptMakerWork) {
+    const presentationJobId = work.content_json?.presentationJobId || extractPresentationJobId(work.content);
+    const pageCount = extractPresentationPageCount(work.content);
+    const presentationStatus = work.content.includes("已完成") ? "succeeded" : work.content.includes("失败") || work.content.includes("未完成") ? "failed" : work.app_run?.status || "running";
+    const finished = presentationStatus === "succeeded";
+    const failed = presentationStatus === "failed";
+
+    return (
+      <div className="workDetailPage pptWorkDetailPage">
+        <div className="page-content pptWorkDetailShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={formatWorkTitle(work)} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <section className={`pptWorkDetailHero ${finished ? "succeeded" : failed ? "failed" : "running"}`}>
+            <div><span>PPT 轻松制作</span><h1>{finished ? "PPT 已准备好" : failed ? "这次制作没有完成" : "PPT 正在制作中"}</h1><p>{formatWorkTitle(work)}</p></div>
+            <div className="pptWorkDetailSeal"><b>{finished ? "✓" : failed ? "!" : "↗"}</b><span>{finished ? "已完成" : failed ? "未完成" : "制作中"}</span></div>
+          </section>
+          <div className="pptWorkDetailLayout">
+            <main className="pptWorkDetailCard">
+              <header><div><span>PRESENTATION</span><h2>{formatWorkTitle(work)}</h2></div><em>{pageCount ? `${pageCount} 页` : finished ? "PPTX" : "处理中"}</em></header>
+              <ol className="pptWorkDetailProgress">
+                <li className="done"><i>1</i><div><b>接收任务</b><span>创作要求已保存</span></div></li>
+                <li className={finished || failed || presentationStatus === "running" ? "done" : ""}><i>2</i><div><b>设计内容</b><span>搭建叙事与页面结构</span></div></li>
+                <li className={finished || failed ? "done" : ""}><i>3</i><div><b>生成与检查</b><span>输出可编辑演示文稿</span></div></li>
+                <li className={finished ? "done" : ""}><i>4</i><div><b>交付文件</b><span>{finished ? "文件已准备好" : failed ? "本次未产生文件" : "等待制作完成"}</span></div></li>
+              </ol>
+              {finished ? <section className="pptWorkDelivery"><div className="pptWorkFileIcon">P</div><div><b>{formatWorkTitle(work)}.pptx</b><span>{pageCount ? `${pageCount} 页 · ` : ""}16:9 · 可编辑 PowerPoint 文件</span></div>{!isAdminPreview && presentationJobId ? <a className="studioPrimary" href={appPath(`/apps/ppt-maker/result/${presentationJobId}`)}>查看并下载</a> : <span className="wechatStudioAdminBadge">管理员只读查看</span>}</section> : <p className={`pptWorkNotice ${failed ? "failed" : ""}`}>{failed ? "这次制作未完成，作品记录和输入信息仍已保留。" : "任务会继续在本地 Agent 中执行，完成后作品状态会自动更新。"}</p>}
+            </main>
+            {showResultDetails ? <aside className="pptWorkDetailAside"><span>作品信息</span><dl><div><dt>任务编号</dt><dd>{presentationJobId || "未记录"}</dd></div><div><dt>文件类型</dt><dd>可编辑 PPTX</dd></div><div><dt>作品状态</dt><dd>{finished ? "已完成" : failed ? "生成失败" : "制作中"}</dd></div><div><dt>更新时间</dt><dd>{formatDate(work.updated_at)}</dd></div></dl></aside> : null}
+          </div>
         </div>
       </div>
     );
@@ -3980,7 +4015,17 @@ function formatAppLabel(value?: string | null) {
   if (value === "topic-picker") return "找选题";
   if (value === "xiaohongshu-check") return "小红书违规检测";
   if (value === "wechat-studio") return "公众号文章创作";
+  if (value === "ppt-maker") return "PPT轻松制作";
   return value ?? "";
+}
+
+function extractPresentationJobId(content: string) {
+  return content.match(/PPT_JOB_ID:\s*([0-9a-f-]{36})/i)?.[1] || "";
+}
+
+function extractPresentationPageCount(content: string) {
+  const value = Number(content.match(/页数[：:]\s*(\d+)\s*页/)?.[1] || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function ReadOnlyWechatArticle({ content, images }: { content: string; images: Array<WechatStudioImage & { url: string }> }) {
