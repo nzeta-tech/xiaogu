@@ -28,7 +28,8 @@ const readJson = async (file, fallback) => existsSync(file) ? JSON.parse(await r
 const writeJson = (file, value) => writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
 const ensure = async (...dirs) => Promise.all(dirs.map((dir) => mkdir(dir, { recursive: true })));
 const slug = (value) => value.replace(/[^a-zA-Z0-9_-]/g, "_");
-const selectedShotIds = (manifest) => (arg("shots") || manifest.shots.map((shot) => shot.id).join(",")).split(",").filter(Boolean);
+const generationUnits = (manifest) => manifest.seedancePlan?.units?.length ? manifest.seedancePlan.units : manifest.shots;
+const selectedUnitIds = (manifest) => (arg("shots") || generationUnits(manifest).map((unit) => unit.id).join(",")).split(",").filter(Boolean);
 
 async function loadManifest() { return JSON.parse(await readFile(manifestPath, "utf8")); }
 
@@ -63,10 +64,11 @@ async function preflight() {
   const ffmpeg = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" }).status === 0;
   const logo = path.join(root, "public/brand/xiaogu-icon.png");
   const characterFiles = ["xiaogu-fairy.png", "broker-hero.png"].map((name) => path.join(filmDir, "assets/characters", name));
-  const productRefs = manifest.shots.flatMap((shot) => shot.productAssets || []);
+  const units = generationUnits(manifest);
+  const productRefs = units.flatMap((unit) => unit.productAssets || []);
   const missingProductRefs = productRefs.filter((asset) => !existsSync(path.join(filmDir, asset)));
   console.log(`Film: ${manifest.title}`);
-  console.log(`Shots: ${manifest.shots.length}; planned duration: ${manifest.shots.reduce((sum, shot) => sum + shot.duration, 0)}s`);
+  console.log(`Seedance units: ${units.length}; planned duration: ${units.reduce((sum, unit) => sum + unit.duration, 0)}s; max unit: ${Math.max(...units.map((unit) => unit.duration))}s`);
   console.log(`FFmpeg: ${ffmpeg ? "ready" : "missing"}`);
   console.log(`Logo: ${existsSync(logo) ? "ready" : "missing"}`);
   console.log(`Characters: ${characterFiles.every(existsSync) ? "ready" : "not yet supplied"}`);
@@ -80,26 +82,28 @@ async function prepare() {
   await ensure(rendersDir, outputDir, path.join(filmDir, "assets/brand"), path.join(filmDir, "assets/characters"), path.join(filmDir, "assets/product"), path.join(filmDir, "assets/product-visuals"), path.join(filmDir, "assets/audio"));
   await copyFile(path.join(root, "public/brand/xiaogu-icon.png"), path.join(filmDir, "assets/brand/xiaogu-logo.png"));
   const common = `${manifest.visualBible.style}\n角色一致性：${manifest.visualBible.fairy}\n主角一致性：${manifest.visualBible.hero}\n禁止项：${manifest.visualBible.negative}`;
-  const requests = manifest.shots.map((shot) => ({
-    shotId: shot.id, beat: shot.beat, duration: shot.duration, candidates: 4,
-    prompt: `${common}\n\n本镜头：${shot.prompt}`,
-    postOverlay: shot.overlay,
-    references: ["assets/brand/xiaogu-logo.png", "assets/characters/xiaogu-fairy.png", "assets/characters/broker-hero.png", ...(shot.productAssets || [])]
+  const units = generationUnits(manifest);
+  const requests = units.map((unit) => ({
+    shotId: unit.id, beat: unit.beat, duration: unit.duration, candidates: 4,
+    prompt: `${common}\n\n本生成单元：${unit.prompt}`,
+    postOverlay: unit.overlay,
+    references: ["assets/brand/xiaogu-logo.png", "assets/characters/xiaogu-fairy.png", "assets/characters/broker-hero.png", ...(unit.productAssets || [])]
   }));
   await writeJson(path.join(rendersDir, "seedance-requests.json"), requests);
-  await writeJson(selectionPath, { note: "Replace each null value with a relative candidate video path after review.", shots: Object.fromEntries(manifest.shots.map((shot) => [shot.id, null])) });
-  console.log(`Prepared ${requests.length} shots. No external API call was made.`);
+  await writeJson(selectionPath, { note: "Replace each null value with a relative candidate video path after review.", shots: Object.fromEntries(units.map((unit) => [unit.id, null])) });
+  console.log(`Prepared ${requests.length} Seedance units. No external API call was made.`);
 }
 
 async function submit() {
   if (!process.env.SEEDANCE_API_BASE_URL || !process.env.SEEDANCE_API_KEY) throw new Error("Seedance credentials are required. Set them in .env.");
   const manifest = await loadManifest();
-  const wanted = new Set(selectedShotIds(manifest));
+  const wanted = new Set(selectedUnitIds(manifest));
+  const units = generationUnits(manifest);
   const jobs = await readJson(jobsPath, {});
   const references = (process.env.SEEDANCE_REFERENCE_IMAGE_URLS || "").split(",").map((value) => value.trim()).filter(Boolean);
   const productReferenceBase = (process.env.SEEDANCE_PRODUCT_REFERENCE_BASE_URL || "").replace(/\/$/, "");
   if (!references.length) throw new Error("Set SEEDANCE_REFERENCE_IMAGE_URLS to publicly reachable logo, fairy, and hero image URLs before submitting.");
-  for (const shot of manifest.shots.filter((item) => wanted.has(item.id))) {
+  for (const shot of units.filter((item) => wanted.has(item.id))) {
     for (let candidate = 1; candidate <= Number(process.env.SEEDANCE_CANDIDATES_PER_SHOT || 4); candidate += 1) {
       const key = `${shot.id}-c${candidate}`;
       if (jobs[key]) { console.log(`Skip ${key}: already submitted.`); continue; }
@@ -155,7 +159,7 @@ async function assemble() {
   const manifest = await loadManifest();
   const selection = await readJson(selectionPath, null);
   if (!selection?.shots) throw new Error("Run prepare first, then fill selection.json.");
-  const selected = manifest.shots.map((shot) => ({ ...shot, file: selection.shots[shot.id] })).filter((shot) => shot.file);
+  const selected = generationUnits(manifest).map((shot) => ({ ...shot, file: selection.shots[shot.id] })).filter((shot) => shot.file);
   if (!selected.length) throw new Error("No clips selected. Fill marketing-film/renders/selection.json first.");
   await ensure(outputDir, path.join(rendersDir, "normalized"));
   const font = process.env.XIAOGU_FILM_FONT || "/System/Library/Fonts/Hiragino Sans GB.ttc";
