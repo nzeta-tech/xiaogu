@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import { parseCreationOutput, type CreationOutputBatch, type CreationOutputItem, type CreationOutputViewMode } from "@/lib/creation/output";
@@ -11,7 +12,10 @@ type WorkDetail = {
   id: string;
   title: string;
   content: string;
-  content_json?: { batches?: CreationOutputBatch[] } | null;
+  content_json?: {
+    batches?: CreationOutputBatch[];
+    wechatStudioState?: WechatStudioWorkState;
+  } | null;
   platform: string;
   status: string;
   compliance_risk: string;
@@ -42,6 +46,21 @@ type XhsTemplate = "journal" | "side-card" | "aurora" | "classic-red" | "memo" |
 type XhsFontSize = "sm" | "md" | "lg" | "xl";
 type CopyState = Record<string, boolean>;
 type GeneratedImage = { id: string; url: string };
+type WechatStudioImage = { id?: string; url?: string; sectionIndex?: number; sectionTitle?: string };
+type WechatStudioWorkState = {
+  title?: string;
+  content?: string;
+  topic?: string;
+  audience?: string;
+  tone?: string;
+  lengthMode?: "minimal" | "standard" | "long";
+  style?: string;
+  layout?: string;
+  images?: WechatStudioImage[];
+  uploadedImages?: WechatStudioImage[];
+  cover?: WechatStudioImage | null;
+  activeTab?: string;
+};
 type ImageGenerationMode = "image" | "demo" | "fallback" | "rate_limited" | "";
 type PreviewField = { label: string; value: string; mode?: "plain" | "markdown" };
 type PreviewImage = { label: string; url: string };
@@ -447,6 +466,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   );
   const imageRetryable = streamState.retryable || Boolean(work?.app_run?.result_json?.retryable);
   const isPolicyRenewalCardWork = work?.platform === "policy-renewal-card";
+  const isWechatStudioWork = work?.platform === "wechat-studio";
   const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || isPolicyRenewalCardWork;
   const defaultWatermark = typeof work?.app_run?.input_payload?.signature === "string" ? work.app_run.input_payload.signature.trim() : "";
   const effectiveWatermark = watermarkEnabled ? (watermarkText.trim() || defaultWatermark) : "";
@@ -626,6 +646,43 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   if (!work) {
     return <div className="pageStack"><section className="panel emptyState">没有找到这条作品。</section></div>;
+  }
+
+  if (isWechatStudioWork) {
+    const state = work.content_json?.wechatStudioState;
+    const articleTitle = state?.title?.trim() || formatWorkTitle(work);
+    const articleContent = state?.content?.trim() || work.content.trim();
+    const articleImages = [...(state?.images ?? []), ...(state?.uploadedImages ?? [])]
+      .filter((image): image is WechatStudioImage & { url: string } => typeof image.url === "string" && Boolean(image.url.trim()));
+    const coverUrl = typeof state?.cover?.url === "string" ? state.cover.url.trim() : "";
+    const layout = typeof state?.layout === "string" && state.layout.trim() ? state.layout.trim() : "clean";
+
+    return (
+      <div className="workDetailPage wechatStudioWorkDetailPage">
+        <div className="page-content wechatStudioWorkDetailShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={articleTitle} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <section className="wechatStudioWorkHero">
+            <div>
+              <span>公众号文章创作</span>
+              <h1>{articleTitle}</h1>
+              <p>{articleContent ? `${articleContent.replace(/\s/g, "").length.toLocaleString("zh-CN")} 字 · 已按创作时保存的版式还原` : "这篇文章仍在创作中，已保留当前进度。"}</p>
+            </div>
+            {!isAdminPreview ? <a className="studioPrimary" href={appPath(`/apps/wechat-studio?from=creation-works&workId=${work.id}`)}>继续编辑</a> : <span className="wechatStudioAdminBadge">管理员只读查看</span>}
+          </section>
+          {showResultDetails ? <section className="wechatStudioWorkMeta">
+            <div><span>创作进度</span><strong>{formatWechatStudioStep(state?.activeTab)}</strong></div>
+            <div><span>正文篇幅</span><strong>{formatWechatLengthMode(state?.lengthMode)}</strong></div>
+            <div><span>配图风格</span><strong>{state?.style || "未选择"}</strong></div>
+            <div><span>整体版式</span><strong>{formatWechatLayout(layout)}</strong></div>
+          </section> : null}
+          <main className={`wechatStudioWorkCanvas studioLayout-${layout}`}>
+            {coverUrl ? <figure className="wechatStudioWorkCover"><img src={coverUrl} alt="公众号文章封面" /></figure> : null}
+            <h1>{articleTitle}</h1>
+            <ReadOnlyWechatArticle content={articleContent} images={articleImages} />
+          </main>
+        </div>
+      </div>
+    );
   }
 
   if (isImageWork) {
@@ -3922,7 +3979,52 @@ function formatAppLabel(value?: string | null) {
   if (value === "wechat-article-polish") return "公众号文章精修";
   if (value === "topic-picker") return "找选题";
   if (value === "xiaohongshu-check") return "小红书违规检测";
+  if (value === "wechat-studio") return "公众号文章创作";
   return value ?? "";
+}
+
+function ReadOnlyWechatArticle({ content, images }: { content: string; images: Array<WechatStudioImage & { url: string }> }) {
+  const sections = content.split(/(?=^##\s+)/m).filter((section) => section.trim());
+  const usedIds = new Set<string>();
+  const imageKey = (image: WechatStudioImage, index: number) => image.id || `${image.url}-${index}`;
+  const before = images.filter((image) => image.sectionIndex === -1);
+  before.forEach((image, index) => usedIds.add(imageKey(image, index)));
+  const after = sections.map((_, sectionIndex) => {
+    const assigned = images.filter((image) => image.sectionIndex === sectionIndex);
+    assigned.forEach((image, index) => usedIds.add(imageKey(image, index)));
+    if (assigned.length) return assigned;
+    const automaticIndex = images.findIndex((image, index) => image.sectionIndex === undefined && !usedIds.has(imageKey(image, index)));
+    if (automaticIndex < 0) return [];
+    const automatic = images[automaticIndex];
+    usedIds.add(imageKey(automatic, automaticIndex));
+    return [automatic];
+  });
+  const remaining = images.filter((image, index) => !usedIds.has(imageKey(image, index)));
+  const figures = (items: Array<WechatStudioImage & { url: string }>, prefix: string) => items.map((image, index) => <figure key={imageKey(image, index)}><img src={image.url} alt={image.sectionTitle || `${prefix} ${index + 1}`} />{image.sectionTitle ? <figcaption>{image.sectionTitle}</figcaption> : null}</figure>);
+
+  if (!content) return <p className="wechatStudioWorkEmpty">正文尚未生成，当前作品已作为未完成草稿保留。</p>;
+  return <article className="studioMarkdownArticle studioArticlePreview">{figures(before, "文首配图")}{sections.map((section, index) => <section className="studioArticleSection" key={`${index}-${section.slice(0, 24)}`}><ReactMarkdown>{section}</ReactMarkdown>{figures(after[index], "章节配图")}</section>)}{figures(remaining, "文末配图")}</article>;
+}
+
+function formatWechatStudioStep(value?: string) {
+  if (value === "write") return "填写内容";
+  if (value === "article") return "文章初稿";
+  if (value === "visual") return "选择配图";
+  if (value === "layout") return "整体版式";
+  if (value === "draft") return "预览发布";
+  return "已保存草稿";
+}
+
+function formatWechatLengthMode(value?: string) {
+  if (value === "minimal") return "极简 · 约 600 字";
+  if (value === "standard") return "常规 · 约 1200 字";
+  if (value === "long") return "长文 · 约 1800 字";
+  return "未记录";
+}
+
+function formatWechatLayout(value?: string) {
+  const labels: Record<string, string> = { clean: "清爽阅读", magazine: "杂志专题", card: "卡片分段", notebook: "手记叙事", minimal: "极简留白", newspaper: "报刊评论", warm: "温暖故事", dark: "深色质感" };
+  return labels[value || ""] || value || "清爽阅读";
 }
 
 function formatTopicPlatformLabel(value?: string | null) {
