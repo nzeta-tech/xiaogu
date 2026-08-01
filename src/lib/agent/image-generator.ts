@@ -3,7 +3,6 @@ import { isDemoModeEnabled } from "@/lib/config/runtime";
 const IMAGE_REQUEST_TIMEOUT_MS = clampDuration(process.env.IMAGE_REQUEST_TIMEOUT_MS, 240000, 60000, 300000);
 const IMAGE_GENERATION_BUDGET_MS = clampDuration(process.env.IMAGE_GENERATION_BUDGET_MS, 600000, IMAGE_REQUEST_TIMEOUT_MS, 900000);
 const IMAGE_REQUEST_MAX_ATTEMPTS = 2;
-const IMAGE_SAFE_SIZE = "1024x1024";
 const IMAGE_RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 export async function generateImageSet(input: {
@@ -12,6 +11,7 @@ export async function generateImageSet(input: {
   ratio: string;
   count?: number;
   referenceImages?: string[];
+  variantPrompts?: string[];
 }) {
   const apiKey =
     process.env.OPENAI_IMAGE_API_KEY ??
@@ -47,6 +47,7 @@ export async function generateImageSet(input: {
     ratio: input.ratio,
     desiredCount,
     referenceImages: input.referenceImages ?? [],
+    variantPrompts: input.variantPrompts ?? [],
   });
 
   if (images.length === 0) {
@@ -74,6 +75,7 @@ async function requestCompatibleImages(input: {
   ratio: string;
   desiredCount: number;
   referenceImages: string[];
+  variantPrompts: string[];
 }) {
   const singles: Array<{ id: string; url: string }> = [];
   const deadlineAt = Date.now() + IMAGE_GENERATION_BUDGET_MS;
@@ -89,13 +91,14 @@ async function requestCompatibleImages(input: {
       break;
     }
 
+    const variantPrompt = input.variantPrompts[index] || input.prompt;
     const image =
       input.referenceImages.length > 0
         ? await requestSingleImageWithReferenceImages({
             endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/edits`,
             apiKey: input.apiKey,
             model: input.model,
-            prompt: input.prompt,
+            prompt: variantPrompt,
             sizeCandidates,
             deadlineAt,
             referenceImages: input.referenceImages,
@@ -104,7 +107,7 @@ async function requestCompatibleImages(input: {
             endpoint: `${input.baseUrl.replace(/\/$/, "")}/images/generations`,
             apiKey: input.apiKey,
             model: input.model,
-            prompt: input.prompt,
+            prompt: variantPrompt,
             sizeCandidates,
             deadlineAt,
           });
@@ -349,12 +352,7 @@ async function requestImageEditBatch(input: {
 
 function buildPreferredSizeCandidates(ratio: string) {
   const targetSize = normalizeRatioToSize(ratio);
-  if (targetSize === IMAGE_SAFE_SIZE) {
-    return [IMAGE_SAFE_SIZE];
-  }
-  // Cheap-llm is currently unstable for long-running image jobs.
-  // Prefer a single lightweight size to avoid multi-minute fallback loops.
-  return [IMAGE_SAFE_SIZE];
+  return [targetSize];
 }
 
 function sleep(ms: number) {
@@ -369,7 +367,7 @@ function clampDuration(rawValue: string | undefined, fallback: number, minimum: 
 
 function normalizeRatioToSize(ratio: string) {
   if (["3:4", "4:5", "2:3", "9:16"].includes(ratio)) return "1024x1536";
-  if (["4:3", "5:4", "3:2", "16:9"].includes(ratio)) return "1536x1024";
+  if (["4:3", "5:4", "3:2", "16:9", "2.35:1"].includes(ratio)) return "1536x1024";
   return "1024x1024";
 }
 
@@ -429,6 +427,7 @@ function buildMockImages(prompt: string, style: string, ratio: string, count: nu
 }
 
 function normalizeRatioToCanvas(ratio: string) {
+  if (ratio === "2.35:1") return { width: 1410, height: 600 };
   if (["3:4", "4:5", "2:3", "9:16"].includes(ratio)) return { width: 900, height: 1200 };
   if (["4:3", "5:4", "3:2", "16:9"].includes(ratio)) return { width: 1200, height: 900 };
   return { width: 1080, height: 1080 };

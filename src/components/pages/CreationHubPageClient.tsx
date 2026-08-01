@@ -56,6 +56,18 @@ const workspaceCategories: Array<{ id: WorkspaceCategory; label: string; descrip
 
 const workspaceCards: WorkspaceCard[] = [
   {
+    slug: "wechat-studio",
+    appSlug: "wechat-studio",
+    name: "公众号文章创作",
+    emoji: "✦",
+    pointsLabel: "8",
+    badge: "新",
+    description: "从选题到成文、配图、排版，再一键提交到公众号草稿箱，发布一页完成。",
+    hint: "输入一个想法，先生成文章，再用配图把阅读节奏做完整。",
+    actionLabel: "使用",
+    goals: ["trust", "conversion", "brand"],
+  },
+  {
     slug: "ppt-maker",
     appSlug: "ppt-maker",
     name: "PPT轻松制作",
@@ -333,6 +345,7 @@ const workspaceCards: WorkspaceCard[] = [
 ];
 
 const hiddenWorkspaceCardSlugs = new Set([
+  "write-copy",
   "lead-copy",
   "wechat-article-polish",
   "lead-package",
@@ -349,7 +362,17 @@ const hiddenWorkspaceCardSlugs = new Set([
 
 const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCardSlugs.has(card.slug));
 
+// Keep the primary creation paths at the head of the feature catalogue, even
+// when a user has previously used another tool more often.
+const workspaceCardPriority = new Map([
+  ["traffic-copy", 0],
+  ["image-card", 1],
+  ["wechat-studio", 2],
+  ["ppt-maker", 3],
+]);
+
 const workspaceIconUrls: Record<string, string> = {
+  "wechat-studio": "/icons/creation/book-pencil.webp",
   "ppt-maker": "/icons/creation/landscape.webp",
   "write-copy": "/icons/creation/book-pencil.webp",
   "image-card": "/icons/creation/palette.webp",
@@ -450,7 +473,12 @@ export function CreationHubPageClient() {
   const filteredCards = visibleWorkspaceCards
     .filter((card) => selectedCategory === "all" || getWorkspaceCategory(card) === selectedCategory)
     .filter((card) => `${card.name}${card.description}`.toLowerCase().includes(search.trim().toLowerCase()))
-    .sort((left, right) => getUsageCount(right, usageByApp) - getUsageCount(left, usageByApp));
+    .sort((left, right) => {
+      const priorityDifference = (workspaceCardPriority.get(left.slug) ?? Number.MAX_SAFE_INTEGER)
+        - (workspaceCardPriority.get(right.slug) ?? Number.MAX_SAFE_INTEGER);
+      if (priorityDifference !== 0) return priorityDifference;
+      return getUsageCount(right, usageByApp) - getUsageCount(left, usageByApp);
+    });
 
   return (
     <div className="pageStack creationHubPage workspaceHubPage">
@@ -578,6 +606,7 @@ function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {
 }
 
 function getCardOutputLabel(card: WorkspaceCard) {
+  if (card.slug === "wechat-studio") return "文章 + 配图";
   if (card.slug === "image-card" || card.slug === "wechat-images" || card.slug === "policy-renewal-card") return "图片结果";
   if (card.slug.includes("check")) return "风险报告";
   if (card.slug === "topic-picker") return "6 个选题";
@@ -601,6 +630,7 @@ function getWorkspaceCategoryLabel(card: WorkspaceCard) {
 
 function getCardInspiration(card: WorkspaceCard) {
   const inspirations: Record<string, string> = {
+    "wechat-studio": "把一个真实想法，变成一篇可以直接排版发布的公众号文章。",
     "write-copy": "把一次客户提问，变成能发布的口播和朋友圈。",
     "link-remix": "参考一条爆款作品，转化成适合自己账号的原创内容。",
     "image-card": "把复杂保险知识，做成一眼能看懂的知识卡片。",

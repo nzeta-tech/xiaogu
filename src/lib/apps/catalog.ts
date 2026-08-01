@@ -63,6 +63,45 @@ export const creationCategories: CreationCategory[] = [
 
 export const creationApps: CreationApp[] = [
   {
+    id: "wechat-studio",
+    slug: "wechat-studio",
+    name: "公众号文章创作",
+    emoji: "✦",
+    category: "content",
+    points: 8,
+    badge: "新",
+    featured: true,
+    description: "从一个想法出发，完成文章、配图、排版和一键发布公众号。",
+    promptHint: "围绕用户提供的真实素材创作一篇适合微信公众号阅读的文章。标题具体有吸引力，结构清楚，段落短而易读；不编造案例、数据或产品承诺，并在不确定处保留核验提示。",
+    resultType: "text",
+    fields: [
+      { id: "topic", label: "这篇文章想讲什么", type: "textarea", required: true, placeholder: "例如：为什么给孩子买保险前，先要弄清家庭现金流？可以补充真实经历、想表达的观点和不能写错的细节。", maxLength: 6000 },
+      { id: "audience", label: "写给谁看", type: "radio", required: true, options: [
+        { label: "年轻家庭", value: "young-family" }, { label: "宝妈 / 宝爸", value: "parents" }, { label: "职场人", value: "professionals" }, { label: "已有客户", value: "existing-clients" },
+      ] },
+      { id: "tone", label: "表达方式", type: "radio", required: true, options: [
+        { label: "专业但易懂", value: "professional" }, { label: "温和有共鸣", value: "warm" }, { label: "观点鲜明", value: "insightful" },
+      ] },
+    ],
+  },
+  {
+    id: "wechat-cover",
+    slug: "wechat-cover",
+    name: "公众号文章封面",
+    emoji: "▧",
+    category: "content",
+    points: 3,
+    description: "为公众号文章生成横版封面图。",
+    promptHint: "生成一张适合微信公众号文章列表展示的横版封面。画面应有明确主体和留白，不要在图中生成文字、品牌标识或水印。",
+    resultType: "image",
+    fields: [
+      { id: "title", label: "文章标题", type: "text", required: true },
+      { id: "summary", label: "文章内容摘要", type: "textarea", required: true },
+      { id: "style", label: "视觉风格", type: "text", required: true },
+      { id: "ratio", label: "图片比例", type: "text", required: true },
+    ],
+  },
+  {
     id: "ppt-maker",
     slug: "ppt-maker",
     name: "PPT轻松制作",

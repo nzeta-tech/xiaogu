@@ -32,6 +32,7 @@ import {
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
+import { buildWechatSectionImagePrompts } from "@/lib/creation/wechat-article-images";
 
 type FieldValue = CreationFieldValue;
 
@@ -71,6 +72,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const body = (await request.json()) as { values?: Record<string, FieldValue> };
   const values = body.values ?? {};
   const isPolicyRenewalCard = app.slug === "policy-renewal-card";
+  const isWechatStudioInternalStep = stringifyCreationFieldValue(values.studio_parent) === "wechat-studio"
+    && (app.slug === "wechat-images" || app.slug === "wechat-cover");
 
   const missingField = app.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
   if (missingField) {
@@ -85,7 +88,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const caseContext = buildCreationPromptContext(app.slug);
 
-  const content = app.slug === "write-copy"
+  const content = app.slug === "wechat-studio"
+    ? buildWechatStudioPrompt(values, caseContext)
+    : app.slug === "write-copy"
     ? buildWriteCopyPrompt(app.fields, values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
     : isMultiChannelCopyAppSlug(app.slug)
       ? buildLeadCopyPrompt(app.fields, values, app.promptHint, caseContext, getMultiChannelCopyVariant(app.slug))
@@ -109,6 +114,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const visualReferences = app.resultType === "image"
     ? await resolveAvatarVisualReferences({ userId: user.id, assetIds: visualAssetIds, appSlug: entry === "personality-card" ? "personality-card" : app.slug })
     : [];
+  const wechatImagePlan = app.slug === "wechat-images"
+    ? buildWechatSectionImagePrompts(stringifyCreationFieldValue(values.article), imagePrompt, 5)
+    : null;
   if (needsAvatarPhoto && visualAssetIds.length > 0 && visualReferences.length === 0) {
     return Response.json({ error: "数字分身形象照当前不可用，请检查隐私设置、照片状态和使用范围。" }, { status: 400 });
   }
@@ -117,8 +125,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       ? await generateImageSet({
           prompt: imagePrompt,
           style: stringifyValue(values.style) || app.name,
-          ratio: stringifyValue(values.ratio) || "1:1",
-          count: 1,
+          ratio: stringifyValue(values.ratio) || (app.slug === "wechat-images" ? "3:2" : "1:1"),
+          count: wechatImagePlan?.prompts.length ?? 1,
+          variantPrompts: wechatImagePlan?.prompts,
           referenceImages: [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
           })
       : null;
@@ -181,19 +190,22 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       images: imageResult?.images ?? [],
       imageMode: imageResult?.mode ?? null,
       avatarVisualAssetIds: visualReferences.map((item) => item.id),
+      imageSections: wechatImagePlan?.sections ?? [],
     },
   });
 
-  const work = await tryCreateWork({
-    userId: user.id,
-    appRunId: run?.id ?? null,
-    appCode: app.slug,
-    title,
-    content: result,
-    contentJson,
-    sourceChannel: app.slug,
-    complianceRisk: "unchecked",
-  });
+  const work = isWechatStudioInternalStep
+    ? null
+    : await tryCreateWork({
+        userId: user.id,
+        appRunId: run?.id ?? null,
+        appCode: app.slug,
+        title,
+        content: result,
+        contentJson,
+        sourceChannel: app.slug,
+        complianceRisk: "unchecked",
+      });
 
   await reportUsage({
     customerId: user.id,
@@ -239,6 +251,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     work,
     result,
     images: imageResult?.images ?? [],
+    imageSections: wechatImagePlan?.sections ?? [],
     imageMode: imageResult?.mode ?? null,
   });
 }
@@ -282,6 +295,30 @@ function buildPrompt(
     lines.push(`- ${field.label}：${Array.isArray(value) ? value.join("、") : value}`);
   }
   return lines.join("\n");
+}
+
+function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext: string[]) {
+  const audience = stringifyValue(values.audience) || "普通读者";
+  const tone = stringifyValue(values.tone) || "专业但易懂";
+  const topic = stringifyValue(values.topic);
+  return [
+    "你正在为微信公众号写一篇完整长文，不是短视频口播稿，不是小红书笔记，也不是营销话术。",
+    ...caseContext,
+    "写作目标：让读者在 3-5 分钟内读懂一个具体问题，并对作者建立专业、可信的信任。",
+    "严格要求：不要使用口播开场、短促断句、‘家人们’‘朋友们’‘你知道吗’等短视频表达；不要用表情符号、编号清单堆砌或强推销 CTA。",
+    "文章结构：",
+    "1. 第一行只输出一个 Markdown 一级标题（不加‘标题：’）。",
+    "2. 用一个具体场景、提问或反常识判断开篇，约 150 字，迅速交代读者为何值得读。",
+    "3. 正文分 3-4 个 Markdown 二级标题，每节 250-450 字；以完整段落自然论证，有具体场景才写具体场景，没有依据不得虚构案例、数据或经历。",
+    "4. 结尾回扣核心判断，给一个温和、自然的行动建议；不得强迫私信、购买或制造焦虑。",
+    "5. 总字数约 1200-1800 字。段落应适合公众号阅读，每段 2-4 句。",
+    "6. 保险相关表达须合规：不承诺收益、承保或理赔；产品、案例与数据不确定时明确提示需要核验。",
+    `目标读者：${audience}。`,
+    `文章气质：${tone}。`,
+    "用户的真实素材与要求：",
+    topic,
+    "只输出可发布文章，不要解释写作过程、配图建议或免责声明。",
+  ].filter(Boolean).join("\n\n");
 }
 
 function buildWriteCopyPrompt(

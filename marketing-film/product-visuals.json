@@ -1,0 +1,15 @@
+{
+  "title": "小谷 AI 宣传片概念产品视觉",
+  "purpose": "作为 Seedance 镜头的产品画面基底与后期合成素材；采用功能抽象化表达，不直接复刻生产界面。",
+  "style": "都市写实科技广告，薄荷绿、暖白、浅金与少量珊瑚色；磨砂玻璃、柔和日光、克制留白。",
+  "sourceReference": "以已核验的小谷 AI 功能能力和界面信息架构为依据重新设计，非产品截图。",
+  "assets": [
+    { "file": "assets/product-visuals/simulated-ui/01-creation-hub-sim-v1.png", "capabilities": ["创作广场", "多平台文案", "录音转文字", "图文配图", "热点创作"], "shots": ["s03"], "kind": "仿真 UI；只复用真实功能信息架构，不含任何用户或客户数据" },
+    { "file": "assets/product-visuals/simulated-ui/02-avatar-memory-sim-v1.png", "capabilities": ["数字分身", "长期记忆", "风格洞察", "合规边界"], "shots": ["s04", "s12"], "kind": "仿真 UI；只复用真实功能信息架构，不含任何用户或客户数据" },
+    { "file": "assets/product-visuals/01-ip-memory-concept-v1.png", "capabilities": ["个性化 IP 定位", "个人画像", "长期记忆", "风格洞察"], "shots": ["s04", "s12"] },
+    { "file": "assets/product-visuals/02-trends-concept-v1.png", "capabilities": ["热点洞察", "爆款灵感", "内容趋势"], "shots": ["s05"] },
+    { "file": "assets/product-visuals/03-content-matrix-concept-v1.png", "capabilities": ["短视频口播", "小红书", "公众号", "朋友圈文案"], "shots": ["s06", "s07"] },
+    { "file": "assets/product-visuals/04-visual-card-ppt-concept-v1.png", "capabilities": ["信息图卡", "PPT 一键生成", "结构化表达"], "shots": ["s09", "s10"] },
+    { "file": "assets/product-visuals/05-renewal-service-concept-v1.png", "capabilities": ["保单续保提醒", "保险专有服务工具"], "shots": ["s11"] }
+  ]
+}

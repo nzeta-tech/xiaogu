@@ -336,7 +336,11 @@ function WorkCard(props: {
 }) {
   const { item } = props;
   const pptJobId = item.platform === "ppt-maker" ? extractPptJobId(item.content) : "";
-  const href = pptJobId ? appPath(`/apps/ppt-maker/result/${pptJobId}`) : appPath(`/works/${item.id}?from=creation-works&entry=${item.platform}`);
+  const href = pptJobId
+    ? appPath(`/apps/ppt-maker/result/${pptJobId}`)
+    : item.platform === "wechat-studio"
+      ? appPath(`/apps/wechat-studio?from=creation-works&workId=${item.id}`)
+      : appPath(`/works/${item.id}?from=creation-works&entry=${item.platform}`);
   const openItem = (event: React.MouseEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("a,button,input")) return;
     window.location.href = href;

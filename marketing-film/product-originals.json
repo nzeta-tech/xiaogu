@@ -1,0 +1,13 @@
+{
+  "title": "小谷 AI 宣传片原始产品素材",
+  "usage": "用户明确授权作为宣传片产品画面参考；后期只允许裁切、透视、景深、入场动效与字幕，不能改写界面内容。",
+  "assets": [
+    { "file": "assets/product-original/01-creation-hub.png", "capability": "创作广场", "shots": ["s03"] },
+    { "file": "assets/product-original/02-avatar-memory.png", "capability": "数字分身与长期记忆", "shots": ["s04", "s12"] },
+    { "file": "assets/product-original/03-article-image-cards.png", "capability": "公众号文章配图", "shots": ["s07", "s09"] },
+    { "file": "assets/product-original/04-ppt-work.png", "capability": "PPT 一键生成", "shots": ["s10"] },
+    { "file": "assets/product-original/05-policy-renewal-card.jpg", "capability": "保单续费提醒", "shots": ["s11"] },
+    { "file": "assets/product-original/06-article-workspace.png", "capability": "公众号文章创作", "shots": ["s06", "s07"] },
+    { "file": "assets/product-original/07-trends-viral-examples.png", "capability": "热点榜单与爆款案例", "shots": ["s05"] }
+  ]
+}

@@ -208,12 +208,12 @@ export function AuthForm({
           {mode === "register" && config?.legal?.termsEnabled !== false && config?.legal?.displayMode !== "modal" ? (
             <label className="checkboxRow authAgreementRow">
               <input name="acceptedTerms" type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} required />
-              <span>我已阅读并同意 <a href={appPath("/terms")} target="_blank">用户协议</a> 和 <a href={appPath("/privacy")} target="_blank">隐私政策</a></span>
+              <span>我已阅读并同意 <a href={appPath("/terms")} target="_blank">小谷服务条款</a> 和 <a href={appPath("/privacy")} target="_blank">小谷隐私政策</a></span>
             </label>
           ) : null}
           {mode === "register" && config?.legal?.termsEnabled !== false && config?.legal?.displayMode === "modal" ? (
             <div className="authAgreementModalTrigger">
-              <button className="secondaryButton" onClick={() => setAgreementOpen(true)} type="button">{acceptedTerms ? "已同意用户协议与隐私政策" : "阅读用户协议与隐私政策"}</button>
+              <button className="secondaryButton" onClick={() => setAgreementOpen(true)} type="button">{acceptedTerms ? "已同意小谷服务条款与隐私政策" : "阅读小谷服务条款与隐私政策"}</button>
               <span role={acceptedTerms ? "status" : undefined}>{acceptedTerms ? "已阅读并同意" : "注册前需完成阅读"}</span>
             </div>
           ) : null}
@@ -227,7 +227,7 @@ export function AuthForm({
           {mode === "login" ? "还没有账号？" : "已经有账号？"}{" "}
           <a href={appPath(`${mode === "login" ? "/register" : "/login"}${nextPath ? `?next=${encodeURIComponent(safeAuthRedirect(nextPath))}` : ""}`)}>{mode === "login" ? "立即注册" : "去登录"}</a>
         </p>
-        <nav className="authLegalLinks" aria-label="法律与隐私"><a href={appPath("/terms")}>用户协议</a><span>·</span><a href={appPath("/privacy")}>隐私政策</a></nav>
+        <nav className="authLegalLinks" aria-label="小谷服务条款与隐私政策"><a href={appPath("/terms")}>小谷服务条款</a><span>·</span><a href={appPath("/privacy")}>小谷隐私政策</a></nav>
       </section>
       {agreementOpen ? (
         <div className="authAgreementBackdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setAgreementOpen(false); }}>

@@ -1,0 +1,4 @@
+# Generated assets can be regenerated and may be large or contain API-derived media.
+assets/
+renders/
+output/

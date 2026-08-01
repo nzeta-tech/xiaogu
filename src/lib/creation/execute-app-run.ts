@@ -113,6 +113,8 @@ export async function executeCreationAppRun(input: {
       ? buildLiveScriptPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "letter"
       ? buildLetterPrompt(values, caseContext, effectiveApp.promptHint)
+      : app.slug === "wechat-studio"
+        ? buildWechatStudioPrompt(values, caseContext)
       : app.slug === "topic-picker"
         ? buildTopicPickerPrompt(values, caseContext, effectiveApp.promptHint, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
       : values.source && typeof values.source === "string"
@@ -492,6 +494,20 @@ function buildLiveScriptPrompt(
     "",
     "用户提供的直播观点：",
     livePoint || "未填写",
+  ].filter(Boolean).join("\n\n");
+}
+
+function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext: string[]) {
+  return [
+    "你正在为微信公众号创作一篇完整长文，不是短视频口播稿、小红书笔记或销售话术。",
+    ...caseContext,
+    "第一行仅输出 Markdown 一级标题。随后以一个具体问题、场景或判断开篇，再用 3-4 个 Markdown 二级标题展开；每段 2-4 句，全文约 1200-1800 字。",
+    "语言自然、完整、有阅读节奏。禁止‘家人们’‘你知道吗’等口播表达，禁止表情、强推销、焦虑营销和编号清单堆砌。",
+    "不得编造数据、案例、产品规则或经历；保险内容不承诺收益、承保或理赔。结尾给温和自然的行动建议。只输出可直接发布的文章，不解释过程或附配图建议。",
+    `目标读者：${stringifyCreationFieldValue(values.audience) || "普通读者"}。`,
+    `文章气质：${stringifyCreationFieldValue(values.tone) || "专业但易懂"}。`,
+    "真实素材与要求：",
+    stringifyCreationFieldValue(values.topic),
   ].filter(Boolean).join("\n\n");
 }
 

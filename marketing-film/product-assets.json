@@ -1,0 +1,21 @@
+{
+  "source": "Xiaogu production UI and Guyu's existing works, captured read-only with an administrator account",
+  "capturedAt": "2026-08-01",
+  "privacy": {
+    "rule": "Customer names, policy identifiers, premiums, contact details and private source text must not appear in the public film.",
+    "excluded": ["assets/product/09-renewal-raw-private.png"],
+    "approvedReplacement": "assets/product/09-renewal-sanitized.png"
+  },
+  "assets": [
+    { "file": "assets/product/01-creation-hub.png", "role": "Product overview and creation capability map", "status": "ready" },
+    { "file": "assets/product/02-digital-avatar.png", "role": "Personal profile and long-term memory", "status": "ready" },
+    { "file": "assets/product/03-today-trends.png", "role": "Trending topics and viral inspiration", "status": "ready" },
+    { "file": "assets/product/04-ip-positioning.png", "role": "IP positioning input", "status": "ready" },
+    { "file": "assets/product/05-real-copy-result.png", "role": "Guyu's real multi-platform copy result", "status": "ready" },
+    { "file": "assets/product/06-real-image-card.png", "role": "Guyu's real knowledge-card result", "status": "ready" },
+    { "file": "assets/product/07-real-ip-result.png", "role": "Guyu's real IP-positioning result", "status": "ready" },
+    { "file": "assets/product/08-real-ppt-result.png", "role": "Guyu's completed PPT result", "status": "ready" },
+    { "file": "assets/product/09-renewal-sanitized.png", "role": "Guyu's renewal reminder with privacy masking", "status": "ready" },
+    { "file": "assets/product/10-real-viral-remix.png", "role": "Guyu's real viral-remix result", "status": "ready" }
+  ]
+}
