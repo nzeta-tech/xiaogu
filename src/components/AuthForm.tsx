@@ -120,6 +120,18 @@ export function AuthForm({
           <h1>让每一次表达，<br />都更像你。</h1>
           <p>{config?.site?.siteSubtitle ?? "从客户问题到可发布内容，把专业经验沉淀成长期资产。"}</p>
         </div>
+        {mode === "login" ? (
+          <dl className="authPurpose">
+            <div>
+              <dt>愿景</dt>
+              <dd>让每一位专业人士的价值，都被看见、被理解、被信任。</dd>
+            </div>
+            <div>
+              <dt>使命</dt>
+              <dd>用懂行业、懂个人的 AI，帮助专业人士更轻松地表达专业、持续服务客户、沉淀长期影响力。</dd>
+            </div>
+          </dl>
+        ) : null}
         <div className="authProductPreview" aria-label="小谷工作台预览">
           <div className="authPreviewTopbar">
             <div><span>今日灵感</span><strong>内容经营状态</strong></div>

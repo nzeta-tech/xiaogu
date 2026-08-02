@@ -29,6 +29,15 @@ const writeJson = (file, value) => writeFile(file, `${JSON.stringify(value, null
 const ensure = async (...dirs) => Promise.all(dirs.map((dir) => mkdir(dir, { recursive: true })));
 const slug = (value) => value.replace(/[^a-zA-Z0-9_-]/g, "_");
 const generationUnits = (manifest) => manifest.seedancePlan?.units?.length ? manifest.seedancePlan.units : manifest.shots;
+
+function audioAndSubtitleInstruction(manifest, unit) {
+  const dialogue = (manifest.audioDesign?.dialogue || []).filter((item) => item.unit === unit.id);
+  const narration = (manifest.audioDesign?.narration || []).filter((item) => item.unit === unit.id);
+  const speech = [...dialogue.map((item) => `${item.speaker}：“${item.line}”`), ...narration.map((item) => `旁白：“${item.line}”`)];
+  const subtitles = [...dialogue.map((item) => item.line), ...narration.map((item) => item.line)];
+  if (unit.id === "u09") subtitles.push(unit.overlay);
+  return `音频、口型与字幕：直接生成自然中文普通话、与说话者同步的口型、轻环境音乐；不得使用后期配音或后期字幕。${speech.length ? `角色台词：${speech.join("；")}` : "仅保留轻环境音乐。"} 必须在画面下三分之一清晰显示完全一致的简体中文字幕，按说话时序出现：${subtitles.join(" / ")}。`;
+}
 const selectedUnitIds = (manifest) => (arg("shots") || generationUnits(manifest).map((unit) => unit.id).join(",")).split(",").filter(Boolean);
 
 async function loadManifest() { return JSON.parse(await readFile(manifestPath, "utf8")); }
@@ -85,7 +94,7 @@ async function prepare() {
   const units = generationUnits(manifest);
   const requests = units.map((unit) => ({
     shotId: unit.id, beat: unit.beat, duration: unit.duration, candidates: 4,
-    prompt: `${common}\n\n本生成单元：${unit.prompt}`,
+    prompt: `${common}\n\n本生成单元：${unit.prompt}\n\n${audioAndSubtitleInstruction(manifest, unit)}`,
     postOverlay: unit.overlay,
     references: ["assets/brand/xiaogu-logo.png", "assets/characters/xiaogu-fairy.png", "assets/characters/broker-hero.png", ...(unit.productAssets || [])]
   }));
@@ -108,7 +117,7 @@ async function submit() {
       const key = `${shot.id}-c${candidate}`;
       if (jobs[key]) { console.log(`Skip ${key}: already submitted.`); continue; }
       const productReferences = productReferenceBase ? (shot.productAssets || []).map((asset) => `${productReferenceBase}/${asset.replace(/^assets\//, "")}`) : [];
-      const body = { model: process.env.SEEDANCE_MODEL || "seedance-2.0", prompt: `${manifest.visualBible.style}\n${manifest.visualBible.fairy}\n${manifest.visualBible.hero}\n禁止：${manifest.visualBible.negative}\n\n${shot.prompt}`, duration: shot.duration, aspect_ratio: manifest.format.aspectRatio, reference_images: [...references, ...productReferences], metadata: { project: "xiaogu-brand-film", shotId: shot.id, candidate } };
+      const body = { model: process.env.SEEDANCE_MODEL || "seedance-2.0", prompt: `${manifest.visualBible.style}\n${manifest.visualBible.fairy}\n${manifest.visualBible.hero}\n禁止：${manifest.visualBible.negative}\n\n${shot.prompt}\n\n${audioAndSubtitleInstruction(manifest, shot)}`, duration: shot.duration, aspect_ratio: manifest.format.aspectRatio, reference_images: [...references, ...productReferences], metadata: { project: "xiaogu-brand-film", shotId: shot.id, candidate } };
       const response = await fetch(apiUrl(process.env.SEEDANCE_SUBMIT_PATH || "/v1/video/tasks"), { method: "POST", headers: { Authorization: `Bearer ${process.env.SEEDANCE_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(`Seedance submit ${key}: ${response.status} ${JSON.stringify(json)}`);

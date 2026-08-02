@@ -1,0 +1,222 @@
+{"kind":"deck","id":"pr/fa10l2","name":"Deck"}
+{"kind":"layout","layoutId":"c85b1210-e4ad-4f7d-962f-128680b337f9","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"826c1bc4-4fb4-4af4-9f4d-9e32660f2d66","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/j2qai4","slide":1,"title":"小谷 AI · 品牌路演","textShapes":6}
+{"kind":"textbox","id":"sh/h07mtsne","slide":1,"text":"小谷 AI · 品牌路演","textPreview":"小谷 AI · 品牌路演","textChars":12,"textLines":1,"bbox":[72,172,280,24]}
+{"kind":"textbox","id":"sh/ilg32x4z","slide":1,"text":"你说的每一句，\n都值得被听见。","textPreview":"你说的每一句， | 都值得被听见。","textChars":15,"textLines":2,"bbox":[72,218,660,150]}
+{"kind":"textbox","id":"sh/jmp4v25k","slide":1,"text":"让专业被看见，让信任自然发生","textPreview":"让专业被看见，让信任自然发生","textChars":14,"textLines":1,"bbox":[76,414,530,34]}
+{"kind":"textbox","id":"sh/4ny547m5","slide":1,"text":"小谷 AI · NZeta.ai","textPreview":"小谷 AI · NZeta.ai","textChars":16,"textLines":1,"bbox":[76,466,330,28]}
+{"kind":"textbox","id":"sh/5o7mxcnq","slide":1,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/6p0n6h4v","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/utw761sb","slide":1,"name":"","alt":"xiaogu-fairy.png","bbox":[820,58,340,530]}
+{"kind":"image","id":"im/hg7q1wb2","slide":1,"name":"","alt":"xiaogu-logo-transparent.png","bbox":[72,70,56,56]}
+{"kind":"notes","id":"nt/j2qai4","slide":1,"text":""}
+{"kind":"slide","id":"sl/7w2ied","slide":2,"title":"客户的决策入口，已经迁移到内容平台","textShapes":20}
+{"kind":"textbox","id":"sh/s7650b2h","slide":2,"text":"客户的决策入口，已经迁移到内容平台","textPreview":"客户的决策入口，已经迁移到内容平台","textChars":17,"textLines":1,"bbox":[72,64,430,24]}
+{"kind":"textbox","id":"sh/r6d47qlw","slide":2,"text":"不做自媒体，\n专业就很难进入客户的选择范围。","textPreview":"不做自媒体， | 专业就很难进入客户的选择范围。","textChars":22,"textLines":2,"bbox":[72,108,690,116]}
+{"kind":"shape","id":"sh/654nylkr","slide":2,"bbox":[760,96,350,178]}
+{"kind":"textbox","id":"sh/1cfmd03e","slide":2,"text":"10.4 亿","textPreview":"10.4 亿","textChars":6,"textLines":1,"bbox":[800,128,270,54]}
+{"kind":"textbox","id":"sh/gb654v2t","slide":2,"text":"短视频用户","textPreview":"短视频用户","textChars":5,"textLines":1,"bbox":[800,190,270,28]}
+{"kind":"textbox","id":"sh/fax4bql8","slide":2,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[72,300,42,25]}
+{"kind":"textbox","id":"sh/e9on2lkn","slide":2,"text":"过去","textPreview":"过去","textChars":2,"textLines":1,"bbox":[132,298,90,28]}
+{"kind":"textbox","id":"sh/p0z6h03a","slide":2,"text":"熟人介绍","textPreview":"熟人介绍","textChars":4,"textLines":1,"bbox":[230,298,150,28]}
+{"kind":"textbox","id":"sh/ozq58v2p","slide":2,"text":"客户先认识你，再了解你的专业","textPreview":"客户先认识你，再了解你的专业","textChars":14,"textLines":1,"bbox":[402,300,680,26]}
+{"kind":"shape","id":"sh/m9sbidsv","slide":2,"bbox":[92,334,0,42]}
+{"kind":"textbox","id":"sh/7a1cri9g","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[72,388,42,25]}
+{"kind":"textbox","id":"sh/8batkna1","slide":2,"text":"现在","textPreview":"现在","textChars":2,"textLines":1,"bbox":[132,386,90,28]}
+{"kind":"textbox","id":"sh/9cjutsrm","slide":2,"text":"内容筛选","textPreview":"内容筛选","textChars":4,"textLines":1,"bbox":[230,386,150,28]}
+{"kind":"textbox","id":"sh/udsvmxs7","slide":2,"text":"客户先看内容，再判断你是否值得咨询","textPreview":"客户先看内容，再判断你是否值得咨询","textChars":17,"textLines":1,"bbox":[402,388,680,26]}
+{"kind":"shape","id":"sh/velcv29c","slide":2,"bbox":[92,422,0,42]}
+{"kind":"textbox","id":"sh/wfudo7qx","slide":2,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[72,476,42,25]}
+{"kind":"textbox","id":"sh/hg3uxcri","slide":2,"text":"变化","textPreview":"变化","textChars":2,"textLines":1,"bbox":[132,474,90,28]}
+{"kind":"textbox","id":"sh/ah8batsn","slide":2,"text":"信任前置","textPreview":"信任前置","textChars":4,"textLines":1,"bbox":[230,474,150,28]}
+{"kind":"textbox","id":"sh/bihcjy98","slide":2,"text":"专业形象开始决定你能否获得第一次对话","textPreview":"专业形象开始决定你能否获得第一次对话","textChars":18,"textLines":1,"bbox":[402,476,680,26]}
+{"kind":"shape","id":"sh/fmd8rup0","slide":2,"bbox":[72,574,1038,48]}
+{"kind":"textbox","id":"sh/el4ri98f","slide":2,"text":"抖音负责发现、视频号负责扩散、小红书承接搜索、公众号沉淀信任。","textPreview":"抖音负责发现、视频号负责扩散、小红书承接搜索、公众号沉淀信任。","textChars":31,"textLines":1,"bbox":[96,587,990,22]}
+{"kind":"textbox","id":"sh/1ofqt476","slide":2,"text":"用户人均单日观看短视频约 156 分钟","textPreview":"用户人均单日观看短视频约 156 分钟","textChars":19,"textLines":1,"bbox":[790,642,320,18]}
+{"kind":"textbox","id":"sh/0nm9kzql","slide":2,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/rid8nup4","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"notes","id":"nt/7w2ied","slide":2,"text":"[Sources]\n- 中国互联网络信息中心，《中国网络视听发展研究报告（2025）》：短视频用户10.4亿、人均单日使用156分钟。https://www2.cnnic.cn/n4/2025/0328/c326-11272.html\n- “决策入口迁移”及各平台角色为结合用户内容消费规模与产品形态形成的业务判断，不代表所有客户均遵循同一路径。\n[/Sources]"}
+{"kind":"slide","id":"sl/fcwh63","slide":3,"title":"真实案例：一位普通保险经纪人的内容获客结果","textShapes":18}
+{"kind":"textbox","id":"sh/bqx0fulo","slide":3,"text":"真实案例：一位普通保险经纪人的内容获客结果","textPreview":"真实案例：一位普通保险经纪人的内容获客结果","textChars":21,"textLines":1,"bbox":[72,64,520,24]}
+{"kind":"textbox","id":"sh/cr618z29","slide":3,"text":"不是大网红，\n也能把专业内容变成客户与业务。","textPreview":"不是大网红， | 也能把专业内容变成客户与业务。","textChars":22,"textLines":2,"bbox":[72,108,690,116]}
+{"kind":"shape","id":"sh/dsfih43u","slide":3,"bbox":[72,278,318,112]}
+{"kind":"textbox","id":"sh/yt8ja9kf","slide":3,"text":"≈ 2,100","textPreview":"≈ 2,100","textChars":7,"textLines":1,"bbox":[96,298,270,38]}
+{"kind":"textbox","id":"sh/zuh0jel0","slide":3,"text":"起步粉丝","textPreview":"起步粉丝","textChars":4,"textLines":1,"bbox":[96,344,270,24]}
+{"kind":"shape","id":"sh/0vq1cz2l","slide":3,"bbox":[422,278,318,112]}
+{"kind":"textbox","id":"sh/lwz2l436","slide":3,"text":"超 100 万","textPreview":"超 100 万","textChars":7,"textLines":1,"bbox":[446,298,270,38]}
+{"kind":"textbox","id":"sh/mx8je9kb","slide":3,"text":"报道所述保费","textPreview":"报道所述保费","textChars":6,"textLines":1,"bbox":[446,344,270,24]}
+{"kind":"shape","id":"sh/nyhknelw","slide":3,"bbox":[772,278,318,112]}
+{"kind":"textbox","id":"sh/nap83a1g","slide":3,"text":"2 个月","textPreview":"2 个月","textChars":4,"textLines":1,"bbox":[796,298,270,38]}
+{"kind":"textbox","id":"sh/m9gra50v","slide":3,"text":"粉丝突破 3,000","textPreview":"粉丝突破 3,000","textChars":10,"textLines":1,"bbox":[796,344,270,24]}
+{"kind":"textbox","id":"sh/9cra50jm","slide":3,"text":"内容","textPreview":"内容","textChars":2,"textLines":1,"bbox":[72,430,72,25]}
+{"kind":"textbox","id":"sh/8by9cfi1","slide":3,"text":"保险消费观点、多维产品比较、真实问题解答","textPreview":"保险消费观点、多维产品比较、真实问题解答","textChars":20,"textLines":1,"bbox":[154,430,900,25]}
+{"kind":"textbox","id":"sh/z6p8zq1k","slide":3,"text":"路径","textPreview":"路径","textChars":2,"textLines":1,"bbox":[72,482,72,25]}
+{"kind":"textbox","id":"sh/y5gr6l0z","slide":3,"text":"笔记吸引关注与咨询，再进入微信持续沟通","textPreview":"笔记吸引关注与咨询，再进入微信持续沟通","textChars":19,"textLines":1,"bbox":[154,482,900,25]}
+{"kind":"textbox","id":"sh/l87q10ja","slide":3,"text":"结果","textPreview":"结果","textChars":2,"textLines":1,"bbox":[72,534,72,25]}
+{"kind":"textbox","id":"sh/07y98vip","slide":3,"text":"媒体称其获得客户、超百万元保费，并组建团队","textPreview":"媒体称其获得客户、超百万元保费，并组建团队","textChars":21,"textLines":1,"bbox":[154,534,900,25]}
+{"kind":"shape","id":"sh/j29sbu1o","slide":3,"bbox":[72,594,1038,42]}
+{"kind":"textbox","id":"sh/i10rip03","slide":3,"text":"关键不是粉丝多，而是持续回答一类客户正在做的选择。","textPreview":"关键不是粉丝多，而是持续回答一类客户正在做的选择。","textChars":25,"textLines":1,"bbox":[96,604,990,22]}
+{"kind":"textbox","id":"sh/ex4batkb","slide":3,"text":"媒体转述当事人自述；未独立核验，不代表普遍收益或获客保证。","textPreview":"媒体转述当事人自述；未独立核验，不代表普遍收益或获客保证。","textChars":29,"textLines":1,"bbox":[690,650,420,18]}
+{"kind":"textbox","id":"sh/fydc3ylw","slide":3,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/gzmdcj2h","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"notes","id":"nt/fcwh63","slide":3,"text":"[Sources]\n- 搜狐/保契，《我在小红书卖保险：粉丝不多但挣得还行》：文章称该经纪人在约2100粉丝时，通过专业保险消费意见和多维信息比较吸引客户；据其自述，获得客户、超百万元保费并组建团队；两个月后粉丝突破3000。https://www.sohu.com/a/539671925_120300154\n- 上述业务结果来自媒体对当事人自述的转述，未作独立核验，不代表普遍收益或获客保证。\n[/Sources]"}
+{"kind":"slide","id":"sl/w830mq","slide":4,"title":"从内容到客户，是一条信任链路","textShapes":21}
+{"kind":"textbox","id":"sh/0n6d8za1","slide":4,"text":"从内容到客户，是一条信任链路","textPreview":"从内容到客户，是一条信任链路","textChars":14,"textLines":1,"bbox":[72,64,380,24]}
+{"kind":"textbox","id":"sh/zmxwzutg","slide":4,"text":"获客不是“发一条就成交”，\n而是让专业被反复看见。","textPreview":"获客不是“发一条就成交”， | 而是让专业被反复看见。","textChars":25,"textLines":2,"bbox":[72,108,700,114]}
+{"kind":"shape","id":"sh/e14v6psb","slide":4,"bbox":[72,316,240,128]}
+{"kind":"textbox","id":"sh/9sfe54by","slide":4,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[96,338,42,24]}
+{"kind":"textbox","id":"sh/or6dcjad","slide":4,"text":"被看见","textPreview":"被看见","textChars":3,"textLines":1,"bbox":[96,374,150,29]}
+{"kind":"textbox","id":"sh/nqxw3ets","slide":4,"text":"热点 · 短视频","textPreview":"热点 · 短视频","textChars":8,"textLines":1,"bbox":[96,410,180,22]}
+{"kind":"textbox","id":"sh/mpova9s7","slide":4,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[317,362,28,36]}
+{"kind":"shape","id":"sh/xwze9obu","slide":4,"bbox":[350,316,240,128]}
+{"kind":"textbox","id":"sh/wvqdgja9","slide":4,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[374,338,42,24]}
+{"kind":"textbox","id":"sh/yd87al8v","slide":4,"text":"被理解","textPreview":"被理解","textChars":3,"textLines":1,"bbox":[374,374,150,29]}
+{"kind":"textbox","id":"sh/jehoj69g","slide":4,"text":"知识卡 · 长文","textPreview":"知识卡 · 长文","textChars":8,"textLines":1,"bbox":[374,410,180,22]}
+{"kind":"textbox","id":"sh/kfapcbql","slide":4,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[595,362,28,36]}
+{"kind":"shape","id":"sh/lgj6lgr6","slide":4,"bbox":[628,316,240,128]}
+{"kind":"textbox","id":"sh/6hs7el8r","slide":4,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[652,338,42,24]}
+{"kind":"textbox","id":"sh/7i1onq9c","slide":4,"text":"被信任","textPreview":"被信任","textChars":3,"textLines":1,"bbox":[652,374,150,29]}
+{"kind":"textbox","id":"sh/8japgvqx","slide":4,"text":"案例 · 持续表达","textPreview":"案例 · 持续表达","textChars":9,"textLines":1,"bbox":[652,410,180,22]}
+{"kind":"textbox","id":"sh/tkj6p0ri","slide":4,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[873,362,28,36]}
+{"kind":"shape","id":"sh/mlon218n","slide":4,"bbox":[906,316,240,128]}
+{"kind":"textbox","id":"sh/nmxobm98","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[930,338,42,24]}
+{"kind":"textbox","id":"sh/rqd4j2p0","slide":4,"text":"被咨询","textPreview":"被咨询","textChars":3,"textLines":1,"bbox":[930,374,150,29]}
+{"kind":"textbox","id":"sh/qp43axof","slide":4,"text":"私域 · 服务","textPreview":"私域 · 服务","textChars":7,"textLines":1,"bbox":[930,410,180,22]}
+{"kind":"textbox","id":"sh/dsvmls7q","slide":4,"text":"真正的瓶颈，是一个普通人很难长期完成选题、创作、分发与服务。","textPreview":"真正的瓶颈，是一个普通人很难长期完成选题、创作、分发与服务。","textChars":30,"textLines":1,"bbox":[72,510,1030,30]}
+{"kind":"shape","id":"sh/srmlcn65","slide":4,"bbox":[72,558,1038,62]}
+{"kind":"textbox","id":"sh/3mt4fipo","slide":4,"text":"小谷 AI：把你的经验变成可持续的内容与服务，让专业形象长期生长。","textPreview":"小谷 AI：把你的经验变成可持续的内容与服务，让专业形象长期生长。","textChars":33,"textLines":1,"bbox":[100,577,980,28]}
+{"kind":"textbox","id":"sh/ilk36do3","slide":4,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/5ovmhs7u","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"notes","id":"nt/w830mq","slide":4,"text":"[Sources]\n- 本页为基于前述平台场景与公开个案的业务推演，不将内容曝光等同于成交结果。\n[/Sources]"}
+{"kind":"slide","id":"sl/rq48bl","slide":5,"title":"每一位保险人，都有值得被听见的专业","textShapes":6}
+{"kind":"textbox","id":"sh/7yhwf69c","slide":5,"text":"每一位保险人，都有值得被听见的专业","textPreview":"每一位保险人，都有值得被听见的专业","textChars":17,"textLines":1,"bbox":[72,64,440,24]}
+{"kind":"textbox","id":"sh/8zqx8bqx","slide":5,"text":"真正困难的，\n是如何让客户听懂你。","textPreview":"真正困难的， | 是如何让客户听懂你。","textChars":17,"textLines":2,"bbox":[72,112,610,118]}
+{"kind":"textbox","id":"sh/90zehgri","slide":5,"text":"你有经验、有判断、有对客户的关心。小谷帮你把这些变成客户愿意停下来看的表达。","textPreview":"你有经验、有判断、有对客户的关心。小谷帮你把这些变成客户愿意停下来看的表达。","textChars":38,"textLines":1,"bbox":[76,272,535,70]}
+{"kind":"shape","id":"sh/v2hwjq98","slide":5,"bbox":[72,430,540,84]}
+{"kind":"textbox","id":"sh/w3qxcvqt","slide":5,"text":"你负责专业，小谷负责把它讲清楚。","textPreview":"你负责专业，小谷负责把它讲清楚。","textChars":16,"textLines":1,"bbox":[104,457,450,31]}
+{"kind":"textbox","id":"sh/h4zel0re","slide":5,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/i5sfel8z","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/bq1szyp8","slide":5,"name":"","geometry":"roundRect","alt":"broker-hero-brooch-v10.png","bbox":[680,78,528,300]}
+{"kind":"notes","id":"nt/rq48bl","slide":5,"text":""}
+{"kind":"slide","id":"sl/7r66op","slide":6,"title":"我们为什么做小谷 AI","textShapes":8}
+{"kind":"textbox","id":"sh/jud8rat4","slide":6,"text":"我们为什么做小谷 AI","textPreview":"我们为什么做小谷 AI","textChars":11,"textLines":1,"bbox":[72,64,300,24]}
+{"kind":"textbox","id":"sh/it4ri5cj","slide":6,"text":"让专业的价值，\n不止存在于心里。","textPreview":"让专业的价值， | 不止存在于心里。","textChars":16,"textLines":2,"bbox":[72,108,660,120]}
+{"kind":"textbox","id":"sh/xsvqp0by","slide":6,"text":"愿景","textPreview":"愿景","textChars":2,"textLines":1,"bbox":[72,292,100,30]}
+{"kind":"textbox","id":"sh/wrm9gfud","slide":6,"text":"让每一位专业人士的价值，都被看见、被理解、被信任。","textPreview":"让每一位专业人士的价值，都被看见、被理解、被信任。","textChars":25,"textLines":1,"bbox":[72,330,720,42]}
+{"kind":"shape","id":"sh/vqd8nats","slide":6,"bbox":[72,414,785,126]}
+{"kind":"textbox","id":"sh/ap4re5c7","slide":6,"text":"使命","textPreview":"使命","textChars":2,"textLines":1,"bbox":[104,437,110,28]}
+{"kind":"textbox","id":"sh/94vql0b2","slide":6,"text":"用懂行业、懂个人的 AI，帮助专业人士更轻松地表达专业、\n持续服务客户、沉淀长期影响力。","textPreview":"用懂行业、懂个人的 AI，帮助专业人士更轻松地表达专业、 | 持续服务客户、沉淀长期影响力。","textChars":44,"textLines":2,"bbox":[104,475,690,56]}
+{"kind":"textbox","id":"sh/8329cvuh","slide":6,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/ux87u1oj","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/5gvihsna","slide":6,"name":"","alt":"xiaogu-fairy.png","bbox":[930,100,180,330]}
+{"kind":"notes","id":"nt/7r66op","slide":6,"text":""}
+{"kind":"slide","id":"sl/rf703d","slide":7,"title":"第一步 · 从创作广场开始","textShapes":6}
+{"kind":"textbox","id":"sh/250jy1cb","slide":7,"text":"第一步 · 从创作广场开始","textPreview":"第一步 · 从创作广场开始","textChars":13,"textLines":1,"bbox":[72,64,300,24]}
+{"kind":"textbox","id":"sh/p8b29gv2","slide":7,"text":"今天想说什么？\n从一个真实问题开始。","textPreview":"今天想说什么？ | 从一个真实问题开始。","textChars":18,"textLines":2,"bbox":[72,108,570,120]}
+{"kind":"textbox","id":"sh/o7210buh","slide":7,"text":"创作广场把常见场景、内容任务和你的想法放在同一个入口。","textPreview":"创作广场把常见场景、内容任务和你的想法放在同一个入口。","textChars":27,"textLines":1,"bbox":[76,268,530,54]}
+{"kind":"shape","id":"sh/a9kj2lcn","slide":7,"bbox":[72,422,520,86]}
+{"kind":"textbox","id":"sh/xwb2dgby","slide":7,"text":"客户刚刚问了什么，就是今天可以讲的内容。","textPreview":"客户刚刚问了什么，就是今天可以讲的内容。","textChars":20,"textLines":1,"bbox":[102,448,450,32]}
+{"kind":"textbox","id":"sh/cv214bud","slide":7,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/zydkfqt4","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/ahoz21wn","slide":7,"name":"","geometry":"roundRect","alt":"01-creation-hub.png","bbox":[670,72,538,305]}
+{"kind":"notes","id":"nt/rf703d","slide":7,"text":""}
+{"kind":"slide","id":"sl/6brzrt","slide":8,"title":"第二步 · 灵感热点与爆款","textShapes":6}
+{"kind":"textbox","id":"sh/8vexgrul","slide":8,"text":"第二步 · 灵感热点与爆款","textPreview":"第二步 · 灵感热点与爆款","textChars":13,"textLines":1,"bbox":[72,64,300,24]}
+{"kind":"textbox","id":"sh/nu5w7mdg","slide":8,"text":"没有灵感时，\n先找到今天值得讲的话题。","textPreview":"没有灵感时， | 先找到今天值得讲的话题。","textChars":19,"textLines":2,"bbox":[72,108,580,120]}
+{"kind":"textbox","id":"sh/mtcfehwv","slide":8,"text":"浏览热点与案例，选择和你的客户、专业有关的切口。","textPreview":"浏览热点与案例，选择和你的客户、专业有关的切口。","textChars":24,"textLines":1,"bbox":[76,268,525,54]}
+{"kind":"shape","id":"sh/0ruxc7ep","slide":8,"bbox":[72,422,520,86]}
+{"kind":"textbox","id":"sh/zqlw32d4","slide":8,"text":"不是追热闹，而是更快找到客户在意的事。","textPreview":"不是追热闹，而是更快找到客户在意的事。","textChars":19,"textLines":1,"bbox":[102,448,452,32]}
+{"kind":"textbox","id":"sh/epcvahwj","slide":8,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/do3e1cvy","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/8jul0v6d","slide":8,"name":"","geometry":"roundRect","alt":"07-trends-viral-examples.png","bbox":[650,66,558,330]}
+{"kind":"notes","id":"nt/6brzrt","slide":8,"text":""}
+{"kind":"slide","id":"sl/28zbaw","slide":9,"title":"第三步 · 流量文案","textShapes":14}
+{"kind":"textbox","id":"sh/g36lg3q5","slide":9,"text":"第三步 · 流量文案","textPreview":"第三步 · 流量文案","textChars":10,"textLines":1,"bbox":[72,64,260,24]}
+{"kind":"textbox","id":"sh/v2dknypk","slide":9,"text":"一句专业判断，\n也可以有好开头。","textPreview":"一句专业判断， | 也可以有好开头。","textChars":16,"textLines":2,"bbox":[72,108,550,120]}
+{"kind":"textbox","id":"sh/u143et8z","slide":9,"text":"把你的观点变成自然、清楚、适合开口说的内容初稿。","textPreview":"把你的观点变成自然、清楚、适合开口说的内容初稿。","textChars":24,"textLines":1,"bbox":[76,270,520,54]}
+{"kind":"textbox","id":"sh/4r6lk3q1","slide":9,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[72,430,40,24]}
+{"kind":"textbox","id":"sh/3qxkripg","slide":9,"text":"说清楚","textPreview":"说清楚","textChars":3,"textLines":1,"bbox":[130,427,110,26]}
+{"kind":"textbox","id":"sh/ipo3id8v","slide":9,"text":"我想和客户聊什么","textPreview":"我想和客户聊什么","textChars":8,"textLines":1,"bbox":[250,427,380,26]}
+{"kind":"textbox","id":"sh/dwz2xs7i","slide":9,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[72,478,40,24]}
+{"kind":"textbox","id":"sh/svqlon6d","slide":9,"text":"选表达","textPreview":"选表达","textChars":3,"textLines":1,"bbox":[130,475,110,26]}
+{"kind":"textbox","id":"sh/a9c321kn","slide":9,"text":"要口播、短文还是朋友圈","textPreview":"要口播、短文还是朋友圈","textChars":11,"textLines":1,"bbox":[250,475,380,26]}
+{"kind":"textbox","id":"sh/bal4b618","slide":9,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[72,526,40,24]}
+{"kind":"textbox","id":"sh/wbul4b2t","slide":9,"text":"再确认","textPreview":"再确认","textChars":3,"textLines":1,"bbox":[130,523,110,26]}
+{"kind":"textbox","id":"sh/xc3mdgje","slide":9,"text":"像不像自己、准不准确","textPreview":"像不像自己、准不准确","textChars":10,"textLines":1,"bbox":[250,523,380,26]}
+{"kind":"textbox","id":"sh/ydc36lkz","slide":9,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/jyl4fq1k","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/kryxw3qp","slide":9,"name":"","geometry":"roundRect","alt":"09-traffic-copy-result.png","bbox":[650,66,558,350]}
+{"kind":"notes","id":"nt/28zbaw","slide":9,"text":""}
+{"kind":"slide","id":"sl/akfl2z","slide":10,"title":"第四步 · 知识卡制作","textShapes":6}
+{"kind":"textbox","id":"sh/w7ydk3mh","slide":10,"text":"第四步 · 知识卡制作","textPreview":"第四步 · 知识卡制作","textChars":11,"textLines":1,"bbox":[72,64,290,24]}
+{"kind":"textbox","id":"sh/vmpcrylw","slide":10,"text":"复杂专业，\n也能一眼看懂。","textPreview":"复杂专业， | 也能一眼看懂。","textChars":13,"textLines":2,"bbox":[72,108,520,120]}
+{"kind":"textbox","id":"sh/ulgvit4b","slide":10,"text":"将文章重点转成知识卡，更适合客户沟通、朋友圈和社交平台。","textPreview":"将文章重点转成知识卡，更适合客户沟通、朋友圈和社交平台。","textChars":28,"textLines":1,"bbox":[76,270,520,54]}
+{"kind":"shape","id":"sh/4bido3md","slide":10,"bbox":[72,424,500,86]}
+{"kind":"textbox","id":"sh/ja9cvyls","slide":10,"text":"先有清晰的信息，再有好看的表达。","textPreview":"先有清晰的信息，再有好看的表达。","textChars":16,"textLines":1,"bbox":[102,449,440,30]}
+{"kind":"textbox","id":"sh/i90vmd47","slide":10,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/tgre1s3u","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/oje5o7eh","slide":10,"name":"","geometry":"roundRect","alt":"08-knowledge-card-whiteboard.png","bbox":[650,62,558,354]}
+{"kind":"notes","id":"nt/akfl2z","slide":10,"text":""}
+{"kind":"slide","id":"sl/qiosvh","slide":11,"title":"第五步 · 公众号创作","textShapes":6}
+{"kind":"textbox","id":"sh/4vy907ih","slide":11,"text":"第五步 · 公众号创作","textPreview":"第五步 · 公众号创作","textChars":11,"textLines":1,"bbox":[72,64,290,24]}
+{"kind":"textbox","id":"sh/jup8r21w","slide":11,"text":"把一段想法，\n写成一篇完整的文章。","textPreview":"把一段想法， | 写成一篇完整的文章。","textChars":17,"textLines":2,"bbox":[72,108,580,120]}
+{"kind":"textbox","id":"sh/itgryx0b","slide":11,"text":"从标题、结构到正文，先生成可修改的初稿，再加上你的专业判断。","textPreview":"从标题、结构到正文，先生成可修改的初稿，再加上你的专业判断。","textChars":30,"textLines":1,"bbox":[76,270,540,58]}
+{"kind":"shape","id":"sh/sji947id","slide":11,"bbox":[72,424,520,88]}
+{"kind":"textbox","id":"sh/ri98v21s","slide":11,"text":"你不用从空白页开始，但每一句仍然由你确认。","textPreview":"你不用从空白页开始，但每一句仍然由你确认。","textChars":21,"textLines":1,"bbox":[102,450,460,31]}
+{"kind":"textbox","id":"sh/6h0r2x07","slide":11,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/1obq1wzu","slide":11,"text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/kjmdk3ex","slide":11,"name":"","geometry":"roundRect","alt":"06-article-workspace.png","bbox":[790,58,310,430]}
+{"kind":"notes","id":"nt/qiosvh","slide":11,"text":""}
+{"kind":"slide","id":"sl/cfudxm","slide":12,"title":"第六步 · PPT","textShapes":6}
+{"kind":"textbox","id":"sh/7mpofid4","slide":12,"text":"第六步 · PPT","textPreview":"第六步 · PPT","textChars":9,"textLines":1,"bbox":[72,64,220,24]}
+{"kind":"textbox","id":"sh/sny58nep","slide":12,"text":"要讲给客户听的，\n一页一页讲清楚。","textPreview":"要讲给客户听的， | 一页一页讲清楚。","textChars":17,"textLines":2,"bbox":[72,108,570,120]}
+{"kind":"textbox","id":"sh/to76h8va","slide":12,"text":"把资料和观点整理成演示结构，方便沟通、分享和复盘。","textPreview":"把资料和观点整理成演示结构，方便沟通、分享和复盘。","textChars":25,"textLines":1,"bbox":[76,270,530,54]}
+{"kind":"shape","id":"sh/ji54byx8","slide":12,"bbox":[72,426,520,86]}
+{"kind":"textbox","id":"sh/kje543et","slide":12,"text":"把复杂信息变成客户愿意继续听的故事。","textPreview":"把复杂信息变成客户愿意继续听的故事。","textChars":18,"textLines":1,"bbox":[102,451,460,30]}
+{"kind":"textbox","id":"sh/lk7md8ve","slide":12,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/2d0nexwr","slide":12,"text":"12","textPreview":"12","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/jexcvet0","slide":12,"name":"","geometry":"roundRect","alt":"04-ppt-work.png","bbox":[650,66,558,350]}
+{"kind":"notes","id":"nt/cfudxm","slide":12,"text":""}
+{"kind":"slide","id":"sl/4ly74x","slide":13,"title":"第七步 · 爆款二创","textShapes":6}
+{"kind":"textbox","id":"sh/2hobulkr","slide":13,"text":"第七步 · 爆款二创","textPreview":"第七步 · 爆款二创","textChars":10,"textLines":1,"bbox":[72,64,270,24]}
+{"kind":"textbox","id":"sh/pkzap03i","slide":13,"text":"看见好表达，\n也要变成适合你的表达。","textPreview":"看见好表达， | 也要变成适合你的表达。","textChars":18,"textLines":2,"bbox":[72,108,570,120]}
+{"kind":"textbox","id":"sh/oj6twv2x","slide":13,"text":"参考高质量案例，找到自己的专业角度和语言，而不是照搬别人的内容。","textPreview":"参考高质量案例，找到自己的专业角度和语言，而不是照搬别人的内容。","textChars":32,"textLines":1,"bbox":[76,270,550,58]}
+{"kind":"shape","id":"sh/ql8bylk3","slide":13,"bbox":[72,438,530,86]}
+{"kind":"textbox","id":"sh/dozat03e","slide":13,"text":"借鉴结构，保留你的判断与声音。","textPreview":"借鉴结构，保留你的判断与声音。","textChars":15,"textLines":1,"bbox":[102,464,450,30]}
+{"kind":"textbox","id":"sh/cnqt0v2t","slide":13,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/zahcvalk","slide":13,"text":"13","textPreview":"13","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/ix8r25k3","slide":13,"name":"","geometry":"roundRect","alt":"10-viral-remix.png","bbox":[650,66,558,350]}
+{"kind":"notes","id":"nt/4ly74x","slide":13,"text":""}
+{"kind":"slide","id":"sl/f0jam9","slide":14,"title":"第八步 · 保单续费提醒卡","textShapes":6}
+{"kind":"textbox","id":"sh/loba50fy","slide":14,"text":"第八步 · 保单续费提醒卡","textPreview":"第八步 · 保单续费提醒卡","textChars":13,"textLines":1,"bbox":[72,64,330,24]}
+{"kind":"textbox","id":"sh/yl0rulw7","slide":14,"text":"关键时刻，\n让关心及时发生。","textPreview":"关键时刻， | 让关心及时发生。","textChars":14,"textLines":2,"bbox":[72,108,540,120]}
+{"kind":"textbox","id":"sh/zm9s3qxs","slide":14,"text":"把续费提醒和服务事项看得更清楚，让客户感受到你的长期陪伴。","textPreview":"把续费提醒和服务事项看得更清楚，让客户感受到你的长期陪伴。","textChars":29,"textLines":1,"bbox":[76,270,520,58]}
+{"kind":"shape","id":"sh/9cba90fu","slide":14,"bbox":[72,424,500,86]}
+{"kind":"textbox","id":"sh/mpkry5wj","slide":14,"text":"服务不是一次成交，而是一段长期关系。","textPreview":"服务不是一次成交，而是一段长期关系。","textChars":18,"textLines":1,"bbox":[102,449,440,30]}
+{"kind":"textbox","id":"sh/nqts7ax4","slide":14,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/ofy9obe5","slide":14,"text":"14","textPreview":"14","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/p4ja9kf6","slide":14,"name":"","geometry":"roundRect","alt":"05-policy-renewal-card.jpg","bbox":[825,48,300,472]}
+{"kind":"notes","id":"nt/f0jam9","slide":14,"text":""}
+{"kind":"slide","id":"sl/ectmof","slide":15,"title":"第九步 · 数字分身与长期记忆","textShapes":6}
+{"kind":"textbox","id":"sh/onelojut","slide":15,"text":"第九步 · 数字分身与长期记忆","textPreview":"第九步 · 数字分身与长期记忆","textChars":15,"textLines":1,"bbox":[72,64,390,24]}
+{"kind":"textbox","id":"sh/nm54vet8","slide":15,"text":"你用得越多，\n小谷越懂你怎么说。","textPreview":"你用得越多， | 小谷越懂你怎么说。","textChars":16,"textLines":2,"bbox":[72,108,570,120]}
+{"kind":"textbox","id":"sh/2lw3mtcn","slide":15,"text":"把经历、擅长领域与表达习惯沉淀下来，让每一次创作更接近真实的你。","textPreview":"把经历、擅长领域与表达习惯沉淀下来，让每一次创作更接近真实的你。","textChars":32,"textLines":1,"bbox":[76,270,540,58]}
+{"kind":"shape","id":"sh/0zelkjuh","slide":15,"bbox":[72,424,520,86]}
+{"kind":"textbox","id":"sh/fylkredw","slide":15,"text":"它不替你成为谁，只让你被更好地理解。","textPreview":"它不替你成为谁，只让你被更好地理解。","textChars":18,"textLines":1,"bbox":[102,449,455,30]}
+{"kind":"textbox","id":"sh/exc3i9cb","slide":15,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/dw32p4v6","slide":15,"text":"15","textPreview":"15","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/4nadw7ax","slide":15,"name":"","geometry":"roundRect","alt":"02-avatar-memory.png","bbox":[650,66,558,344]}
+{"kind":"notes","id":"nt/ectmof","slide":15,"text":""}
+{"kind":"slide","id":"sl/n3kvjv","slide":16,"title":"小谷 AI · NZeta.ai","textShapes":7}
+{"kind":"textbox","id":"sh/ytgfupwj","slide":16,"text":"小谷 AI · NZeta.ai","textPreview":"小谷 AI · NZeta.ai","textChars":16,"textLines":1,"bbox":[72,184,280,24]}
+{"kind":"textbox","id":"sh/ds7ylkfy","slide":16,"text":"你说的每一句，\n都值得被听见。","textPreview":"你说的每一句， | 都值得被听见。","textChars":15,"textLines":2,"bbox":[72,230,620,120]}
+{"kind":"textbox","id":"sh/cryxszed","slide":16,"text":"带着一个真实问题，现场生成第一份内容。","textPreview":"带着一个真实问题，现场生成第一份内容。","textChars":19,"textLines":1,"bbox":[76,406,520,32]}
+{"kind":"textbox","id":"sh/bqpgjuxs","slide":16,"text":"https://xiaogu.nzeta.ai","textPreview":"https://xiaogu.nzeta.ai","textChars":23,"textLines":1,"bbox":[76,456,380,28]}
+{"kind":"shape","id":"sh/qpwfqpw7","slide":16,"bbox":[72,538,260,52]}
+{"kind":"textbox","id":"sh/ponyhkfm","slide":16,"text":"欢迎现场体验","textPreview":"欢迎现场体验","textChars":6,"textLines":1,"bbox":[105,552,195,24]}
+{"kind":"textbox","id":"sh/onexofeh","slide":16,"text":"小谷 AI  ·  NZeta.ai","textPreview":"小谷 AI  ·  NZeta.ai","textChars":18,"textLines":1,"bbox":[72,680,250,20]}
+{"kind":"textbox","id":"sh/ah8761sr","slide":16,"text":"16","textPreview":"16","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"image","id":"im/tkfqhczy","slide":16,"name":"","alt":"xiaogu-fairy.png","bbox":[830,54,310,490]}
+{"kind":"image","id":"im/6hor6h07","slide":16,"name":"","alt":"xiaogu-logo-transparent.png","bbox":[72,72,78,78]}
+{"kind":"notes","id":"nt/n3kvjv","slide":16,"text":""}

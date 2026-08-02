@@ -130,10 +130,11 @@ export function buildWorkTitle(input: {
 }) {
   const generatedTitle = extractGeneratedTitle(input.result ?? "");
   const fieldTitle = extractFieldTitle(input.appSlug, input.values);
-  // A remix is identified by its reference work. Generated Markdown starts
-  // with a channel heading such as "口播文案", which is not a useful work title.
+  // A completed topic remix should be named for the newly written article,
+  // rather than its reference work, so works created from different angles are
+  // distinguishable in history. Before generation, fall back to the source.
   const subject = input.appSlug === "link-remix"
-    ? fieldTitle || generatedTitle || fallbackSubjects[input.appSlug] || defaultSubjectForApp(input.appSlug)
+    ? generatedTitle || fieldTitle || fallbackSubjects[input.appSlug] || defaultSubjectForApp(input.appSlug)
     : generatedTitle || fieldTitle || fallbackSubjects[input.appSlug] || defaultSubjectForApp(input.appSlug);
   return `${input.appName}｜${truncateSubject(subject)}`;
 }

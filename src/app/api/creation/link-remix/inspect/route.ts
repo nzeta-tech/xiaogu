@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "请输入有效的作品链接。" }, { status: 400 });
   }
   if (!/^https?:$/.test(parsed.protocol) || !allowedHosts.test(parsed.hostname)) {
-    return Response.json({ error: "爆款二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
+    return Response.json({ error: "爆款话题二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
   }
 
   if (!isAgentExecution && process.env.LOCAL_AGENT_ENABLED === "1") {

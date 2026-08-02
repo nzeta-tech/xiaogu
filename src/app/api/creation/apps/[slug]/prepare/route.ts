@@ -44,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
   const values = body.values ?? {};
   if (app.slug === "link-remix" && !isSupportedLinkRemixUrl(typeof values.source_url === "string" ? values.source_url : "")) {
-    return Response.json({ error: "爆款二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
+    return Response.json({ error: "爆款话题二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
   }
 
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";

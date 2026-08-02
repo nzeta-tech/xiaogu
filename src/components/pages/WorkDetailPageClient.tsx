@@ -2589,15 +2589,13 @@ function LinkRemixWorkDetail({
     ? activeItemIds[activeBatch.id]
     : activeBatch?.items[0]?.id;
   const activeItem = activeBatch?.items.find((item) => item.id === activeItemId) ?? activeBatch?.items[0];
-  const outputCount = batches.reduce((count, batch) => count + batch.items.length, 0);
-
   return (
     <div className="workDetailPage linkRemixWorkDetailPage">
       <div className="page-content linkRemixShell">
         <header className="linkRemixTopbar">
           <a aria-label={returnLabel} className="linkRemixBack" href={returnHref}>←</a>
           <div className="linkRemixTopbarTitle">
-            <span>爆款二创</span>
+            <span>爆款话题二创</span>
             <strong>{formatWorkTitle(work)}</strong>
           </div>
           <div className="linkRemixTopbarStatus">
@@ -2642,49 +2640,22 @@ function LinkRemixWorkDetail({
           ) : null}
         </section>
 
-        <section className="linkRemixWorkspace">
-          <aside className="linkRemixSidebar">
-            <div className="linkRemixSidebarBlock">
-              <span>发布渠道</span>
-              {batches.map((batch) => (
-                <button className={activeBatch?.id === batch.id ? "active" : ""} key={batch.id} onClick={() => onSelectBatch(batch.id)} type="button">
-                  <strong>{formatRemixChannelLabel(batch.label)}</strong>
-                  <em>{batch.items.length}</em>
-                </button>
-              ))}
-            </div>
-            <div className="linkRemixSidebarMeta">
-              <span>已生成</span><strong>{outputCount} 条内容</strong>
-              <span>阅读字号</span>
-              <div>
-                <button aria-label="减小字号" onClick={() => onSetFontScale((current) => Math.max(90, current - 10))} type="button">A-</button>
-                <button aria-label="恢复默认字号" onClick={() => onSetFontScale(100)} type="button">{fontScale}%</button>
-                <button aria-label="增大字号" onClick={() => onSetFontScale((current) => Math.min(130, current + 10))} type="button">A+</button>
-              </div>
-            </div>
-          </aside>
-
+        <section className="linkRemixWorkspace linkRemixSingleWorkspace">
           <main className="linkRemixMain">
             {activeBatch ? (
               <>
                 <div className="linkRemixContentHeader">
-                  <div><span>{formatRemixChannelLabel(activeBatch.label)}</span><h2>选择一个版本后直接发布</h2></div>
+                  <div><span>{formatRemixChannelLabel(activeBatch.label)}</span><h2>一篇可直接发布的原创文章</h2></div>
                   {activeItem ? (
                     <div className="linkRemixContentActions">
-                      <button onClick={() => void onCopy(activeItem.id, activeItem.body)} type="button">{copied[activeItem.id] ? "已复制" : "复制当前版本"}</button>
+                      <button onClick={() => void onCopy(activeItem.id, activeItem.body)} type="button">{copied[activeItem.id] ? "已复制" : "复制全文"}</button>
                       <button onClick={() => onExport(activeItem.title, activeItem.body, { viewMode: activeItem.viewMode, theme: "default" })} type="button">导出 Word</button>
+                      <button aria-label="减小字号" onClick={() => onSetFontScale((current) => Math.max(90, current - 10))} type="button">A-</button>
+                      <button aria-label="恢复默认字号" onClick={() => onSetFontScale(100)} type="button">{fontScale}%</button>
+                      <button aria-label="增大字号" onClick={() => onSetFontScale((current) => Math.min(130, current + 10))} type="button">A+</button>
                     </div>
                   ) : null}
                 </div>
-                {activeBatch.items.length > 1 ? (
-                  <div aria-label="选择内容版本" className="linkRemixVersionTabs" role="tablist">
-                    {activeBatch.items.map((item, index) => (
-                      <button aria-selected={activeItem?.id === item.id} className={activeItem?.id === item.id ? "active" : ""} key={item.id} onClick={() => onSelectItem(activeBatch.id, item.id)} role="tab" type="button">
-                        {formatRemixVersionLabel(item.title, index)}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
                 {activeItem ? (
                   <article className="linkRemixDocument" style={{ fontSize: `${fontScale}%` }}>
                     <div className="linkRemixDocumentMeta"><span>{activeItem.viewMode === "wechat" ? "公众号长文" : activeItem.viewMode === "xiaohongshu" ? "小红书笔记" : "可直接发布"}</span><strong>{activeItem.title}</strong></div>
@@ -2743,7 +2714,9 @@ function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
       items: [],
     };
     const versionPattern = /^###\s+(.+?)\s*$/gm;
-    const versions = Array.from(body.matchAll(versionPattern));
+    // A公众号 article uses H3 headings as in-article sections, not alternate
+    // drafts. Treat the whole channel group as one publishable document.
+    const versions = meta.key === "wechat" ? [] : Array.from(body.matchAll(versionPattern));
     const items = versions.length > 0
       ? versions.map((version, versionIndex) => ({
           heading: version[1].trim(),

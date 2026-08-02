@@ -2,38 +2,49 @@
   "title": "你说的每一句，都值得被听见",
   "brand": "小谷 AI",
   "website": "https://xiaogu.nzeta.ai",
+  "brandNarrative": {
+    "vision": "让每一位专业人士的价值，都被看见、被理解、被信任。",
+    "mission": "用懂行业、懂个人的 AI，帮助专业人士更轻松地表达专业、持续服务客户、沉淀长期影响力。"
+  },
   "format": { "width": 3840, "height": 2160, "fps": 25, "aspectRatio": "16:9" },
   "visualBible": {
     "style": "现代都市写实科技广告，结合温暖轻动画品牌精灵；克制、可信、清透，不采用赛博朋克或纯动漫主画风。",
     "fairy": "小谷精灵由上传的小谷 Logo 演化而来：成年感年轻女性、聪慧温暖、青绿色半透明轻科技服饰、极简品牌徽记、柔和粒子光。她不是幼童、不是游戏角色、不是二次元人物。",
     "hero": "固定为一位 30 至 40 岁的中国保险经纪人，专业温和、自然克制。全片保持同一张脸、发型、服装体系和现代都市办公空间。",
-    "negative": "可读文字、乱码 UI、水印、第三方 Logo、影视角色、名人肖像、额外手指、畸形肢体、夸张表演、赛博朋克霓虹、儿童化卡通。"
+    "negative": "除本单元明确指定的简体中文字幕与品牌文字外，禁止任何可读文字、乱码 UI、水印、第三方 Logo、影视角色、名人肖像、额外手指、畸形肢体、夸张表演、赛博朋克霓虹、儿童化卡通。"
   },
-  "narration": [
-    "每一位保险人，都有值得被听见的专业。",
-    "可真正困难的，从来不是专业本身。",
-    "而是，如何让别人看见你、理解你、信任你。",
-    "小谷，先帮你认识自己，梳理你的经历、优势与表达。",
-    "没有话题，没有灵感？小谷为你发现热点，拆解爆款，找到真正适合你讲的内容。",
-    "一句想法，小谷帮你写成适合不同平台的内容。",
-    "一图胜千言。复杂的专业知识，也能清晰易懂地呈现。",
-    "贴心的专有工具，让服务更及时，让工作更高效。",
-    "你用得越多，小谷就越懂你。",
-    "它不替你成为谁。它让每一次表达，都更像真正的你。",
-    "小谷AI。让专业被看见，让信任自然发生。"
-  ],
+  "audioDesign": {
+    "approach": "Seedance 直接生成画面、自然中文普通话对白／旁白、同步口型与简体中文字幕；不使用后期配音或后期字幕。谷雨说真实困惑，小谷精灵用短句回应与引导，旁白只负责品牌收束。每一条提示词均须明确指定台词与字幕。",
+    "dialogue": [
+      { "unit": "u01", "speaker": "谷雨", "line": "我有很多专业想说，却常常不知道，怎样让人愿意听下去。" },
+      { "unit": "u02", "speaker": "小谷精灵", "line": "那就先从你自己开始。你的经历、判断和表达，本来就很有力量。" },
+      { "unit": "u03", "speaker": "小谷精灵", "line": "我懂行业，也想先懂你。我帮你把这些，慢慢整理成更清晰的你。" },
+      { "unit": "u04", "speaker": "小谷精灵", "line": "今天的热点里，也许就藏着你最适合说的那句话。" },
+      { "unit": "u04", "speaker": "谷雨", "line": "那就从我最想帮客户想清楚的事开始。" },
+      { "unit": "u05", "speaker": "小谷精灵", "line": "一个想法，我帮你说给更多人听。" },
+      { "unit": "u06", "speaker": "小谷精灵", "line": "专业不必复杂，清楚就很有力量。" },
+      { "unit": "u07", "speaker": "小谷精灵", "line": "重要的事，我会替你记得。让你的服务，一直在线。" },
+      { "unit": "u08", "speaker": "小谷精灵", "line": "我不会替你成为谁。我只想让每一次表达，更像你。" }
+    ],
+    "narration": [
+      { "unit": "u01", "line": "每一位保险人，都有值得被听见的专业。" },
+      { "unit": "u09", "line": "小谷 AI · NZeta.ai。让每一位专业人士的价值，都被看见、被理解、被信任。" }
+    ]
+  },
   "seedancePlan": {
     "model": "seedance-2.0",
     "maxDurationSeconds": 15,
-    "submissionStrategy": "7 条独立候选片段；每条使用统一的人物、精灵、Logo 参考图，并附带本段相关的真实产品画面。每条生成 4 个候选，人工只需从候选中选择一条后由脚本拼接。",
+    "submissionStrategy": "9 条独立候选片段；每条均为 15 秒，使用统一的人物、精灵、Logo 参考图，并附带本段相关的真实产品画面。每条生成 4 个候选，人工只需从候选中选择一条后由脚本拼接。",
     "units": [
-      { "id": "u01", "duration": 15, "beat": "专业值得被听见", "overlay": "每一位保险人，都有值得被听见的专业。\n如何让别人看见你、理解你、信任你？", "productAssets": ["assets/product-original/01-creation-hub.png"], "prompt": "15 秒内完成三个自然连续段落：0–5 秒，清晨的现代上海办公室，固定主角谷雨面对空白文档、手机待回复提示和便签，短暂沉思；5–9 秒，她删除又重新输入内容，抬眼看向窗外；9–15 秒，桌面角落由上传的小谷 Logo 参考图化作柔和青绿色粒子，汇聚为上传的小谷精灵设定图中的同一角色，创作广场界面以真实产品参考图的形式在她视线前优雅浮现。35mm 写实高端广告，慢速推进，无可读文字。" },
-      { "id": "u02", "duration": 15, "beat": "个性化 IP 与长期记忆", "overlay": "个性化 IP 定位\n更清晰地呈现自己", "productAssets": ["assets/product-original/02-avatar-memory.png"], "prompt": "15 秒单镜头缓慢推进：固定主角谷雨在现代办公室中站在数字分身与长期记忆界面旁，小谷精灵站在她身边，以轻抬手的动作把象征经历、专业、客户与表达风格的抽象光点整理成清晰的星图。真实产品参考图仅以屏幕内容呈现，人物和环境写实，图形克制，不出现额外可读文字。" },
-      { "id": "u03", "duration": 15, "beat": "热点成为表达灵感", "overlay": "热点与爆款\n找到今天值得讲的话题", "productAssets": ["assets/product-original/07-trends-viral-examples.png", "assets/product-original/06-article-workspace.png"], "prompt": "15 秒两段顺滑转场：前 7 秒，热点榜单与爆款案例的真实产品参考图在工作屏幕中清晰出现，小谷精灵从温和青绿色光流中捕捉资讯卡片和短视频碎片，整理为内容灵感；后 8 秒，主角对手机自然说出一个家庭保障想法，小谷精灵轻触空气，想法变为整齐的内容卡片轮廓，并自然接到公众号文章创作界面。写实广告，不显示模型生成的可读文字。" },
-      { "id": "u04", "duration": 15, "beat": "多平台表达与口播", "overlay": "短视频 · 小红书 · 公众号 · 朋友圈\n让表达自然发生", "productAssets": ["assets/product-original/06-article-workspace.png", "assets/product-original/03-article-image-cards.png"], "prompt": "15 秒两段顺滑转场：前 8 秒，同一主角在明亮工作台前查看公众号文章创作和文章配图真实产品参考图，三组不同尺寸的内容卡片平稳展开，暗示短视频、小红书、公众号和朋友圈；后 7 秒，她在窗边架起手机自然录制视频，神情真诚专业，小谷精灵化为克制的青绿色柔光停在取景框外。现代都市写实广告，无可读文字。" },
-      { "id": "u05", "duration": 15, "beat": "图卡、PPT 与服务工具", "overlay": "一图胜千言 · PPT 一键生成\n贴心服务，更及时高效", "productAssets": ["assets/product-original/03-article-image-cards.png", "assets/product-original/04-ppt-work.png", "assets/product-original/05-policy-renewal-card.jpg"], "prompt": "15 秒三段节奏清晰但转场柔和：0–6 秒，文章配图的真实产品参考图浮现，复杂保险资料纸张与线条重组成清晰优雅的信息图卡；6–11 秒，PPT 真实作品参考图的页面依次浮现并排列成清晰结构；11–15 秒，保单续费提醒真实卡片在现代日历与客户服务待办旁出现，小谷精灵轻点确认。保持可信的企业服务广告质感，不生成额外文字。" },
-      { "id": "u06", "duration": 15, "beat": "越用越懂你", "overlay": "个人画像 · 长期记忆 · 风格洞察\n每一次表达，都更像真正的你", "productAssets": ["assets/product-original/02-avatar-memory.png"], "prompt": "15 秒温暖蒙太奇：前 8 秒，主角在不同日期持续创作，数字分身与长期记忆真实产品参考图在屏幕中出现，小谷精灵从细小光点逐步变得清晰稳定，身后是经验、判断与表达习惯构成的抽象记忆星图；后 7 秒，她回看自己录制的视频，微笑而笃定，小谷精灵安静陪伴，两人看向同一束清晨光。高级品牌广告，真实而富有希望。" },
-      { "id": "u07", "duration": 10, "beat": "品牌收束", "overlay": "小谷 AI · NZeta.ai\nhttps://xiaogu.nzeta.ai", "productAssets": [], "prompt": "10 秒极简品牌片尾：固定主角谷雨从容面对手机镜头，背景为干净明亮的现代都市办公空间；小谷精灵化为柔和青绿色光点，回归上传的小谷 Logo 参考图轮廓。最后 3 秒过渡到深青绿色至白色的柔和光影背景，中央留出干净空间供后期叠加品牌文案与网址。绝不生成文字、水印或其他 Logo。" }
+      { "id": "u01", "duration": 15, "beat": "专业值得被听见", "overlay": "每一位保险人，都有值得被听见的专业。", "productAssets": [], "prompt": "15 秒内两个自然连续段落：0–8 秒，清晨现代上海办公室，固定主角谷雨面对空白文档、手机待回复提示和便签，短暂沉思；8–15 秒，她删除又重新输入内容，抬眼看向窗外，准备开口说话。35mm 写实高端广告，慢速推进，无可读文字，留出自然呼吸。" },
+      { "id": "u02", "duration": 15, "beat": "小谷出现与创作广场", "overlay": "如何让别人看见你、理解你、信任你？", "productAssets": ["assets/product-original/01-creation-hub.png"], "prompt": "15 秒单镜头：同一办公室中，桌面角落由上传的小谷 Logo 参考图化作柔和青绿色粒子，汇聚为上传的小谷精灵设定图中的同一角色。她温暖轻盈地看向主角，创作广场真实产品参考图以干净屏幕内容在主角视线前出现。电影广告质感，镜头轻推，无可读文字。" },
+      { "id": "u03", "duration": 15, "beat": "个性化 IP 与长期记忆", "overlay": "个性化 IP 定位\n更清晰地呈现自己", "productAssets": ["assets/product-original/02-avatar-memory.png"], "prompt": "15 秒单镜头缓慢推进：固定主角谷雨在现代办公室中站在数字分身与长期记忆界面旁，小谷精灵站在她身边，以轻抬手的动作把象征经历、专业、客户与表达风格的抽象光点整理成清晰的星图。真实产品参考图仅以屏幕内容呈现，人物和环境写实，图形克制，不出现额外可读文字。" },
+      { "id": "u04", "duration": 15, "beat": "热点、爆款二创与流量文案", "overlay": "热点 · 爆款二创 · 流量文案\n找到今天值得讲的话题", "productAssets": ["assets/product-original/07-trends-viral-examples.png", "assets/product-original/10-viral-remix.png", "assets/product-original/09-traffic-copy-result.png"], "prompt": "15 秒三段顺滑转场：前 5 秒，热点榜单与爆款案例真实产品参考图在工作屏幕中清晰出现，小谷精灵从温和青绿色光流中捕捉资讯卡片和短视频碎片；中间 5 秒，爆款话题二创真实产品参考图清晰呈现，精灵将外部热点梳理为贴合谷雨专业表达的原创角度；后 5 秒，流量文案真实产品结果图在屏幕中清晰呈现，主角在镜头前自然说出一个家庭保障想法，神情真诚专业。写实广告，不显示模型生成的可读文字。" },
+      { "id": "u05", "duration": 15, "beat": "文章与多平台内容", "overlay": "短视频 · 小红书 · 公众号 · 朋友圈", "productAssets": ["assets/product-original/06-article-workspace.png", "assets/product-original/03-article-image-cards.png"], "prompt": "15 秒两段顺滑转场：前 8 秒，主角的一句想法变为公众号文章创作真实产品参考图中的清晰文章结构；后 7 秒，文章配图与三组不同尺寸内容卡片平稳展开，暗示短视频、小红书、公众号和朋友圈。小谷精灵在旁指引，现代都市写实广告，无可读文字。" },
+      { "id": "u06", "duration": 15, "beat": "知识卡与 PPT", "overlay": "一图胜千言\nPPT 一键生成", "productAssets": ["assets/product-original/08-knowledge-card-whiteboard.jpg", "assets/product-original/04-ppt-work.png"], "prompt": "15 秒两段平稳转场：前 8 秒，知识卡真实产品参考图浮现，谷雨在白板前以清晰、有温度的方式讲解复杂资产逻辑，信息从手写板书自然整理成易懂的知识卡；后 7 秒，PPT 真实作品参考图的页面依次浮现并排列成清晰结构。白色、青绿、浅金色，克制高级，不生成额外文字。" },
+      { "id": "u07", "duration": 15, "beat": "保险专有服务", "overlay": "贴心专有工具\n让服务更及时，让工作更高效", "productAssets": ["assets/product-original/05-policy-renewal-card.jpg"], "prompt": "15 秒服务场景：保单续费提醒真实卡片在现代日历与客户服务待办旁出现，一个重要日期被柔和青绿色光圈标记，小谷精灵轻点确认；主角从容确认服务事项，随后抬头微笑。写实光线，专业服务感，不生成额外文字。" },
+      { "id": "u08", "duration": 15, "beat": "越用越懂你", "overlay": "个人画像 · 长期记忆 · 风格洞察\n每一次表达，都更像真正的你", "productAssets": ["assets/product-original/02-avatar-memory.png"], "prompt": "15 秒温暖人物收束：前 8 秒，主角在不同日期持续创作，数字分身与长期记忆真实产品参考图在屏幕中出现，小谷精灵从细小光点逐步变得清晰稳定，身后是经验、判断与表达习惯构成的抽象记忆星图；后 7 秒，主角从容面对手机镜头，小谷精灵安静陪伴，两人看向同一束晨光。高级品牌广告，真实而富有希望，绝不生成文字、水印或其他 Logo。" },
+      { "id": "u09", "duration": 15, "beat": "品牌愿景与使命", "overlay": "小谷 AI · NZeta.ai\n愿景：让每一位专业人士的价值，都被看见、被理解、被信任。\n使命：用懂行业、懂个人的 AI，帮助专业人士更轻松地表达专业、持续服务客户、沉淀长期影响力。\nhttps://xiaogu.nzeta.ai", "productAssets": [], "prompt": "15 秒极简品牌片尾：小谷精灵化为柔和青绿色光点，回归上传的小谷 Logo 参考图轮廓；随后过渡到深青绿色至暖白色的柔和光影背景。画面中央与下方必须稳定、清晰地显示本单元指定的品牌名称、愿景、使命与网址，文字无错别字、无乱码、无水印。镜头稳定、留白充足、高端品牌广告。" }
     ]
   },
   "shots": [
@@ -41,11 +52,11 @@
     { "id": "s02", "duration": 7, "beat": "难以表达", "prompt": "同一位保险经纪人轻轻删除又重新输入内容，抬眼看向窗外，屏幕光映在脸上。现代都市写实广告，浅景深，细腻情绪，不展示任何可读屏幕文字。", "overlay": "可真正困难的，从来不是专业本身。" },
     { "id": "s03", "duration": 7, "beat": "精灵出现", "prompt": "同一办公室中，桌面角落由上传的小谷 Logo 参考图化作柔和青绿色粒子，光点汇聚为上传的小谷精灵设定图中的同一角色。她温暖、轻盈、成年感，微笑看向经纪人。电影广告质感，镜头轻推。", "overlay": "如何让别人看见你、理解你、信任你。", "productAssets": ["assets/product-original/01-creation-hub.png"] },
     { "id": "s04", "duration": 7, "beat": "个性化IP定位", "prompt": "小谷精灵站在经纪人身旁，轻抬手，将象征经历、专业、客户与表达风格的抽象光点整理成清晰、有层次的星图。写实办公室与克制动态图形融合，不出现文字或界面。", "overlay": "个性化 IP 定位\n更清晰地呈现自己", "productAssets": ["assets/product-original/02-avatar-memory.png"] },
-    { "id": "s05", "duration": 7, "beat": "热点与爆款", "prompt": "小谷精灵在温和的青绿色光流中捕捉抽象资讯卡片和短视频画面碎片，再把它们整理成三个明亮的内容灵感节点。真实广告片，信息流只作无文字抽象图形，动作自然。", "overlay": "热点与爆款\n找到今天值得讲的话题", "productAssets": ["assets/product-original/07-trends-viral-examples.png"] },
+    { "id": "s05", "duration": 7, "beat": "热点、爆款二创与流量文案", "prompt": "小谷精灵在温和的青绿色光流中捕捉抽象资讯卡片和短视频画面碎片，再把它们整理成三个明亮的内容灵感节点。真实广告片，信息流只作无文字抽象图形，动作自然。", "overlay": "热点 · 爆款二创 · 流量文案\n找到今天值得讲的话题", "productAssets": ["assets/product-original/07-trends-viral-examples.png", "assets/product-original/10-viral-remix.png", "assets/product-original/09-traffic-copy-result.png"] },
     { "id": "s06", "duration": 7, "beat": "提笔不难", "prompt": "经纪人对着手机自然说出一个关于家庭保障的想法，小谷精灵轻触空气，想法变成流畅的发光线条和整齐的内容卡片轮廓。现代都市写实，人物自信但不夸张，不显示文字。", "overlay": "短视频口播文案\n从一个想法开始", "productAssets": ["assets/product-original/06-article-workspace.png"] },
     { "id": "s07", "duration": 7, "beat": "多平台表达", "prompt": "同一个经纪人在明亮工作台前查看三组不同尺寸的无文字内容卡片，它们平稳展开，分别暗示短视频、小红书、公众号和朋友圈。小谷精灵在旁指引，真实广告摄影。", "overlay": "短视频 · 小红书 · 公众号 · 朋友圈", "productAssets": ["assets/product-original/06-article-workspace.png", "assets/product-original/03-article-image-cards.png"] },
     { "id": "s08", "duration": 7, "beat": "录制视频", "prompt": "经纪人在窗边架起手机录制视频，自然讲述，神情真诚、专业、松弛。小谷精灵化成非常克制的青绿色柔光停在取景框外，现代城市背景虚化。", "overlay": "不知道怎么说？\n让表达自然发生" },
-    { "id": "s09", "duration": 7, "beat": "一图胜千言", "prompt": "复杂、抽象的保险资料纸张和线条在空中平稳重组为一张清晰优雅的无文字信息图卡。小谷精灵以手势完成整理。白色、青绿、浅金色，克制高级，不出现真实文字。", "overlay": "一图胜千言\n复杂专业，也能一眼看懂", "productAssets": ["assets/product-original/03-article-image-cards.png"] },
+    { "id": "s09", "duration": 7, "beat": "一图胜千言", "prompt": "复杂、抽象的保险资料纸张和线条在空中平稳重组为一张清晰优雅的无文字信息图卡。小谷精灵以手势完成整理。白色、青绿、浅金色，克制高级，不出现真实文字。", "overlay": "一图胜千言\n复杂专业，也能一眼看懂", "productAssets": ["assets/product-original/08-knowledge-card-whiteboard.jpg"] },
     { "id": "s10", "duration": 7, "beat": "PPT一键生成", "prompt": "从一叠杂乱资料中，三张干净专业的无文字演示文稿页面依次浮现并排列成清晰结构。小谷精灵在侧面点亮页面边缘，商业广告感，现代、可信。", "overlay": "PPT 一键生成\n结构化呈现专业", "productAssets": ["assets/product-original/04-ppt-work.png"] },
     { "id": "s11", "duration": 5, "beat": "续保提醒", "prompt": "温暖的现代日历和客户服务待办在桌面上以无文字图形方式出现，一个重要日期被柔和青绿色光圈标记，小谷精灵轻点确认。写实光线，专业服务感，不使用任何可读文字。", "overlay": "贴心专有工具\n保单续保提醒", "productAssets": ["assets/product-original/05-policy-renewal-card.jpg"] },
     { "id": "s12", "duration": 7, "beat": "长期记忆", "prompt": "经纪人在不同日期持续创作的蒙太奇以自然转场展开，小谷精灵从细小光点逐步变得清晰稳定；身后浮现由经验、判断与表达习惯构成的抽象记忆星图。温暖、可信。", "overlay": "个人画像 · 长期记忆 · 风格洞察", "productAssets": ["assets/product-original/02-avatar-memory.png"] },
