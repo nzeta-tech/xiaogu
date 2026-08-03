@@ -56,6 +56,18 @@ const workspaceCategories: Array<{ id: WorkspaceCategory; label: string; descrip
 
 const workspaceCards: WorkspaceCard[] = [
   {
+    slug: "xiaohongshu-studio",
+    appSlug: "xiaohongshu-studio",
+    name: "小红书笔记创作",
+    emoji: "◉",
+    pointsLabel: "8",
+    badge: "新",
+    description: "从真实选题生成笔记、竖版图文卡片和发布前风险检查，一次备齐发布包。",
+    hint: "先完成一条真实笔记，再按段落制作可下载的图文卡片。",
+    actionLabel: "使用",
+    goals: ["attention", "trust", "conversion"],
+  },
+  {
     slug: "wechat-studio",
     appSlug: "wechat-studio",
     name: "公众号文章创作",
@@ -165,7 +177,7 @@ const workspaceCards: WorkspaceCard[] = [
   {
     slug: "traffic-copy",
     appSlug: "traffic-copy",
-    name: "流量文案",
+    name: "口播文案（流量型）",
     emoji: "⚡",
     pointsLabel: "5",
     badge: "新",
@@ -365,14 +377,16 @@ const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCa
 // Keep the primary creation paths at the head of the feature catalogue, even
 // when a user has previously used another tool more often.
 const workspaceCardPriority = new Map([
-  ["traffic-copy", 0],
-  ["image-card", 1],
-  ["wechat-studio", 2],
-  ["ppt-maker", 3],
-  ["link-remix", 4],
+  ["xiaohongshu-studio", 0],
+  ["traffic-copy", 1],
+  ["image-card", 2],
+  ["wechat-studio", 3],
+  ["ppt-maker", 4],
+  ["link-remix", 5],
 ]);
 
 const workspaceIconUrls: Record<string, string> = {
+  "xiaohongshu-studio": "/icons/creation/book-pencil.webp",
   "wechat-studio": "/icons/creation/book-pencil.webp",
   "ppt-maker": "/icons/creation/landscape.webp",
   "write-copy": "/icons/creation/book-pencil.webp",

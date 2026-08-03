@@ -2,12 +2,58 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
+import BaseMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { articleDocx } from "@/lib/client/docx";
 import { getCreationAppBySlug, type CreationApp } from "@/lib/apps/catalog";
 
 type GeneratedImage = { id: string; url: string; sectionIndex?: number; sectionTitle?: string };
+
+type MarkdownTable = { headers: string[]; rows: string[][] };
+
+function ReactMarkdown({ children }: { children: string }) {
+  const blocks = splitMarkdownTables(children);
+  return <>{blocks.map((block, index) => block.type === "table"
+    ? <MarkdownTableCard key={`table-${index}`} table={block.table} />
+    : <BaseMarkdown key={`text-${index}`}>{block.content}</BaseMarkdown>)}</>;
+}
+
+function MarkdownTableCard({ table }: { table: MarkdownTable }) {
+  const series = table.headers.slice(1).map((label, column) => ({
+    label,
+    values: table.rows.map((row) => percentageValue(row[column + 1])),
+  })).filter((item) => item.values.some((value) => value !== null));
+  return <figure className="studioDataTable">
+    <div className="studioTableScroll"><table><thead><tr>{table.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{table.rows.map((row, rowIndex) => <tr key={`${rowIndex}-${row[0]}`}>{table.headers.map((_, column) => <td key={column}>{row[column] ?? "—"}</td>)}</tr>)}</tbody></table></div>
+    {series.length > 0 ? <TableTrendChart labels={table.rows.map((row) => row[0])} series={series} /> : null}
+  </figure>;
+}
+
+function TableTrendChart({ labels, series }: { labels: string[]; series: Array<{ label: string; values: Array<number | null> }> }) {
+  const values = series.flatMap((item) => item.values).filter((value): value is number => value !== null);
+  if (!values.length) return null;
+  const max = Math.max(1, ...values); const min = Math.min(0, ...values); const span = Math.max(0.5, max - min);
+  const width = 620; const height = 230; const left = 44; const top = 28; const right = 18; const bottom = 42;
+  const x = (index: number) => left + index * ((width - left - right) / Math.max(1, labels.length - 1));
+  const y = (value: number) => top + (max - value) * ((height - top - bottom) / span);
+  const colors = ["#16866b", "#d18a3b", "#6577b9", "#bd5d70"];
+  return <div className="studioTrendChart" aria-label="根据表格数值生成的趋势图"><strong>数值趋势</strong><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="表格中百分比数值的变化趋势"><line x1={left} x2={width - right} y1={height - bottom} y2={height - bottom} className="axis" />{[0, 0.5, 1].map((tick) => { const value = min + span * tick; const position = y(value); return <g key={tick}><line x1={left} x2={width - right} y1={position} y2={position} className="grid" /><text x={left - 8} y={position + 4} textAnchor="end">{value.toFixed(1)}%</text></g>; })}{series.map((item, seriesIndex) => { const points = item.values.map((value, index) => value === null ? null : `${x(index)},${y(value)}`); return <g key={item.label}><polyline points={points.filter(Boolean).join(" ")} fill="none" stroke={colors[seriesIndex % colors.length]} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />{item.values.map((value, index) => value === null ? null : <circle key={index} cx={x(index)} cy={y(value)} r="4" fill={colors[seriesIndex % colors.length]} />)}</g>; })}{labels.map((label, index) => <text key={label} x={x(index)} y={height - 16} textAnchor="middle">{label}</text>)}</svg><span>{series.map((item, index) => <i key={item.label}><b style={{ backgroundColor: colors[index % colors.length] }} />{item.label}</i>)}</span><small>箭头数值按变动后的数值绘制；“—”不参与计算。</small></div>;
+}
+
+function splitMarkdownTables(content: string): Array<{ type: "text"; content: string } | { type: "table"; table: MarkdownTable }> {
+  const lines = content.replace(/\r/g, "").split("\n"); const blocks: Array<{ type: "text"; content: string } | { type: "table"; table: MarkdownTable }> = []; let text: string[] = [];
+  const flush = () => { if (text.join("\n").trim()) blocks.push({ type: "text", content: text.join("\n") }); text = []; };
+  for (let index = 0; index < lines.length;) {
+    if (isTableRow(lines[index]) && isTableDivider(lines[index + 1] ?? "")) { flush(); const headers = cells(lines[index]); index += 2; const rows: string[][] = []; while (index < lines.length && isTableRow(lines[index])) { rows.push(cells(lines[index])); index += 1; } blocks.push({ type: "table", table: { headers, rows } }); continue; }
+    text.push(lines[index]); index += 1;
+  }
+  flush(); return blocks;
+}
+
+function isTableRow(line: string) { return /^\s*\|.*\|\s*$/.test(line); }
+function isTableDivider(line: string) { return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line); }
+function cells(line: string) { return line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()); }
+function percentageValue(value: string | undefined) { const matches = value?.match(/(\d+(?:\.\d+)?)\s*%/g); if (!matches?.length) return null; return Number(matches.at(-1)?.replace("%", "")); }
 
 const styles = (getCreationAppBySlug("wechat-images")?.fields.find((field) => field.id === "style")?.options ?? []).map((option, index) => ({
   value: option.value,

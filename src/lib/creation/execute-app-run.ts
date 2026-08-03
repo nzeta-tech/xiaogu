@@ -91,9 +91,7 @@ export async function executeCreationAppRun(input: {
   }
 
   const caseContext = buildCreationPromptContext(app, entry);
-  const linkRemixResearch = app.slug === "link-remix"
-    ? await buildLinkRemixResearchContext(values)
-    : "";
+  const linkRemixResearch = app.slug === "link-remix" ? await buildLinkRemixResearchContext(values) : "";
 
   const prompt = isPolicyRenewalCard
     ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
@@ -115,6 +113,8 @@ export async function executeCreationAppRun(input: {
       ? buildLetterPrompt(values, caseContext, effectiveApp.promptHint)
       : app.slug === "wechat-studio"
         ? buildWechatStudioPrompt(values, caseContext)
+      : app.slug === "xiaohongshu-studio"
+        ? buildXiaohongshuStudioPrompt(values, caseContext)
       : app.slug === "topic-picker"
         ? buildTopicPickerPrompt(values, caseContext, effectiveApp.promptHint, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
       : values.source && typeof values.source === "string"
@@ -508,6 +508,22 @@ function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext
     "不得编造数据、案例、产品规则或经历；保险内容不承诺收益、承保或理赔。结尾给温和自然的行动建议。只输出可直接发布的文章，不解释过程或附配图建议。",
     `目标读者：${stringifyCreationFieldValue(values.audience) || "普通读者"}。`,
     `文章气质：${stringifyCreationFieldValue(values.tone) || "专业但易懂"}。`,
+    "真实素材与要求：",
+    stringifyCreationFieldValue(values.topic),
+  ].filter(Boolean).join("\n\n");
+}
+
+function buildXiaohongshuStudioPrompt(values: Record<string, FieldValue>, caseContext: string[]) {
+  const creationMode = stringifyCreationFieldValue(values.creation_mode) || "idea";
+  const lengthMode = stringifyCreationFieldValue(values.length_mode) || "standard";
+  const lengthBrief = lengthMode === "minimal" ? "极简模式：250-350 字，3-4 个短段落。" : lengthMode === "long" ? "长文模式：900-1200 字，5-7 个短段落或清单节点。" : "普通模式：500-700 字，4-5 个短段落或清单节点。";
+  return [
+    "你正在为小红书创作一篇图文笔记，不是公众号长文、口播稿或直接成交话术。",
+    ...caseContext,
+    `第一行输出一个不超过 20 字、与正文完全一致的笔记标题；随后直接输出可发布正文。${lengthBrief}正文用短段落和少量自然的 Emoji，先给具体场景或结论，再展开解释，结尾给克制的站内互动问题。正文必须至少包含 2-4 个简短子标题：每个子标题单独一行，用“## ”开头，像小红书图文卡片中的段落引导；子标题要具体、有信息量，不能是“正文”“总结”等空泛词。`,
+    creationMode === "rewrite" ? "这是基于原文的正常创作，不是逐句改写、摘要或复述。输入原文是可靠素材和事实边界：保留其中能确认的主题、事实、数字、案例、时间、结论和风险边界，但应重新选择更适合小红书读者的切入角度、标题、叙事顺序、子标题、场景化表达、观点推进和互动收尾，写成一篇有独立阅读价值的新笔记。允许提炼原文隐含的生活问题和行动建议；不得捏造原文没有的具体数字、案例、政策、产品规则或亲身经历，也不得把推测写成事实。" : "这是基于想法创作：请先全网检索相关的公开、可信资料，再把能明确核验的事实自然融入笔记；如果无法检索或无法确认，不得声称已经查找，改用一般性表述或明确标注待核验，绝不补造数字、案例、政策或产品规则。",
+    "内容应真实、清晰、值得收藏；不得编造案例、数据、产品规则或个人经历，不承诺投保、理赔、收益或服务结果。不得出现电话、微信、二维码、站外链接、谐音/变体导流或规避审核说法；不得贬损竞品、诱导点击或用标题党。",
+    "最后单独一行输出 3-6 个相关话题标签，使用 #标签 形式。只输出成稿，不解释创作过程、配图建议或合规说明。",
     "真实素材与要求：",
     stringifyCreationFieldValue(values.topic),
   ].filter(Boolean).join("\n\n");

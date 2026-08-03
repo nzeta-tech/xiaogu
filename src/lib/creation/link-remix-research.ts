@@ -40,6 +40,12 @@ export async function buildLinkRemixResearchContext(values: Record<string, Creat
   ].join("\n");
 }
 
+/** Best-effort public-source pack for idea-led Xiaohongshu creation. */
+export async function buildXiaohongshuIdeaResearchContext(values: Record<string, CreationFieldValue>) {
+  if (stringifyCreationFieldValue(values.creation_mode) !== "idea") return "";
+  return buildLinkRemixResearchContext({ ...values, source_topic: stringifyCreationFieldValue(values.topic) });
+}
+
 function buildResearchQuery(values: Record<string, CreationFieldValue>) {
   const title = stringifyCreationFieldValue(values.source_title).replace(/#[^\s#]+/g, " ").trim();
   const topic = stringifyCreationFieldValue(values.source_topic).trim();

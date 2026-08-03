@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>小谷｜热点榜单预览</title>
+  <style>
+    :root { --ink:#172033; --muted:#64748b; --line:#dfe7ee; --green:#0f766e; --mint:#effcf9; --amber:#9a670e; --amber-bg:#fff7e6; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#f5f7f8; color:var(--ink); font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
+    .shell { width:min(1120px,calc(100% - 36px)); margin:42px auto 64px; }
+    .eyebrow { color:var(--green); font-size:12px; font-weight:800; letter-spacing:.08em; }
+    h1 { margin:7px 0 8px; font-size:28px; letter-spacing:-.04em; }
+    .intro { margin:0; max-width:720px; color:var(--muted); font-size:13px; line-height:1.7; }
+    .panel { margin-top:22px; padding:20px; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:0 14px 35px rgba(15,23,42,.05); }
+    .topline { display:flex; justify-content:space-between; gap:16px; align-items:start; }
+    .topline h2 { margin:3px 0 0; font-size:19px; letter-spacing:-.03em; }
+    .fresh { display:flex; align-items:center; gap:7px; padding:7px 9px; border:1px solid #bdebe2; border-radius:6px; background:var(--mint); color:var(--green); font-size:10px; font-weight:800; white-space:nowrap; }
+    .fresh i { width:6px; height:6px; border-radius:99px; background:#16a085; box-shadow:0 0 0 3px #d8f6ef; }
+    .summary { display:flex; flex-wrap:wrap; gap:7px; margin:15px 0 12px; }
+    .summary span,.filter { border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; color:var(--muted); font-size:10px; padding:6px 8px; }
+    .summary b { color:#334155; }
+    .ranking-note { display:flex; align-items:flex-start; gap:10px; margin:16px 0 0; padding:10px 12px; border:1px solid #d5ece7; border-radius:8px; background:#f6fcfa; }
+    .ranking-note b { display:block; color:#0f766e; font-size:10px; }
+    .ranking-note p { margin:3px 0 0; color:#64748b; font-size:10px; line-height:1.55; }
+    .ranking-note button { margin-left:auto; padding:0; border:0; background:transparent; color:#0f766e; font-size:10px; font-weight:800; white-space:nowrap; cursor:pointer; }
+    .filters { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 15px; }
+    .filter { cursor:pointer; transition:.16s; }
+    .filter:hover,.filter.active { border-color:#8fdbce; background:var(--mint); color:var(--green); font-weight:800; }
+    .mode-tabs { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin:18px 0 14px; }
+    .mode-tab { min-height:68px; padding:11px 13px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; color:#64748b; text-align:left; cursor:pointer; transition:.16s; }
+    .mode-tab strong { display:block; color:#334155; font-size:12px; }
+    .mode-tab span { display:block; margin-top:4px; font-size:10px; line-height:1.4; }
+    .mode-tab.active { border-color:#82d8c9; background:#f1fcf9; box-shadow:0 4px 12px rgba(15,118,110,.08); }
+    .mode-tab.active strong { color:var(--green); }
+    .topic-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .topic { position:relative; display:grid; grid-template-columns:31px 46px minmax(0,1fr) auto; gap:10px; align-items:start; min-height:136px; padding:12px; overflow:hidden; border:1px solid var(--line); border-radius:9px; background:#fff; box-shadow:0 5px 16px rgba(15,23,42,.045); transition:.18s; }
+    .topic::before { position:absolute; inset:0 auto 0 0; width:3px; background:#cbd5e1; content:""; }
+    .topic.hot::before { background:#e6ad43; }
+    .topic:hover { transform:translateY(-2px); border-color:#b8c7d4; box-shadow:0 12px 24px rgba(15,23,42,.08); }
+    .rank { display:grid; place-items:center; width:30px; height:30px; border-radius:6px; background:#f1f5f9; color:var(--muted); font-size:10px; font-weight:900; }
+    .hot .rank { background:#fff4d6; color:var(--amber); }
+    .topic-visual { width:46px; height:46px; display:grid; place-items:center; margin:1px 0 0; overflow:hidden; border-radius:7px; background:linear-gradient(135deg,#e8f6f2,#c8eee4); color:#0f766e; font-size:20px; }
+    .topic-visual.finance { background:linear-gradient(135deg,#edf3ff,#d7e6ff); color:#456f9e; }
+    .topic-visual.health { background:linear-gradient(135deg,#fff4e4,#ffe4bb); color:#a26511; }
+    .topic-visual.risk { background:linear-gradient(135deg,#e8f2ff,#cfe5ff); color:#4777a8; }
+    .topic-main { min-width:0; }
+    .title-line { display:flex; align-items:flex-start; justify-content:space-between; gap:7px; }
+    .title { margin:0; color:var(--ink); font-size:13px; line-height:1.45; }
+    .tag { flex:0 0 auto; padding:3px 5px; border-radius:4px; background:#eff6ff; color:#3b6b9c; font-size:9px; font-style:normal; }
+    .source { margin:5px 0 0; color:#94a3b8; font-size:9px; line-height:1.45; }
+    .source a { color:#718096; text-decoration:none; border-bottom:1px dashed #cbd5e1; }
+    .source a:hover { color:var(--green); }
+    .fact { display:-webkit-box; margin:7px 0 0; overflow:hidden; color:#475569; font-size:10px; line-height:1.55; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+    .fact b,.angle b { color:var(--green); }
+    .angle { display:none; }
+    .score { display:flex; align-items:center; gap:4px; margin-top:7px; color:var(--amber); font-size:9px; font-style:normal; }
+    .score i { width:5px; height:5px; border-radius:50%; background:#e05252; }
+    .opportunity { display:inline-flex; align-items:center; gap:4px; margin-left:6px; padding:2px 5px; border-radius:4px; background:#f1f5f9; color:#64748b; font-size:9px; font-style:normal; }
+    .create { align-self:center; min-height:32px; display:inline-flex; align-items:center; padding:0 9px; border:1px solid #bdebe2; border-radius:6px; background:var(--mint); color:var(--green); font-size:10px; font-weight:800; cursor:pointer; white-space:nowrap; }
+    .create:hover { background:#e2f8f3; }
+    dialog { width:min(570px,calc(100% - 28px)); padding:0; border:0; border-radius:14px; box-shadow:0 24px 70px rgba(15,23,42,.25); }
+    dialog::backdrop { background:rgba(15,23,42,.42); backdrop-filter:blur(2px); }
+    .dialog { padding:24px; }
+    .dialog-top { display:flex; justify-content:space-between; gap:16px; align-items:start; }
+    .dialog h3 { margin:4px 0 0; font-size:19px; line-height:1.45; }
+    .close { border:0; background:#f1f5f9; color:#64748b; border-radius:6px; width:28px; height:28px; cursor:pointer; }
+    .detail { display:grid; gap:13px; margin-top:20px; }
+    .detail section { padding:12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+    .detail label { display:block; margin-bottom:5px; color:var(--green); font-size:10px; font-weight:900; }
+    .detail p { margin:0; color:#475569; font-size:12px; line-height:1.7; }
+    .disclaimer { margin:16px 0 0; color:#94a3b8; font-size:10px; line-height:1.55; }
+    @media (max-width:820px) { .topic-list { grid-template-columns:1fr; } }
+    @media (max-width:820px) { .mode-tabs { grid-template-columns:repeat(3,1fr); } }
+    @media (max-width:520px) { .shell { width:min(100% - 24px,1120px); margin-top:24px; } .panel { padding:14px; } h1 { font-size:23px; } .fresh { display:none; } .mode-tabs { grid-template-columns:1fr; } .topic { grid-template-columns:28px 42px minmax(0,1fr); } .topic-visual { width:42px; height:42px; } .create { grid-column:3; justify-self:start; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <span class="eyebrow">XIAOGU / TOPIC RADAR</span>
+    <h1>创作机会榜 · 先有传播力，再有专业度</h1>
+    <p class="intro">不是搬运热搜。小谷把可核验事实、家庭焦虑与可讲的内容冲突组合成可立即开拍的机会。</p>
+
+    <section class="panel" aria-labelledby="topic-title">
+      <div class="topline"><div><span class="eyebrow">TODAY'S CREATIVE OPPORTUNITIES</span><h2 id="topic-title">创作机会榜</h2></div><span class="fresh"><i></i>事实已核验 · 2026.08.04</span></div>
+      <div class="ranking-note"><div><b>排序说明</b><p>当前按「情绪张力 × 家庭相关 × 可核验事实 × 合规安全」计算创作潜力；不是平台播放量。接入抖音/小红书/微博热榜后，才叠加真实讨论增速。</p></div><button type="button" onclick="document.querySelector('#detailDialog').showModal(); document.querySelector('#dialogTitle').textContent='小谷如何排序'; document.querySelector('#dialogContent').innerHTML='<section><label>当前创作潜力</label><p>情绪张力 35% · 家庭相关 30% · 可核验事实 20% · 合规安全 15%。</p></section><section><label>下一步接入</label><p>抖音、小红书、微博、百度和知乎的实时榜单、搜索趋势与增速信号；权威来源只负责核验与补充事实。</p></section>';">查看规则 →</button></div>
+      <div class="mode-tabs" aria-label="热点类型"><button class="mode-tab active" data-tab="热点"><strong>热点</strong><span>高讨论度的社会与家庭话题</span></button><button class="mode-tab" data-tab="实时热点"><strong>实时热点</strong><span>当天 / 近 24 小时新闻信号</span></button><button class="mode-tab" data-tab="政策"><strong>政策</strong><span>近期重点解读政策</span></button><button class="mode-tab" data-tab="香港"><strong>香港</strong><span>香港民生、医疗与金融动态</span></button><button class="mode-tab" data-tab="国际"><strong>国际</strong><span>全球经济与家庭风险议题</span></button></div>
+      <div class="summary" id="summary"><span><b>4</b> 条可创作热点</span><span>建议优先创作：高热度 · 强相关</span></div>
+      <nav class="filters" aria-label="筛选领域"><button class="filter active" data-filter="全部">全部领域</button><button class="filter" data-filter="社会民生">社会民生</button><button class="filter" data-filter="家庭理财">家庭理财</button><button class="filter" data-filter="医疗养老">医疗养老</button><button class="filter" data-filter="风险提醒">风险提醒</button></nav>
+      <div class="topic-list" id="topicList"></div>
+    </section>
+  </main>
+
+  <dialog id="detailDialog"><div class="dialog"><div class="dialog-top"><div><span class="eyebrow">创作简报</span><h3 id="dialogTitle"></h3></div><button class="close" onclick="detailDialog.close()" aria-label="关闭">×</button></div><div class="detail" id="dialogContent"></div><p class="disclaimer">发布前请核验地区、日期和具体产品条款。内容用于风险教育，不构成投资建议、投保承诺或理赔结论。</p></div></dialog>
+
+  <script>
+    const categoryVisuals = { '社会民生':{icon:'⌂',className:''}, '家庭理财':{icon:'¥',className:'finance'}, '医疗养老':{icon:'+',className:'health'}, '风险提醒':{icon:'☂',className:'risk'} };
+    const sourceLinks = {
+      '民政部、财政部 / 2026.03':'https://www.beijing.gov.cn/fuwu/bmfw/sy/jrts/202601/t20260130_4477010.html', '国家卫健委、财政部 / 2026.06':'https://www.mof.gov.cn/zhengwuxinxi/caizhengxinwen/202606/t20260602_3991021.htm', '应急管理部 / 2026.07':'https://www.mem.gov.cn/xw/yjglbgzdt/202607/t20260706_675144.shtml', 'IMF《世界经济展望》/ 2026.07':'https://www.imf.org/en/publications/weo/issues/2026/07/08/world-economic-outlook-update-july-2026', '文旅部 / 2026.07':'https://big5.www.gov.cn/gate/big5/www.gov.cn/lianbo/202607/content_7074657.htm', '中央网信办·AI治理 / 2026.07':'https://www.cac.gov.cn/2026-07/06/c_1785081384384987.htm', '公安部·反诈 / 2026.07':'https://www.btdsss.gov.cn/c/2026-07-13/953689.shtml', '人社部·AI人社 / 2026.07':'https://www.mohrss.gov.cn/wap/xw/rsxw/202607/t20260708_579825.html', '国家医保局·个账 / 2026.05':'https://www.nhsa.gov.cn/art/2026/5/19/art_53_20546.html', '国家医保局·创新药 / 2026.05':'https://www.nhsa.gov.cn/art/2026/5/9/art_105_20455.html', '美联储政策动态 / 2026.07':'https://apnews.com/article/4c1858032eb701ae776d286db674d994', '人社部·新职业 / 2026.07':'https://chinajob.mohrss.gov.cn/c/2026-07-10/569764.shtml', '人社部·职业伤害 / 2026.07':'https://www.mohrss.gov.cn/wap/xw/rsxw/202607/t20260701_579347.html', '国家医保局基层医疗政策 / 2026.03':'https://www.nhsa.gov.cn/art/2026/3/16/art_105_19933.html', '国家外汇管理局 / 2026.07':'https://www.safe.gov.cn/en/2026/0707/2436.html', '长沙住房公积金管理办法 / 2026.07':'https://hunan.gov.cn/hnszf/hnyw/szdt/202607/t20260706_34020071.html' };
+    const topics = [
+      {tab:'政策', cat:'医疗养老', hot:true, title:'养老服务消费补贴：每月最高 800 元，够不够一位老人照护？', source:'民政部、财政部 / 2026.03', fact:'居家服务抵扣 50%、机构服务抵扣 40%，每类每月最高 800 元。', angle:'从“住院费”转向“长期照护账单”，讲清人力、康复与居家改造。', hook:'父母需要照护时，最贵的往往不是一次住院。', action:'做一张「照护成本四格表」：人力、康复、改造、误工。', risk:'中', score:'强相关 · 可连载'},
+      {tab:'政策', cat:'社会民生', hot:true, title:'育儿补贴每孩每年 3600 元：年轻家庭真正要算哪三笔账？', source:'国家卫健委、财政部 / 2026.06', fact:'基础标准为每孩每年 3600 元、发至 3 周岁；2026 年中央补助资金 999 亿元。', angle:'不争论“够不够”，从托育、医疗、父母误工拆解家庭现金流。', hook:'一年 3600 元育儿补贴，够养一个孩子吗？', action:'用 30 秒展示「补贴能覆盖什么 / 覆盖不了什么」。', risk:'低', score:'高热度 · 强相关'},
+      {tab:'实时热点', cat:'风险提醒', hot:true, title:'汛期高温叠加：暴雨、台风来时家庭先做哪 5 件事？', source:'应急管理部 / 2026.07', fact:'官方研判多地区存在暴雨、洪涝、台风与阶段性高温风险。', angle:'先讲人身安全，再讲证件、影像留存、紧急联系人与保单资料。', hook:'暴雨来了，最先该拿走的不是雨伞。', action:'给出「家庭应急包」逐项镜头与可保存清单。', risk:'中', score:'强时效 · 高收藏'},
+      {tab:'热点', cat:'家庭理财', hot:true, title:'全球通胀回落停滞：为什么家庭会觉得钱更不经花？', source:'IMF《世界经济展望》/ 2026.07', fact:'IMF 预计 2026 年全球通胀为 4.7%，高于 2025 年的 4.1%。', angle:'解释生活成本、应急金与长期资金的不同任务，不预测市场涨跌。', hook:'AI 很热、市场很热，为什么你家账单还是越来越厚？', action:'用「花的钱 / 能等的钱 / 不能动的钱」三桶法收尾。', risk:'中', score:'国际视角 · 易出圈'},
+      {tab:'热点', cat:'社会民生', hot:true, title:'暑期文旅消费季：3 万场活动背后，亲子家庭最怕哪种意外？', source:'文旅部 / 2026.07', fact:'暑期文旅消费季将举办超 3 万场活动，并发放超 4.5 亿元消费券。', angle:'从亲子游、研学、夜间出行的真实风险清单切入，不用“旅行保险硬广”。', hook:'暑假花钱最狠的，可能不是门票，而是一次计划外的突发状况。', action:'生成「亲子出游前 5 分钟检查表」图文。', risk:'低', score:'暑期场景 · 高收藏'},
+      {tab:'热点', cat:'社会民生', hot:true, title:'AI 应用被整治：普通人把家庭资料交给 AI 前要问哪 3 件事？', source:'中央网信办·AI治理 / 2026.07', fact:'专项行动第一阶段已处置违规 AI 产品 1.4 万余款、违规信息 600 余万条。', angle:'围绕保单、病历、身份证等信息，讲清“哪些能传、哪些不应直接传”。', hook:'把保单和病历扔给 AI 整理前，先停 10 秒。', action:'用「可上传 / 脱敏后上传 / 不要上传」三栏收尾。', risk:'中', score:'AI焦虑 · 强互动'},
+      {tab:'热点', cat:'家庭理财', hot:true, title:'全民反诈宣传月：共享屏幕为什么比陌生来电更危险？', source:'公安部·反诈 / 2026.07', fact:'公安部在集中宣传月推动面向社区、高校、企业和老年人群的精准反诈宣传。', angle:'用“假客服 + 共享屏幕”故事讲家庭资金安全，不借恐惧推销。', hook:'骗子不需要你的银行卡，可能只需要你点一次“共享屏幕”。', action:'制作「家族群反诈三不原则」可转发海报。', risk:'低', score:'全民议题 · 高转发'},
+      {tab:'实时热点', cat:'社会民生', hot:false, title:'人工智能＋人社：20 个应用场景今年启动，求职者如何保护自己？', source:'人社部·AI人社 / 2026.07', fact:'政策提出 2026 年建设人工智能＋人社基础设施，打造 20 个行业大模型应用场景。', angle:'从 AI 招聘、简历、职业规划中个人信息保护与职业转换期现金流切入。', hook:'AI 开始帮你找工作时，简历到底该交给谁？', action:'输出「AI 求职资料最小化提交」清单。', risk:'中', score:'近期开启 · 职场人群'},
+      {cat:'医疗养老', hot:false, title:'医保个人账户家庭共济：能给家人用，不等于什么都能买', source:'国家医保局·个账 / 2026.05', fact:'可用于近亲属医疗费用、居民医保缴费等；各省原则上 9 月底前出台药店支付白名单。', angle:'做“能用 / 不能用 / 要看本地规则”辟谣卡，建立专业信任。', hook:'医保卡能给家人用，是好消息；但别把它当购物卡。', action:'结尾提醒评论区注明城市，自动生成地区政策核验提示。', risk:'高', score:'高搜索 · 高合规'},
+      {cat:'家庭理财', hot:false, title:'美联储维持利率：有外币刚性支出的家庭，该看什么？', source:'美联储政策动态 / 2026.07', fact:'7 月美联储将利率维持在 3.5%–3.75% 区间。', angle:'只谈留学、旅行、外币保费等确定性支出如何做预算，不推荐换汇或投资。', hook:'美联储不降息，和一个中国家庭有什么关系？', action:'列出未来 12 个月刚性外币支出的预算检查表。', risk:'高', score:'国际金融 · 强信任'},
+      {cat:'社会民生', hot:false, title:'12 个新职业公示：AI 改变的不是工作消失，而是收入结构', source:'人社部·新职业 / 2026.07', fact:'拟增加智能体开发员、具身智能机器人应用技术员、适老化改造设计师等职业/工种。', angle:'从职业转换期收入波动谈应急金和家庭责任，不渲染“AI 焦虑”。', hook:'AI 抢工作了吗？先看哪些新工作正在被正式命名。', action:'给客户一个「职业转换期 90 天现金流」自查问题。', risk:'低', score:'年轻客群 · 高讨论'},
+      {cat:'社会民生', hot:false, title:'职业伤害保障覆盖近 3000 万人：平台工作者还缺什么？', source:'人社部·职业伤害 / 2026.07', fact:'试点覆盖 17 省、11 家平台企业，截至 6 月累计参保 2990.2 万人。', angle:'认可制度进步，同时讲职业保障、家庭应急金和长期责任的不同边界。', hook:'外卖员有职业保障后，家里是不是就不用准备应急金？', action:'设计「职业保障 ≠ 全家保障」的对比图。', risk:'中', score:'新就业形态 · 强共鸣'},
+      {cat:'医疗养老', hot:false, title:'创新药目录衔接：医保保基本，家庭还需要看什么？', source:'国家医保局·创新药 / 2026.05', fact:'2026 年目录调整推动商保创新药目录与基本医保目录衔接。', angle:'讲“费用可及性”而不是产品销售，避免承诺任何药物或责任必然覆盖。', hook:'创新药越来越多，医保报不了是不是只能自费？', action:'用「基本医保 / 商保 / 自费」三层图解释概念。', risk:'高', score:'高价值客群 · 高合规'},
+      {cat:'家庭理财', hot:false, title:'外汇储备 3.4163 万亿美元：这个数字和你家钱袋子有何关系？', source:'国家外汇管理局 / 2026.07', fact:'截至 6 月末外储 3.4163 万亿美元，较上月减少 260 亿美元。', angle:'纠正“外储变动 = 个人要立刻换汇”的误读，讲家庭外币需求计划。', hook:'外储少了 260 亿美元，普通人需要恐慌吗？', action:'配一张「宏观数字与个人决策」的误读对照图。', risk:'高', score:'宏观热点 · 反常识'},
+      {cat:'社会民生', hot:false, title:'灵活就业者的公积金：能缴、该缴、缴多少是三道题', source:'长沙住房公积金管理办法 / 2026.07', fact:'长沙将网约车司机、快递员、个体工商户等纳入缴存范围。', angle:'做本地政策模板，提醒不同城市规则、贷款资格与现金流承受能力不同。', hook:'快递小哥也能缴公积金，为什么不能只看“能不能”？', action:'让用户选择城市，生成核验来源与提问清单。', risk:'中', score:'本地化 · 高转化'},
+      {cat:'医疗养老', hot:false, title:'慢病家庭的隐形成本：一次住院费之外，还有哪些长期支出？', source:'国家医保局基层医疗政策 / 2026.03', fact:'政策提出支持基层慢病随访、用药指导、健康监测与长期处方。', angle:'围绕陪诊、误工、康复、长期用药等碎片成本，体现服务而非焦虑营销。', hook:'慢病家庭最容易低估的，不是一次住院费。', action:'创建「一年慢病支出地图」口播脚本。', risk:'中', score:'长期需求 · 易建立信任'}
+    ];
+    Object.assign(sourceLinks, { '社会工作部·暑期儿童关爱 / 2026.07':'https://www.zyshgzb.gov.cn/n1/2026/0713/c462438-40759244.html', '香港政府·在职家庭津贴 / 2026.07':'https://www.info.gov.hk/gia/general/202607/13/P2026071300286p.htm', '香港政府·预设医疗指示 / 2026.07':'https://www.news.gov.hk/eng/2026/05/20260522/20260522_111618_161.html', '香港预算案·基层医疗 / 2026':'https://www.budget.gov.hk/2026/eng/budget49.html', '香港政府·黄金市场 / 2026.07':'https://www.news.gov.hk/eng/2026/07/20260706/20260706_221805_446.html?type=ticker', '香港房屋委员会 / 2026.04':'https://www.hkha.gov.hk/sc/flat-application/income-and-asset-limits/index.html', '世卫组织·高温健康 / 2026.07':'https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health', '世卫组织·癌症 / 2026.07':'https://www.who.int/news-room/headlines' });
+    topics.push({tab:'实时热点', cat:'社会民生', hot:false, title:'暑期儿童关爱活动密集启动：亲子陪伴如何从“报满班”变成有准备？', source:'社会工作部·暑期儿童关爱 / 2026.07', fact:'多部门部署暑期儿童关爱服务，包含亲子陪伴、心理疏导与研学实践等活动。', angle:'以暑期孩子独处、出行和情绪需求为入口，给家庭一份“陪伴与安全”清单。', hook:'暑假最怕的不是孩子没事做，而是大人以为“安排满了就安全”。', action:'生成「暑期亲子安全与沟通」五问卡。', risk:'低', score:'暑期进行中 · 家庭高关注'});
+    topics.push(
+      {tab:'香港',cat:'社会民生',hot:true,title:'香港在职家庭津贴试点：转入职家庭最高可获 4.5 万港元奖励',source:'香港政府·在职家庭津贴 / 2026.07',fact:'试点计划将于 10 月启动，合资格家庭最多可获 3 次现金奖励、合计 4.5 万港元。',angle:'用“收入恢复期”拆解家庭现金流、债务与保障的优先级。',hook:'重新上班的第一年，最容易低估的是哪一笔家庭支出？',action:'生成「家庭收入恢复 90 天」检查表。',risk:'低',score:'香港民生 · 强场景'},
+      {tab:'香港',cat:'医疗养老',hot:true,title:'香港预设医疗指示新法月底生效：谁应先和家人谈这件事？',source:'香港政府·预设医疗指示 / 2026.07',fact:'《维持生命治疗的预作决定条例》将于 7 月 31 日生效。',angle:'从患者自主权、家庭沟通和照护安排切入，不提供医疗或法律结论。',hook:'最难谈的家庭话题，往往不是钱，而是“最后由谁决定”。',action:'生成「和父母谈医疗意愿」四步提纲。',risk:'高',score:'医疗照护 · 高信任'},
+      {tab:'香港',cat:'医疗养老',hot:false,title:'香港基层医疗共治网络：健康筛查正从医院向社区延伸',source:'香港预算案·基层医疗 / 2026',fact:'2026-27 预算案提出启动基层医疗共治网络，并将筛查延伸至乙型肝炎等疾病。',angle:'围绕家庭筛查、慢病管理与医疗资料整理做服务型内容。',hook:'体检报告里最怕的不是红字，而是红字没人帮你看后续。',action:'生成「家庭健康资料夹」整理模板。',risk:'中',score:'医疗服务 · 常青'},
+      {tab:'香港',cat:'家庭理财',hot:false,title:'香港建设黄金交易生态：家庭应该如何理解“黄金热”？',source:'香港政府·黄金市场 / 2026.07',fact:'香港正推进黄金交易、风险管理、保险、仓储与物流等相关服务生态。',angle:'解释资产波动与家庭资产配置的边界，不做金价预测或买卖推荐。',hook:'金价热的时候，最危险的不是没上车，而是把应急钱拿去追车。',action:'生成「黄金不是应急金」三句解释。',risk:'高',score:'香港金融 · 高讨论'},
+      {tab:'香港',cat:'社会民生',hot:false,title:'香港公屋入息与资产限额更新：申请资格为何总要重新核对？',source:'香港房屋委员会 / 2026.04',fact:'香港房屋委员会公布的入息和资产净值限额自 2026 年 4 月 1 日起生效。',angle:'提醒家庭将住房资格、资产证明和重大支出分开管理。',hook:'申请公屋最容易出错的，未必是收入，可能是你没算进去的资产。',action:'生成「住房申请资料」家庭整理清单。',risk:'中',score:'住房议题 · 本地高关注'},
+      {tab:'国际',cat:'风险提醒',hot:true,title:'全球高温暴露增加：极端热浪下，哪些家庭成员最需要被看见？',source:'世卫组织·高温健康 / 2026.07',fact:'世卫组织指出，因气候变化，暴露于极端高温的人群正在所有地区快速增加。',angle:'围绕老人、婴幼儿、户外劳动者的高温健康准备和家庭联络机制。',hook:'高温不是“忍一忍就过了”，它对有些人是医疗急症。',action:'生成「高温天家庭照护」一页卡。',risk:'中',score:'全球共鸣 · 强时效'},
+      {tab:'国际',cat:'家庭理财',hot:true,title:'全球增长 3.0%：为什么“经济没崩”不等于每个家庭都轻松？',source:'IMF《世界经济展望》/ 2026.07',fact:'IMF 预计 2026 年全球经济增长 3.0%，2027 年为 3.4%，各经济体表现并不均衡。',angle:'用收入稳定性、生活成本和应急资金解释宏观增长与家庭体感的差异。',hook:'新闻说增长还在，为什么你家还是不敢轻易花钱？',action:'生成「家庭财务安全感」三问。',risk:'中',score:'国际经济 · 反常识'},
+      {tab:'国际',cat:'家庭理财',hot:false,title:'美国利率维持高位：海外留学与旅行预算要重算什么？',source:'美联储政策动态 / 2026.07',fact:'7 月美联储将利率维持在 3.5%–3.75% 区间。',angle:'聚焦刚性外币支出、付款节点与汇率容忍度，不提供换汇建议。',hook:'海外花钱，最贵的可能不是机票，而是你没做过预算的汇率波动。',action:'生成「12 个月外币支出」预算表。',risk:'高',score:'跨境家庭 · 强实用'},
+      {tab:'国际',cat:'社会民生',hot:false,title:'全球 AI 投资升温：技术繁荣为何也会带来家庭职业焦虑？',source:'IMF《世界经济展望》/ 2026.07',fact:'IMF 指出 AI 驱动的投资是增长动力之一，同时技术预期重估仍是风险。',angle:'将“职业替代”改写为技能、收入与家庭缓冲期的现实准备。',hook:'AI 真正改变的，可能不是你的岗位，而是你家收入的稳定感。',action:'生成「职业变化期」家庭资金缓冲清单。',risk:'中',score:'AI全球议题 · 易讨论'},
+      {tab:'国际',cat:'医疗养老',hot:false,title:'癌症负担或上升：预防、筛查与保障为什么不能只做一件？',source:'世卫组织·癌症 / 2026.07',fact:'世卫组织近期呼吁面对未来癌症病例可能显著增加的挑战采取行动。',angle:'只讲预防、筛查、就医资料和财务准备的配合，不讨论具体诊疗方案。',hook:'真正拉开差距的，不是生病后有多努力，而是生病前准备了多少。',action:'生成「家庭健康准备」四件事。',risk:'高',score:'健康全球议题 · 长期需求'}
+    );
+    const policyTitles=['医保个人账户','职业伤害保障','创新药目录','灵活就业者','慢病家庭'];
+    const realtimeTitles=['美联储维持利率','外汇储备'];
+    topics.forEach(topic=>{ if (!topic.tab) topic.tab=realtimeTitles.some(title=>topic.title.startsWith(title))?'实时热点':policyTitles.some(title=>topic.title.startsWith(title))?'政策':'热点'; });
+    const list = document.querySelector('#topicList'); const dialog = document.querySelector('#detailDialog');
+    let activeTab='热点', activeFilter='全部'; const tabCopy={ '热点':'优先展示最有讨论、最容易被讲出观点的机会', '实时热点':'当天 / 近 24 小时适合快速响应的新闻信号', '政策':'近期需要重点关注的政策解读', '香港':'香港家庭、医疗、住房与金融动态', '国际':'全球经济、健康与风险议题' };
+    function creativeScore(topic){ const emotion=topic.hot?34:23, family=topic.cat==='家庭理财'||topic.cat==='医疗养老'?30:25, evidence=20, safety=topic.risk==='高'?9:15; return emotion+family+evidence+safety; }
+    function contentAngles(topic){ const base=['反常识：'+topic.hook,'家庭账本：把这件事换算成一个家庭会遇到的三笔钱','评论提问：你家遇到这件事时，最担心的是什么？']; if(topic.cat==='风险提醒') base[1]='清单型：3 个立刻能做、又不制造恐慌的动作'; if(topic.cat==='医疗养老') base[1]='故事型：从一次陪诊、一次照护或一张报告讲起'; return base; }
+    function render() { const visible=topics.filter(t=>t.tab===activeTab&&(activeFilter==='全部'||t.cat===activeFilter)).sort((a,b)=>creativeScore(b)-creativeScore(a)); document.querySelector('#summary').innerHTML=`<span><b>${visible.length}</b> 条${activeTab}可创作</span><span>${tabCopy[activeTab]}</span><span>按创作潜力排序</span>`; list.innerHTML=''; visible.forEach((t,i)=>{ const visual=categoryVisuals[t.cat], link=sourceLinks[t.source], potential=creativeScore(t); const el=document.createElement('article'); el.className='topic '+(t.hot?'hot':''); el.innerHTML=`<span class="rank">${String(i+1).padStart(2,'0')}</span><figure class="topic-visual ${visual.className}" aria-label="默认${t.cat}配图">${visual.icon}</figure><div class="topic-main"><div class="title-line"><h3 class="title">${t.title}</h3><em class="tag">${t.cat}</em></div><p class="source"><a href="${link}" target="_blank" rel="noreferrer">${t.source} · 原文 ↗</a></p><p class="fact"><b>事实</b> · ${t.fact}</p><em class="score"><i></i>${t.score}<span class="opportunity">创作潜力 ${potential}</span></em></div><button class="create">拿走角度 →</button>`; el.querySelector('.create').onclick=()=>openDetail(t); list.appendChild(el); }); }
+    function openDetail(t) { const link=sourceLinks[t.source]||'#', angles=contentAngles(t); document.querySelector('#dialogTitle').textContent=t.title; document.querySelector('#dialogContent').innerHTML=`<section><label>为什么现在值得写</label><p>创作潜力 ${creativeScore(t)} / 100：${t.score}。它既有明确事实，也能落到一个具体家庭场景。</p></section><section><label>可核验事实</label><p>${t.fact}</p><p style="margin-top:8px"><a href="${link}" target="_blank" rel="noreferrer" style="color:#0f766e;font-weight:800">阅读权威原文 ↗</a></p></section><section><label>3 个更容易起量的角度</label><p>① ${angles[0]}<br>② ${angles[1]}<br>③ ${angles[2]}</p></section><section><label>30 秒口播开头</label><p>“${t.hook} 今天我只讲一个事实：${t.fact}。但大多数家庭真正忽略的是，${t.angle}”</p></section><section><label>合规提醒 · ${t.risk}风险</label><p>${t.risk==='高'?'不得承诺收益、理赔、药品覆盖或任何具体结果；需保留政策地区与日期。':'避免绝对化表达；将建议表述为风险教育和个人情况自查。'}</p></section>`; dialog.showModal(); }
+    document.querySelectorAll('.filter').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));btn.classList.add('active');activeFilter=btn.dataset.filter;render()});
+    document.querySelectorAll('.mode-tab').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.mode-tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');activeTab=btn.dataset.tab;activeFilter='全部';document.querySelectorAll('.filter').forEach(x=>x.classList.toggle('active',x.dataset.filter==='全部'));render()}); render();
+  </script>
+</body>
+</html>

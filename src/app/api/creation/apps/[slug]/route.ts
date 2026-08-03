@@ -576,6 +576,7 @@ function buildImagePlan(appName: string, fields: CreationField[], values: Record
 
 function buildImagePrompt(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string) {
   const isWechatArticleVisual = appName === "文章配图生成" || appName === "公众号文章封面";
+  const isXiaohongshuVisual = stringifyValue(values.studio_parent) === "xiaohongshu-studio";
   const lines = [
     `你现在在执行小谷图片类应用：${appName}。${isWechatArticleVisual ? "请生成准确服务文章主题和阅读理解的编辑视觉。" : "请生成适合内容传播场景的视觉图。"}`,
     ...caseContext,
@@ -595,6 +596,9 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
   const styleDirective = getImageStyleDirective(styleValue, appName);
   if (styleDirective) {
     lines.push(`风格细化：${styleDirective}`);
+  }
+  if (isXiaohongshuVisual) {
+    lines.push("用途要求：这是小红书图文笔记的 3:4 竖版卡片，不是公众号文章插图。首图必须快速传达笔记主题，并可使用准确、简短的中文主标题；后续卡片围绕各段落的一个要点，采用易滑读、易收藏的视觉层级，允许少量来自正文的短标题、编号、关键词或结论。画面要像真实的小红书内容创作者制作的笔记卡，不要做成横版编辑插图、商务报道、无文字的氛围空镜、二维码、Logo、水印或长段落文字。多张图保持一套配色、字体气质和人物设定，但每张承担不同信息任务。");
   }
   if (appName === "文章配图生成") {
     lines.push("用途要求：这是微信公众号正文中的编辑配图。视觉内容必须由当前章节决定，可以是纯图片、人物或事件场景、编辑插画、概念解释图、信息图或知识卡片，不预设行业和题材。画面本身足以表达时优先纯视觉；流程、分类、对比、方法、数据关系或知识框架需要解释时，可以加入从正文准确提炼的短标题、关键词和标签。允许使用服务构图、知识组织或短文字的合理留白，但不要无意义空白、长段文字、编造信息、图库式万能概念图和无语义装饰。\n");

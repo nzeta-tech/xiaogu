@@ -103,12 +103,7 @@ function articleHtml(content: string, images: Array<{ url: string; sectionIndex?
   const before = images.map((image, index) => ({ image, index })).filter(({ image }) => image.sectionIndex === -1);
   before.forEach(({ index }) => used.add(index));
   const html = sections.map((section, sectionIndex) => {
-    const paragraphs = section.split(/\n{2,}/).filter(Boolean);
-    const blocks = paragraphs.map((paragraph) => {
-      const headingMatch = paragraph.match(/^#{2,3}\s+(.+)/);
-      const text = escapeHtml(headingMatch ? headingMatch[1] : paragraph.replace(/\*\*(.*?)\*\*/g, "$1")).replace(/\n/g, "<br/>");
-      return headingMatch ? `<h2 style="${theme.heading}">${text}</h2>` : `<p style="${theme.paragraph}">${text}</p>`;
-    }).join("");
+    const blocks = renderArticleBlocks(section, theme);
     let placed = images.map((image, index) => ({ image, index })).filter(({ image, index }) => !used.has(index) && image.sectionIndex === sectionIndex);
     if (!placed.length) {
       const automaticIndex = images.findIndex((image, index) => !used.has(index) && image.sectionIndex === undefined);
@@ -124,3 +119,29 @@ function articleHtml(content: string, images: Array<{ url: string; sectionIndex?
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+
+function renderArticleBlocks(section: string, theme: { heading: string; paragraph: string }) {
+  const lines = section.replace(/\r/g, "").split("\n"); const blocks: string[] = []; let text: string[] = [];
+  const flush = () => {
+    const source = text.join("\n").trim(); text = [];
+    if (!source) return;
+    const headingMatch = source.match(/^#{2,3}\s+(.+)/);
+    const value = escapeHtml(headingMatch ? headingMatch[1] : source.replace(/\*\*(.*?)\*\*/g, "$1")).replace(/\n/g, "<br/>");
+    blocks.push(headingMatch ? `<h2 style="${theme.heading}">${value}</h2>` : `<p style="${theme.paragraph}">${value}</p>`);
+  };
+  for (let index = 0; index < lines.length;) {
+    if (isMarkdownTableRow(lines[index]) && isMarkdownTableDivider(lines[index + 1] ?? "")) {
+      flush(); const headers = markdownTableCells(lines[index]); index += 2; const rows: string[][] = [];
+      while (index < lines.length && isMarkdownTableRow(lines[index])) { rows.push(markdownTableCells(lines[index])); index += 1; }
+      const cellStyle = "padding:9px 8px;border:1px solid #d8e4df;text-align:left;vertical-align:top;";
+      blocks.push(`<table style="width:100%;margin:18px 0;border-collapse:collapse;font-size:14px;line-height:1.6;"><thead><tr>${headers.map((cell) => `<th style="${cellStyle}background:#edf7f2;color:#174c3c;">${escapeHtml(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((_, column) => `<td style="${cellStyle}">${escapeHtml(row[column] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    text.push(lines[index]); index += 1;
+  }
+  flush(); return blocks.join("");
+}
+
+function isMarkdownTableRow(line: string) { return /^\s*\|.*\|\s*$/.test(line); }
+function isMarkdownTableDivider(line: string) { return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line); }
+function markdownTableCells(line: string) { return line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()); }

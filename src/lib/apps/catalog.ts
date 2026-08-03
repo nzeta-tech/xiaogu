@@ -63,6 +63,24 @@ export const creationCategories: CreationCategory[] = [
 
 export const creationApps: CreationApp[] = [
   {
+    id: "xiaohongshu-studio",
+    slug: "xiaohongshu-studio",
+    name: "小红书笔记创作",
+    emoji: "◉",
+    category: "content",
+    points: 8,
+    badge: "新",
+    featured: true,
+    description: "基于原文重新创作笔记，或从一个想法出发检索资料后完成图文创作。",
+    promptHint: "基于原文创作会以原文为事实边界，重新完成一篇小红书笔记；基于想法创作会先检索公开资料补足可核验事实。两种模式均不夸大保障或服务效果，不含站外导流与规避审核表达。",
+    resultType: "text",
+    fields: [
+      { id: "topic", label: "原文或创作想法", type: "textarea", required: true, placeholder: "基于原文创作：粘贴完整原文；基于想法创作：写下想表达的主题、角度和必须核验的问题。", maxLength: 6000 },
+      { id: "creation_mode", label: "创作方式", type: "radio", required: true, options: [{ label: "基于原文正常创作", value: "rewrite" }, { label: "基于想法帮我创作", value: "idea" }] },
+      { id: "length_mode", label: "笔记长度", type: "radio", required: true, options: [{ label: "极简 · 250-350 字", value: "minimal" }, { label: "普通 · 500-700 字", value: "standard" }, { label: "长文 · 900-1200 字", value: "long" }] },
+    ],
+  },
+  {
     id: "wechat-studio",
     slug: "wechat-studio",
     name: "公众号文章创作",
