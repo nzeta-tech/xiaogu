@@ -175,6 +175,20 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: userError }, { status: 500 });
   }
 
+  if (app.resultType === "image" && !(imageResult?.images.length)) {
+    const userError = imageResult?.mode === "fallback"
+      ? "图片服务尚未配置，暂时无法生成图片。"
+      : "图片服务暂时未返回可用图片，请稍后重试。";
+    await tryCompleteAppRun({
+      runId: run?.id ?? null,
+      status: "failed",
+      resultText: "",
+      errorMessage: userError,
+      resultJson: { images: [], imageMode: imageResult?.mode ?? null },
+    });
+    return Response.json({ error: userError }, { status: 503 });
+  }
+
   const title = buildWorkTitle({
     appName: app.name,
     appSlug: app.slug,
