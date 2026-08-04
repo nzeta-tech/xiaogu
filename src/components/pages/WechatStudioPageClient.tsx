@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import BaseMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
+import { streamCreationImages } from "@/lib/client/creation-image-stream";
 import { articleDocx } from "@/lib/client/docx";
 import { getCreationAppBySlug, type CreationApp } from "@/lib/apps/catalog";
 
@@ -220,17 +221,14 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     setLoading("assets"); setMessage("");
     try {
       const resolvedWorkId = workId || await ensureStudioWork();
-      const [imagesResponse, coverResponse] = await Promise.all([fetch(apiPath("/api/creation/apps/wechat-images"), {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ values: { article: `${title}\n\n${content}`, style, studio_parent: "wechat-studio", studio_work_id: resolvedWorkId } }),
-      }), fetch(apiPath("/api/creation/apps/wechat-cover"), {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ values: { title, summary: content.slice(0, 1600), style, ratio: "2.35:1", studio_parent: "wechat-studio", studio_work_id: resolvedWorkId } }),
-      })]);
-      const [payload, coverPayload] = await Promise.all([imagesResponse.json() as Promise<{ images?: GeneratedImage[]; imageSections?: Array<{ index: number; title: string }>; error?: string }>, coverResponse.json() as Promise<{ images?: GeneratedImage[]; error?: string }>]);
-      if (!imagesResponse.ok || !payload.images?.length || !coverResponse.ok || !coverPayload.images?.[0]) throw new Error(payload.error || coverPayload.error || "视觉素材生成失败，请稍后再试。");
-      const nextImages = payload.images.map((image, index) => ({ ...image, sectionIndex: payload.imageSections?.[index]?.index ?? index, sectionTitle: payload.imageSections?.[index]?.title }));
-      const nextCover = coverPayload.images[0];
+      const [sectionImages, coverImages] = await Promise.all([
+        streamCreationImages("wechat-images", { article: `${title}\n\n${content}`, style, studio_parent: "wechat-studio", studio_work_id: resolvedWorkId }, resolvedWorkId),
+        streamCreationImages("wechat-cover", { title, summary: content.slice(0, 1600), style, ratio: "2.35:1", studio_parent: "wechat-studio", studio_work_id: resolvedWorkId }, resolvedWorkId),
+      ]);
+      if (!sectionImages.length || !coverImages[0]) throw new Error("视觉素材生成失败，请稍后再试。");
+      const sectionTitles = Array.from(content.matchAll(/^##\s+(.+)$/gm)).map((match) => match[1].trim());
+      const nextImages = sectionImages.map((image, index) => ({ ...image, sectionIndex: index, sectionTitle: sectionTitles[index] || `正文第 ${index + 1} 部分` }));
+      const nextCover = coverImages[0];
       setImages(nextImages); setCover(nextCover);
       await saveStudioProgress(resolvedWorkId, "visual", {}, { images: nextImages, cover: nextCover });
       setStyleUsage((current) => { const next = { ...current, [style]: (current[style] ?? 0) + 1 }; window.localStorage.setItem(STYLE_USAGE_KEY, JSON.stringify(next)); return next; });

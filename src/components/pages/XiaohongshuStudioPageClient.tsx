@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
+import { streamCreationImages } from "@/lib/client/creation-image-stream";
 import { type CreationApp } from "@/lib/apps/catalog";
 
 type Card = { id: string; url: string; sectionTitle?: string };
@@ -119,14 +120,14 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
     setLoading("cards"); setMessage("");
     try {
       const resolvedWorkId = await ensureStudioWork();
-      const [response, headResponse] = await Promise.all([
-        fetch(apiPath("/api/creation/apps/wechat-images"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: { article: `${title}\n\n${body}`, style, ratio: "3:4", studio_parent: "xiaohongshu-studio", studio_work_id: resolvedWorkId } }) }),
-        fetch(apiPath("/api/creation/apps/wechat-cover"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: { title, summary: body.slice(0, 1600), style, ratio: "3:4", studio_parent: "xiaohongshu-studio", studio_work_id: resolvedWorkId } }) }),
+      const [sectionImages, headerImages] = await Promise.all([
+        streamCreationImages("wechat-images", { article: `${title}\n\n${body}`, style, ratio: "3:4", studio_parent: "xiaohongshu-studio", studio_work_id: resolvedWorkId }, resolvedWorkId),
+        streamCreationImages("wechat-cover", { title, summary: body.slice(0, 1600), style, ratio: "3:4", studio_parent: "xiaohongshu-studio", studio_work_id: resolvedWorkId }, resolvedWorkId),
       ]);
-      const [payload, headPayload] = await Promise.all([response.json() as Promise<{ images?: Card[]; imageSections?: Array<{ title: string }>; error?: string }>, headResponse.json() as Promise<{ images?: Card[]; error?: string }>]);
-      const next = (payload.images ?? []).map((card, index) => ({ ...card, sectionTitle: payload.imageSections?.[index]?.title }));
-      if (!response.ok || !next.length || !headResponse.ok || !headPayload.images?.[0]) throw new Error(payload.error || headPayload.error || "图文包生成失败，请稍后再试。");
-      setCards(next); setCoverId(next[0].id); setHeadImage(headPayload.images[0]); setActiveSlide(0); setMessage("完整图文包已生成：包含 1 张头图和按段落生成的章节配图。");
+      const sectionTitles = Array.from(body.matchAll(/^##\s+(.+)$/gm)).map((match) => match[1].trim());
+      const next = sectionImages.map((card, index) => ({ ...card, sectionTitle: sectionTitles[index] || `正文第 ${index + 1} 部分` }));
+      if (!next.length || !headerImages[0]) throw new Error("图文包生成失败，请稍后再试。");
+      setCards(next); setCoverId(next[0].id); setHeadImage(headerImages[0]); setActiveSlide(0); setMessage("完整图文包已生成：包含 1 张头图和按段落生成的章节配图。");
     } catch (error) { setMessage(error instanceof Error ? error.message : "网络连接失败，请重试。"); } finally { setLoading(""); }
   }
 

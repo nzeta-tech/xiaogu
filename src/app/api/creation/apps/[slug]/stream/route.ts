@@ -102,7 +102,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
             }
           },
         });
-      } catch {
+      } catch (error) {
+        safeEnqueue(encodeEvent({ type: "error", content: getCreationUserError(error) }));
         safeClose();
         return;
       }
