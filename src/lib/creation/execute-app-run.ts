@@ -250,6 +250,8 @@ export async function executeCreationAppRun(input: {
         }
       }
 
+      if (app.slug === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
+
       resultJson = {
         contentJson: buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []),
       };
@@ -516,11 +518,11 @@ function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext
 function buildXiaohongshuStudioPrompt(values: Record<string, FieldValue>, caseContext: string[]) {
   const creationMode = stringifyCreationFieldValue(values.creation_mode) || "idea";
   const lengthMode = stringifyCreationFieldValue(values.length_mode) || "standard";
-  const lengthBrief = lengthMode === "minimal" ? "极简模式：250-350 字，3-4 个短段落。" : lengthMode === "long" ? "长文模式：900-1200 字，5-7 个短段落或清单节点。" : lengthMode === "extra_long" ? "超长文模式：1600-2200 字，8-10 个短段落或清单节点。需要完整保留原文的关键机制、数字、对比、案例条件与风险边界，必要时保留精简表格或列表。" : "普通模式：500-700 字，4-5 个短段落或清单节点。";
+  const lengthBrief = lengthMode === "long" ? "长文模式：800-1000 字，绝不超过 1000 字，5-7 个短段落或清单节点。" : "常规模式：约 500 字（450-550 字），4-5 个短段落或清单节点。";
   return [
     "你正在为小红书创作一篇图文笔记，不是公众号长文、口播稿或直接成交话术。",
     ...caseContext,
-    `第一行输出一个不超过 20 字、与正文完全一致的笔记标题；随后直接输出可发布正文。${lengthBrief}正文用短段落和少量自然的 Emoji，先给具体场景或结论，再展开解释，结尾给克制的站内互动问题。正文必须至少包含 2-4 个简短子标题：每个子标题单独一行，用“## ”开头，像小红书图文卡片中的段落引导；子标题要具体、有信息量，不能是“正文”“总结”等空泛词。`,
+    `第一行输出笔记标题：标题严格不超过 20 个字符（汉字、数字、英文和标点均计入），不要加“标题：”等前缀；随后直接输出可发布正文。${lengthBrief}正文用短段落和少量自然的 Emoji，先给具体场景或结论，再展开解释，结尾给克制的站内互动问题。正文必须至少包含 2-4 个简短子标题：每个子标题单独一行，用“## ”开头，像小红书图文卡片中的段落引导；子标题要具体、有信息量，不能是“正文”“总结”等空泛词。`,
     "读者沟通优先采用有生活感、能承接情绪的表达：从真实的日常时刻、家庭关系、预算取舍、照顾自己或未来安排等具体处境切入，让读者先感到“这和我有关”，再获得清晰判断。可以温和、有共鸣，但不煽情、不假设所有读者的性别或处境；尤其不要把女性读者刻板化为只关心颜值、家庭或情绪。涉及专业决策时，必须同时交代适合条件、不适合条件、限制和需核验处，让共情建立在信息透明上。",
     creationMode === "rewrite" ? "这是基于原文的正常创作，不是逐句改写、摘要或复述。输入原文是可靠素材和事实边界：先在内部列出不可遗漏的关键信息（产品/公司/人物名称、时间、数字、方案条件、保证与非保证口径、限制条件、案例结论），再重新选择更适合小红书读者的切入角度、标题、叙事顺序、子标题、场景化表达、观点推进和互动收尾。输出必须覆盖所有原文核心结论和支撑它们的关键事实；可压缩修辞、重复论述和次要背景，不能为了短而删去产品机制、关键差异、重要数字或风险边界。允许提炼原文隐含的生活问题和行动建议；不得捏造原文没有的具体数字、案例、政策、产品规则或亲身经历，也不得把推测写成事实。" : "这是基于想法创作：请先全网检索相关的公开、可信资料，再把能明确核验的事实自然融入笔记；如果无法检索或无法确认，不得声称已经查找，改用一般性表述或明确标注待核验，绝不补造数字、案例、政策或产品规则。",
     "以读者兴趣和创作者自然获客为目标动态组织内容，不使用机械固定模板：有真实场景、人物困境或冲突时，优先从读者可代入的场景切入；有复杂机制、数字或方案时，优先用对比、误区或判断顺序讲清楚；有产品或服务优势时，先解释它解决的具体问题和适用条件，再表达价值；有时效变化时，先说清它对读者意味着什么。优先产出可收藏的判断框架、清单或自检问题；信息密度高时减少套话，保留关键事实；结尾根据内容自然给出一个低压力、具体的核验动作、判断问题或讨论入口，而不是生硬求评论或私信。",
@@ -529,6 +531,20 @@ function buildXiaohongshuStudioPrompt(values: Record<string, FieldValue>, caseCo
     "真实素材与要求：",
     stringifyCreationFieldValue(values.topic),
   ].filter(Boolean).join("\n\n");
+}
+
+function limitXiaohongshuTitle(result: string) {
+  const lines = result.replace(/\r\n/g, "\n").split("\n");
+  const titleIndex = lines.findIndex((line) => line.trim());
+  if (titleIndex < 0) return result;
+  const match = lines[titleIndex].match(/^(\s*#{0,6}\s*)(.*)$/);
+  if (!match) return result;
+  const [, prefix, rawTitle] = match;
+  const title = rawTitle.trim();
+  const characters = Array.from(title);
+  if (characters.length <= 20) return result;
+  lines[titleIndex] = `${prefix}${characters.slice(0, 20).join("")}`.trimEnd();
+  return lines.join("\n");
 }
 
 function buildGeneralContentPrompt(

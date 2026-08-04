@@ -48,7 +48,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
         if (state) {
           if (typeof state.topic === "string") setTopic(state.topic);
           if (typeof state.creationMode === "string") setCreationMode(state.creationMode);
-          if (typeof state.lengthMode === "string") setLengthMode(state.lengthMode);
+          if (typeof state.lengthMode === "string") setLengthMode(state.lengthMode === "long" ? "long" : "standard");
           if (typeof state.content === "string") setContent(state.content);
           if (Array.isArray(state.cards)) setCards(state.cards as Card[]);
           if (typeof state.coverId === "string") setCoverId(state.coverId);
