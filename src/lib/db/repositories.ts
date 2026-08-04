@@ -328,6 +328,12 @@ export async function tryListWorks(userId: string | null) {
        from works w
        left join app_runs ar on ar.id = w.app_run_id
        where w.user_id = $1 and w.status <> 'archived'
+         and not exists (
+           select 1
+           from app_runs studio_step
+           where studio_step.id = w.app_run_id
+             and studio_step.input_payload->>'studio_parent' in ('wechat-studio', 'xiaohongshu-studio')
+         )
        order by w.updated_at desc
        limit 50`,
       [userId],
@@ -2107,6 +2113,7 @@ export async function tryListAdminUsers() {
   try {
     const result = await query<{
       id: string;
+      user_number: string;
       name: string;
       email: string;
       role: string;
@@ -2117,7 +2124,8 @@ export async function tryListAdminUsers() {
       gift_total: string | null;
       current_balance: string | null;
     }>(
-      `select u.id, u.name, u.email, u.role, u.status, u.created_at,
+      `select u.id, row_number() over (order by u.created_at asc, u.id asc)::text as user_number,
+              u.name, u.email, u.role, u.status, u.created_at,
               coalesce((select sum(ul.quota_cost) from usage_logs ul where ul.user_id = u.id), 0)::text as usage_total,
               coalesce((select sum(case when o.status = 'paid' then o.amount_cents else 0 end) from orders o where o.user_id = u.id), 0)::text as order_total,
               coalesce((select sum(g.quota_amount) from gift_records g where g.user_id = u.id and g.status = 'granted'), 0)::text as gift_total,
@@ -2134,6 +2142,7 @@ export async function tryListAdminUsers() {
     );
     return result.rows.map((row) => ({
       ...row,
+      user_number: Number(row.user_number),
       usage_total: Number(row.usage_total ?? 0),
       order_total: Number(row.order_total ?? 0),
       gift_total: Number(row.gift_total ?? 0),

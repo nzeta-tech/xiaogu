@@ -72,7 +72,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const body = (await request.json()) as { values?: Record<string, FieldValue> };
   const values = body.values ?? {};
   const isPolicyRenewalCard = app.slug === "policy-renewal-card";
-  const isWechatStudioInternalStep = stringifyCreationFieldValue(values.studio_parent) === "wechat-studio"
+  const isStudioInternalStep = ["wechat-studio", "xiaohongshu-studio"].includes(stringifyCreationFieldValue(values.studio_parent))
     && (app.slug === "wechat-images" || app.slug === "wechat-cover");
 
   const missingField = app.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
@@ -127,7 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
           style: stringifyValue(values.style) || app.name,
           ratio: stringifyValue(values.ratio) || (app.slug === "wechat-images" ? "3:2" : "1:1"),
           count: wechatImagePlan?.prompts.length ?? 1,
-          budgetMs: isWechatStudioInternalStep ? 270000 : undefined,
+          budgetMs: isStudioInternalStep ? 270000 : undefined,
           variantPrompts: wechatImagePlan?.prompts,
           referenceImages: [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
           })
@@ -195,7 +195,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     },
   });
 
-  const work = isWechatStudioInternalStep
+  const work = isStudioInternalStep
     ? null
     : await tryCreateWork({
         userId: user.id,
@@ -598,9 +598,12 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
     lines.push(`风格细化：${styleDirective}`);
   }
   if (isXiaohongshuVisual) {
-    lines.push("用途要求：这是小红书图文笔记的 3:4 竖版卡片，不是公众号文章插图。首图必须快速传达笔记主题，并可使用准确、简短的中文主标题；后续卡片围绕各段落的一个要点，采用易滑读、易收藏的视觉层级，允许少量来自正文的短标题、编号、关键词或结论。画面要像真实的小红书内容创作者制作的笔记卡，不要做成横版编辑插图、商务报道、无文字的氛围空镜、二维码、Logo、水印或长段落文字。多张图保持一套配色、字体气质和人物设定，但每张承担不同信息任务。");
+    const noteTitle = stringifyValue(values.title);
+    lines.push(`用途要求：这是小红书图文笔记的 3:4 竖版卡片，不是公众号文章插图。${appName === "公众号文章封面" ? `这张是首屏头图，必须把笔记标题“${noteTitle}”作为画面中的主标题准确排入设计，不能改写、截断或省略；标题必须清晰可读。` : "后续卡片围绕各段落的一个要点，采用易滑读、易收藏的视觉层级，可使用准确、简短的中文小标题、编号、关键词或结论。"}视觉优先选择真实生活场景、日常物件、关系与行动细节，避免万能金融符号、商务西装人物、城市天际线和空泛氛围图。默认使用奶油白、雾蓝、鼠尾草绿、低饱和暖粉或浅棕等耐看的低饱和配色，留白克制、字体易读；不需要用粉色标签化任何群体。画面要像真实的小红书内容创作者制作的笔记卡，不要做成横版编辑插图、商务报道、无文字的氛围空镜、二维码、Logo、水印或长段落文字。多张图保持一套配色、字体气质和人物设定，但每张承担不同信息任务。`);
   }
-  if (appName === "文章配图生成") {
+  if (isXiaohongshuVisual) {
+    // The Xiaohongshu instruction above fully replaces the generic WeChat cover/image rules.
+  } else if (appName === "文章配图生成") {
     lines.push("用途要求：这是微信公众号正文中的编辑配图。视觉内容必须由当前章节决定，可以是纯图片、人物或事件场景、编辑插画、概念解释图、信息图或知识卡片，不预设行业和题材。画面本身足以表达时优先纯视觉；流程、分类、对比、方法、数据关系或知识框架需要解释时，可以加入从正文准确提炼的短标题、关键词和标签。允许使用服务构图、知识组织或短文字的合理留白，但不要无意义空白、长段文字、编造信息、图库式万能概念图和无语义装饰。\n");
   } else if (appName === "公众号文章封面") {
     lines.push("用途要求：这是微信公众号文章的横版封面。根据全文主题选择最准确的主视觉类型，不预设人物、行业或生活场景；提炼一个核心对象、关系、变化或问题，用一个明确主视觉和少量支持细节呈现，不要把标题名词简单摆成一排。画面不得出现任何文字、数字、Logo 或水印；主体放在左侧或中央，保留适度呼吸空间，但不能让空白成为画面主体。避免与正文无关的万能商务隐喻和图库模板。\n");

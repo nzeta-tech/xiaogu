@@ -76,8 +76,8 @@ export const creationApps: CreationApp[] = [
     resultType: "text",
     fields: [
       { id: "topic", label: "原文或创作想法", type: "textarea", required: true, placeholder: "基于原文创作：粘贴完整原文；基于想法创作：写下想表达的主题、角度和必须核验的问题。", maxLength: 6000 },
-      { id: "creation_mode", label: "创作方式", type: "radio", required: true, options: [{ label: "基于原文正常创作", value: "rewrite" }, { label: "基于想法帮我创作", value: "idea" }] },
-      { id: "length_mode", label: "笔记长度", type: "radio", required: true, options: [{ label: "极简 · 250-350 字", value: "minimal" }, { label: "普通 · 500-700 字", value: "standard" }, { label: "长文 · 900-1200 字", value: "long" }] },
+      { id: "creation_mode", label: "创作方式", type: "radio", required: true, options: [{ label: "我有一个内容素材", value: "rewrite" }, { label: "我有一个想法", value: "idea" }] },
+      { id: "length_mode", label: "笔记长度", type: "radio", required: true, options: [{ label: "极简 · 250-350 字", value: "minimal" }, { label: "普通 · 500-700 字", value: "standard" }, { label: "长文 · 900-1200 字", value: "long" }, { label: "超长文 · 1600-2200 字", value: "extra_long" }] },
     ],
   },
   {
