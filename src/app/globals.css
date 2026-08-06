@@ -10346,6 +10346,49 @@ a {
   gap: 12px;
 }
 
+.viralContentForm { gap: 16px; }
+.viralContentInlineForm { max-width: 980px; margin: 0 auto; padding: 4px 0 20px; }
+.viralFormSteps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px; border: 1px solid #dbe7e2; border-radius: 12px; background: #f7fbf9; }
+.viralFormSteps span { display: flex; align-items: center; gap: 7px; color: #718078; font-size: 12px; font-weight: 600; }
+.viralFormSteps span.active { color: #13795b; }
+.viralFormSteps b { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 999px; background: #e2ebe6; color: #5a6c62; font-size: 11px; }
+.viralFormSteps .active b { background: #13795b; color: #fff; }
+.viralFormSection { display: grid; gap: 12px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.viralFormSection.source { border-color: #bfe3d5; background: linear-gradient(135deg, #f4fcf8, #fff); }
+.viralFormSection.publish { background: #fbfcff; }
+.viralFormSectionHeading { display: flex; justify-content: space-between; gap: 12px; }
+.viralFormSectionHeading strong, .viralFormSectionHeading span { display: block; }
+.viralFormSectionHeading strong { color: #1e293b; font-size: 14px; }
+.viralFormSectionHeading span, .viralInlineHint { margin: 4px 0 0; color: #64748b; font-size: 12px; line-height: 1.55; }
+.viralSourceInput { display: flex; gap: 8px; align-items: center; }
+.viralSourceInput input { flex: 1; min-width: 0; }
+.viralSourceInput button { white-space: nowrap; }
+.viralCoverField { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: end; }
+.viralCoverField .adminField { min-width: 0; }
+.viralCoverField .viralCoverPreview { min-height: 74px; }
+.viralCoverUpload { display: grid; gap: 6px; min-height: 38px; align-content: center; padding: 8px 10px; border: 1px dashed #91bfb0; border-radius: 8px; color: #13795b; font-size: 12px; font-weight: 650; cursor: pointer; }
+.viralCoverUpload input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.viralCoverUploadBelow { width: fit-content; min-width: 220px; }
+.viralPositionSection { display: flex; align-items: end; gap: 12px; padding: 12px 16px; border: 1px solid #dbe7e2; border-radius: 12px; background: #f7fbf9; }
+.viralPositionSection .adminField { width: 150px; }
+.viralPositionSection > span { padding-bottom: 8px; color: #64748b; font-size: 12px; }
+.viralLocalCoverUpload { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, .6fr) 180px; gap: 12px; align-items: center; padding: 14px 16px; border: 1px dashed #91bfb0; border-radius: 12px; background: #f7fbf9; }
+.viralLocalCoverUpload strong,.viralLocalCoverUpload span { display:block; }.viralLocalCoverUpload strong { color:#1e293b; font-size:13px; }.viralLocalCoverUpload span { margin-top:4px; color:#64748b; font-size:12px; line-height:1.45; }
+.viralLocalCoverUpload .viralCoverPreview { min-height:74px; }
+.viralCoverUpload { display:grid; gap:6px; min-height:38px; align-content:center; padding:8px 10px; border:1px dashed #91bfb0; border-radius:8px; color:#13795b; font-size:12px; font-weight:650; cursor:pointer; }
+.viralCoverUpload input { position:absolute; width:1px; height:1px; overflow:hidden; opacity:0; }
+.viralCoverPreview:not(.hasCover) { color: #64748b; background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 8px, #e8eef5 8px, #e8eef5 16px); }
+.viralCoverPreview { min-height: 104px; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; padding: 12px; border-radius: 10px; color: #fff; background-image: linear-gradient(0deg, rgba(15, 23, 42, .65), rgba(15, 23, 42, .04)), var(--viral-cover); background-position: center; background-size: cover; }
+.viralCoverPreview span { font-size: 12px; font-weight: 700; }
+.viralCoverPreview .secondaryButton { background: rgba(255,255,255,.92); }
+.viralFormAdvanced { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.viralFormAdvanced summary { padding: 14px 16px; cursor: pointer; color: #334155; font-size: 13px; font-weight: 650; }
+.viralFormAdvancedBody { display: grid; gap: 12px; padding: 0 16px 16px; }
+.viralFormToggles { display: flex; flex-wrap: wrap; gap: 18px; }
+.viralFormActions { position: sticky; bottom: -1px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 2px; background: linear-gradient(to bottom, rgba(255,255,255,.86), #fff 36%); }
+.viralFormActions span { color: #64748b; font-size: 12px; }
+@media (max-width: 620px) { .viralFormSteps { grid-template-columns: 1fr; } .viralSourceInput { align-items: stretch; flex-direction: column; } .viralCoverField { grid-template-columns: 1fr; } .viralFormActions { align-items: stretch; flex-direction: column; } .viralFormActions button { width: 100%; } }
+
 .inlineFields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -16896,6 +16939,41 @@ a {
   background: linear-gradient(135deg, #f0f9ff, #e6f7ff) !important;
   color: #409eff !important;
   font-weight: 600 !important;
+}
+
+.creationAppPage .imageCardRatioOptions {
+  gap: 10px !important;
+}
+
+.creationAppPage .imageCardRatioOption {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+}
+
+.creationAppPage .imageCardRatioHint {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.creationAppPage .imageCardRatioBadge {
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.creationAppPage .imageCardRatioOption.active .imageCardRatioHint {
+  color: #2563eb;
+}
+
+.creationAppPage .imageCardRatioOption.active .imageCardRatioBadge {
+  background: #bfdbfe;
+  color: #1d4ed8;
 }
 
 .creationAppPage .batch-checkbox-group {

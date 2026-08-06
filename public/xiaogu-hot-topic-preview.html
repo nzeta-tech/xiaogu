@@ -5,42 +5,59 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>小谷｜热点榜单预览</title>
   <style>
-    :root { --ink:#172033; --muted:#64748b; --line:#dfe7ee; --green:#0f766e; --mint:#effcf9; --amber:#9a670e; --amber-bg:#fff7e6; }
+    :root { --ink:#172033; --muted:#64748b; --line:#dfe7ee; --green:#0f766e; --mint:#effcf9; --amber:#9a670e; --amber-bg:#fff7e6; --navy:#123a35; }
     * { box-sizing:border-box; }
     body { margin:0; background:#f5f7f8; color:var(--ink); font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
-    .shell { width:min(1120px,calc(100% - 36px)); margin:42px auto 64px; }
+    .shell { width:min(980px,calc(100% - 32px)); margin:28px auto 56px; }
     .eyebrow { color:var(--green); font-size:12px; font-weight:800; letter-spacing:.08em; }
-    h1 { margin:7px 0 8px; font-size:28px; letter-spacing:-.04em; }
-    .intro { margin:0; max-width:720px; color:var(--muted); font-size:13px; line-height:1.7; }
-    .panel { margin-top:22px; padding:20px; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:0 14px 35px rgba(15,23,42,.05); }
-    .topline { display:flex; justify-content:space-between; gap:16px; align-items:start; }
+    h1 { margin:5px 0 0; font-size:22px; letter-spacing:-.04em; }
+    .intro { display:none; }
+    .creator-launchpad { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:center; margin-top:16px; padding:12px 14px; border:1px solid #d2ebe4; border-radius:10px; background:#f6fcfa; }
+    .launch-kicker { color:#0f766e; font-size:10px; font-weight:900; letter-spacing:.08em; }
+    .launch-title { margin:3px 0 0; color:#102d29; font-size:14px; letter-spacing:-.02em; }
+    .launch-hook { display:none; }
+    .launch-side { display:flex; align-items:center; gap:8px; }
+    .launch-metrics { display:none; }
+    .launch-actions { display:flex; gap:7px; }
+    .launch-actions button { min-height:32px; border-radius:6px; padding:0 10px; font-size:10px; font-weight:800; cursor:pointer; }
+    .launch-primary { border:1px solid #0f766e; background:#0f766e; color:#fff; }
+    .launch-secondary { border:1px solid #bdebe2; background:#fff; color:#0f766e; }
+    .toast { position:fixed; left:50%; bottom:24px; z-index:20; padding:9px 12px; border-radius:7px; background:#152f2b; color:#fff; font-size:11px; opacity:0; pointer-events:none; transform:translate(-50%,10px); transition:.18s; }
+    .toast.visible { opacity:1; transform:translate(-50%,0); }
+    .panel { margin-top:10px; padding:14px; border:1px solid var(--line); border-radius:10px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.04); }
+    .topline { display:flex; justify-content:flex-end; gap:16px; align-items:start; }
+    .topline > div { display:none; }
     .topline h2 { margin:3px 0 0; font-size:19px; letter-spacing:-.03em; }
     .fresh { display:flex; align-items:center; gap:7px; padding:7px 9px; border:1px solid #bdebe2; border-radius:6px; background:var(--mint); color:var(--green); font-size:10px; font-weight:800; white-space:nowrap; }
     .fresh i { width:6px; height:6px; border-radius:99px; background:#16a085; box-shadow:0 0 0 3px #d8f6ef; }
-    .summary { display:flex; flex-wrap:wrap; gap:7px; margin:15px 0 12px; }
+    .summary { display:none; }
     .summary span,.filter { border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; color:var(--muted); font-size:10px; padding:6px 8px; }
     .summary b { color:#334155; }
-    .ranking-note { display:flex; align-items:flex-start; gap:10px; margin:16px 0 0; padding:10px 12px; border:1px solid #d5ece7; border-radius:8px; background:#f6fcfa; }
+    .ranking-note { display:none; }
     .ranking-note b { display:block; color:#0f766e; font-size:10px; }
     .ranking-note p { margin:3px 0 0; color:#64748b; font-size:10px; line-height:1.55; }
-    .ranking-note button { margin-left:auto; padding:0; border:0; background:transparent; color:#0f766e; font-size:10px; font-weight:800; white-space:nowrap; cursor:pointer; }
-    .filters { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 15px; }
+    .note-actions { display:flex; flex:0 0 auto; flex-direction:column; align-items:flex-end; gap:8px; }
+    .ranking-note button { padding:0; border:0; background:transparent; color:#0f766e; font-size:10px; font-weight:800; white-space:nowrap; cursor:pointer; }
+    .source-strip { display:flex; flex-wrap:wrap; gap:6px; margin:9px 0 0; }
+    .source-strip span { padding:3px 6px; border:1px solid #d9ebe6; border-radius:4px; background:#fff; color:#52716a; font-size:9px; }
+    .filters { display:none; }
     .filter { cursor:pointer; transition:.16s; }
     .filter:hover,.filter.active { border-color:#8fdbce; background:var(--mint); color:var(--green); font-weight:800; }
-    .mode-tabs { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin:18px 0 14px; }
-    .mode-tab { min-height:68px; padding:11px 13px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; color:#64748b; text-align:left; cursor:pointer; transition:.16s; }
+    .mode-tabs { display:flex; gap:6px; margin:12px 0; overflow-x:auto; }
+    .mode-tab { flex:0 0 auto; min-height:auto; padding:7px 9px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#64748b; text-align:left; cursor:pointer; transition:.16s; }
     .mode-tab strong { display:block; color:#334155; font-size:12px; }
-    .mode-tab span { display:block; margin-top:4px; font-size:10px; line-height:1.4; }
+    .mode-tab span { display:none; }
     .mode-tab.active { border-color:#82d8c9; background:#f1fcf9; box-shadow:0 4px 12px rgba(15,118,110,.08); }
     .mode-tab.active strong { color:var(--green); }
-    .topic-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-    .topic { position:relative; display:grid; grid-template-columns:31px 46px minmax(0,1fr) auto; gap:10px; align-items:start; min-height:136px; padding:12px; overflow:hidden; border:1px solid var(--line); border-radius:9px; background:#fff; box-shadow:0 5px 16px rgba(15,23,42,.045); transition:.18s; }
+    .topic-list { display:grid; gap:7px; }
+    .loading { padding:28px 12px; color:var(--muted); font-size:12px; text-align:center; }
+    .topic { position:relative; display:grid; grid-template-columns:30px minmax(0,1fr) auto; gap:10px; align-items:center; min-height:66px; padding:9px 10px; overflow:hidden; border:1px solid var(--line); border-radius:7px; background:#fff; box-shadow:none; transition:.18s; }
     .topic::before { position:absolute; inset:0 auto 0 0; width:3px; background:#cbd5e1; content:""; }
     .topic.hot::before { background:#e6ad43; }
     .topic:hover { transform:translateY(-2px); border-color:#b8c7d4; box-shadow:0 12px 24px rgba(15,23,42,.08); }
     .rank { display:grid; place-items:center; width:30px; height:30px; border-radius:6px; background:#f1f5f9; color:var(--muted); font-size:10px; font-weight:900; }
     .hot .rank { background:#fff4d6; color:var(--amber); }
-    .topic-visual { width:46px; height:46px; display:grid; place-items:center; margin:1px 0 0; overflow:hidden; border-radius:7px; background:linear-gradient(135deg,#e8f6f2,#c8eee4); color:#0f766e; font-size:20px; }
+    .topic-visual { display:none; }
     .topic-visual.finance { background:linear-gradient(135deg,#edf3ff,#d7e6ff); color:#456f9e; }
     .topic-visual.health { background:linear-gradient(135deg,#fff4e4,#ffe4bb); color:#a26511; }
     .topic-visual.risk { background:linear-gradient(135deg,#e8f2ff,#cfe5ff); color:#4777a8; }
@@ -51,13 +68,13 @@
     .source { margin:5px 0 0; color:#94a3b8; font-size:9px; line-height:1.45; }
     .source a { color:#718096; text-decoration:none; border-bottom:1px dashed #cbd5e1; }
     .source a:hover { color:var(--green); }
-    .fact { display:-webkit-box; margin:7px 0 0; overflow:hidden; color:#475569; font-size:10px; line-height:1.55; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+    .fact { display:none; }
     .fact b,.angle b { color:var(--green); }
     .angle { display:none; }
-    .score { display:flex; align-items:center; gap:4px; margin-top:7px; color:var(--amber); font-size:9px; font-style:normal; }
+    .score { display:flex; align-items:center; gap:4px; margin-top:4px; color:#94a3b8; font-size:9px; font-style:normal; }
     .score i { width:5px; height:5px; border-radius:50%; background:#e05252; }
-    .opportunity { display:inline-flex; align-items:center; gap:4px; margin-left:6px; padding:2px 5px; border-radius:4px; background:#f1f5f9; color:#64748b; font-size:9px; font-style:normal; }
-    .create { align-self:center; min-height:32px; display:inline-flex; align-items:center; padding:0 9px; border:1px solid #bdebe2; border-radius:6px; background:var(--mint); color:var(--green); font-size:10px; font-weight:800; cursor:pointer; white-space:nowrap; }
+    .opportunity { display:none; }
+    .create { align-self:center; min-height:28px; display:inline-flex; align-items:center; padding:0 8px; border:0; border-radius:5px; background:transparent; color:var(--green); font-size:10px; font-weight:800; cursor:pointer; white-space:nowrap; }
     .create:hover { background:#e2f8f3; }
     dialog { width:min(570px,calc(100% - 28px)); padding:0; border:0; border-radius:14px; box-shadow:0 24px 70px rgba(15,23,42,.25); }
     dialog::backdrop { background:rgba(15,23,42,.42); backdrop-filter:blur(2px); }
@@ -67,12 +84,17 @@
     .close { border:0; background:#f1f5f9; color:#64748b; border-radius:6px; width:28px; height:28px; cursor:pointer; }
     .detail { display:grid; gap:13px; margin-top:20px; }
     .detail section { padding:12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+    .original-meta { display:flex; flex-wrap:wrap; gap:5px; margin:0 0 9px; }
+    .original-meta span { padding:3px 6px; border-radius:4px; background:#e8f5f1; color:#397168; font-size:10px; }
+    .original-body { white-space:pre-wrap; }
     .detail label { display:block; margin-bottom:5px; color:var(--green); font-size:10px; font-weight:900; }
     .detail p { margin:0; color:#475569; font-size:12px; line-height:1.7; }
+    .copy-line { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .copy-line button { flex:0 0 auto; padding:5px 7px; border:1px solid #bdebe2; border-radius:5px; background:#fff; color:#0f766e; font-size:10px; font-weight:800; cursor:pointer; }
     .disclaimer { margin:16px 0 0; color:#94a3b8; font-size:10px; line-height:1.55; }
-    @media (max-width:820px) { .topic-list { grid-template-columns:1fr; } }
+    @media (max-width:820px) { .topic-list { grid-template-columns:1fr; } .creator-launchpad { grid-template-columns:1fr; } .launch-side { justify-content:space-between; } }
     @media (max-width:820px) { .mode-tabs { grid-template-columns:repeat(3,1fr); } }
-    @media (max-width:520px) { .shell { width:min(100% - 24px,1120px); margin-top:24px; } .panel { padding:14px; } h1 { font-size:23px; } .fresh { display:none; } .mode-tabs { grid-template-columns:1fr; } .topic { grid-template-columns:28px 42px minmax(0,1fr); } .topic-visual { width:42px; height:42px; } .create { grid-column:3; justify-self:start; } }
+    @media (max-width:520px) { .shell { width:min(100% - 24px,980px); margin-top:20px; } .panel { padding:11px; } h1 { font-size:20px; } .fresh { display:none; } .topic { grid-template-columns:28px minmax(0,1fr) auto; } .create { grid-column:auto; justify-self:auto; } }
   </style>
 </head>
 <body>
@@ -81,9 +103,14 @@
     <h1>创作机会榜 · 先有传播力，再有专业度</h1>
     <p class="intro">不是搬运热搜。小谷把可核验事实、家庭焦虑与可讲的内容冲突组合成可立即开拍的机会。</p>
 
+    <section class="creator-launchpad" aria-labelledby="launch-title">
+      <div><span class="launch-kicker">今天先发这一条</span><h2 class="launch-title" id="launch-title">正在为你挑选最佳创作机会…</h2><p class="launch-hook" id="launchHook">把 30 分钟留给表达，不要留给找选题。</p></div>
+      <div class="launch-side"><div class="launch-metrics" id="launchMetrics"><span>短视频</span><span>小红书</span><span>视频号</span></div><div class="launch-actions"><button class="launch-primary" id="launchCreate">查看原文 →</button><button class="launch-secondary" id="launchCopy">复制 Idea</button></div></div>
+    </section>
+
     <section class="panel" aria-labelledby="topic-title">
       <div class="topline"><div><span class="eyebrow">TODAY'S CREATIVE OPPORTUNITIES</span><h2 id="topic-title">创作机会榜</h2></div><span class="fresh"><i></i>事实已核验 · 2026.08.04</span></div>
-      <div class="ranking-note"><div><b>排序说明</b><p>当前按「情绪张力 × 家庭相关 × 可核验事实 × 合规安全」计算创作潜力；不是平台播放量。接入抖音/小红书/微博热榜后，才叠加真实讨论增速。</p></div><button type="button" onclick="document.querySelector('#detailDialog').showModal(); document.querySelector('#dialogTitle').textContent='小谷如何排序'; document.querySelector('#dialogContent').innerHTML='<section><label>当前创作潜力</label><p>情绪张力 35% · 家庭相关 30% · 可核验事实 20% · 合规安全 15%。</p></section><section><label>下一步接入</label><p>抖音、小红书、微博、百度和知乎的实时榜单、搜索趋势与增速信号；权威来源只负责核验与补充事实。</p></section>';">查看规则 →</button></div>
+      <div class="ranking-note"><div><b>排序说明</b><p>创作潜力 = 平台信号 × 情绪张力 × 家庭相关 × 事实完整度 × 合规安全。平台热度是“线索”，权威原文才是“事实”。</p><div class="source-strip"><span>DailyHot · 微博/抖音/百度/知乎</span><span>Rebang · 小红书/腾讯新闻/雪球等</span><span>FreeJK · 澎湃/36氪/头条等</span><span>Tavily/Jina · 搜索核验</span></div></div><div class="note-actions"><button type="button" onclick="showSourceRadar()">来源雷达 →</button><button type="button" onclick="showRankingRules()">查看规则 →</button></div></div>
       <div class="mode-tabs" aria-label="热点类型"><button class="mode-tab active" data-tab="热点"><strong>热点</strong><span>高讨论度的社会与家庭话题</span></button><button class="mode-tab" data-tab="实时热点"><strong>实时热点</strong><span>当天 / 近 24 小时新闻信号</span></button><button class="mode-tab" data-tab="政策"><strong>政策</strong><span>近期重点解读政策</span></button><button class="mode-tab" data-tab="香港"><strong>香港</strong><span>香港民生、医疗与金融动态</span></button><button class="mode-tab" data-tab="国际"><strong>国际</strong><span>全球经济与家庭风险议题</span></button></div>
       <div class="summary" id="summary"><span><b>4</b> 条可创作热点</span><span>建议优先创作：高热度 · 强相关</span></div>
       <nav class="filters" aria-label="筛选领域"><button class="filter active" data-filter="全部">全部领域</button><button class="filter" data-filter="社会民生">社会民生</button><button class="filter" data-filter="家庭理财">家庭理财</button><button class="filter" data-filter="医疗养老">医疗养老</button><button class="filter" data-filter="风险提醒">风险提醒</button></nav>
@@ -92,6 +119,7 @@
   </main>
 
   <dialog id="detailDialog"><div class="dialog"><div class="dialog-top"><div><span class="eyebrow">创作简报</span><h3 id="dialogTitle"></h3></div><button class="close" onclick="detailDialog.close()" aria-label="关闭">×</button></div><div class="detail" id="dialogContent"></div><p class="disclaimer">发布前请核验地区、日期和具体产品条款。内容用于风险教育，不构成投资建议、投保承诺或理赔结论。</p></div></dialog>
+  <div class="toast" id="toast" role="status">已复制，可直接粘贴创作</div>
 
   <script>
     const categoryVisuals = { '社会民生':{icon:'⌂',className:''}, '家庭理财':{icon:'¥',className:'finance'}, '医疗养老':{icon:'+',className:'health'}, '风险提醒':{icon:'☂',className:'risk'} };
@@ -115,8 +143,21 @@
       {cat:'社会民生', hot:false, title:'灵活就业者的公积金：能缴、该缴、缴多少是三道题', source:'长沙住房公积金管理办法 / 2026.07', fact:'长沙将网约车司机、快递员、个体工商户等纳入缴存范围。', angle:'做本地政策模板，提醒不同城市规则、贷款资格与现金流承受能力不同。', hook:'快递小哥也能缴公积金，为什么不能只看“能不能”？', action:'让用户选择城市，生成核验来源与提问清单。', risk:'中', score:'本地化 · 高转化'},
       {cat:'医疗养老', hot:false, title:'慢病家庭的隐形成本：一次住院费之外，还有哪些长期支出？', source:'国家医保局基层医疗政策 / 2026.03', fact:'政策提出支持基层慢病随访、用药指导、健康监测与长期处方。', angle:'围绕陪诊、误工、康复、长期用药等碎片成本，体现服务而非焦虑营销。', hook:'慢病家庭最容易低估的，不是一次住院费。', action:'创建「一年慢病支出地图」口播脚本。', risk:'中', score:'长期需求 · 易建立信任'}
     ];
-    Object.assign(sourceLinks, { '社会工作部·暑期儿童关爱 / 2026.07':'https://www.zyshgzb.gov.cn/n1/2026/0713/c462438-40759244.html', '香港政府·在职家庭津贴 / 2026.07':'https://www.info.gov.hk/gia/general/202607/13/P2026071300286p.htm', '香港政府·预设医疗指示 / 2026.07':'https://www.news.gov.hk/eng/2026/05/20260522/20260522_111618_161.html', '香港预算案·基层医疗 / 2026':'https://www.budget.gov.hk/2026/eng/budget49.html', '香港政府·黄金市场 / 2026.07':'https://www.news.gov.hk/eng/2026/07/20260706/20260706_221805_446.html?type=ticker', '香港房屋委员会 / 2026.04':'https://www.hkha.gov.hk/sc/flat-application/income-and-asset-limits/index.html', '世卫组织·高温健康 / 2026.07':'https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health', '世卫组织·癌症 / 2026.07':'https://www.who.int/news-room/headlines' });
+    Object.assign(sourceLinks, { '社会工作部·暑期儿童关爱 / 2026.07':'https://www.zyshgzb.gov.cn/n1/2026/0713/c462438-40759244.html', 'Rebang · 小红书热搜 / 2026.08.04':'https://www.xiaohongshu.com/search_result?keyword=%E6%88%91%E7%9A%84%E5%AE%B6%E5%BA%AD%E6%97%85%E8%A1%8C%E6%9B%B4%E5%83%8F%E6%98%AF%E6%89%93%E5%89%AF%E6%9C%AC', '香港政府·在职家庭津贴 / 2026.07':'https://www.info.gov.hk/gia/general/202607/13/P2026071300286p.htm', '香港政府·预设医疗指示 / 2026.07':'https://www.news.gov.hk/eng/2026/05/20260522/20260522_111618_161.html', '香港预算案·基层医疗 / 2026':'https://www.budget.gov.hk/2026/eng/budget49.html', '香港政府·黄金市场 / 2026.07':'https://www.news.gov.hk/eng/2026/07/20260706/20260706_221805_446.html?type=ticker', '香港房屋委员会 / 2026.04':'https://www.hkha.gov.hk/sc/flat-application/income-and-asset-limits/index.html', '世卫组织·高温健康 / 2026.07':'https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health', '世卫组织·癌症 / 2026.07':'https://www.who.int/news-room/headlines' });
+    Object.assign(sourceLinks, { 'Rebang · 知乎热榜 / 2026.08.04 · AI竞争':'https://www.zhihu.com/question/2067512422555029717', 'Rebang · 知乎热榜 / 2026.08.04 · 消费维权':'https://www.zhihu.com/question/2067542275152765264', 'Rebang · 知乎热榜 / 2026.08.04 · 供应链':'https://www.zhihu.com/question/2066891275412977022' });
+    Object.assign(sourceLinks, { 'Google Trends · 香港 / 2026.08.04 · 白牌車':'https://trends.google.com/trending?geo=HK&hl=zh-HK', 'Google Trends · 香港 / 2026.08.04 · 日元兌港元':'https://trends.google.com/trending?geo=HK&hl=zh-HK', 'Google Trends · 香港 / 2026.08.04 · 房屋署':'https://trends.google.com/trending?geo=HK&hl=zh-HK' });
     topics.push({tab:'实时热点', cat:'社会民生', hot:false, title:'暑期儿童关爱活动密集启动：亲子陪伴如何从“报满班”变成有准备？', source:'社会工作部·暑期儿童关爱 / 2026.07', fact:'多部门部署暑期儿童关爱服务，包含亲子陪伴、心理疏导与研学实践等活动。', angle:'以暑期孩子独处、出行和情绪需求为入口，给家庭一份“陪伴与安全”清单。', hook:'暑假最怕的不是孩子没事做，而是大人以为“安排满了就安全”。', action:'生成「暑期亲子安全与沟通」五问卡。', risk:'低', score:'暑期进行中 · 家庭高关注'});
+    topics.push(
+      {tab:'热点',cat:'家庭理财',hot:true,title:'知乎热榜｜抽奖码被提前核销：消费者维权为什么总这么难？',source:'Rebang · 知乎热榜 / 2026.08.04 · 消费维权',fact:'该讨论进入 Rebang 聚合的知乎热榜，围绕抽奖码提前核销、赔付与消费者维权展开；事件细节须以原始报道和官方回应核验。',angle:'用“给老人买一箱牛奶，最后却要花一个月维权”的故事讲家庭消费证据留存。',hook:'你以为买的是一箱牛奶，最后买到的却是一堂维权课。',action:'生成「家庭消费留证 4 步」：订单、包装、沟通、时间线。',risk:'中',score:'知乎高讨论 · 消费共鸣'},
+      {tab:'国际',cat:'家庭理财',hot:true,title:'知乎热榜｜43 家中企被列入进口限制：普通家庭会感到什么？',source:'Rebang · 知乎热榜 / 2026.08.04 · 供应链',fact:'该讨论进入 Rebang 聚合的知乎热榜，关注食品、医药等民生领域相关供应链变化；政策与企业清单需以权威原文核验。',angle:'不做宏大叙事，从收入、物价和工作稳定性三件家庭更能感受到的事讲起。',hook:'国际新闻离你很远？它最后可能出现在你的账单和工作的订单里。',action:'生成「供应链变化和我家」三问：工资、物价、应急金。',risk:'高',score:'国际信号 · 反常识'},
+      {tab:'热点',cat:'社会民生',hot:true,title:'知乎热榜｜AI 竞争又起：为什么大家总要拿模型性能做“斩杀线”？',source:'Rebang · 知乎热榜 / 2026.08.04 · AI竞争',fact:'Rebang 聚合的知乎热榜出现多家韩国公司发布 AI 并与 DeepSeek 性能比较的讨论；它是技术讨论信号，不应扩写为未经核验的产品结论。',angle:'从“AI 让工作更快，还是让人更焦虑”切入职业稳定感与技能储备。',hook:'每次 AI 性能刷新，最先紧张的为什么不是程序员？',action:'生成「AI 时代家庭职业缓冲」三件事：技能、现金流、保障。',risk:'中',score:'AI高讨论 · 情绪强'}
+    );
+    topics.push(
+      {tab:'香港',cat:'风险提醒',hot:true,title:'香港搜索飙升｜白牌車：网约车出行，家庭先问哪三个安全问题？',source:'Google Trends · 香港 / 2026.08.04 · 白牌車',fact:'Google Trends 香港过去 24 小时显示“白牌車”搜索量 500+、增幅 800%，并关联“司機、網約車”等查询；这是搜索信号，不代表事件结论。',angle:'从司机、车辆、乘客三方的责任与出行准备切入，避免对个案责任下结论。',hook:'叫车时你看的是价格，出事时你最想确认的却是这三件事。',action:'生成「家庭叫车前 10 秒」安全检查卡。',risk:'高',score:'香港搜索飙升 · 出行场景'},
+      {tab:'香港',cat:'家庭理财',hot:true,title:'香港搜索飙升｜日元兑港元：旅行预算最怕的不是贵，而是没上限',source:'Google Trends · 香港 / 2026.08.04 · 日元兌港元',fact:'Google Trends 香港过去 24 小时显示“日元兌港元”搜索量 2K+，关联美国、日本股市等查询；这是搜索兴趣信号。',angle:'从兑换、订房、购物、紧急备用金四笔预算讲“跨境旅行的钱要分层”。',hook:'去日本旅行，真正的汇率风险不是少换几十块，而是没有预算上限。',action:'生成「港人赴日旅行预算」四格表。',risk:'中',score:'香港搜索飙升 · 家庭理财'},
+      {tab:'香港',cat:'社会民生',hot:false,title:'香港搜索飙升｜房屋署：住房信息为什么总会触发家庭焦虑？',source:'Google Trends · 香港 / 2026.08.04 · 房屋署',fact:'Google Trends 香港过去 24 小时显示“房屋署”搜索量 1K+、增幅 1,000%；这是搜索信号，需要结合后续官方公告核验原因。',angle:'从公屋资格、资产资料、住房支出和家庭成员分工讲“住房焦虑如何变成待办清单”。',hook:'住房焦虑最可怕的，不是房子，而是全家都不知道下一步该做什么。',action:'生成「香港家庭住房资料夹」清单。',risk:'中',score:'香港搜索飙升 · 住房共鸣'}
+    );
+    topics.push({tab:'热点', cat:'社会民生', hot:true, title:'小红书热搜｜“我的家庭旅行更像是打副本”为什么有共鸣？', source:'Rebang · 小红书热搜 / 2026.08.04', fact:'该话题出现在 Rebang 聚合的小红书热搜中；它是平台内容信号，不应当被当作事实新闻。', angle:'用“带娃、带老人、订酒店、赶交通”的真实混乱做故事，最后给一张家庭出游风险清单。', hook:'带着全家旅行，像打副本：每一关都怕有人掉血。', action:'把家庭成员分成“孩子、老人、主理人”三类，分别给一个出游准备动作。', risk:'低', score:'小红书信号 · 高代入感'});
     topics.push(
       {tab:'香港',cat:'社会民生',hot:true,title:'香港在职家庭津贴试点：转入职家庭最高可获 4.5 万港元奖励',source:'香港政府·在职家庭津贴 / 2026.07',fact:'试点计划将于 10 月启动，合资格家庭最多可获 3 次现金奖励、合计 4.5 万港元。',angle:'用“收入恢复期”拆解家庭现金流、债务与保障的优先级。',hook:'重新上班的第一年，最容易低估的是哪一笔家庭支出？',action:'生成「家庭收入恢复 90 天」检查表。',risk:'低',score:'香港民生 · 强场景'},
       {tab:'香港',cat:'医疗养老',hot:true,title:'香港预设医疗指示新法月底生效：谁应先和家人谈这件事？',source:'香港政府·预设医疗指示 / 2026.07',fact:'《维持生命治疗的预作决定条例》将于 7 月 31 日生效。',angle:'从患者自主权、家庭沟通和照护安排切入，不提供医疗或法律结论。',hook:'最难谈的家庭话题，往往不是钱，而是“最后由谁决定”。',action:'生成「和父母谈医疗意愿」四步提纲。',risk:'高',score:'医疗照护 · 高信任'},
@@ -133,13 +174,32 @@
     const realtimeTitles=['美联储维持利率','外汇储备'];
     topics.forEach(topic=>{ if (!topic.tab) topic.tab=realtimeTitles.some(title=>topic.title.startsWith(title))?'实时热点':policyTitles.some(title=>topic.title.startsWith(title))?'政策':'热点'; });
     const list = document.querySelector('#topicList'); const dialog = document.querySelector('#detailDialog');
+    let preparedTopics=[];
     let activeTab='热点', activeFilter='全部'; const tabCopy={ '热点':'优先展示最有讨论、最容易被讲出观点的机会', '实时热点':'当天 / 近 24 小时适合快速响应的新闻信号', '政策':'近期需要重点关注的政策解读', '香港':'香港家庭、医疗、住房与金融动态', '国际':'全球经济、健康与风险议题' };
     function creativeScore(topic){ const emotion=topic.hot?34:23, family=topic.cat==='家庭理财'||topic.cat==='医疗养老'?30:25, evidence=20, safety=topic.risk==='高'?9:15; return emotion+family+evidence+safety; }
     function contentAngles(topic){ const base=['反常识：'+topic.hook,'家庭账本：把这件事换算成一个家庭会遇到的三笔钱','评论提问：你家遇到这件事时，最担心的是什么？']; if(topic.cat==='风险提醒') base[1]='清单型：3 个立刻能做、又不制造恐慌的动作'; if(topic.cat==='医疗养老') base[1]='故事型：从一次陪诊、一次照护或一张报告讲起'; return base; }
-    function render() { const visible=topics.filter(t=>t.tab===activeTab&&(activeFilter==='全部'||t.cat===activeFilter)).sort((a,b)=>creativeScore(b)-creativeScore(a)); document.querySelector('#summary').innerHTML=`<span><b>${visible.length}</b> 条${activeTab}可创作</span><span>${tabCopy[activeTab]}</span><span>按创作潜力排序</span>`; list.innerHTML=''; visible.forEach((t,i)=>{ const visual=categoryVisuals[t.cat], link=sourceLinks[t.source], potential=creativeScore(t); const el=document.createElement('article'); el.className='topic '+(t.hot?'hot':''); el.innerHTML=`<span class="rank">${String(i+1).padStart(2,'0')}</span><figure class="topic-visual ${visual.className}" aria-label="默认${t.cat}配图">${visual.icon}</figure><div class="topic-main"><div class="title-line"><h3 class="title">${t.title}</h3><em class="tag">${t.cat}</em></div><p class="source"><a href="${link}" target="_blank" rel="noreferrer">${t.source} · 原文 ↗</a></p><p class="fact"><b>事实</b> · ${t.fact}</p><em class="score"><i></i>${t.score}<span class="opportunity">创作潜力 ${potential}</span></em></div><button class="create">拿走角度 →</button>`; el.querySelector('.create').onclick=()=>openDetail(t); list.appendChild(el); }); }
-    function openDetail(t) { const link=sourceLinks[t.source]||'#', angles=contentAngles(t); document.querySelector('#dialogTitle').textContent=t.title; document.querySelector('#dialogContent').innerHTML=`<section><label>为什么现在值得写</label><p>创作潜力 ${creativeScore(t)} / 100：${t.score}。它既有明确事实，也能落到一个具体家庭场景。</p></section><section><label>可核验事实</label><p>${t.fact}</p><p style="margin-top:8px"><a href="${link}" target="_blank" rel="noreferrer" style="color:#0f766e;font-weight:800">阅读权威原文 ↗</a></p></section><section><label>3 个更容易起量的角度</label><p>① ${angles[0]}<br>② ${angles[1]}<br>③ ${angles[2]}</p></section><section><label>30 秒口播开头</label><p>“${t.hook} 今天我只讲一个事实：${t.fact}。但大多数家庭真正忽略的是，${t.angle}”</p></section><section><label>合规提醒 · ${t.risk}风险</label><p>${t.risk==='高'?'不得承诺收益、理赔、药品覆盖或任何具体结果；需保留政策地区与日期。':'避免绝对化表达；将建议表述为风险教育和个人情况自查。'}</p></section>`; dialog.showModal(); }
+    function showRankingRules(){ document.querySelector('#dialogTitle').textContent='小谷如何排序'; document.querySelector('#dialogContent').innerHTML='<section><label>实时信号来源</label><p>DailyHot：微博、抖音、百度、知乎；Rebang：小红书、微博、知乎、腾讯新闻、头条、抖音、雪球等；FreeJK：澎湃、36氪、头条、抖音、知乎。</p></section><section><label>事实核验来源</label><p>通过 Tavily 搜索和 Jina Reader 补充事件原文、发布时间与证据摘要。平台热词不能直接被写成事实结论。</p></section><section><label>排序</label><p>先取平台热度和增速，再叠加情绪张力、家庭关联、事实完整度与合规风险；同一来源和同一类别会被限额，避免榜单单一。</p></section>'; dialog.showModal(); }
+    function showSourceRadar(){ const tabTopics=preparedTopics.filter(topic=>topic.tab===activeTab); const signalCount=tabTopics.filter(topic=>/Rebang|DailyHot|FreeJK/.test(topic.source)).length; document.querySelector('#dialogTitle').textContent=`${activeTab} · 来源雷达`; document.querySelector('#dialogContent').innerHTML=`<section><label>当前榜单信号</label><p>本 Tab 共 ${tabTopics.length} 条可发布来源，均已预读原文；其中 ${signalCount} 条来自平台热榜信号。</p></section><section><label>入榜门槛</label><p>每条必须成功取得原文标题、发布时间、发布作者/机构、摘要、正文和原始链接。任何一项读取失败，即不进入榜单。</p></section>`; dialog.showModal(); }
+    function render() { const visible=preparedTopics.filter(t=>t.tab===activeTab&&(activeFilter==='全部'||t.cat===activeFilter)).sort((a,b)=>creativeScore(b)-creativeScore(a)); document.querySelector('#summary').innerHTML=`<span><b>${visible.length}</b> 条${activeTab}可创作</span><span>${tabCopy[activeTab]}</span><span>按创作潜力排序</span>`; list.innerHTML=''; if(!visible.length){ list.innerHTML='<div class="loading">该分类暂时没有通过原文预读的内容。</div>'; return; } visible.forEach((t,i)=>{ const visual=categoryVisuals[t.cat], link=sourceLinks[t.source], potential=creativeScore(t); const el=document.createElement('article'); el.className='topic '+(t.hot?'hot':''); el.innerHTML=`<span class="rank">${String(i+1).padStart(2,'0')}</span><figure class="topic-visual ${visual.className}" aria-label="默认${t.cat}配图">${visual.icon}</figure><div class="topic-main"><div class="title-line"><h3 class="title">${t.title}</h3><em class="tag">${t.cat}</em></div><p class="source"><a href="${link}" target="_blank" rel="noreferrer">${t.source} · 原文 ↗</a></p><p class="fact"><b>事实</b> · ${t.fact}</p><em class="score"><i></i>${t.score}<span class="opportunity">创作潜力 ${potential}</span></em></div><button class="create">复制 Idea</button>`; el.querySelector('.create').onclick=()=>copyIdea(t); list.appendChild(el); }); }
+    let featuredTopic=null;
+    function notify(message='已复制，可直接粘贴创作'){ const toast=document.querySelector('#toast'); toast.textContent=message; toast.classList.add('visible'); window.setTimeout(()=>toast.classList.remove('visible'),1800); }
+    async function copyText(value){ try { await navigator.clipboard.writeText(value); notify(); } catch { notify('请手动复制这段内容'); } }
+    function updateLaunch(topic){ if(!topic) return; featuredTopic=topic; document.querySelector('#launch-title').textContent=topic.title; document.querySelector('#launchHook').textContent=`“${topic.hook}”`; document.querySelector('#launchMetrics').innerHTML=`<span>创作潜力 ${creativeScore(topic)}</span><span>${topic.cat}</span><span>适配短视频 / 图文</span>`; }
+    const originalRender=render; render=function(){ originalRender(); const selected=preparedTopics.filter(t=>t.tab===activeTab&&(activeFilter==='全部'||t.cat===activeFilter)).sort((a,b)=>creativeScore(b)-creativeScore(a))[0]; updateLaunch(selected); };
+    document.querySelector('#launchCreate').onclick=()=>{ if(featuredTopic) openDetail(featuredTopic); };
+    function publishedAt(t){ const match=t.source.match(/(20\d{2}\.\d{2}(?:\.\d{2})?)/); return match?match[1].replaceAll('.','-'):'以原始链接标注为准'; }
+    function compactBody(text){ const clean=text.replace(/^#{1,6}\s.*$/gm,'').replace(/\n{3,}/g,'\n\n').trim(); if(clean.length<=1000) return clean; const paragraphs=clean.split(/\n\s*\n/).filter(Boolean), picked=[]; let size=0; for(const paragraph of paragraphs){ if(size+paragraph.length+2>997) break; picked.push(paragraph); size+=paragraph.length+2; } return `${(picked.join('\n\n')||clean.slice(0,997)).slice(0,997)}…`; }
+    function parseOriginal(markdown){ const lines=markdown.split('\n').map(line=>line.trim()).filter(Boolean); const title=(lines.find(line=>/^title\s*:/i.test(line))||lines.find(line=>/^#\s+/.test(line))||'').replace(/^title\s*:\s*|^#\s*/i,''); const published=(lines.find(line=>/(published|发布日期|发布时间|日期)\s*[:：]/i.test(line))||'').replace(/^.*?[:：]\s*/,''); const author=(lines.find(line=>/(author|by|作者|发布者|来源)\s*[:：]/i.test(line))||'').replace(/^.*?[:：]\s*/,''); const content=lines.filter(line=>!/^title\s*:|^(url|published|author|by|发布日期|发布时间|日期|作者|发布者|来源)\s*[:：]/i.test(line)&&!/^#\s+/.test(line)).join('\n\n'); const body=compactBody(content); if(!title||!published||!author||body.length<80) return null; return { title, publishedAt:published, author, summary:body.split('\n\n')[0].slice(0,180), body }; }
+    async function readOriginalSource(t){ const link=sourceLinks[t.source]; if(!link||link==='#') return null; try { const controller=new AbortController(), timer=window.setTimeout(()=>controller.abort(),12000); const response=await fetch(`https://r.jina.ai/http://${link.replace(/^https?:\/\//,'')}`,{signal:controller.signal}); window.clearTimeout(timer); if(!response.ok) throw new Error('source unavailable'); const markdown=await response.text(); return parseOriginal(markdown); } catch { return null; } }
+    function ideaText(t,raw){ const link=sourceLinks[t.source]||'#'; return `【创作 Idea】\n原文标题：${raw.title}\n发布时间：${raw.publishedAt}\n发布作者：${raw.author}\n来源：${t.source}\n原文链接：${link}\n\n摘要：${raw.summary}\n\n正文关键信息（${raw.body.length} 字）：\n${raw.body}\n\n可用开场：${t.hook}\n创作方向：${t.action}`; }
+    async function copyIdea(t){ if(!t.original) return notify('该来源未完成原文预读'); await copyText(ideaText(t,t.original)); }
+    document.querySelector('#launchCopy').onclick=()=>{ if(featuredTopic) copyIdea(featuredTopic); };
+    function escapeHtml(text){ return String(text).replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
+    function openDetail(t) { const link=sourceLinks[t.source]||'#', raw=t.original; if(!raw) return; document.querySelector('#dialogTitle').textContent='原文速读'; document.querySelector('#dialogContent').innerHTML=`<section><label>原文信息</label><p><b>${escapeHtml(raw.title)}</b></p><div class="original-meta"><span>${escapeHtml(raw.publishedAt)}</span><span>${escapeHtml(raw.author)}</span><span>${escapeHtml(t.source)}</span></div><p><b>摘要：</b>${escapeHtml(raw.summary)}</p><p class="original-body" style="margin-top:9px">${escapeHtml(raw.body)}</p><p style="margin-top:9px"><a href="${link}" target="_blank" rel="noreferrer" style="color:#0f766e;font-weight:800">打开原文 ↗</a></p></section><section><label>可直接复制的 Idea</label><div class="copy-line"><p>已包含标题、发布时间、发布作者、摘要、正文及创作开场。</p><button type="button" onclick='copyIdea(topics.find(x=>x.title===${JSON.stringify(t.title)}))'>复制 Idea</button></div></section>`; dialog.showModal(); }
     document.querySelectorAll('.filter').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));btn.classList.add('active');activeFilter=btn.dataset.filter;render()});
-    document.querySelectorAll('.mode-tab').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.mode-tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');activeTab=btn.dataset.tab;activeFilter='全部';document.querySelectorAll('.filter').forEach(x=>x.classList.toggle('active',x.dataset.filter==='全部'));render()}); render();
+    document.querySelectorAll('.mode-tab').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.mode-tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');activeTab=btn.dataset.tab;activeFilter='全部';document.querySelectorAll('.filter').forEach(x=>x.classList.toggle('active',x.dataset.filter==='全部'));render()});
+    async function boot(){ list.innerHTML='<div class="loading">正在预读原文并核验作者、时间与正文…</div>'; const batches=[]; for(let i=0;i<topics.length;i+=4) batches.push(topics.slice(i,i+4)); for(const batch of batches){ const results=await Promise.all(batch.map(async topic=>({topic,original:await readOriginalSource(topic)}))); preparedTopics.push(...results.filter(result=>result.original).map(result=>Object.assign(result.topic,{original:result.original}))); } render(); }
+    boot();
   </script>
 </body>
 </html>

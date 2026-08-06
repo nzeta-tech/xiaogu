@@ -208,6 +208,7 @@ export async function tryUpdateWorkContent(input: {
   complianceRisk?: string;
   content: string;
   contentJson?: Record<string, unknown>;
+  preserveWechatStudioState?: boolean;
 }) {
   if (!input.userId) return null;
 
@@ -247,14 +248,29 @@ export async function tryUpdateWorkContent(input: {
       );
     }
 
-    const latestVersion = await query<{ version_no: number }>(
-      `select version_no
+    const latestVersion = await query<{ version_no: number; content_json: Record<string, unknown> }>(
+      `select version_no, content_json
        from work_versions
        where work_id = $1
        order by version_no desc
        limit 1`,
       [input.workId],
     );
+
+    const existingStudioState = input.preserveWechatStudioState
+      ? latestVersion.rows[0]?.content_json?.wechatStudioState
+      : null;
+    const contentJson = input.preserveWechatStudioState && existingStudioState && typeof existingStudioState === "object"
+      ? {
+          ...(input.contentJson ?? {}),
+          wechatStudioState: {
+            ...(existingStudioState as Record<string, unknown>),
+            title: input.title ?? (existingStudioState as Record<string, unknown>).title ?? "",
+            content: input.content,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      : input.contentJson ?? {};
 
     if (latestVersion.rows[0]) {
       await query(
@@ -265,7 +281,7 @@ export async function tryUpdateWorkContent(input: {
         [
           input.workId,
           input.content,
-          JSON.stringify(input.contentJson ?? {}),
+          JSON.stringify(contentJson),
           latestVersion.rows[0].version_no,
         ],
       );
@@ -273,7 +289,7 @@ export async function tryUpdateWorkContent(input: {
       await query(
         `insert into work_versions(work_id, version_no, content, content_json, created_from)
          values ($1, 1, $2, $3::jsonb, 'generation')`,
-        [input.workId, input.content, JSON.stringify(input.contentJson ?? {})],
+        [input.workId, input.content, JSON.stringify(contentJson)],
       );
     }
 
@@ -291,6 +307,65 @@ export async function tryUpdateWorkContent(input: {
       [input.workId, input.userId],
     );
 
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Attach the primary article run without replacing the studio draft the user is editing. */
+export async function tryAttachWorkAppRun(input: { userId: string | null; workId: string; appRunId: string | null }) {
+  if (!input.userId || !input.appRunId) return null;
+  try {
+    const result = await query<{ id: string }>(
+      `update works set app_run_id = $3, updated_at = now() where id = $1 and user_id = $2 returning id`,
+      [input.workId, input.userId, input.appRunId],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a studio asset step without letting it replace the article's title, content, or primary run. */
+export async function tryMergeWechatStudioAssets(input: {
+  userId: string | null;
+  workId: string;
+  kind: "images" | "cover";
+  images: Array<{ id: string; url: string }>;
+}) {
+  if (!input.userId) return null;
+  const value = input.kind === "cover" ? input.images[0] ?? null : input.images;
+  if (!value) return null;
+  try {
+    const result = await query<{ id: string }>(
+      `with latest as (
+         select wv.id, wv.content_json
+         from work_versions wv
+         join works w on w.id = wv.work_id
+         where w.id = $1 and w.user_id = $2
+         order by wv.version_no desc
+         limit 1
+         for update
+       ), updated_version as (
+         update work_versions wv
+         set content_json = jsonb_set(
+           coalesce(latest.content_json, '{}'::jsonb),
+           '{wechatStudioState}',
+           coalesce(latest.content_json->'wechatStudioState', '{}'::jsonb)
+             || jsonb_build_object($3::text, $4::jsonb, 'activeTab', 'visual', 'updatedAt', now()::text),
+           true
+         )
+         from latest
+         where wv.id = latest.id
+         returning wv.work_id
+       )
+       update works w set updated_at = now()
+       from updated_version uv
+       where w.id = uv.work_id
+       returning w.id`,
+      [input.workId, input.userId, input.kind, JSON.stringify(value)],
+    );
     return result.rows[0] ?? null;
   } catch {
     return null;
@@ -2620,8 +2695,7 @@ export async function tryListPublishedViralContents(limit = 24) {
          and status = 'published'
          and (publish_at is null or publish_at <= now())
          and (expire_at is null or expire_at > now())
-       order by is_pinned desc, is_featured desc,
-                viral_score desc, sort_order asc, coalesce(publish_at, fetched_at, updated_at) desc
+       order by sort_order asc, coalesce(publish_at, fetched_at, updated_at) desc
        limit $1`,
       [Math.min(Math.max(limit, 1), 100)],
     );
@@ -2663,7 +2737,8 @@ export async function tryListAdminViralContents() {
        from viral_contents vc
        left join users u on u.id = vc.updated_by
        where vc.source_type = 'manual'
-       order by vc.is_pinned desc, vc.is_featured desc, vc.sort_order asc, vc.updated_at desc`,
+       order by case when vc.status = 'offline' then 1 else 0 end,
+                vc.sort_order asc, vc.created_at asc, vc.id asc`,
     );
     return result.rows;
   } catch {
@@ -2766,7 +2841,8 @@ export async function tryUpsertAdminViralContent(input: {
          sort_order, publish_at, expire_at, created_by, updated_by, reviewed_by)
        values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6::jsonb, $7, $8, $9,
          $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23,
-         $24, $25, $26, $27, $27, case when $21 = 'published' then $27 else null end)
+         coalesce($24, (select coalesce(max(sort_order), 0) + 1 from viral_contents where source_type = 'manual')),
+         $25, $26, $27, $27, case when $21 = 'published' then $27 else null end)
        on conflict (id) do update set
          title = excluded.title, platform = excluded.platform, content_type = excluded.content_type,
          category = excluded.category, tags = excluded.tags, source_url = excluded.source_url,
@@ -2775,7 +2851,8 @@ export async function tryUpsertAdminViralContent(input: {
          article_body = excluded.article_body, summary = excluded.summary, metric_label = excluded.metric_label,
          metric_value = excluded.metric_value, metric_unit = excluded.metric_unit, insight = excluded.insight,
          creation_scenes = excluded.creation_scenes, risk_note = excluded.risk_note, status = excluded.status,
-         is_pinned = excluded.is_pinned, is_featured = excluded.is_featured, sort_order = excluded.sort_order,
+         is_pinned = excluded.is_pinned, is_featured = excluded.is_featured,
+         sort_order = case when $24 is null then viral_contents.sort_order else excluded.sort_order end,
          publish_at = excluded.publish_at, expire_at = excluded.expire_at, updated_by = excluded.updated_by,
          reviewed_by = case when excluded.status = 'published' then excluded.updated_by else viral_contents.reviewed_by end,
          updated_at = now()
@@ -2784,11 +2861,62 @@ export async function tryUpsertAdminViralContent(input: {
         input.sourceTitle ?? '', input.sourceAuthor ?? '', input.thumbnailUrl ?? null, input.mediaUrl ?? null, input.embedUrl ?? null,
         input.articleBody ?? '', input.summary ?? '', input.metricLabel ?? '热度待核验', input.metricValue ?? null, input.metricUnit ?? '',
         input.insight ?? '', JSON.stringify(input.creationScenes ?? []), input.riskNote ?? '', input.status, input.isPinned ?? false,
-        input.isFeatured ?? false, input.sortOrder ?? 0, input.publishAt ?? null, input.expireAt ?? null, input.updatedBy],
+        input.isFeatured ?? false, input.sortOrder ?? null, input.publishAt ?? null, input.expireAt ?? null, input.updatedBy],
     );
-    return result.rows[0] ?? null;
+    const content = result.rows[0] ?? null;
+    if (content && !input.id && input.sortOrder && input.sortOrder > 0) {
+      await query(
+        `update viral_contents
+         set sort_order = sort_order + 1
+         where source_type = 'manual' and status <> 'offline' and id <> $1 and sort_order >= $2`,
+        [String(content.id), input.sortOrder],
+      );
+      await query("update viral_contents set sort_order = $2 where id = $1", [String(content.id), input.sortOrder]);
+    }
+    return content;
   } catch {
     return null;
+  }
+}
+
+export async function tryMoveAdminViralContent(id: string, direction: "up" | "down") {
+  try {
+    const offset = direction === "up" ? -1 : 1;
+    const result = await query<{ id: string }>(
+      `with target as (
+         select status from viral_contents where id = $1 and source_type = 'manual'
+       ), ordered as (
+         select id, row_number() over (
+           order by sort_order asc, created_at asc, id asc
+         )::integer as position
+         from viral_contents
+         where source_type = 'manual'
+           and (status = 'offline') = (select status = 'offline' from target)
+       ), target_position as (
+         select position from ordered where id = $1
+       ), neighbor as (
+         select ordered.id, ordered.position
+         from ordered, target_position
+         where ordered.position = target_position.position + $2
+       ), reordered as (
+         select ordered.id,
+           case
+             when ordered.id = $1 and exists(select 1 from neighbor) then (select position from neighbor)
+             when ordered.id = (select id from neighbor) then (select position from target_position)
+             else ordered.position
+           end as position
+         from ordered
+       )
+       update viral_contents content
+       set sort_order = reordered.position
+       from reordered
+       where content.id = reordered.id
+       returning content.id`,
+      [id, offset],
+    );
+    return result.rows.some((row) => row.id === id);
+  } catch {
+    return false;
   }
 }
 

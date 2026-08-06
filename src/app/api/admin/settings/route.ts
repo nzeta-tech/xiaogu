@@ -32,7 +32,7 @@ const schema = z.object({
     turnstileEnabled: z.boolean(), turnstileSiteKey: z.string().trim().max(200), turnstileSecret: z.string().max(500).optional(),
     totpEnabled: z.boolean(), totpIssuer: z.string().trim().min(1).max(80),
   }).optional(),
-  defaults: z.object({ signupCredits: z.number().int().min(0).max(100000), dailyCreationLimit: z.number().int().min(0).max(10000), monthlyCreationLimit: z.number().int().min(0).max(100000), maxConcurrentCreations: z.number().int().min(1).max(20), creationRpmLimit: z.number().int().min(1).max(1000) }).optional(),
+  defaults: z.object({ signupCreditsEnabled: z.boolean(), signupCredits: z.number().int().min(0).max(100000), dailyCreationLimit: z.number().int().min(0).max(10000), monthlyCreationLimit: z.number().int().min(0).max(100000), maxConcurrentCreations: z.number().int().min(1).max(20), creationRpmLimit: z.number().int().min(1).max(1000) }).optional(),
   features: z.object({ complianceEnabled: z.boolean(), imageGenerationEnabled: z.boolean(), hotTopicsEnabled: z.boolean(), feedbackEnabled: z.boolean(), localAgentEnabled: z.boolean() }).optional(),
   payment: z.object({
     enableStripe: z.boolean(), enableAirwallex: z.boolean(), enableAlipay: z.boolean(), enableWechat: z.boolean(), enableManualTransfer: z.boolean(), displaySubscriptions: z.boolean(), purchaseNotice: z.string().trim().max(500),

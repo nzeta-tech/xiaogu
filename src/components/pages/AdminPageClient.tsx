@@ -98,6 +98,35 @@ type AdminViralContent = {
   sort_order: number; publish_at: string | null; expire_at: string | null; updated_at: string;
 };
 
+type ViralSourceInspection = {
+  finalUrl?: string;
+  thumbnailUrl?: string;
+  mediaUrl?: string;
+  note?: string;
+  error?: string;
+  fields?: Record<string, string>;
+};
+
+function platformFromViralSource(url: string, sourceType = "") {
+  if (sourceType === "wechat_article" || /mp\.weixin\.qq\.com/i.test(url)) return "公众号";
+  if (sourceType === "xiaohongshu" || /xiaohongshu\.com|xhslink\.com/i.test(url)) return "小红书";
+  if (sourceType === "wechat_channels" || /weixin\.qq\.com|channels\.weixin\.qq\.com/i.test(url)) return "视频号";
+  return "抖音";
+}
+
+function contentTypeFromInspection(value = "") {
+  if (/公众号|文章|正文/.test(value)) return "爆文";
+  if (/图文|纯图/.test(value)) return "图文";
+  return "短视频";
+}
+
+function metricValueFromInspection(value = "") {
+  const matched = value.replace(/,/g, "").match(/(\d+(?:\.\d+)?)\s*(万|w|k)?/i);
+  if (!matched) return "";
+  const multiplier = /万|w/i.test(matched[2] ?? "") ? 10000 : /k/i.test(matched[2] ?? "") ? 1000 : 1;
+  return String(Math.round(Number(matched[1]) * multiplier));
+}
+
 type AdminViralCreator = {
   id: string; platform: string; display_name: string; profile_url: string | null; bio: string;
   status: "active" | "paused" | "excluded" | string; relevance_score: number; source_kind: string;
@@ -334,13 +363,20 @@ export function AdminPageClient() {
   const [confirmConfig, setConfirmConfig] = useState<AdminConfirmConfig | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [viralContents, setViralContents] = useState<AdminViralContent[]>([]);
+  const [viralContentTab, setViralContentTab] = useState<"create" | "active" | "offline">("active");
+  const [viralContentSearch, setViralContentSearch] = useState("");
+  const [viralCoverFile, setViralCoverFile] = useState<File | null>(null);
+  const [viralCoverPreviewUrl, setViralCoverPreviewUrl] = useState("");
+  const [viralPlatformFilter, setViralPlatformFilter] = useState("all");
+  const [viralContentTypeFilter, setViralContentTypeFilter] = useState("all");
+  const [viralCategoryFilter, setViralCategoryFilter] = useState("all");
   const [viralCreators, setViralCreators] = useState<AdminViralCreator[]>([]);
   const [creatorSearch, setCreatorSearch] = useState("");
   const [creatorPlatformFilter, setCreatorPlatformFilter] = useState("all");
   const [creatorStatusFilter, setCreatorStatusFilter] = useState("all");
   const [creatorSort, setCreatorSort] = useState<"relevance" | "recent" | "works">("relevance");
   const [selectedCreatorIds, setSelectedCreatorIds] = useState<string[]>([]);
-  const [contentView, setContentView] = useState<"works" | "apps" | "runs" | "compliance" | "viral" | "creators">("works");
+  const [contentView, setContentView] = useState<"works" | "apps" | "runs" | "compliance" | "viral" | "creators">("viral");
   const [commerceView, setCommerceView] = useState<"orders" | "plans" | "promos">("orders");
   const [supportView, setSupportView] = useState<"tickets" | "audit">("tickets");
   const [pageSize, setPageSize] = useState(20);
@@ -632,15 +668,72 @@ export function AdminPageClient() {
         mediaUrl: viralForm.mediaUrl, articleBody: viralForm.articleBody, summary: viralForm.summary, metricLabel: viralForm.metricLabel,
         metricValue: viralForm.metricValue ? Number(viralForm.metricValue) : null, metricUnit: viralForm.metricUnit, insight: viralForm.insight,
         creationScenes: viralForm.creationScenes.split(/[、,\s]+/).map((item) => item.trim()).filter(Boolean), riskNote: viralForm.riskNote,
-        status: viralForm.status, isPinned: viralForm.isPinned, isFeatured: viralForm.isFeatured, sortOrder: Number(viralForm.sortOrder) || 0,
+        status: viralForm.status, isPinned: viralForm.isPinned, isFeatured: viralForm.isFeatured, sortOrder: Math.max(Number(viralForm.sortOrder) || 1, 1),
         publishAt: toIso(viralForm.publishAt), expireAt: toIso(viralForm.expireAt),
       }),
     });
-    const payload = await response.json() as { error?: string };
+    const payload = await response.json() as { error?: string; content?: { id: string } };
     if (!response.ok) return showToast(payload.error ?? "爆款资源保存失败", "error");
+    if (viralCoverFile && payload.content?.id) {
+      const coverForm = new FormData();
+      coverForm.append("contentId", payload.content.id);
+      coverForm.append("file", viralCoverFile);
+      const coverResponse = await fetch(apiPath("/api/admin/viral-contents/cover"), { method: "POST", body: coverForm });
+      const coverPayload = await coverResponse.json().catch(() => ({})) as { error?: string };
+      if (!coverResponse.ok) return showToast(`爆款资源已保存，但封面上传失败：${coverPayload.error ?? "请重试"}`, "error");
+      setViralCoverFile(null);
+      setViralCoverPreviewUrl("");
+    }
     setViralDrawerOpen(false);
+    if (viralContentTab === "create") setViralContentTab("active");
     await loadSection("content");
     showToast("爆款资源已保存");
+  }
+
+  function selectViralCover(file: File | undefined) {
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) return showToast("仅支持 JPG、PNG、WebP 或 GIF 图片", "error");
+    if (file.size > 10 * 1024 * 1024) return showToast("封面文件需小于 10MB", "error");
+    setViralCoverFile(file);
+    setViralCoverPreviewUrl(URL.createObjectURL(file));
+    setViralForm((current) => ({ ...current, thumbnailUrl: "" }));
+  }
+
+  async function inspectViralContentSource() {
+    const sourceUrl = viralForm.sourceUrl.trim();
+    if (!sourceUrl) return showToast("请先填写单条作品来源链接", "error");
+    setActionKey("viral-inspect");
+    try {
+      const response = await fetch(apiPath("/api/creation/link-remix/inspect"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: sourceUrl, adminOperation: true }) });
+      const payload = await response.json().catch(() => ({})) as ViralSourceInspection;
+      if (!response.ok) return showToast(payload.error ?? "作品解析失败", "error");
+      const fields = payload.fields ?? {};
+      const finalUrl = payload.finalUrl ?? sourceUrl;
+      setViralForm((current) => ({
+        ...current,
+        title: fields.source_title || current.title,
+        platform: platformFromViralSource(finalUrl, fields.source_type),
+        contentType: contentTypeFromInspection(fields.source_content_type),
+        category: fields.source_topic || current.category,
+        tags: fields.source_tags || current.tags,
+        sourceUrl: finalUrl,
+        sourceTitle: fields.source_title || current.sourceTitle,
+        sourceAuthor: fields.source_author || current.sourceAuthor,
+        thumbnailUrl: payload.thumbnailUrl || current.thumbnailUrl,
+        mediaUrl: payload.mediaUrl || current.mediaUrl,
+        articleBody: fields.source_text || fields.source_transcript || current.articleBody,
+        summary: fields.source_evidence || current.summary,
+        metricLabel: fields.source_like_count ? "点赞" : current.metricLabel,
+        metricValue: fields.source_like_count ? metricValueFromInspection(fields.source_like_count) : current.metricValue,
+        metricUnit: fields.source_like_count ? "赞" : current.metricUnit,
+        publishAt: fields.source_published_at ? (() => { const date = new Date(fields.source_published_at); return Number.isNaN(date.getTime()) ? current.publishAt : date.toISOString().slice(0, 16); })() : current.publishAt,
+      }));
+      showToast(payload.note ? `已自动解析并回填作品字段：${payload.note}` : "已自动解析并回填作品字段");
+    } catch {
+      showToast("作品解析请求失败，请稍后重试", "error");
+    } finally {
+      setActionKey("");
+    }
   }
 
   async function updateViralContentStatus(id: string, status: string) {
@@ -649,6 +742,13 @@ export function AdminPageClient() {
     if (!response.ok) return showToast(payload.error ?? "爆款资源状态更新失败", "error");
     await loadSection("content");
     showToast("爆款资源状态已更新");
+  }
+
+  async function moveViralContent(id: string, action: "move_up" | "move_down") {
+    const response = await fetch(apiPath("/api/admin/viral-contents"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, action }) });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) return showToast(payload.error ?? "爆款资源排序失败", "error");
+    await loadSection("content");
   }
 
   async function updateViralCreatorStatus(ids: string[], status: "active" | "paused" | "excluded") {
@@ -970,6 +1070,14 @@ export function AdminPageClient() {
     return matchesStatus && (!keyword || `${order.user_email} ${order.user_name} ${order.provider} ${order.id}`.toLowerCase().includes(keyword));
   });
   const filteredCreationApps = creationApps.filter((app) => appStatusFilter === "all" || app.status === appStatusFilter);
+  const filteredViralContents = viralContents.filter((item) => {
+    const inCurrentTab = viralContentTab === "offline" ? item.status === "offline" : item.status !== "offline";
+    const matchesPlatform = viralPlatformFilter === "all" || item.platform === viralPlatformFilter;
+    const matchesContentType = viralContentTypeFilter === "all" || item.content_type === viralContentTypeFilter;
+    const matchesCategory = viralCategoryFilter === "all" || item.category === viralCategoryFilter;
+    const keyword = viralContentSearch.trim().toLowerCase();
+    return inCurrentTab && matchesPlatform && matchesContentType && matchesCategory && (!keyword || `${item.title} ${item.platform} ${item.content_type} ${item.category} ${item.tags.join(" ")} ${item.source_author}`.toLowerCase().includes(keyword));
+  });
   const filteredViralCreators = viralCreators.filter((creator) => {
     const matchesPlatform = creatorPlatformFilter === "all" || creator.platform === creatorPlatformFilter;
     const matchesStatus = creatorStatusFilter === "all" || creator.status === creatorStatusFilter;
@@ -1256,11 +1364,11 @@ export function AdminPageClient() {
       {tab === "content" ? (
         <div className="pageStack">
           <div className="adminSegmented" role="tablist" aria-label="内容运营视图">
+            <button className={contentView === "viral" ? "active" : ""} onClick={() => setContentView("viral")} role="tab" type="button">爆款资源</button>
             <button className={contentView === "works" ? "active" : ""} onClick={() => setContentView("works")} role="tab" type="button">作品概览</button>
             <button className={contentView === "apps" ? "active" : ""} onClick={() => setContentView("apps")} role="tab" type="button">应用管理</button>
             <button className={contentView === "runs" ? "active" : ""} onClick={() => setContentView("runs")} role="tab" type="button">运行任务</button>
             <button className={contentView === "compliance" ? "active" : ""} onClick={() => setContentView("compliance")} role="tab" type="button">合规分析</button>
-            <button className={contentView === "viral" ? "active" : ""} onClick={() => setContentView("viral")} role="tab" type="button">爆款资源</button>
             <button className={contentView === "creators" ? "active" : ""} onClick={() => setContentView("creators")} role="tab" type="button">作者候选池</button>
           </div>
           {contentView === "works" ? <div className="metricGrid adminMetrics">
@@ -1378,15 +1486,25 @@ export function AdminPageClient() {
           {contentView === "viral" ? <AdminPanel title="爆款资源运营">
             <AdminToolbar>
               <span>{viralContents.filter((item) => item.status === "published").length} 条已发布 · 人工内容会优先于自动热榜展示</span>
-              <button className="primaryButton" onClick={() => { setViralForm({ id: "", title: "", platform: "抖音", contentType: "短视频", category: "健康医疗", tags: "", sourceUrl: "", sourceTitle: "", sourceAuthor: "", thumbnailUrl: "", mediaUrl: "", articleBody: "", summary: "", metricLabel: "热度待核验", metricValue: "", metricUnit: "", insight: "", creationScenes: "", riskNote: "", status: "draft", isPinned: false, isFeatured: false, sortOrder: "0", publishAt: "", expireAt: "" }); setViralDrawerOpen(true); }} type="button">新增爆款</button>
+              <button className="primaryButton" onClick={() => { setViralContentTab("create"); setViralForm({ id: "", title: "", platform: "抖音", contentType: "短视频", category: "健康医疗", tags: "", sourceUrl: "", sourceTitle: "", sourceAuthor: "", thumbnailUrl: "", mediaUrl: "", articleBody: "", summary: "", metricLabel: "热度待核验", metricValue: "", metricUnit: "", insight: "", creationScenes: "", riskNote: "", status: "draft", isPinned: false, isFeatured: false, sortOrder: "0", publishAt: "", expireAt: "" }); }} type="button">新增爆款</button>
             </AdminToolbar>
+            <div className="tabs" aria-label="爆款资源状态"><button className={viralContentTab === "create" ? "active" : ""} onClick={() => { setViralContentTab("create"); setViralForm({ id: "", title: "", platform: "抖音", contentType: "短视频", category: "健康医疗", tags: "", sourceUrl: "", sourceTitle: "", sourceAuthor: "", thumbnailUrl: "", mediaUrl: "", articleBody: "", summary: "", metricLabel: "热度待核验", metricValue: "", metricUnit: "", insight: "", creationScenes: "", riskNote: "", status: "draft", isPinned: false, isFeatured: false, sortOrder: "0", publishAt: "", expireAt: "" }); }} type="button">新增爆款</button><button className={viralContentTab === "active" ? "active" : ""} onClick={() => setViralContentTab("active")} type="button">运营中 ({viralContents.filter((item) => item.status !== "offline").length})</button><button className={viralContentTab === "offline" ? "active" : ""} onClick={() => setViralContentTab("offline")} type="button">已下线 ({viralContents.filter((item) => item.status === "offline").length})</button></div>
+            {viralContentTab === "create" ? <form className="stackForm viralContentForm viralContentInlineForm" onSubmit={saveViralContent}>
+              <section className="viralFormSection source"><div className="viralFormSectionHeading"><div><strong>卡片展示信息</strong><span>这些信息会直接出现在“今日灵感”的爆款卡片中。</span></div></div><AdminField label="来源链接 *"><div className="viralSourceInput"><input required type="url" value={viralForm.sourceUrl} onChange={(event) => setViralForm((current) => ({ ...current, sourceUrl: event.target.value }))} placeholder="粘贴作品链接" /><button className="primaryButton" disabled={actionKey === "viral-inspect"} onClick={() => void inspectViralContentSource()} type="button">{actionKey === "viral-inspect" ? "正在解析…" : "自动解析作品"}</button></div></AdminField><AdminField label="封面地址"><input type="url" value={viralForm.thumbnailUrl} onChange={(event) => { setViralCoverFile(null); setViralCoverPreviewUrl(""); setViralForm((current) => ({ ...current, thumbnailUrl: event.target.value })); }} placeholder="粘贴封面图片链接" /></AdminField><label className="viralCoverUpload viralCoverUploadBelow">上传本地封面<input accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => { selectViralCover(event.target.files?.[0]); event.currentTarget.value = ""; }} type="file" />{viralCoverFile ? viralCoverFile.name : "JPG、PNG、WebP、GIF，最大 10MB"}</label></section>
+              <section className="viralPositionSection"><AdminField label="指定位置"><input min="1" type="number" value={viralForm.sortOrder === "0" ? "1" : viralForm.sortOrder} onChange={(event) => setViralForm((current) => ({ ...current, sortOrder: event.target.value }))} /></AdminField><span>默认 1，即运营中列表首位；后续作品会自动顺延。</span></section>
+              <section className="viralFormSection"><div className="viralFormSectionHeading"><div><strong>标题与来源信息</strong><span>标题、平台和作者决定卡片的主要呈现。</span></div></div><AdminField label="标题 *"><input required maxLength={160} value={viralForm.title} onChange={(event) => setViralForm((current) => ({ ...current, title: event.target.value }))} /></AdminField><div className="settingsFormGrid"><AdminField label="平台"><select value={viralForm.platform} onChange={(event) => setViralForm((current) => ({ ...current, platform: event.target.value }))}><option>抖音</option><option>视频号</option><option>小红书</option><option>公众号</option></select></AdminField><AdminField label="内容类型"><select value={viralForm.contentType} onChange={(event) => setViralForm((current) => ({ ...current, contentType: event.target.value }))}><option>短视频</option><option>爆文</option><option>图文</option><option>直播切片</option></select></AdminField><AdminField label="来源作者"><input value={viralForm.sourceAuthor} onChange={(event) => setViralForm((current) => ({ ...current, sourceAuthor: event.target.value }))} /></AdminField></div><div className="settingsFormGrid"><AdminField label="热度数值"><input min="0" type="number" value={viralForm.metricValue} onChange={(event) => setViralForm((current) => ({ ...current, metricValue: event.target.value }))} /></AdminField><AdminField label="热度单位"><input value={viralForm.metricUnit} onChange={(event) => setViralForm((current) => ({ ...current, metricUnit: event.target.value }))} /></AdminField><AdminField label="业务分类 *"><input required value={viralForm.category} onChange={(event) => setViralForm((current) => ({ ...current, category: event.target.value }))} /></AdminField></div></section>
+              <details className="viralFormAdvanced"><summary>运营补充资料（不直接展示在爆款卡片）</summary><div className="viralFormAdvancedBody"><AdminField label="推荐角度"><textarea value={viralForm.insight} onChange={(event) => setViralForm((current) => ({ ...current, insight: event.target.value }))} /></AdminField><AdminField label="标签"><input value={viralForm.tags} onChange={(event) => setViralForm((current) => ({ ...current, tags: event.target.value }))} /></AdminField><AdminField label="内容摘要"><textarea value={viralForm.summary} onChange={(event) => setViralForm((current) => ({ ...current, summary: event.target.value }))} /></AdminField><AdminField label="文章正文/转写稿"><textarea rows={8} value={viralForm.articleBody} onChange={(event) => setViralForm((current) => ({ ...current, articleBody: event.target.value }))} /></AdminField></div></details>
+              <section className="viralFormSection publish"><div className="settingsFormGrid"><AdminField label="状态"><select value={viralForm.status} onChange={(event) => setViralForm((current) => ({ ...current, status: event.target.value }))}><option value="draft">保存草稿</option><option value="pending_review">待审核</option><option value="published">立即发布</option></select></AdminField></div><div className="viralFormActions"><button className="secondaryButton" onClick={() => setViralContentTab("active")} type="button">取消</button><button className="primaryButton" type="submit">{viralForm.status === "published" ? "保存并发布" : "保存爆款资源"}</button></div></section>
+            </form> : <>
+            <div className="adminToolbarFilters"><input aria-label="搜索爆款资源" value={viralContentSearch} onChange={(event) => setViralContentSearch(event.target.value)} placeholder="搜索标题、平台、分类、标签或作者" /><select aria-label="爆款资源平台筛选" value={viralPlatformFilter} onChange={(event) => setViralPlatformFilter(event.target.value)}><option value="all">全部平台</option>{[...new Set(viralContents.map((item) => item.platform))].sort().map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select><select aria-label="爆款资源内容类型筛选" value={viralContentTypeFilter} onChange={(event) => setViralContentTypeFilter(event.target.value)}><option value="all">全部类型</option>{[...new Set(viralContents.map((item) => item.content_type))].sort().map((contentType) => <option key={contentType} value={contentType}>{contentType}</option>)}</select><select aria-label="爆款资源分类筛选" value={viralCategoryFilter} onChange={(event) => setViralCategoryFilter(event.target.value)}><option value="all">全部分类</option>{[...new Set(viralContents.map((item) => item.category))].sort().map((category) => <option key={category} value={category}>{category}</option>)}</select></div>
             <div className="tableList">
-              {viralContents.map((item) => <div className="tableRow" key={item.id}>
-                <div><strong>{item.title}</strong><span>{item.platform} · {item.content_type} · {item.category} · {item.is_pinned ? "置顶 · " : ""}{item.is_featured ? "重点推荐 · " : ""}{item.metric_label}{item.metric_value ? ` ${item.metric_value}${item.metric_unit}` : ""}</span><span>{item.insight || "尚未填写推荐角度"}</span></div>
-                <div className="rowActions"><AdminStatus value={item.status} /><button className="secondaryButton" onClick={() => { setViralForm({ id: item.id, title: item.title, platform: item.platform, contentType: item.content_type, category: item.category, tags: item.tags.join("、"), sourceUrl: item.source_url, sourceTitle: item.source_title, sourceAuthor: item.source_author, thumbnailUrl: item.thumbnail_url ?? "", mediaUrl: item.media_url ?? "", articleBody: item.article_body, summary: item.summary, metricLabel: item.metric_label, metricValue: item.metric_value?.toString() ?? "", metricUnit: item.metric_unit, insight: item.insight, creationScenes: item.creation_scenes.join("、"), riskNote: item.risk_note, status: item.status, isPinned: item.is_pinned, isFeatured: item.is_featured, sortOrder: item.sort_order.toString(), publishAt: item.publish_at ? item.publish_at.slice(0, 16) : "", expireAt: item.expire_at ? item.expire_at.slice(0, 16) : "" }); setViralDrawerOpen(true); }} type="button">编辑</button><button className="secondaryButton" onClick={() => void updateViralContentStatus(item.id, item.status === "published" ? "offline" : "published")} type="button">{item.status === "published" ? "下线" : "发布"}</button></div>
+              {filteredViralContents.map((item, index) => <div className="tableRow" key={item.id}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" width={64} height={48} style={{ borderRadius: 6, objectFit: "cover", flex: "0 0 auto" }} /> : <div aria-label="暂无封面" style={{ width: 64, height: 48, borderRadius: 6, display: "grid", placeItems: "center", background: "var(--surface-muted, #f3f4f6)", color: "var(--muted, #6b7280)", fontSize: 12, flex: "0 0 auto" }}>无封面</div>}<div><strong>{index + 1}. {item.title}</strong><span>{item.platform} · {item.content_type} · {item.category} · {item.is_pinned ? "置顶 · " : ""}{item.is_featured ? "重点推荐 · " : ""}{item.metric_label}{item.metric_value ? ` ${item.metric_value}${item.metric_unit}` : ""}</span><span>{item.insight || "尚未填写推荐角度"}</span></div></div>
+                <div className="rowActions"><AdminStatus value={item.status} /><button className="secondaryButton" disabled={index === 0 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_up")} type="button">上移</button><button className="secondaryButton" disabled={index === filteredViralContents.length - 1 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_down")} type="button">下移</button><button className="secondaryButton" onClick={() => { setViralForm({ id: item.id, title: item.title, platform: item.platform, contentType: item.content_type, category: item.category, tags: item.tags.join("、"), sourceUrl: item.source_url, sourceTitle: item.source_title, sourceAuthor: item.source_author, thumbnailUrl: item.thumbnail_url ?? "", mediaUrl: item.media_url ?? "", articleBody: item.article_body, summary: item.summary, metricLabel: item.metric_label, metricValue: item.metric_value?.toString() ?? "", metricUnit: item.metric_unit, insight: item.insight, creationScenes: item.creation_scenes.join("、"), riskNote: item.risk_note, status: item.status, isPinned: item.is_pinned, isFeatured: item.is_featured, sortOrder: item.sort_order.toString(), publishAt: item.publish_at ? item.publish_at.slice(0, 16) : "", expireAt: item.expire_at ? item.expire_at.slice(0, 16) : "" }); setViralDrawerOpen(true); }} type="button">编辑</button><button className="secondaryButton" onClick={() => void updateViralContentStatus(item.id, item.status === "published" ? "offline" : "published")} type="button">{item.status === "published" ? "下线" : "发布"}</button></div>
               </div>)}
-              {viralContents.length === 0 ? <AdminEmptyState title="暂无人工爆款资源" description="自动热榜仍会正常展示；新增资源后可通过置顶和推荐角度影响用户创作。" /> : null}
+              {filteredViralContents.length === 0 ? <AdminEmptyState title={viralContentTab === "offline" ? "暂无已下线资源" : "暂无运营中爆款资源"} description={viralContentSearch ? "没有匹配的爆款资源。" : "新增资源后可通过置顶和推荐角度影响用户创作。"} /> : null}
             </div>
+            </>}
           </AdminPanel> : null}
 
           {contentView === "creators" ? <AdminPanel title="各平台作者候选池">
@@ -1432,20 +1550,22 @@ export function AdminPageClient() {
             <AdminPagination page={currentPage} pageSize={pageSize} pageSizeOptions={settings.ui.tablePageSizeOptions} total={filteredViralCreators.length} onPageChange={updatePage} onPageSizeChange={(size) => { setPageSize(size); updatePage(1); }} />
           </AdminPanel> : null}
 
-          <AdminDrawer open={viralDrawerOpen} title={viralForm.id ? "编辑爆款资源" : "新增爆款资源"} description="发布后会优先展示在用户端爆款模块" onClose={() => setViralDrawerOpen(false)}>
-            <form className="stackForm" onSubmit={saveViralContent}>
-              <AdminField label="标题"><input required maxLength={160} value={viralForm.title} onChange={(event) => setViralForm((current) => ({ ...current, title: event.target.value }))} /></AdminField>
-              <div className="settingsFormGrid"><AdminField label="平台"><select value={viralForm.platform} onChange={(event) => setViralForm((current) => ({ ...current, platform: event.target.value }))}><option>抖音</option><option>视频号</option><option>小红书</option><option>公众号</option></select></AdminField><AdminField label="内容类型"><select value={viralForm.contentType} onChange={(event) => setViralForm((current) => ({ ...current, contentType: event.target.value }))}><option>短视频</option><option>爆文</option><option>图文</option><option>直播切片</option></select></AdminField><AdminField label="业务分类"><input required value={viralForm.category} onChange={(event) => setViralForm((current) => ({ ...current, category: event.target.value }))} /></AdminField><AdminField label="运营排序"><input min="0" type="number" value={viralForm.sortOrder} onChange={(event) => setViralForm((current) => ({ ...current, sortOrder: event.target.value }))} /></AdminField></div>
-              <AdminField label="来源链接"><input required type="url" value={viralForm.sourceUrl} onChange={(event) => setViralForm((current) => ({ ...current, sourceUrl: event.target.value }))} /></AdminField>
+          <AdminDrawer open={viralDrawerOpen && viralContentTab !== "create"} title={viralForm.id ? "编辑爆款资源" : "新增爆款资源"} description="发布后会优先展示在用户端爆款模块" onClose={() => setViralDrawerOpen(false)}>
+            <form className="stackForm viralContentForm" onSubmit={saveViralContent}>
+              <div className="viralFormSteps" aria-label="录入流程"><span className="active"><b>1</b> 解析来源</span><span><b>2</b> 补充运营信息</span><span><b>3</b> 设置发布</span></div>
+              <section className="viralFormSection source"><div className="viralFormSectionHeading"><div><strong>先录入来源作品</strong><span>粘贴作品链接后自动识别可公开获取的信息，再按需人工校验。</span></div></div><AdminField label="来源链接 *" hint="支持抖音、视频号、公众号、小红书的单条作品链接"><div className="viralSourceInput"><input required type="url" value={viralForm.sourceUrl} onChange={(event) => setViralForm((current) => ({ ...current, sourceUrl: event.target.value }))} placeholder="粘贴作品链接" /><button className="primaryButton" disabled={actionKey === "viral-inspect"} onClick={() => void inspectViralContentSource()} type="button">{actionKey === "viral-inspect" ? "正在解析…" : "自动解析作品"}</button></div></AdminField><AdminField label="封面地址" hint="用户端卡片的主要视觉；解析失败时可在此手动补充。"><input type="url" value={viralForm.thumbnailUrl} onChange={(event) => setViralForm((current) => ({ ...current, thumbnailUrl: event.target.value }))} placeholder="粘贴封面图片链接" /></AdminField>{viralForm.thumbnailUrl ? <div className="viralCoverPreview" style={{ "--viral-cover": `url(${JSON.stringify(viralForm.thumbnailUrl)})` } as CSSProperties}><span>用户端封面预览</span><button className="secondaryButton" onClick={() => setViralForm((current) => ({ ...current, thumbnailUrl: "" }))} type="button">移除</button></div> : <p className="viralInlineHint">解析后会回填标题、作者、封面、正文/转写、热度等公开字段；未识别的字段可继续手动填写。</p>}</section>
+              <section className="viralFormSection"><div className="viralFormSectionHeading"><div><strong>内容与运营信息</strong><span>带 * 的信息是保存所需；发布前还需要填写推荐角度。</span></div></div><AdminField label="标题 *"><input required maxLength={160} value={viralForm.title} onChange={(event) => setViralForm((current) => ({ ...current, title: event.target.value }))} placeholder="用户端展示的作品标题" /></AdminField>
+              <div className="settingsFormGrid"><AdminField label="平台"><select value={viralForm.platform} onChange={(event) => setViralForm((current) => ({ ...current, platform: event.target.value }))}><option>抖音</option><option>视频号</option><option>小红书</option><option>公众号</option></select></AdminField><AdminField label="内容类型"><select value={viralForm.contentType} onChange={(event) => setViralForm((current) => ({ ...current, contentType: event.target.value }))}><option>短视频</option><option>爆文</option><option>图文</option><option>直播切片</option></select></AdminField><AdminField label="业务分类 *"><input required value={viralForm.category} onChange={(event) => setViralForm((current) => ({ ...current, category: event.target.value }))} placeholder="例如：家庭保障" /></AdminField></div>
+              <div className="settingsFormGrid"><AdminField label="来源标题"><input value={viralForm.sourceTitle} onChange={(event) => setViralForm((current) => ({ ...current, sourceTitle: event.target.value }))} /></AdminField><AdminField label="来源作者"><input value={viralForm.sourceAuthor} onChange={(event) => setViralForm((current) => ({ ...current, sourceAuthor: event.target.value }))} /></AdminField><AdminField label="媒体地址"><input type="url" value={viralForm.mediaUrl} onChange={(event) => setViralForm((current) => ({ ...current, mediaUrl: event.target.value }))} /></AdminField></div>
               <AdminField label="标签" hint="用逗号或顿号分隔"><input value={viralForm.tags} onChange={(event) => setViralForm((current) => ({ ...current, tags: event.target.value }))} /></AdminField>
-              <AdminField label="推荐角度" hint="发布前必填，将用于用户端展示和 AI 二创参考"><textarea required value={viralForm.insight} onChange={(event) => setViralForm((current) => ({ ...current, insight: event.target.value }))} /></AdminField>
+              <AdminField label="推荐角度 *" hint="发布前必填，将用于用户端展示和 AI 二创参考"><textarea required value={viralForm.insight} onChange={(event) => setViralForm((current) => ({ ...current, insight: event.target.value }))} placeholder="说明这条内容值得借鉴的切入点、结构或适用人群" /></AdminField>
               <AdminField label="内容摘要"><textarea value={viralForm.summary} onChange={(event) => setViralForm((current) => ({ ...current, summary: event.target.value }))} /></AdminField>
-              <AdminField label="文章正文/转写稿"><textarea rows={8} value={viralForm.articleBody} onChange={(event) => setViralForm((current) => ({ ...current, articleBody: event.target.value }))} /></AdminField>
+              <AdminField label="文章正文/转写稿"><textarea rows={8} value={viralForm.articleBody} onChange={(event) => setViralForm((current) => ({ ...current, articleBody: event.target.value }))} placeholder="自动解析的正文或转写稿会显示在这里，可补充和修订" /></AdminField></section>
+              <details className="viralFormAdvanced"><summary>补充信息（封面、热度与风险提示）</summary><div className="viralFormAdvancedBody">
               <div className="settingsFormGrid"><AdminField label="封面地址"><input type="url" value={viralForm.thumbnailUrl} onChange={(event) => setViralForm((current) => ({ ...current, thumbnailUrl: event.target.value }))} /></AdminField><AdminField label="热度数值"><input min="0" type="number" value={viralForm.metricValue} onChange={(event) => setViralForm((current) => ({ ...current, metricValue: event.target.value }))} /></AdminField><AdminField label="热度单位"><input value={viralForm.metricUnit} onChange={(event) => setViralForm((current) => ({ ...current, metricUnit: event.target.value }))} /></AdminField></div>
-              <AdminField label="风险提示"><textarea value={viralForm.riskNote} onChange={(event) => setViralForm((current) => ({ ...current, riskNote: event.target.value }))} /></AdminField>
-              <div className="settingsFormGrid"><AdminField label="状态"><select value={viralForm.status} onChange={(event) => setViralForm((current) => ({ ...current, status: event.target.value }))}><option value="draft">草稿</option><option value="pending_review">待审核</option><option value="published">已发布</option><option value="offline">已下线</option></select></AdminField><AdminField label="开始展示"><input type="datetime-local" value={viralForm.publishAt} onChange={(event) => setViralForm((current) => ({ ...current, publishAt: event.target.value }))} /></AdminField><AdminField label="结束展示"><input type="datetime-local" value={viralForm.expireAt} onChange={(event) => setViralForm((current) => ({ ...current, expireAt: event.target.value }))} /></AdminField></div>
-              <label className="checkboxRow"><input checked={viralForm.isPinned} type="checkbox" onChange={(event) => setViralForm((current) => ({ ...current, isPinned: event.target.checked }))} />置顶</label><label className="checkboxRow"><input checked={viralForm.isFeatured} type="checkbox" onChange={(event) => setViralForm((current) => ({ ...current, isFeatured: event.target.checked }))} />重点推荐</label>
-              <button className="primaryButton" type="submit">保存爆款资源</button>
+              <AdminField label="风险提示"><textarea value={viralForm.riskNote} onChange={(event) => setViralForm((current) => ({ ...current, riskNote: event.target.value }))} placeholder="涉及保险条款、数据、案例时，写明需要核验的边界" /></AdminField></div></details>
+              <section className="viralFormSection publish"><div className="viralFormSectionHeading"><div><strong>发布设置</strong><span>列表顺序由运营页的上移、下移控制；新增内容会自动排到末尾。</span></div></div><div className="settingsFormGrid"><AdminField label="状态"><select value={viralForm.status} onChange={(event) => setViralForm((current) => ({ ...current, status: event.target.value }))}><option value="draft">保存草稿</option><option value="pending_review">待审核</option><option value="published">立即发布</option><option value="offline">已下线</option></select></AdminField><AdminField label="开始展示"><input type="datetime-local" value={viralForm.publishAt} onChange={(event) => setViralForm((current) => ({ ...current, publishAt: event.target.value }))} /></AdminField><AdminField label="结束展示"><input type="datetime-local" value={viralForm.expireAt} onChange={(event) => setViralForm((current) => ({ ...current, expireAt: event.target.value }))} /></AdminField></div><div className="viralFormToggles"><label className="checkboxRow"><input checked={viralForm.isPinned} type="checkbox" onChange={(event) => setViralForm((current) => ({ ...current, isPinned: event.target.checked }))} />置顶标识</label><label className="checkboxRow"><input checked={viralForm.isFeatured} type="checkbox" onChange={(event) => setViralForm((current) => ({ ...current, isFeatured: event.target.checked }))} />重点推荐标识</label></div></section>
+              <div className="viralFormActions"><span>{viralForm.status === "published" ? "将对用户端立即生效" : viralForm.status === "draft" ? "可稍后继续编辑" : "保存后不会立即展示给用户"}</span><button className="primaryButton" type="submit">{viralForm.status === "published" ? "保存并发布" : "保存爆款资源"}</button></div>
             </form>
           </AdminDrawer>
         </div>
@@ -1708,7 +1828,7 @@ export function AdminPageClient() {
 
           {settingsTab === "security" ? <AdminPanel title="注册与登录安全"><SettingsToggle title="允许新用户注册" hint="关闭后注册接口立即停止创建账号。" checked={settings.auth.allowRegistration} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, allowRegistration: checked } }))} /><SettingsToggle title="注册要求平台准入码" hint="固定准入码与返利邀请码相互独立。" checked={settings.auth.requireInviteCode} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, requireInviteCode: checked } }))} /><SettingsToggle title="邮箱验证" hint="启用后新账号必须验证邮箱才能登录。" checked={settings.auth.emailVerificationEnabled} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, emailVerificationEnabled: checked } }))} /><SettingsToggle title="找回密码" hint="通过一次性邮件链接重置密码。" checked={settings.auth.passwordResetEnabled} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordResetEnabled: checked } }))} /><div className="settingsFormGrid"><SettingsNumber label="会话有效期（天）" value={settings.auth.sessionDays} min={1} max={30} onChange={(value) => setSettings((current) => ({ ...current, auth: { ...current.auth, sessionDays: value } }))} /><SettingsNumber label="登录失败上限" value={settings.auth.loginAttemptLimit} min={3} max={100} onChange={(value) => setSettings((current) => ({ ...current, auth: { ...current.auth, loginAttemptLimit: value } }))} /><SettingsNumber label="限制窗口（分钟）" value={settings.auth.loginWindowMinutes} min={1} max={1440} onChange={(value) => setSettings((current) => ({ ...current, auth: { ...current.auth, loginWindowMinutes: value } }))} /><SettingsField label="允许邮箱域名" hint="英文逗号分隔，留空允许所有域名。"><input value={settings.auth.allowedEmailDomains.join(", ")} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, allowedEmailDomains: event.target.value.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) } }))} /></SettingsField></div><SettingsToggle title="Cloudflare Turnstile" hint="登录和注册都必须通过服务端人机验证。" checked={settings.auth.turnstileEnabled} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, turnstileEnabled: checked } }))} />{settings.auth.turnstileEnabled ? <div className="settingsFormGrid"><SettingsField label="Site Key"><input value={settings.auth.turnstileSiteKey} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, turnstileSiteKey: event.target.value } }))} /></SettingsField><SettingsField label="Secret" hint={settings.auth.turnstileSecretConfigured ? "已配置；留空保持原值" : "尚未配置"}><input type="password" value={turnstileSecret} onChange={(event) => setTurnstileSecret(event.target.value)} /></SettingsField></div> : null}</AdminPanel> : null}
 
-          {settingsTab === "defaults" ? <AdminPanel title="新用户默认值"><div className="settingsFormGrid"><SettingsNumber label="注册赠送积分" value={settings.defaults.signupCredits} min={0} max={100000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCredits: value } }))} /><SettingsNumber label="每日创作次数（0=不限）" value={settings.defaults.dailyCreationLimit} min={0} max={10000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, dailyCreationLimit: value } }))} /><SettingsField label="密码规则提示"><input value={settings.auth.passwordHint} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordHint: event.target.value } }))} /></SettingsField></div></AdminPanel> : null}
+          {settingsTab === "defaults" ? <div className="pageStack"><AdminPanel title="新用户自动充值积分"><SettingsToggle title="启用自动充值" hint="仅影响新注册用户；开启后会发放下方设置的积分。" checked={settings.defaults.signupCreditsEnabled} onChange={(checked) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCreditsEnabled: checked } }))} />{settings.defaults.signupCreditsEnabled ? <div className="settingsFormGrid"><SettingsNumber label="每位新用户充值积分" value={settings.defaults.signupCredits} min={0} max={100000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCredits: value } }))} /></div> : null}</AdminPanel><AdminPanel title="创作与密码默认值"><div className="settingsFormGrid"><SettingsNumber label="每日创作次数（0=不限）" value={settings.defaults.dailyCreationLimit} min={0} max={10000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, dailyCreationLimit: value } }))} /><SettingsField label="密码规则提示"><input value={settings.auth.passwordHint} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordHint: event.target.value } }))} /></SettingsField></div></AdminPanel></div> : null}
 
           {settingsTab === "services" ? <AdminPanel title="外部服务状态"><div className="panelHeaderActions"><button className="secondaryButton" disabled={actionKey === "services"} onClick={() => void refreshServiceHealth()} type="button">{actionKey === "services" ? "检测中" : "重新检测"}</button></div><div className="serviceHealthGrid">{serviceHealth?.checks.map((check) => <article className={check.ok ? "healthy" : "unhealthy"} key={check.key}><div><strong>{check.label}</strong><AdminStatus value={check.ok ? "active" : check.required ? "failed" : "inactive"} /></div><span>{check.latencyMs} ms</span><p>{check.ok ? "连接正常" : check.error}</p></article>)}{!serviceHealth ? <AdminEmptyState title="尚未检测" description="点击重新检测查看数据库、模型、支付、邮件和遥测服务状态。" /> : null}</div>{serviceHealth?.lastStripeWebhook ? <p className="subtleText">最近 Stripe Webhook：{serviceHealth.lastStripeWebhook.lastWebhookAt ?? "未知"} · {serviceHealth.lastStripeWebhook.lastEventType ?? "未知事件"}</p> : null}</AdminPanel> : null}
 

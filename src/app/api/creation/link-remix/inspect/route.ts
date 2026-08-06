@@ -7,10 +7,10 @@ import { isAuthorizedLocalAgentRequest } from "@/lib/local-agent/auth";
 import { enqueueLocalAgentTask, getLinkRemixAvailability, isLocalAgentDelegationEnabled } from "@/lib/local-agent/repository";
 import { inferHotTopicCategory } from "@/lib/topics/rules";
 
-const allowedHosts = /(^|\.)((douyin\.com)|(weixin\.qq\.com)|(channels\.weixin\.qq\.com))$/i;
+const allowedHosts = /(^|\.)((douyin\.com)|(weixin\.qq\.com)|(channels\.weixin\.qq\.com)|(xiaohongshu\.com)|(xhslink\.com))$/i;
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { url?: string; deferTranscription?: boolean; agentUserId?: string };
+  const body = (await request.json().catch(() => ({}))) as { url?: string; deferTranscription?: boolean; agentUserId?: string; adminOperation?: boolean };
   const isAgentExecution = process.env.LOCAL_AGENT_EXECUTOR === "1" && isAuthorizedLocalAgentRequest(request);
   const user = isAgentExecution ? { id: body.agentUserId?.trim() || "local-agent" } : await requireSessionUser();
   if (user instanceof Response) return user;
@@ -22,10 +22,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "请输入有效的作品链接。" }, { status: 400 });
   }
   if (!/^https?:$/.test(parsed.protocol) || !allowedHosts.test(parsed.hostname)) {
-    return Response.json({ error: "爆款话题二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
+    return Response.json({ error: "仅支持抖音、视频号、公众号和小红书的单条作品链接。" }, { status: 400 });
   }
 
-  if (!isAgentExecution && process.env.LOCAL_AGENT_ENABLED === "1") {
+  const isAdminInspection = !isAgentExecution && "role" in user && user.role === "admin" && body.adminOperation === true;
+  if (!isAgentExecution && !isAdminInspection && process.env.LOCAL_AGENT_ENABLED === "1") {
     const availability = await getLinkRemixAvailability();
     if (!availability.available) return Response.json({ error: availability.reason, code: "LOCAL_AGENT_OFFLINE" }, { status: 503 });
     if (!await isLocalAgentDelegationEnabled()) return Response.json({ error: "功能暂不可用", code: "LOCAL_AGENT_DISABLED" }, { status: 503 });
@@ -81,6 +82,11 @@ export async function POST(request: Request) {
           return Response.json({ status: "unavailable", fields: {}, note: message }, { status: 200 });
         }
       }
+    }
+    if (/^mp\.weixin\.qq\.com$/i.test(parsed.hostname)) return inspectWechatArticleSource(parsed);
+    if (/(^|\.)(xiaohongshu\.com|xhslink\.com)$/i.test(parsed.hostname)) {
+      const configuredResult = await inspectXhsWithConfiguredApi(parsed.toString());
+      if (configuredResult) return configuredResult;
     }
     if (/^(?:www\.)?weixin\.qq\.com$/i.test(parsed.hostname) || /(^|\.)channels\.weixin\.qq\.com$/i.test(parsed.hostname)) {
       return inspectWechatChannelsSource(parsed.toString(), user.id, body.deferTranscription === true);

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
-import { listenForPageMeta, type PageMetaDetail } from "@/lib/client/page-meta";
 
 const platformNavItems = [
   { id: "workbench", href: "/today", label: "今日灵感", shortLabel: "今日灵感", icon: "home" },
@@ -28,17 +27,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminSection, setAdminSection] = useState<AdminSectionId>("overview");
   const [siteConfig, setSiteConfig] = useState<{ siteName: string; siteSubtitle: string; supportContact: string; footerNote: string; logoUrl: string; helpUrl: string; homeContent: string; customNavItems: Array<{ id: string; label: string; url: string; visibility: "user" | "admin"; sortOrder: number }> }>({ siteName: "小谷", siteSubtitle: "保险内容增长助手", supportContact: "", footerNote: "", logoUrl: "/brand/xiaogu-icon.png", helpUrl: "/help", homeContent: "", customNavItems: [] });
-  const [pageMetaOverride, setPageMetaOverride] = useState<PageMetaDetail | null>(null);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setPageMetaOverride(null), 0);
-    const stopListening = listenForPageMeta(setPageMetaOverride);
-    return () => {
-      window.clearTimeout(timer);
-      stopListening();
-    };
-  }, [pathname]);
-
   useEffect(() => {
     async function loadUser() {
       const response = await fetch(apiPath("/api/auth/me"));
@@ -108,8 +96,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const customAdminNavItems = siteConfig.customNavItems.filter((item) => item.visibility === "admin").sort((a, b) => a.sortOrder - b.sortOrder);
   const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, ...customUserNavItems, adminNavItem] : [...platformNavItems, ...customUserNavItems];
   const mobileNavItems = role === "admin" ? [...platformNavItems, adminNavItem] : platformNavItems;
-  const pageMeta = pageMetaOverride ?? getPageMeta(pathname, siteConfig.siteSubtitle);
-
   return (
     <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""}`}>
       <aside className="appSidebar">
@@ -164,44 +150,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="support" /></span>
               <span>反馈支持</span>
             </a>
-          </div>
-        </div>
-      </aside>
-
-      <div className="shellMainColumn">
-        <header className="appHeader">
-          <div className="appHeaderBar">
-            <a className="mobileBrand" href={appPath("/today")} aria-label="小谷首页">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={resolvePublicUrl(siteConfig.logoUrl)} alt="" />
-            </a>
-            <div className="appPageIdentity">
-              <strong>{pageMeta.title}{pageMeta.status ? <em>{pageMeta.status}</em> : null}</strong>
-              <span>{pageMeta.description}</span>
-            </div>
-
-            <div className="headerActions">
-              <div className="quotaChip" aria-label={`可用积分 ${quotaBalance === null ? "同步中" : quotaBalance}`}>
+            <div className="sidebarAccountArea">
+              <a className="sidebarQuota" href={appPath("/billing")} aria-label={`可用积分 ${quotaBalance === null ? "同步中" : quotaBalance}，前往充值中心`}>
                 <span>可用积分</span>
                 <strong>{quotaBalance === null ? "同步中" : quotaBalance}</strong>
-              </div>
-              <div className="userMenuWrap" onClick={(event) => event.stopPropagation()}>
+              </a>
+              <div className="userMenuWrap sidebarUserMenuWrap" onClick={(event) => event.stopPropagation()}>
                 <button
                   aria-label="打开账户菜单"
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
-                  className="userPill userMenuButton"
+                  className="sidebarUserButton userMenuButton"
                   onClick={() => setMenuOpen((current) => !current)}
                   type="button"
                 >
                   <UserAvatarIcon />
+                  <span>{userName}</span>
                 </button>
                 {menuOpen ? renderUserMenu() : null}
               </div>
             </div>
           </div>
-        </header>
+        </div>
+      </aside>
 
+      <div className="shellMainColumn">
         <div className="shellBody">
           {pathname === "/admin" ? (
             <nav className="adminMobileSubnav" aria-label="管理后台子菜单">
@@ -429,18 +402,4 @@ function isNavItemActive(pathname: string, itemId?: string, navigationSource?: s
 
 function resolvePublicUrl(value: string) {
   return /^https?:\/\//i.test(value) ? value : appPath(value.startsWith("/") ? value : `/${value}`);
-}
-
-function getPageMeta(pathname: string, fallbackDescription: string): PageMetaDetail {
-  if (pathname === "/today") return { title: "今日灵感", description: "热点与爆款内容灵感" };
-  if (pathname === "/create" || pathname.startsWith("/apps/")) return { title: "创作广场", description: "从想法到可发布内容" };
-  if (pathname.startsWith("/works/") || pathname.startsWith("/examples/")) return { title: "作品详情", description: "审阅、优化与复用内容" };
-  if (pathname === "/works") return { title: "创作历史", description: "管理作品与创作素材" };
-  if (pathname === "/avatar" || pathname === "/questionnaire") return { title: "数字分身", description: "管理人设与表达偏好" };
-  if (pathname === "/billing") return { title: "充值中心", description: "选择套餐、完成支付、查看订单" };
-  if (pathname === "/rewards") return { title: "邀请有礼", description: "邀请好友、查看返利与活动奖励" };
-  if (pathname === "/feedback") return { title: "反馈支持", description: "告诉我们你的使用感受" };
-  if (pathname === "/account") return { title: "用户中心", description: "个人资料、经营数据与账号安全" };
-  if (pathname === "/admin") return { title: "管理后台", description: "运营与系统管理" };
-  return { title: "小谷 AI", description: fallbackDescription };
 }

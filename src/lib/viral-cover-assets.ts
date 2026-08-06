@@ -28,6 +28,17 @@ export async function storeViralCover(input: { contentId: string; sourceUrl: str
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length === 0 || bytes.length > MAX_VIRAL_COVER_BYTES) throw new Error("封面文件大小无效");
 
+  return persistViralCover({ contentId: input.contentId, contentType, bytes, sourceUrl: sourceUrl.toString() });
+}
+
+export async function storeUploadedViralCover(input: { contentId: string; contentType: string; bytes: Buffer; sourceUrl?: string }) {
+  const contentType = normalizeContentType(input.contentType);
+  if (!contentType) throw new Error("仅支持 JPG、PNG、WebP 或 GIF 图片");
+  if (input.bytes.length === 0 || input.bytes.length > MAX_VIRAL_COVER_BYTES) throw new Error("封面文件需小于 10MB");
+  return persistViralCover({ contentId: input.contentId, contentType, bytes: input.bytes, sourceUrl: input.sourceUrl ?? "uploaded://admin" });
+}
+
+async function persistViralCover(input: { contentId: string; contentType: string; bytes: Buffer; sourceUrl: string }) {
   const result = await query<{ updated_at: string }>(
     `insert into viral_content_cover_assets(viral_content_id,content_type,image_data,source_url,sha256,size_bytes)
      values($1,$2,$3,$4,$5,$6)
@@ -35,9 +46,9 @@ export async function storeViralCover(input: { contentId: string; sourceUrl: str
        content_type=excluded.content_type,image_data=excluded.image_data,source_url=excluded.source_url,
        sha256=excluded.sha256,size_bytes=excluded.size_bytes,updated_at=now()
      returning updated_at`,
-    [input.contentId, contentType, bytes, sourceUrl.toString(), createHash("sha256").update(bytes).digest("hex"), bytes.length],
+    [input.contentId, input.contentType, input.bytes, input.sourceUrl, createHash("sha256").update(input.bytes).digest("hex"), input.bytes.length],
   );
-  return { contentType, sizeBytes: bytes.length, updatedAt: result.rows[0]?.updated_at ?? new Date().toISOString() };
+  return { contentType: input.contentType, sizeBytes: input.bytes.length, updatedAt: result.rows[0]?.updated_at ?? new Date().toISOString() };
 }
 
 export async function readViralCover(contentId: string) {

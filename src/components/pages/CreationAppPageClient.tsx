@@ -2252,16 +2252,19 @@ function renderField({
       );
     }
 
+    const isImageCardRatio = isImageCard && field.id === "ratio";
     return (
-      <div className="radio-select-group choiceGrid">
+      <div className={isImageCardRatio ? "radio-select-group choiceGrid imageCardRatioOptions" : "radio-select-group choiceGrid"}>
         {(field.options ?? []).map((option) => (
           <button
-            className={value === option.value ? "radio-select-option is-checked choiceButton active" : "radio-select-option choiceButton"}
+            className={`${value === option.value ? "radio-select-option is-checked choiceButton active" : "radio-select-option choiceButton"}${isImageCardRatio && option.badge ? " imageCardRatioOption" : ""}`}
             key={option.value}
             onClick={() => onChange(option.value)}
             type="button"
           >
-            {option.label}
+            <span className="imageCardRatioLabel">{option.label}</span>
+            {isImageCardRatio && option.hint ? <span className="imageCardRatioHint">（{option.hint}）</span> : null}
+            {isImageCardRatio && option.badge ? <span className="imageCardRatioBadge">{option.badge}</span> : null}
           </button>
         ))}
       </div>

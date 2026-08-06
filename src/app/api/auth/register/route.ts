@@ -98,7 +98,7 @@ export async function POST(request: Request) {
       }
     }
     await recordAffiliateRegistrationContext(user.id, requestClientKey(request));
-    if (settings.defaults.signupCredits > 0) {
+    if (settings.defaults.signupCreditsEnabled && settings.defaults.signupCredits > 0) {
       const gift = await tryGrantGiftCredits({ userId: user.id, quotaAmount: settings.defaults.signupCredits, sourceType: "signup", sourceLabel: "新用户注册赠送" });
       if (gift) await queueCreditChangeEmail({ eventKey: `gift:${gift.id}`, userId: user.id, deltaCredits: gift.quota_amount, changeKind: "signup_gift", changeLabel: gift.source_label });
     }

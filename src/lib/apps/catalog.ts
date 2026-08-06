@@ -6,6 +6,10 @@ export type CreationFieldOption = {
   label: string;
   value: string;
   previewUrl?: string;
+  /** Short contextual guidance rendered next to the option label. */
+  hint?: string;
+  /** A compact label for options that should be surfaced as a frequent choice. */
+  badge?: string;
 };
 
 export type CreationField = {
@@ -327,15 +331,15 @@ export const creationApps: CreationApp[] = [
         type: "radio",
         required: true,
         options: [
-          { label: "3:4 竖版", value: "3:4" },
+          { label: "3:4 竖版", value: "3:4", hint: "小红书推荐", badge: "常用" },
+          { label: "16:9 横版", value: "16:9", hint: "公众号/PPT推荐", badge: "常用" },
+          { label: "9:16 竖版", value: "9:16", hint: "视频号/抖音推荐", badge: "常用" },
           { label: "4:5 竖版", value: "4:5" },
           { label: "2:3 竖版", value: "2:3" },
-          { label: "9:16 竖版", value: "9:16" },
           { label: "1:1 方形", value: "1:1" },
           { label: "4:3 横版", value: "4:3" },
           { label: "5:4 横版", value: "5:4" },
           { label: "3:2 横版", value: "3:2" },
-          { label: "16:9 横版", value: "16:9" },
         ],
         helper: "小红书常用 3:4 或 4:5，朋友圈常用 1:1，视频封面常用 9:16。",
       },

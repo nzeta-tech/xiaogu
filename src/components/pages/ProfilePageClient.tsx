@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import ReactMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import type {
@@ -12,6 +14,8 @@ import type {
   AvatarVisualAsset,
   AvatarVisualAssetRole,
   AvatarVersion,
+  AvatarCoachConversation,
+  AvatarCoachMessage,
 } from "@/lib/avatar/types";
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 
@@ -32,9 +36,10 @@ type AvatarWorkspace = {
   questionnaire: { completionPercent: number; updatedAt: string } | null;
 };
 
-type AvatarTab = "overview" | "memory" | "visual" | "evolution" | "lab" | "sources" | "versions";
+type AvatarTab = "coach" | "overview" | "memory" | "visual" | "evolution" | "lab" | "sources" | "versions";
 
 const tabs: Array<{ id: AvatarTab; label: string; description: string }> = [
+  { id: "coach", label: "小谷精灵", description: "和懂你的创作教练聊聊" },
   { id: "overview", label: "分身主页", description: "成熟度与当前状态" },
   { id: "memory", label: "我的记忆", description: "查看和管理长期记忆" },
   { id: "visual", label: "形象资产", description: "管理可复用的本人照片" },
@@ -64,7 +69,13 @@ const emptyPrivacy: AvatarPrivacySettings = {
 
 export function ProfilePageClient() {
   const [workspace, setWorkspace] = useState<AvatarWorkspace | null>(null);
-  const [activeTab, setActiveTab] = useState<AvatarTab>("overview");
+  const [activeTab, setActiveTab] = useState<AvatarTab>(() => {
+    if (typeof window === "undefined") return "coach";
+    const params = new URLSearchParams(window.location.search);
+    const requestedTab = params.get("tab");
+    if (requestedTab && tabs.some((tab) => tab.id === requestedTab)) return requestedTab as AvatarTab;
+    return "coach";
+  });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -73,6 +84,15 @@ export function ProfilePageClient() {
   const [sourceDraft, setSourceDraft] = useState({ sourceType: "article", title: "", content: "" });
   const [labPrompt, setLabPrompt] = useState("");
   const [labResult, setLabResult] = useState<{ avatarText: string; baselineText: string } | null>(null);
+  const [coachConversations, setCoachConversations] = useState<AvatarCoachConversation[]>([]);
+  const [coachConversationId, setCoachConversationId] = useState("");
+  const [coachMessages, setCoachMessages] = useState<AvatarCoachMessage[]>([]);
+  const [coachInput, setCoachInput] = useState("");
+  const [coachFollowups, setCoachFollowups] = useState<string[]>([]);
+  const [coachProfilePrompt, setCoachProfilePrompt] = useState(false);
+  const [coachThinkingStep, setCoachThinkingStep] = useState(-1);
+  const [coachStreamingContent, setCoachStreamingContent] = useState("");
+  const coachInputRef = useRef<HTMLTextAreaElement | null>(null);
   usePageMeta({ title: "数字分身 · 人设与表达", description: `数字分身 / ${tabs.find((tab) => tab.id === activeTab)?.label ?? "分身主页"}` });
 
   async function loadAvatar(signal?: AbortSignal) {
@@ -97,6 +117,13 @@ export function ProfilePageClient() {
     void Promise.resolve().then(() => loadAvatar(controller.signal));
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "coach") return;
+    void fetch(apiPath("/api/avatar/chat")).then(async (response) => response.ok ? response.json() : null).then((payload: { conversations?: AvatarCoachConversation[] } | null) => {
+      if (payload?.conversations) setCoachConversations(payload.conversations);
+    }).catch(() => undefined);
+  }, [activeTab]);
 
   const maturity = useMemo(() => calculateMaturity(workspace), [workspace]);
   const activeMemories = workspace?.memories.filter((item) => item.status === "active") ?? [];
@@ -167,6 +194,57 @@ export function ProfilePageClient() {
     }
   }
 
+  async function submitCoach(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await sendCoachMessage(coachInput);
+  }
+
+  async function sendCoachMessage(rawMessage: string) {
+    const message = rawMessage.trim();
+    if (message.length < 2) return;
+    const localUserMessage: AvatarCoachMessage = { id: `local-${Date.now()}`, role: "user", content: message, created_at: new Date().toISOString() };
+    setCoachMessages((current) => [...current, localUserMessage]);
+    setCoachInput(""); setBusy("coach"); setError("");
+    setCoachStreamingContent("");
+    setCoachThinkingStep(0);
+    const contextTimer = window.setTimeout(() => setCoachThinkingStep(1), 350);
+    const planTimer = window.setTimeout(() => setCoachThinkingStep(2), 900);
+    try {
+      const response = await fetch(apiPath("/api/avatar/chat"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: coachConversationId || undefined, message }) });
+      if (!response.ok || !response.body) throw new Error("咨询失败，请稍后重试");
+      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let event = "message"; let received = false; let streamedAnswer = "";
+      const consume = (block: string) => {
+        const lines = block.split("\n"); const eventLine = lines.find((line) => line.startsWith("event:")); const dataLine = lines.find((line) => line.startsWith("data:"));
+        if (!dataLine) return;
+        const payload = JSON.parse(dataLine.slice(5).trim()) as { conversationId?: string; content?: string; followups?: string[]; profilePrompt?: boolean; proposalCreated?: boolean; error?: string };
+        event = eventLine?.slice(6).trim() ?? "message";
+        if (event === "meta" && payload.conversationId) setCoachConversationId(payload.conversationId);
+        if (event === "delta" && payload.content) { received = true; streamedAnswer += payload.content; setCoachThinkingStep(2); setCoachStreamingContent(streamedAnswer); }
+        if (event === "done") { setCoachFollowups(payload.followups ?? []); setCoachProfilePrompt(Boolean(payload.profilePrompt)); if (payload.proposalCreated) { setNotice("小谷识别到一项长期偏好，已生成待确认的进化建议。"); void loadAvatar(); } }
+        if (event === "error") throw new Error(payload.error ?? "咨询失败，请稍后重试");
+      };
+      while (true) { const { value, done } = await reader.read(); buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }); let boundary; while ((boundary = buffer.indexOf("\n\n")) >= 0) { consume(buffer.slice(0, boundary)); buffer = buffer.slice(boundary + 2); } if (done) break; }
+      if (!received) throw new Error("小谷暂时没有生成结果，请稍后重试");
+      setCoachMessages((current) => [...current, { id: `assistant-${Date.now()}`, role: "assistant", content: streamedAnswer, created_at: new Date().toISOString() }]);
+      setCoachStreamingContent("");
+      const history = await fetch(apiPath("/api/avatar/chat"));
+      if (history.ok) { const data = await history.json() as { conversations?: AvatarCoachConversation[] }; if (data.conversations) setCoachConversations(data.conversations); }
+    } catch (cause) {
+      setCoachMessages((current) => current.filter((item) => item.id !== localUserMessage.id));
+      setError(cause instanceof Error ? cause.message : "咨询失败，请稍后重试");
+    } finally { window.clearTimeout(contextTimer); window.clearTimeout(planTimer); setCoachThinkingStep(-1); setBusy(""); }
+  }
+
+  async function openCoachConversation(id: string) {
+    setBusy("coach-history");
+    try {
+      const response = await fetch(apiPath(`/api/avatar/chat?conversationId=${encodeURIComponent(id)}`));
+      const payload = await response.json() as { conversation?: { messages?: AvatarCoachMessage[] }; error?: string };
+      if (!response.ok || !payload.conversation) throw new Error(payload.error ?? "记录无法加载");
+      setCoachConversationId(id); setCoachMessages(payload.conversation.messages ?? []); setCoachFollowups([]); setCoachProfilePrompt(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "记录无法加载"); } finally { setBusy(""); }
+  }
+
   async function uploadPhotos(fileList: FileList | null) {
     const files = Array.from(fileList ?? []);
     if (files.length === 0) return;
@@ -232,38 +310,7 @@ export function ProfilePageClient() {
   }
 
   return (
-    <div className="avatarConsolePage">
-      <section className="avatarConsoleHero">
-        <p className="avatarConsoleVision">让小谷理解并记住你的经验、判断与表达方式，把它们沉淀成可长期复用的个人内容资产，让每一次创作都更像你。</p>
-        <div className="avatarConsoleIdentity">
-          {primaryPhoto ? (
-            <>
-              {/* User-uploaded avatar assets may use runtime-generated URLs. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img alt={`${displayName}的主形象`} className="avatarConsolePhoto" src={primaryPhoto.content_url} />
-            </>
-          ) : <div className="avatarConsoleMark" aria-hidden="true">AI</div>}
-          <div>
-            <div className="avatarConsoleMeta">
-              <span>{loading ? "同步中" : "分身在线"}</span>
-              <em>V{workspace?.versions[0]?.version ?? workspace?.profile?.version ?? 1}</em>
-            </div>
-            <h1>{displayName}</h1>
-            <p>{workspace?.profile?.summary.one_liner || "持续记住你的经历、客户和表达方式，并在确认后不断进化。"}</p>
-          </div>
-        </div>
-        <div className="avatarHeroStats">
-          <div><strong>{maturity.overall}%</strong><span>分身成熟度</span></div>
-          <div><strong>{activeMemories.length}</strong><span>长期记忆</span></div>
-          <div><strong>{workspace?.usage.count ?? 0}</strong><span>应用次数</span></div>
-          <div><strong>{workspace?.photos.length ?? 0}/8</strong><span>形象资料</span></div>
-        </div>
-        <div className="avatarHeroActions">
-          <button className="secondaryButton" onClick={() => setActiveTab("lab")} type="button">测试分身</button>
-          <button className="primaryButton" onClick={() => setActiveTab("memory")} type="button">添加记忆</button>
-        </div>
-      </section>
-
+    <div className={`avatarConsolePage ${activeTab === "coach" ? "coachActive" : ""}`}>
       {error ? <div className="alertPanel">{error}</div> : null}
       {notice ? <div className="successPanel">{notice}</div> : null}
 
@@ -276,9 +323,33 @@ export function ProfilePageClient() {
         ))}
       </nav>
 
-      {activeTab === "overview" ? (
-        <OverviewView maturity={maturity} workspace={workspace} onOpenTab={setActiveTab} />
+      {activeTab === "coach" ? (
+        <AvatarCoachView busy={busy} thinkingStep={coachThinkingStep} streamingContent={coachStreamingContent} conversations={coachConversations} messages={coachMessages} input={coachInput} followups={coachFollowups} profilePrompt={coachProfilePrompt} inputRef={coachInputRef} onChangeInput={setCoachInput} onSubmit={submitCoach} onPrompt={(prompt) => void sendCoachMessage(prompt)} onOpenConversation={openCoachConversation} onOpenProfile={() => setActiveTab("memory")} onNew={() => { setCoachConversationId(""); setCoachMessages([]); setCoachStreamingContent(""); setCoachFollowups([]); setCoachProfilePrompt(false); }} />
       ) : null}
+
+      {activeTab === "overview" ? <>
+        <section className="avatarConsoleHero">
+          <p className="avatarConsoleVision">让小谷理解并记住你的经验、判断与表达方式，把它们沉淀成可长期复用的个人内容资产，让每一次创作都更像你。</p>
+          <div className="avatarConsoleIdentity">
+            {primaryPhoto ? (
+              <>
+                {/* User-uploaded avatar assets may use runtime-generated URLs. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img alt={`${displayName}的主形象`} className="avatarConsolePhoto" src={primaryPhoto.content_url} />
+              </>
+            ) : <div className="avatarConsoleMark" aria-hidden="true">AI</div>}
+            <div>
+              <div className="avatarConsoleMeta"><span>{loading ? "同步中" : "分身在线"}</span><em>V{workspace?.versions[0]?.version ?? workspace?.profile?.version ?? 1}</em></div>
+              <h1>{displayName}</h1>
+              <p>{workspace?.profile?.summary.one_liner || "持续记住你的经历、客户和表达方式，并在确认后不断进化。"}</p>
+            </div>
+          </div>
+          <div className="avatarHeroStats"><div><strong>{maturity.overall}%</strong><span>分身成熟度</span></div><div><strong>{activeMemories.length}</strong><span>长期记忆</span></div><div><strong>{workspace?.usage.count ?? 0}</strong><span>应用次数</span></div></div>
+          <div className="avatarHeroActions"><button className="primaryButton" onClick={() => { setActiveTab("coach"); window.requestAnimationFrame(() => document.getElementById("avatar-coach")?.scrollIntoView({ behavior: "smooth", block: "center" })); }} type="button">和小谷聊聊</button><div className="avatarHeroSecondaryActions"><button onClick={() => setActiveTab("memory")} type="button">完善记忆</button><i>·</i><button onClick={() => setActiveTab("lab")} type="button">试试像不像我</button></div></div>
+          <p className="avatarHeroContext">小谷已参考：{activeMemories.length ? `${activeMemories.length} 条长期记忆、你的表达偏好与目标客户` : "待完善的个人画像"}<button onClick={() => setActiveTab("memory")} type="button">查看画像</button></p>
+        </section>
+        <OverviewView maturity={maturity} workspace={workspace} onOpenTab={setActiveTab} />
+      </> : null}
 
       {activeTab === "memory" ? (
         <section className="avatarViewLayout">
@@ -539,6 +610,55 @@ function PrivacyToggle({ label, detail, checked, onChange }: { label: string; de
 
 function FeedbackActions({ onFeedback }: { onFeedback: (eventType: string) => void }) {
   return <div className="avatarFeedbackActions"><button onClick={() => onFeedback("more-like-me")}>更像我</button><button onClick={() => onFeedback("too-salesy")}>太销售</button><button onClick={() => onFeedback("too-formal")}>太正式</button><button onClick={() => onFeedback("remember-style")}>记住这种表达</button></div>;
+}
+
+function AvatarCoachView({
+  busy, thinkingStep, streamingContent, conversations, messages, input, followups, profilePrompt, inputRef, onChangeInput, onSubmit, onPrompt, onOpenConversation, onOpenProfile, onNew,
+}: {
+  busy: string; thinkingStep: number; streamingContent: string; conversations: AvatarCoachConversation[]; messages: AvatarCoachMessage[]; input: string; followups: string[]; profilePrompt: boolean; inputRef: RefObject<HTMLTextAreaElement | null>;
+  onChangeInput: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>; onPrompt: (prompt: string) => void; onOpenConversation: (id: string) => Promise<void>; onOpenProfile: () => void; onNew: () => void;
+}) {
+  const quickPrompts = [
+    { label: "帮我判断当前增长卡点", text: "请结合我的数字分身，帮我判断当前最可能的内容增长卡点，并告诉我本周最值得先做的一步。" },
+    { label: "给我本周创作计划", text: "根据我的定位和目标客户，帮我安排本周可执行的内容计划。" },
+    { label: "找 6 个获客选题", text: "根据我的目标客户，给我 6 个兼顾信任与有效咨询的选题方向。" },
+    { label: "设计获客承接", text: "我想让内容带来更多有效咨询，请帮我设计一条合规、自然的评论和私信承接路径。" },
+  ];
+  return <section className="avatarCoachView" id="avatar-coach">
+    <aside className="avatarCoachSidebar">
+      <div className="avatarCoachMentor" aria-hidden="true"><div className="avatarCoachFairy"><Image alt="" height={162} priority src="/avatars/xiaogu-fairy.png" width={108} /></div><i>加油噢！</i></div>
+      <div><span>小谷精灵 · 创作教练</span><h2>今天，先做最重要的一步</h2><p>小谷会结合你的分身画像、内容目标与已确认偏好，给出有依据的建议。</p></div>
+      <div className="avatarCoachHistory"><div><strong>最近咨询</strong>{messages.length ? <button className="avatarCoachNewChat" onClick={onNew} type="button">新咨询</button> : null}</div>{conversations.length ? conversations.slice(0, 4).map((item) => <button key={item.id} onClick={() => void onOpenConversation(item.id)} type="button"><b>{item.title.replace("分身咨询｜", "")}</b><span>{formatDate(item.updated_at)} · {item.message_count} 条消息</span></button>) : <p>从一次真实困惑开始，小谷会持续理解你的创作方式。</p>}</div>
+    </aside>
+    <div className="avatarCoachMain">
+      {messages.length === 0 ? <div className="avatarCoachWelcome"><strong>不必选功能，直接告诉我你现在遇到的真实问题</strong><p>例如“内容有收藏但没有咨询”“我不知道这周该写什么”或“以后不要用焦虑营销”。</p><div>{quickPrompts.map((prompt) => <button key={prompt.label} onClick={() => onPrompt(prompt.text)} type="button">{prompt.label}</button>)}</div></div> : <div className="avatarCoachMessages">{messages.map((item) => <CoachMessage key={item.id} message={item} />)}{busy === "coach" ? <CoachThinkingIndicator step={thinkingStep} /> : null}{streamingContent ? <CoachMessage message={{ id: "streaming", role: "assistant", content: streamingContent, created_at: "" }} /> : null}</div>}
+      {followups.length ? <div className="avatarCoachFollowups"><strong>接下来，可以继续和小谷一起推进</strong><div>{followups.map((prompt) => <button key={prompt} onClick={() => onPrompt(prompt)} type="button">{prompt} →</button>)}</div>{profilePrompt ? <p>想让后续建议更贴近你的真实业务？<button onClick={onOpenProfile} type="button">补充一条客户问题</button></p> : null}</div> : null}
+      <form className="avatarCoachComposer" onSubmit={(event) => void onSubmit(event)}>
+        <textarea ref={inputRef} value={input} onChange={(event) => onChangeInput(event.target.value)} placeholder="直接说你的真实情况。小谷会自动判断你需要选题、复盘、获客建议还是更新分身。" />
+        <button className="primaryButton" disabled={busy === "coach" || input.trim().length < 2} type="submit">{busy === "coach" ? "小谷思考中" : "发送咨询"}</button>
+      </form>
+      <p className="avatarCoachSafety">请勿输入客户身份证件、联系方式、健康资料或完整保单号。小谷不会自动发送内容或修改你的长期画像。</p>
+    </div>
+  </section>;
+}
+
+function CoachThinkingIndicator({ step }: { step: number }) {
+  const steps = ["梳理你当前遇到的内容或业务症状", "对照你的定位、目标客户和表达习惯", "判断最值得优先尝试的增长动作"];
+  return <article className="assistant coachThinking"><span>小谷精灵正在分析</span><div>{steps.map((item, index) => <p className={index <= step ? "active" : ""} key={item}><i>{index < step ? "✓" : index === step ? "·" : ""}</i>{item}</p>)}</div></article>;
+}
+
+function CoachMessage({ message }: { message: AvatarCoachMessage }) {
+  if (message.role === "user") return <article className="user"><span>你</span><p>{message.content}</p></article>;
+  const sections = parseCoachResponse(message.content);
+  return <article className="assistant coachAnswer"><span>小谷精灵</span><div className="coachAnswerBody">{sections.map((section) => <section key={`${section.title}-${section.content}`}><h3>{section.title}</h3><ReactMarkdown>{section.content}</ReactMarkdown></section>)}</div></article>;
+}
+
+function parseCoachResponse(content: string) {
+  const titles = ["我的判断", "为什么这样判断", "下一步行动", "你可以直接做"];
+  const matcher = new RegExp(`【(${titles.join("|")})】`, "g");
+  const matches = [...content.matchAll(matcher)];
+  if (matches.length === 0) return [{ title: "小谷的建议", content }];
+  return matches.map((match, index) => ({ title: match[1], content: content.slice((match.index ?? 0) + match[0].length, matches[index + 1]?.index).trim() || "—" }));
 }
 
 function MbtiProfilePanel({ profile }: { profile: NonNullable<ThinkingProfileSnapshot["mbti_profile"]> }) {

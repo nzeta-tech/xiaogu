@@ -59,6 +59,26 @@ export type AvatarPrivacySettings = {
   visual_creation_enabled: boolean;
 };
 
+export type AvatarCoachConversation = {
+  id: string;
+  title: string;
+  updated_at: string;
+  message_count: number;
+};
+
+export type AvatarCoachMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+export type AvatarCoachAction = {
+  label: string;
+  href: string;
+  description: string;
+};
+
 export type AvatarVisualAssetRole = "portrait" | "professional" | "lifestyle" | "full_body" | "side_profile";
 
 export type AvatarVisualAsset = {

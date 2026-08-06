@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryCreateAdminAuditLog, tryListAdminViralContents, tryUpdateAdminViralContentStatus, tryUpsertAdminViralContent } from "@/lib/db/repositories";
+import { tryCreateAdminAuditLog, tryListAdminViralContents, tryMoveAdminViralContent, tryUpdateAdminViralContentStatus, tryUpsertAdminViralContent } from "@/lib/db/repositories";
 
 const schema = z.object({
   id: z.string().uuid().optional(), title: z.string().trim().min(1).max(160),
@@ -40,9 +40,20 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const user = await requireAdmin();
   if (user instanceof Response) return user;
-  const input = z.object({ id: z.string().uuid(), status: z.enum(["draft", "pending_review", "published", "offline", "expired"]) }).parse(await request.json());
-  const content = await tryUpdateAdminViralContentStatus(input.id, input.status);
+  const input = z.object({
+    id: z.string().uuid(),
+    status: z.enum(["draft", "pending_review", "published", "offline", "expired"]).optional(),
+    action: z.enum(["move_up", "move_down"]).optional(),
+  }).refine((value) => Boolean(value.status) !== Boolean(value.action), { message: "请选择一种操作" }).parse(await request.json());
+  if (input.action) {
+    const moved = await tryMoveAdminViralContent(input.id, input.action === "move_up" ? "up" : "down");
+    if (!moved) return Response.json({ error: "爆款资源排序失败" }, { status: 503 });
+    await tryCreateAdminAuditLog({ adminUserId: user.id, action: `viral_content.${input.action}`, targetType: "viral_content", targetId: input.id, detail: {} });
+    return Response.json({ moved: true, mode: "server" });
+  }
+  const status = input.status!;
+  const content = await tryUpdateAdminViralContentStatus(input.id, status);
   if (!content) return Response.json({ error: "爆款资源状态更新失败" }, { status: 503 });
-  await tryCreateAdminAuditLog({ adminUserId: user.id, action: "viral_content.update_status", targetType: "viral_content", targetId: input.id, detail: { status: input.status } });
+  await tryCreateAdminAuditLog({ adminUserId: user.id, action: "viral_content.update_status", targetType: "viral_content", targetId: input.id, detail: { status } });
   return Response.json({ content, mode: "server" });
 }

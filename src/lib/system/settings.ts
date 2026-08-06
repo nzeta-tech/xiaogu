@@ -50,6 +50,7 @@ export type SystemSettings = {
     totpIssuer: string;
   };
   defaults: {
+    signupCreditsEnabled: boolean;
     signupCredits: number;
     dailyCreationLimit: number;
     monthlyCreationLimit: number;
@@ -234,7 +235,9 @@ AI 结果可能存在遗漏或错误。用户在对外发布或用于客户沟�
     totpEnabled: false,
     totpIssuer: "小谷",
   },
-  defaults: { signupCredits: 0, dailyCreationLimit: 0, monthlyCreationLimit: 0, maxConcurrentCreations: 2, creationRpmLimit: 10 },
+  // Keep the existing registration-gift behavior for installations that already
+  // have a non-zero signupCredits value saved before this switch was introduced.
+  defaults: { signupCreditsEnabled: true, signupCredits: 0, dailyCreationLimit: 0, monthlyCreationLimit: 0, maxConcurrentCreations: 2, creationRpmLimit: 10 },
   features: { complianceEnabled: true, imageGenerationEnabled: true, hotTopicsEnabled: true, feedbackEnabled: true, localAgentEnabled: false },
   payment: {
     enableStripe: true,
