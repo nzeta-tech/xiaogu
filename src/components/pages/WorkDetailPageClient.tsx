@@ -15,6 +15,7 @@ type WorkDetail = {
   content_json?: {
     batches?: CreationOutputBatch[];
     wechatStudioState?: WechatStudioWorkState;
+    xiaohongshuStudioState?: XiaohongshuStudioWorkState;
     presentationJobId?: string;
   } | null;
   platform: string;
@@ -61,6 +62,16 @@ type WechatStudioWorkState = {
   uploadedImages?: WechatStudioImage[];
   cover?: WechatStudioImage | null;
   activeTab?: string;
+};
+type XiaohongshuStudioCard = { id?: string; url?: string; sectionTitle?: string };
+type XiaohongshuStudioWorkState = {
+  content?: string;
+  cards?: XiaohongshuStudioCard[];
+  coverId?: string;
+  headImage?: XiaohongshuStudioCard | null;
+  style?: string;
+  tab?: string;
+  previewMode?: "long" | "album";
 };
 type ImageGenerationMode = "image" | "demo" | "fallback" | "rate_limited" | "";
 type PreviewField = { label: string; value: string; mode?: "plain" | "markdown" };
@@ -468,6 +479,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const imageRetryable = streamState.retryable || Boolean(work?.app_run?.result_json?.retryable);
   const isPolicyRenewalCardWork = work?.platform === "policy-renewal-card";
   const isWechatStudioWork = work?.platform === "wechat-studio";
+  const isXiaohongshuStudioWork = work?.platform === "xiaohongshu-studio";
   const isPptMakerWork = work?.platform === "ppt-maker";
   const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || isPolicyRenewalCardWork;
   const defaultWatermark = typeof work?.app_run?.input_payload?.signature === "string" ? work.app_run.input_payload.signature.trim() : "";
@@ -648,6 +660,46 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   if (!work) {
     return <div className="pageStack"><section className="panel emptyState">没有找到这条作品。</section></div>;
+  }
+
+  if (isXiaohongshuStudioWork) {
+    const state = work.content_json?.xiaohongshuStudioState;
+    const noteContent = state?.content?.trim() || work.content.trim();
+    const [firstLine = "未命名笔记", ...bodyLines] = noteContent.split("\n").filter(Boolean);
+    const noteTitle = firstLine.replace(/^#\s*/, "").trim() || "未命名笔记";
+    const noteBody = bodyLines.join("\n").trim();
+    const cards = (state?.cards ?? []).filter((card): card is XiaohongshuStudioCard & { url: string } => typeof card.url === "string" && Boolean(card.url.trim()));
+    const headImage = state?.headImage && typeof state.headImage.url === "string" && state.headImage.url.trim()
+      ? state.headImage
+      : cards.find((card) => card.id === state?.coverId) ?? cards[0] ?? null;
+
+    return (
+      <div className="workDetailPage xiaohongshuStudioWorkDetailPage">
+        <div className="page-content wechatStudioWorkDetailShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={noteTitle} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <section className="wechatStudioWorkHero">
+            <div>
+              <span>小红书图文创作</span>
+              <h1>{noteTitle}</h1>
+              <p>{noteContent ? `${noteContent.replace(/\s/g, "").length.toLocaleString("zh-CN")} 字 · 已按创作时保存的笔记结构还原` : "这篇笔记仍在创作中，已保留当前进度。"}</p>
+            </div>
+            {!isAdminPreview ? <a className="studioPrimary" href={appPath(`/apps/xiaohongshu-studio?from=creation-works&workId=${work.id}`)}>继续编辑</a> : <span className="wechatStudioAdminBadge">管理员只读查看</span>}
+          </section>
+          {showResultDetails ? <section className="wechatStudioWorkMeta">
+            <div><span>创作进度</span><strong>{formatXiaohongshuStudioStep(state?.tab)}</strong></div>
+            <div><span>内容形式</span><strong>{state?.previewMode === "album" ? "图文卡片" : "长文笔记"}</strong></div>
+            <div><span>视觉风格</span><strong>{state?.style || "未选择"}</strong></div>
+            <div><span>配图数量</span><strong>{cards.length + (headImage && !cards.some((card) => card.url === headImage.url) ? 1 : 0)} 张</strong></div>
+          </section> : null}
+          <main className="wechatStudioWorkCanvas">
+            {headImage ? <figure className="wechatStudioWorkCover"><img src={headImage.url} alt="小红书笔记封面" /></figure> : null}
+            <h1>{noteTitle}</h1>
+            <div className="wechatStudioWorkArticle"><MarkdownContent content={noteBody || noteContent} /></div>
+            {cards.length > 0 ? <section className="xhsGeneratedSections"><span>章节配图 · {cards.length} 张</span><div className="xhsCardGrid">{cards.map((card, index) => <figure key={card.id || card.url}><img src={card.url} alt={card.sectionTitle || `章节配图 ${index + 1}`} /><figcaption><strong>第 {index + 1} 张</strong><span>{card.sectionTitle || "章节配图"}</span></figcaption></figure>)}</div></section> : null}
+          </main>
+        </div>
+      </div>
+    );
   }
 
   if (isWechatStudioWork) {
@@ -4030,6 +4082,14 @@ function formatWechatStudioStep(value?: string) {
   if (value === "visual") return "选择配图";
   if (value === "layout") return "整体版式";
   if (value === "draft") return "预览发布";
+  return "已保存草稿";
+}
+
+function formatXiaohongshuStudioStep(value?: string) {
+  if (value === "write") return "填写素材";
+  if (value === "note") return "编辑笔记";
+  if (value === "cards") return "生成配图";
+  if (value === "preview") return "整体预览";
   return "已保存草稿";
 }
 
