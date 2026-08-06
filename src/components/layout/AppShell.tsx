@@ -22,7 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const navigationSource = searchParams.get("from");
   const [role, setRole] = useState("broker");
-  const [userName, setUserName] = useState("经纪人");
+  const [userName, setUserName] = useState("创作者");
   const [quotaBalance, setQuotaBalance] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminSection, setAdminSection] = useState<AdminSectionId>("overview");
@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const response = await fetch(apiPath("/api/auth/me"));
       const payload = (await response.json()) as { user?: { name?: string; email?: string; role?: string } };
       setRole(payload.user?.role ?? "broker");
-      setUserName(payload.user?.name || payload.user?.email || "经纪人");
+      setUserName(payload.user?.name || payload.user?.email || "创作者");
     }
 
     void loadUser();

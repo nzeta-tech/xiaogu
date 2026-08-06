@@ -2091,7 +2091,10 @@ body {
 .avatarCoachSidebar p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.65; }
 .avatarCoachHistory { display: grid; gap: 7px; }
 .avatarCoachHistory > div { display: flex; align-items: center; justify-content: space-between; }
-.avatarCoachNewChat { padding: 0; border: 0; background: transparent; color: #0f766e; font-size: 11px; font-weight: 750; }
+.avatarCoachNewChat { display: inline-flex !important; align-items: center; gap: 4px; padding: 5px 8px !important; border: 1px solid #5eead4 !important; border-radius: 999px; background: linear-gradient(135deg, #14b8a6, #06b6d4) !important; box-shadow: 0 4px 10px rgba(13, 148, 136, .18); color: #fff !important; font-size: 11px; font-weight: 800; line-height: 1; transition: box-shadow .18s ease, transform .18s ease, filter .18s ease; }
+.avatarCoachNewChat i { display: inline-grid; place-items: center; width: 12px; height: 12px; border-radius: 999px; background: rgba(255,255,255,.2); color: #fff; font-size: 13px; font-style: normal; font-weight: 500; line-height: 1; }
+.avatarCoachNewChat:hover { box-shadow: 0 6px 14px rgba(13, 148, 136, .28); color: #fff !important; filter: brightness(1.03); transform: translateY(-1px); }
+.avatarCoachNewChat:focus-visible { outline: 3px solid rgba(45, 212, 191, .35); outline-offset: 2px; }
 .avatarCoachHistory button { display: grid; gap: 3px; padding: 9px 0; border: 0; border-bottom: 1px solid #f1f5f9; background: transparent; color: #334155; text-align: left; }
 .avatarCoachHistory button:hover b { color: #0d9488; }
 .avatarCoachHistory button b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

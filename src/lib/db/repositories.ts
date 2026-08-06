@@ -2528,8 +2528,11 @@ export async function tryGetAdminUserDetail(userId: string) {
   }
 }
 
-export async function tryGetAdminContentOverview() {
+export async function tryGetAdminContentOverview({ page = 1, limit = 20 }: { page?: number; limit?: number } = {}) {
   try {
+    const safePage = Math.max(Math.floor(page) || 1, 1);
+    const safeLimit = Math.min(Math.max(Math.floor(limit) || 20, 1), 100);
+    const worksOffset = (safePage - 1) * safeLimit;
     const [totals, complianceRisk, recentWorks, recentComplianceReports, appUsage, questionnaireStats] = await Promise.all([
       query<{
         works_total: string;
@@ -2583,7 +2586,8 @@ export async function tryGetAdminContentOverview() {
          left join users u on u.id = w.user_id
          left join apps a on a.id = w.app_id
          order by w.updated_at desc
-         limit 12`,
+         limit $1 offset $2`,
+        [safeLimit, worksOffset],
       ),
       query<{
         id: string;
@@ -2655,6 +2659,7 @@ export async function tryGetAdminContentOverview() {
         count: Number(row.count ?? 0),
       })),
       recentWorks: recentWorks.rows,
+      recentWorksTotal: Number(totalRow?.works_total ?? 0),
       recentComplianceReports: recentComplianceReports.rows.map((row) => ({
         ...row,
         issue_count: Number(row.issue_count ?? 0),
@@ -2874,13 +2879,37 @@ export async function tryUpsertAdminViralContent(input: {
       await query("update viral_contents set sort_order = $2 where id = $1", [String(content.id), input.sortOrder]);
     }
     return content;
-  } catch {
+  } catch (error) {
+    console.error("Failed to save admin viral content", {
+      contentId: input.id ?? null,
+      status: input.status,
+      error,
+    });
     return null;
   }
 }
 
-export async function tryMoveAdminViralContent(id: string, direction: "up" | "down") {
+export async function tryMoveAdminViralContent(id: string, direction: "up" | "down" | "top") {
   try {
+    if (direction === "top") {
+      const result = await query<{ id: string }>(
+        `with target as (
+           select status from viral_contents where id = $1 and source_type = 'manual'
+         ), ordered as (
+           select id, row_number() over (order by sort_order asc, created_at asc, id asc)::integer as position
+           from viral_contents
+           where source_type = 'manual'
+             and (status = 'offline') = (select status = 'offline' from target)
+         )
+         update viral_contents content
+         set sort_order = case when ordered.id = $1 then 1 else ordered.position + 1 end
+         from ordered
+         where content.id = ordered.id
+         returning content.id`,
+        [id],
+      );
+      return result.rows.some((row) => row.id === id);
+    }
     const offset = direction === "up" ? -1 : 1;
     const result = await query<{ id: string }>(
       `with target as (

@@ -7,11 +7,14 @@ import { buildWorkTitle } from "@/lib/creation/work-title";
 import { query } from "@/lib/db/client";
 import { isEmptyCreationFieldValue } from "@/lib/creation/output";
 import { isSupportedLinkRemixUrl } from "@/lib/creation/link-remix-source";
+import { creationRequestId, normalizeCreationTraceId, trySaveCreationDiagnostic } from "@/lib/creation/diagnostics";
 import { tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
 import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
+  const traceId = normalizeCreationTraceId(request.headers.get("x-creation-trace-id"));
+  const requestId = creationRequestId();
   await trySyncCreationCatalog();
   const app = await tryGetCreationAppBySlug(slug);
   if (!app) {
@@ -22,6 +25,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
+  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, traceId, requestId, appSlug: slug, eventType: "prepare_received", outcome: "started" });
 
   if (app.slug === "link-remix") {
     const availability = await getLinkRemixAvailability();
@@ -49,13 +53,23 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
   const effectiveApp = getEntryAdjustedApp(app, entry);
-  const missingField = effectiveApp.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
+  const isImageCardRemix = app.slug === "image-card" && values.creation_mode === "image_remix";
+  const missingField = effectiveApp.fields.find((field) => {
+    if (isImageCardRemix && field.id === "draw_portrait") return false;
+    return field.required && isEmptyCreationFieldValue(values[field.id]);
+  });
   if (missingField) {
     return Response.json({ error: `${missingField.label}还没有填写。` }, { status: 400 });
   }
+  if (app.slug === "image-card" && !isImageCardRemix && isEmptyCreationFieldValue(values.source)) {
+    return Response.json({ error: "请填写卡片内容，或切换为上传图片进行二创。" }, { status: 400 });
+  }
+  if (isImageCardRemix && isEmptyCreationFieldValue(values.reference_image)) {
+    return Response.json({ error: "二创模式需要先上传一张原图。" }, { status: 400 });
+  }
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean) : [];
   const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || app.slug === "policy-renewal-card") && values.avatar_visual_mode === "yes";
-  if (needsAvatarPhoto && visualAssetIds.length === 0 && isEmptyCreationFieldValue(values.reference_image)) {
+  if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     return Response.json({ error: "请选择数字分身形象照，或临时上传一张形象照。" }, { status: 400 });
   }
 
@@ -106,11 +120,12 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   // runtime can discard the detached task before the work page reconnects.
   await waitForBackgroundWorkRunStart(work.id);
 
+  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, traceId, requestId, appSlug: slug, eventType: "prepare_finished", outcome: "201", detail: { workId: work.id } });
   return Response.json({
     ok: true,
     work: {
       id: work.id,
       title: work.title,
     },
-  });
+  }, { headers: { "x-request-id": requestId } });
 }

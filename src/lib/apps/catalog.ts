@@ -296,11 +296,21 @@ export const creationApps: CreationApp[] = [
         helper: "选择最接近你账号现有视觉的一种风格。",
       },
       {
-        id: "source",
-        label: "填写卡片内容",
-        type: "textarea",
+        id: "creation_mode",
+        label: "选择制作方式",
+        type: "radio",
         required: true,
-        placeholder: "粘贴文章、口播稿或要做成卡片的核心观点。请尽量提供完整句子，不要只写一个词。",
+        options: [
+          { label: "从文字制作知识卡片", value: "text_to_card" },
+          { label: "上传图片进行二创", value: "image_remix" },
+        ],
+        helper: "二创会以你上传的图片为基础，按所选风格和改造要求重新生成。",
+      },
+      {
+        id: "source",
+        label: "卡片文字内容（可选）",
+        type: "textarea",
+        placeholder: "粘贴文章、口播稿或要做成卡片的核心观点。二创时可留空，模型会以原图信息为基础处理。",
       },
       {
         id: "signature",
@@ -321,9 +331,25 @@ export const creationApps: CreationApp[] = [
       },
       {
         id: "reference_image",
-        label: "上传形象照或参考图（可选）",
+        label: "上传原图 / 参考图",
         type: "file",
         accept: "image/*",
+        helper: "二创模式必须上传原图；文字制卡时可作为风格或人物参考图。",
+      },
+      {
+        id: "remix_instruction",
+        label: "二创改造要求（可选）",
+        type: "textarea",
+        placeholder: "例如：保留人物和配色，去除原图文字，改成 3 个保障重点的知识卡；或保留构图，将画面改成更专业的保险科普风。",
+        helper: "说清哪些元素要保留、替换或删除；未说明时会尽量保留原图的核心主体和构图。",
+        maxLength: 1000,
+      },
+      {
+        id: "portrait_reference_image",
+        label: "选择或上传形象照",
+        type: "file",
+        accept: "image/jpeg,image/png,image/webp",
+        helper: "可从下方数字分身库选择，也可临时上传一张清晰形象照；仅用于本次二创的人物形象。",
       },
       {
         id: "ratio",

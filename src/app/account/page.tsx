@@ -93,7 +93,7 @@ function AccountCenter() {
   }, []);
 
   const profileCompletion = thinking.questionnaire?.completionPercent ?? thinking.summary?.completion ?? 0;
-  const displayName = thinking.profile?.display_name || user.name || "经纪人";
+  const displayName = thinking.profile?.display_name || user.name || "创作者";
   const initials = useMemo(() => displayName.trim().slice(0, 1).toUpperCase() || "谷", [displayName]);
   const keywords = thinking.profile?.brand_keywords?.filter(Boolean).slice(0, 6) ?? [];
 
@@ -302,7 +302,7 @@ function AccountCenter() {
           <section className="accountSectionCard accountStatusCard">
             <div className="accountSectionHeader compact"><div><span>账户信息</span><h2>当前状态</h2></div></div>
             <dl>
-              <div><dt>账号类型</dt><dd>{user.role === "admin" ? "管理员" : "经纪人"}</dd></div>
+              <div><dt>账号类型</dt><dd>{user.role === "admin" ? "管理员" : "创作者"}</dd></div>
               <div><dt>支付订单</dt><dd>{overview.paidOrders ?? 0} 笔</dd></div>
               <div><dt>账号状态</dt><dd className="healthy">正常</dd></div>
             </dl>

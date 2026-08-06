@@ -86,7 +86,7 @@ export function ChatWorkspace() {
   const [topicLoading, setTopicLoading] = useState(true);
   const [topicError, setTopicError] = useState("");
   const [topicRefreshedAt, setTopicRefreshedAt] = useState<string | null>(null);
-  const [userName, setUserName] = useState("经纪人");
+  const [userName, setUserName] = useState("创作者");
   const [expandedTopicIds, setExpandedTopicIds] = useState<string[]>([]);
   const [listening, setListening] = useState(false);
   const [voicePaused, setVoicePaused] = useState(false);
@@ -121,7 +121,7 @@ export function ChatWorkspace() {
   async function loadUserName() {
     const response = await fetch(apiPath("/api/auth/me"));
     const payload = (await response.json()) as { user?: { name?: string; email?: string } };
-    setUserName(payload.user?.name || payload.user?.email || "经纪人");
+    setUserName(payload.user?.name || payload.user?.email || "创作者");
   }
 
   async function openConversation(id: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
 import { apiPath } from "@/lib/client/url";
 import { defaultSystemSettings, type SystemSettings } from "@/lib/system/settings";
@@ -55,6 +55,7 @@ type ContentOverview = {
   };
   complianceRisk: Array<{ riskLevel: string; count: number }>;
   recentWorks: AdminWork[];
+  recentWorksTotal: number;
   recentComplianceReports: AdminComplianceReport[];
   appUsage: AdminAppUsage[];
 };
@@ -334,6 +335,10 @@ export function AdminPageClient() {
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [contentOverview, setContentOverview] = useState<ContentOverview | null>(null);
+  const [worksPage, setWorksPage] = useState(1);
+  const [worksLoading, setWorksLoading] = useState(false);
+  const worksPageRef = useRef(1);
+  const pageSizeRef = useRef(20);
   const [appRuns, setAppRuns] = useState<AdminAppRun[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [planForm, setPlanForm] = useState<Plan>({ code: "", name: "", quotaAmount: 100, amountCents: 9900, currency: "CNY", description: "", recommended: false, status: "active", sortOrder: 0 });
@@ -402,6 +407,9 @@ export function AdminPageClient() {
   const [testEmailRecipient, setTestEmailRecipient] = useState("");
   const [s3Secret, setS3Secret] = useState("");
   const [fallbackApiKey, setFallbackApiKey] = useState("");
+
+  worksPageRef.current = worksPage;
+  pageSizeRef.current = pageSize;
 
   useEffect(() => {
     function syncTab() {
@@ -491,7 +499,7 @@ export function AdminPageClient() {
         setUsers(payload.users ?? []);
       } else if (section === "content") {
         const [contentPayload, appsPayload, runsPayload, viralPayload, creatorsPayload] = await Promise.all([
-          read<{ content?: ContentOverview }>("/api/admin/content"),
+          read<{ content?: ContentOverview }>(`/api/admin/content?page=${worksPageRef.current}&limit=${pageSizeRef.current}`),
           read<{ apps?: AdminCreationApp[] }>("/api/admin/apps"),
           read<{ runs?: AdminAppRun[] }>("/api/admin/runs?limit=200"),
           read<{ contents?: AdminViralContent[] }>("/api/admin/viral-contents"),
@@ -744,11 +752,12 @@ export function AdminPageClient() {
     showToast("爆款资源状态已更新");
   }
 
-  async function moveViralContent(id: string, action: "move_up" | "move_down") {
+  async function moveViralContent(id: string, action: "move_up" | "move_down" | "move_top") {
     const response = await fetch(apiPath("/api/admin/viral-contents"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, action }) });
     const payload = await response.json() as { error?: string };
     if (!response.ok) return showToast(payload.error ?? "爆款资源排序失败", "error");
     await loadSection("content");
+    if (action === "move_top") showToast("爆款内容已置顶");
   }
 
   async function updateViralCreatorStatus(ids: string[], status: "active" | "paused" | "excluded") {
@@ -1058,6 +1067,30 @@ export function AdminPageClient() {
       controller.abort();
     };
   }, [loadSection, tab]);
+
+  useEffect(() => {
+    if (tab !== "content" || !loadedSections.content) return;
+    const controller = new AbortController();
+
+    async function loadWorksPage() {
+      setWorksLoading(true);
+      try {
+        const response = await fetch(apiPath(`/api/admin/content?page=${worksPage}&limit=${pageSize}`), { signal: controller.signal });
+        const payload = await response.json() as { content?: ContentOverview; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "作品列表加载失败");
+        if (payload.content) setContentOverview(payload.content);
+      } catch (cause) {
+        if (!(cause instanceof DOMException && cause.name === "AbortError")) {
+          showToast(cause instanceof Error ? cause.message : "作品列表加载失败", "error");
+        }
+      } finally {
+        if (!controller.signal.aborted) setWorksLoading(false);
+      }
+    }
+
+    void loadWorksPage();
+    return () => controller.abort();
+  }, [loadedSections.content, pageSize, showToast, tab, worksPage]);
 
   const filteredUsers = users.filter((user) => {
     const keyword = userSearch.trim().toLowerCase();
@@ -1382,7 +1415,7 @@ export function AdminPageClient() {
 
           {contentView === "works" ? <div className="adminGrid">
             <AdminPanel title="最近作品">
-              {(contentOverview?.recentWorks ?? []).map((work) => (
+              {worksLoading ? <AdminLoadingRows rows={pageSize} /> : (contentOverview?.recentWorks ?? []).map((work) => (
                 <Row
                   key={work.id}
                   title={work.title}
@@ -1390,7 +1423,15 @@ export function AdminPageClient() {
                   href={adminWorkHref(work.id)}
                 />
               ))}
-              {(contentOverview?.recentWorks ?? []).length === 0 ? <div className="emptyState">暂无作品数据。</div> : null}
+              {!worksLoading && (contentOverview?.recentWorks ?? []).length === 0 ? <div className="emptyState">暂无作品数据。</div> : null}
+              <AdminPagination
+                page={worksPage}
+                pageSize={pageSize}
+                pageSizeOptions={settings.ui.tablePageSizeOptions}
+                total={contentOverview?.recentWorksTotal ?? 0}
+                onPageChange={setWorksPage}
+                onPageSizeChange={(size) => { setPageSize(size); setWorksPage(1); }}
+              />
             </AdminPanel>
 
             <AdminPanel title="应用使用排行">
@@ -1500,7 +1541,7 @@ export function AdminPageClient() {
             <div className="tableList">
               {filteredViralContents.map((item, index) => <div className="tableRow" key={item.id}>
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" width={64} height={48} style={{ borderRadius: 6, objectFit: "cover", flex: "0 0 auto" }} /> : <div aria-label="暂无封面" style={{ width: 64, height: 48, borderRadius: 6, display: "grid", placeItems: "center", background: "var(--surface-muted, #f3f4f6)", color: "var(--muted, #6b7280)", fontSize: 12, flex: "0 0 auto" }}>无封面</div>}<div><strong>{index + 1}. {item.title}</strong><span>{item.platform} · {item.content_type} · {item.category} · {item.is_pinned ? "置顶 · " : ""}{item.is_featured ? "重点推荐 · " : ""}{item.metric_label}{item.metric_value ? ` ${item.metric_value}${item.metric_unit}` : ""}</span><span>{item.insight || "尚未填写推荐角度"}</span></div></div>
-                <div className="rowActions"><AdminStatus value={item.status} /><button className="secondaryButton" disabled={index === 0 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_up")} type="button">上移</button><button className="secondaryButton" disabled={index === filteredViralContents.length - 1 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_down")} type="button">下移</button><button className="secondaryButton" onClick={() => { setViralForm({ id: item.id, title: item.title, platform: item.platform, contentType: item.content_type, category: item.category, tags: item.tags.join("、"), sourceUrl: item.source_url, sourceTitle: item.source_title, sourceAuthor: item.source_author, thumbnailUrl: item.thumbnail_url ?? "", mediaUrl: item.media_url ?? "", articleBody: item.article_body, summary: item.summary, metricLabel: item.metric_label, metricValue: item.metric_value?.toString() ?? "", metricUnit: item.metric_unit, insight: item.insight, creationScenes: item.creation_scenes.join("、"), riskNote: item.risk_note, status: item.status, isPinned: item.is_pinned, isFeatured: item.is_featured, sortOrder: item.sort_order.toString(), publishAt: item.publish_at ? item.publish_at.slice(0, 16) : "", expireAt: item.expire_at ? item.expire_at.slice(0, 16) : "" }); setViralDrawerOpen(true); }} type="button">编辑</button><button className="secondaryButton" onClick={() => void updateViralContentStatus(item.id, item.status === "published" ? "offline" : "published")} type="button">{item.status === "published" ? "下线" : "发布"}</button></div>
+                <div className="rowActions"><AdminStatus value={item.status} /><button className="secondaryButton" disabled={index === 0 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_up")} type="button">上移</button><button className="secondaryButton" disabled={index === filteredViralContents.length - 1 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_down")} type="button">下移</button><button className="secondaryButton" disabled={index === 0 || Boolean(viralContentSearch.trim())} onClick={() => void moveViralContent(item.id, "move_top")} type="button">置顶</button><button className="secondaryButton" onClick={() => { setViralForm({ id: item.id, title: item.title, platform: item.platform, contentType: item.content_type, category: item.category, tags: item.tags.join("、"), sourceUrl: item.source_url, sourceTitle: item.source_title, sourceAuthor: item.source_author, thumbnailUrl: item.thumbnail_url ?? "", mediaUrl: item.media_url ?? "", articleBody: item.article_body, summary: item.summary, metricLabel: item.metric_label, metricValue: item.metric_value?.toString() ?? "", metricUnit: item.metric_unit, insight: item.insight, creationScenes: item.creation_scenes.join("、"), riskNote: item.risk_note, status: item.status, isPinned: item.is_pinned, isFeatured: item.is_featured, sortOrder: item.sort_order.toString(), publishAt: item.publish_at ? item.publish_at.slice(0, 16) : "", expireAt: item.expire_at ? item.expire_at.slice(0, 16) : "" }); setViralDrawerOpen(true); }} type="button">编辑</button><button className="secondaryButton" onClick={() => void updateViralContentStatus(item.id, item.status === "published" ? "offline" : "published")} type="button">{item.status === "published" ? "下线" : "发布"}</button></div>
               </div>)}
               {filteredViralContents.length === 0 ? <AdminEmptyState title={viralContentTab === "offline" ? "暂无已下线资源" : "暂无运营中爆款资源"} description={viralContentSearch ? "没有匹配的爆款资源。" : "新增资源后可通过置顶和推荐角度影响用户创作。"} /> : null}
             </div>

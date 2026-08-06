@@ -13,6 +13,7 @@ import { usePageMeta } from "@/lib/client/page-meta";
 import type { AvatarVisualAsset } from "@/lib/avatar/types";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 import { articleDocx } from "@/lib/client/docx";
+import { createCreationTraceId, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
 
 type FieldValue = string | string[];
 
@@ -115,6 +116,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [transcriptCopied, setTranscriptCopied] = useState(false);
   const [showAllWechatStyles, setShowAllWechatStyles] = useState(false);
   const [showAllImageCardStyles, setShowAllImageCardStyles] = useState(false);
+  const [remixPreviewOpen, setRemixPreviewOpen] = useState(false);
   const [imageCardStyleUsage, setImageCardStyleUsage] = useState<Record<string, number>>({});
   const [wechatImageStyleUsage, setWechatImageStyleUsage] = useState<Record<string, number>>({});
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
@@ -144,7 +146,18 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const visibleFields = (isWechatImages
     ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
     : filteredFields
-  ).filter((field) => !isPolicyRenewalCard || values.avatar_visual_mode === "yes" || !["reference_image", "portrait_treatment"].includes(field.id));
+  ).filter((field) => {
+    if (isPolicyRenewalCard && values.avatar_visual_mode !== "yes" && ["reference_image", "portrait_treatment"].includes(field.id)) return false;
+    if (isImageCard && field.id === "remix_instruction") return false;
+    if (isImageCard && field.id === "portrait_reference_image" && !(values.creation_mode === "image_remix" && values.draw_portrait === "yes")) return false;
+    // The third interaction is the actual source: text for a new card, or an image for remix.
+    if (isImageCard && values.creation_mode === "image_remix" && field.id === "source") return false;
+    return true;
+  }).sort((left, right) => {
+    if (!isImageCard || values.creation_mode !== "image_remix") return 0;
+    const remixOrder = ["style", "creation_mode", "reference_image", "remix_instruction", "signature", "draw_portrait", "portrait_reference_image", "ratio"];
+    return remixOrder.indexOf(left.id) - remixOrder.indexOf(right.id);
+  });
   const incomingLinkRemixSourceUrl = isLinkRemix ? searchParams.get("source_url")?.trim() ?? "" : "";
   const incomingLinkRemixSourceTitle = isLinkRemix ? searchParams.get("source_title")?.trim() ?? "" : "";
   const incomingLinkRemixSourcePlatform = isLinkRemix ? searchParams.get("source_platform")?.trim() ?? "" : "";
@@ -162,6 +175,16 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   useEffect(() => {
     return () => recognitionRef.current?.stop();
   }, []);
+
+  useEffect(() => {
+    const traceId = createCreationTraceId();
+    trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "page_view", detail: { visibility: document.visibilityState } });
+    const reportError = (event: ErrorEvent) => trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "window_error", detail: { visibility: document.visibilityState } });
+    const reportRejection = () => trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "unhandled_rejection", detail: { visibility: document.visibilityState } });
+    window.addEventListener("error", reportError);
+    window.addEventListener("unhandledrejection", reportRejection);
+    return () => { window.removeEventListener("error", reportError); window.removeEventListener("unhandledrejection", reportRejection); };
+  }, [app.slug]);
 
   useEffect(() => {
     valuesRef.current = values;
@@ -283,6 +306,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }, [isLinkRemix, linkRemixSourceUrl]);
 
   async function handleSubmit() {
+    const traceId = createCreationTraceId();
+    trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_click", detail: { visibility: document.visibilityState } });
     if (remixAutoParsingPending) {
       setError("素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。");
       return;
@@ -293,9 +318,20 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       window.requestAnimationFrame(() => document.getElementById(`creation-field-${missingField.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
     }
+    if (isImageCard && values.creation_mode === "text_to_card" && isEmpty(values.source)) {
+      setError("请填写卡片内容，或切换为“上传图片进行二创”。");
+      window.requestAnimationFrame(() => document.getElementById("creation-field-source")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return;
+    }
+    if (isImageCard && values.creation_mode === "image_remix" && isEmpty(values.reference_image)) {
+      setError("二创模式需要先上传一张原图。");
+      window.requestAnimationFrame(() => document.getElementById("creation-field-reference_image")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return;
+    }
     const selectedVisualIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids : [];
     const needsAvatarPhoto = isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || (isWechatImages || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
-    if (needsAvatarPhoto && selectedVisualIds.length === 0 && isEmpty(values.reference_image)) {
+    const isImageCardRemix = isImageCard && values.creation_mode === "image_remix";
+    if (needsAvatarPhoto && selectedVisualIds.length === 0 && (isImageCardRemix ? isEmpty(values.portrait_reference_image) : isEmpty(values.reference_image))) {
       setError("请选择数字分身形象照，或临时上传一张形象照。");
       window.requestAnimationFrame(() => document.getElementById("creation-avatar-visual-picker")?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
@@ -307,12 +343,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
     let response: Response;
     try {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_started" });
       response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-creation-trace-id": traceId },
         body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "" } }),
       });
     } catch {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_failed", errorCode: "network_error" });
       setError(CREATION_NETWORK_ERROR);
       setLoading(false);
       return;
@@ -324,6 +362,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     };
 
     if (!response.ok || !payload.work?.id) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_failed", outcome: String(response.status), errorCode: "prepare_rejected" });
       setError(getCreationUserError(payload.error, CREATION_NETWORK_ERROR));
       setLoading(false);
       return;
@@ -331,7 +370,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
     if (isImageCard && typeof values.style === "string") recordImageCardStyleUsage(values.style);
     if (isWechatImages && typeof values.style === "string") recordWechatImageStyleUsage(values.style);
-    router.push(appPath(`/works/${payload.work.id}?from=creation-works&entry=${workspaceEntry || app.slug}`));
+    trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_finished", outcome: String(response.status) });
+    trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "navigation_started", detail: { visibility: document.visibilityState } });
+    router.push(appPath(`/works/${payload.work.id}?from=creation-works&entry=${workspaceEntry || app.slug}&trace_id=${traceId}`));
   }
 
   function updateField(fieldId: string, nextValue: FieldValue) {
@@ -584,7 +625,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     setUploadErrors((current) => ({ ...current, [fieldId]: "" }));
     setUploadSuccess((current) => ({ ...current, [fieldId]: "" }));
 
-    if (fieldId === "reference_image") {
+    if (fieldId === "reference_image" || fieldId === "portrait_reference_image") {
       if (!file.type.startsWith("image/")) {
         setUploadErrors((current) => ({ ...current, [fieldId]: "请上传 JPG、PNG 或 WebP 图片。" }));
         return;
@@ -1236,6 +1277,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
         <form className={isLinkRemix ? "create-form creationForm targetCreateForm linkRemixCreateForm" : isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
           {visibleFields.map((field, index) => {
+            const isImageRemixSource = isImageCard && values.creation_mode === "image_remix" && field.id === "reference_image";
+            const isTextCardSource = isImageCard && values.creation_mode !== "image_remix" && field.id === "source";
+            const fieldLabel = isTextCardSource ? "填写卡片内容" : field.label;
+            const fieldRequired = field.required || isImageRemixSource || isTextCardSource;
             const voicePanel = voiceFieldId === field.id ? (
               <VoiceInputPanel
                 elapsed={voiceElapsed}
@@ -1254,8 +1299,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   <span className="step-number">{index + 1}</span>
                 </span>
                 <strong className="field-title">
-                  {field.label}
-                  {field.required ? <em className="required-mark">*</em> : null}
+                  {fieldLabel}
+                  {fieldRequired ? <em className="required-mark">*</em> : null}
                   {supportsVoice(field.id) && field.type !== "text_or_file" ? (
                     <>
                       <span className={isImageCard ? "imageCardInlineOr" : "creationFieldInlineOr"}>或</span>
@@ -1274,7 +1319,50 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               </span>
               {field.type !== "text_or_file" ? voicePanel : null}
               <span className="field-content">
-                {renderField({
+                {isImageRemixSource ? (
+                  <div className="imageCardSplitField imageCardRemixSourceField">
+                    <div className="imageCardSplitColumn imageCardUploadColumn">
+                      <div className="imageCardSplitHeader">上传二创原图</div>
+                      <div className="imageCardRemixUploadRow">
+                        {renderField({
+                          field,
+                          value: values[field.id],
+                          onChange: (nextValue) => updateField(field.id, nextValue),
+                          isImageCard: true,
+                          voiceActive: false,
+                          voiceSupported,
+                          onVoiceInput: () => startVoiceInput(field.id),
+                          voicePanel,
+                          openFilePicker,
+                          uploadName: uploadNames[field.id] ?? "",
+                          uploadError: uploadErrors[field.id] ?? "",
+                          uploadSuccess: uploadSuccess[field.id] ?? "",
+                          uploading: Boolean(uploadingFields[field.id]),
+                          onFileChange: (fileList) => handleFileChange(field.id, fileList),
+                        })}
+                        {typeof values.reference_image === "string" && values.reference_image.startsWith("data:image/") ? (
+                          <figure className="imageCardRemixPreview">
+                            <img alt="二创原图预览" src={values.reference_image} />
+                            <figcaption><span>原图预览</span><button onClick={() => setRemixPreviewOpen(true)} type="button">查看全图</button></figcaption>
+                          </figure>
+                        ) : null}
+                      </div>
+                      <span className="imageCardMinorTip">原图会用于本次二创，请确认你拥有编辑和使用权限。</span>
+                    </div>
+                    <div className="imageCardSplitColumn">
+                      <div className="imageCardSplitHeader">二创改造要求（可选）</div>
+                      <textarea
+                        className="creationTextarea el-textarea__inner"
+                        maxLength={1000}
+                        onChange={(event) => updateField("remix_instruction", event.target.value)}
+                        placeholder="例如：保留人物和配色，去除原图文字，改成 3 个保障重点的知识卡；或保留构图，改成更专业的保险科普风。"
+                        rows={4}
+                        value={typeof values.remix_instruction === "string" ? values.remix_instruction : ""}
+                      />
+                      <span className="field-help">说清哪些元素要保留、替换或删除；未说明时会尽量保留原图的核心主体和构图。</span>
+                    </div>
+                  </div>
+                ) : renderField({
                   field,
                   value: values[field.id],
                   onChange: (nextValue) => updateField(field.id, nextValue),
@@ -1306,11 +1394,25 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                     {sourcePreview.mediaUrl ? <video className="linkRemixSourcePreview" controls preload="metadata" poster={sourcePreview.thumbnailUrl} src={sourcePreview.mediaUrl} /> : null}
                   </div>
                 ) : null}
-                {field.helper && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
-                {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，暂不支持图片</span> : null}
-                {(isImageCard || isWechatImages) && field.id === "reference_image" ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
+                {field.helper && !isImageRemixSource && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
+                {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，图片请使用下方“上传原图 / 参考图”。</span> : null}
+                {(isImageCard || isWechatImages) && field.id === "reference_image" && !isImageRemixSource ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
                 {isWechatImages && field.id === "article" ? (
                   <WechatArticleAnalysis analysis={wechatArticleAnalysis} />
+                ) : null}
+                {isImageCard && values.creation_mode === "image_remix" && field.id === "portrait_reference_image" ? (
+                  <AvatarVisualPicker
+                    appScope="image-card"
+                    enabled
+                    loading={avatarPhotosLoading}
+                    maxSelection={4}
+                    photos={avatarPhotos}
+                    selectedIds={Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids : []}
+                    showEnableToggle={false}
+                    toggleTitle="选择本次使用的形象照"
+                    onEnabledChange={() => undefined}
+                    onSelectionChange={(ids) => updateField("avatar_visual_asset_ids", ids)}
+                  />
                 ) : null}
               </span>
             </label>
@@ -1330,7 +1432,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             <RemixManualSourcePanel values={values} onChange={updateField} />
           </> : null}
 
-          {(isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || isWechatImages || isPolicyRenewalCard) ? (
+          {(isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" && values.creation_mode !== "image_remix" || isWechatImages || isPolicyRenewalCard) ? (
             <AvatarVisualPicker
               appScope={isPersonalityCardEntry ? "personality-card" : isWechatImages ? "wechat-images" : isPolicyRenewalCard ? "policy-renewal-card" : "image-card"}
               enabled={isPersonalityCardEntry || isImageCard ? true : values.avatar_visual_mode === "yes"}
@@ -1487,6 +1589,15 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         />
       ) : null}
 
+      {isImageCard && remixPreviewOpen && typeof values.reference_image === "string" && values.reference_image.startsWith("data:image/") ? (
+        <div className="imageCardFullPreviewOverlay" onClick={() => setRemixPreviewOpen(false)} role="presentation">
+          <section aria-label="二创原图全图预览" className="imageCardFullPreviewDialog" onClick={(event) => event.stopPropagation()} role="dialog">
+            <header><strong>二创原图全图预览</strong><button aria-label="关闭全图预览" onClick={() => setRemixPreviewOpen(false)} type="button">×</button></header>
+            <img alt="二创原图全图" src={values.reference_image} />
+          </section>
+        </div>
+      ) : null}
+
     </div>
   );
 }
@@ -1630,6 +1741,15 @@ function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
       portrait_treatment: "soft-illustration",
       ratio: "3:4",
       avatar_visual_mode: "no",
+      avatar_visual_asset_ids: [],
+    };
+  }
+  if (app.slug === "image-card") {
+    return {
+      ...base,
+      creation_mode: "text_to_card",
+      draw_portrait: "no",
+      ratio: "3:4",
       avatar_visual_asset_ids: [],
     };
   }

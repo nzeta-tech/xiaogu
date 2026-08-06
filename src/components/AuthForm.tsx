@@ -105,7 +105,7 @@ export function AuthForm({
   }
 
   return (
-    <div className="authPage">
+    <div className={`authPage${mode === "register" ? " authPage--register" : ""}`}>
       <aside className="authBrandPanel">
         <div className="authBrandLockup">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -161,7 +161,7 @@ export function AuthForm({
           <strong>{config?.site?.siteName ?? "小谷"}AI</strong>
         </div>
         <span className="authEyebrow">{mode === "login" ? "欢迎回来" : "开始使用小谷"}</span>
-        <h2>{mode === "login" ? "登录你的工作台" : "创建经纪人账号"}</h2>
+        <h2>{mode === "login" ? "登录你的工作台" : "创建创作者账号"}</h2>
         <p className="authLead">
           {mode === "login"
             ? "继续今天的内容创作与数字分身管理。"
@@ -175,27 +175,20 @@ export function AuthForm({
         >
           {mode === "register" ? (
             <label>
-              姓名
-              <input name="name" value={name} onChange={(event) => setName(event.target.value)} required />
+              <span className="authFieldName">姓名</span>
+              <input autoComplete="name" autoFocus name="name" onChange={(event) => setName(event.target.value)} placeholder="请输入你的称呼" value={name} required />
             </label>
           ) : null}
           {config?.auth?.turnstileEnabled && config.auth.turnstileSiteKey ? <TurnstileWidget siteKey={config.auth.turnstileSiteKey} onToken={setTurnstileToken} /> : null}
           {mode === "register" && config?.auth?.requireInviteCode ? (
             <label>
-              邀请码
+              <span className="authFieldName">邀请码</span>
               <input name="inviteCode" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} required />
             </label>
           ) : null}
-          {mode === "register" && config?.affiliate?.enabled ? (
-            <label>
-              返利邀请码 <span className="formHint">选填</span>
-              <input name="referralCode" value={referralCode} onChange={(event) => setReferralCode(event.target.value.toUpperCase())} />
-              <span className="formHint">通过好友邀请注册时自动填写，与平台注册门槛邀请码不同。</span>
-            </label>
-          ) : null}
           <label>
-            邮箱
-            <input name="email" type="email" autoComplete="email" autoFocus={mode === "login"} value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "auth-form-error" : undefined} required />
+            <span className="authFieldName">邮箱</span>
+            <input name="email" type="email" autoComplete="email" autoFocus={mode === "login"} inputMode="email" placeholder={mode === "register" ? "name@example.com" : undefined} value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "auth-form-error" : undefined} required />
           </label>
           <div className="authField">
             <span className="authFieldLabel"><label htmlFor="auth-password">密码</label>{mode === "login" && config?.auth?.passwordResetEnabled !== false ? <a href={appPath("/forgot-password")}>忘记密码？</a> : null}</span>
@@ -207,6 +200,7 @@ export function AuthForm({
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
                 value={password}
                 minLength={8}
+                placeholder={mode === "register" ? "设置至少 8 位密码" : undefined}
                 onChange={(event) => setPassword(event.target.value)}
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? "auth-form-error" : undefined}
@@ -214,9 +208,16 @@ export function AuthForm({
               />
               <button type="button" aria-label={passwordVisible ? "隐藏密码" : "显示密码"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((current) => !current)}>{passwordVisible ? "隐藏" : "显示"}</button>
             </span>
-            {mode === "register" ? <span className="formHint">{config?.auth?.passwordHint ?? "至少 8 位密码"}</span> : null}
+            {mode === "register" ? <span className={`formHint authPasswordHint ${password.length >= 8 ? "isReady" : ""}`}>{password.length ? (password.length >= 8 ? "密码长度符合要求" : `还需 ${8 - password.length} 位`) : (config?.auth?.passwordHint ?? "至少 8 位密码")}</span> : null}
           </div>
-          {mode === "login" && totpRequired ? <label>二次验证码或恢复码<input autoComplete="one-time-code" inputMode="numeric" value={totpCode} onChange={(event) => setTotpCode(event.target.value)} required /></label> : null}
+          {mode === "register" && (config === null || config.affiliate?.enabled) ? (
+            <label>
+              <span className="authFieldName">返利邀请码 <span className="formHint">选填</span></span>
+              <input name="referralCode" value={referralCode} onChange={(event) => setReferralCode(event.target.value.toUpperCase())} />
+              <span className="formHint">好友邀请注册时会自动填写。</span>
+            </label>
+          ) : null}
+          {mode === "login" && totpRequired ? <label><span className="authFieldName">二次验证码或恢复码</span><input autoComplete="one-time-code" inputMode="numeric" value={totpCode} onChange={(event) => setTotpCode(event.target.value)} required /></label> : null}
           {mode === "register" && config?.legal?.termsEnabled !== false && config?.legal?.displayMode !== "modal" ? (
             <label className="checkboxRow authAgreementRow">
               <input name="acceptedTerms" type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} required />
@@ -231,7 +232,7 @@ export function AuthForm({
           ) : null}
           {mode === "register" && config?.auth?.allowRegistration === false ? <div className="alertPanel">当前暂未开放新用户注册。</div> : null}
           {error ? <div className="authFormError" id="auth-form-error" role="alert">{error}</div> : null}
-          <button className="primaryButton" disabled={submitting || (mode === "register" && (config?.auth?.allowRegistration === false || (config?.legal?.termsEnabled !== false && !acceptedTerms)))} type="submit">
+          <button aria-busy={submitting} className="primaryButton" disabled={submitting || (mode === "register" && (config?.auth?.allowRegistration === false || (config?.legal?.termsEnabled !== false && !acceptedTerms)))} type="submit">
             {submitting ? (mode === "login" ? "登录中..." : "注册中...") : mode === "login" ? "进入工作台" : "注册并进入"}
           </button>
         </form>

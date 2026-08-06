@@ -43,10 +43,10 @@ export async function PATCH(request: Request) {
   const input = z.object({
     id: z.string().uuid(),
     status: z.enum(["draft", "pending_review", "published", "offline", "expired"]).optional(),
-    action: z.enum(["move_up", "move_down"]).optional(),
+    action: z.enum(["move_up", "move_down", "move_top"]).optional(),
   }).refine((value) => Boolean(value.status) !== Boolean(value.action), { message: "请选择一种操作" }).parse(await request.json());
   if (input.action) {
-    const moved = await tryMoveAdminViralContent(input.id, input.action === "move_up" ? "up" : "down");
+    const moved = await tryMoveAdminViralContent(input.id, input.action === "move_up" ? "up" : input.action === "move_down" ? "down" : "top");
     if (!moved) return Response.json({ error: "爆款资源排序失败" }, { status: 503 });
     await tryCreateAdminAuditLog({ adminUserId: user.id, action: `viral_content.${input.action}`, targetType: "viral_content", targetId: input.id, detail: {} });
     return Response.json({ moved: true, mode: "server" });

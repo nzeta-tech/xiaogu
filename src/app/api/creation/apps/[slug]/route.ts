@@ -1,5 +1,6 @@
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { generateImageSet } from "@/lib/agent/image-generator";
+import { extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
 import { getCreationAppBySlug, type CreationField } from "@/lib/apps/catalog";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
@@ -72,15 +73,25 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const body = (await request.json()) as { values?: Record<string, FieldValue> };
   const values = body.values ?? {};
   const isPolicyRenewalCard = app.slug === "policy-renewal-card";
+  const isImageCardRemix = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix";
   const isStudioInternalStep = ["wechat-studio", "xiaohongshu-studio"].includes(stringifyCreationFieldValue(values.studio_parent))
     && (app.slug === "wechat-images" || app.slug === "wechat-cover");
 
-  const missingField = app.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
+  const missingField = app.fields.find((field) => {
+    if (isImageCardRemix && field.id === "draw_portrait") return false;
+    return field.required && isEmptyCreationFieldValue(values[field.id]);
+  });
   if (missingField) {
     return Response.json({ error: `${missingField.label}还没有填写。` }, { status: 400 });
   }
   if (isPolicyRenewalCard && stringifyCreationFieldValue(values.confirmation) !== "confirmed") {
     return Response.json({ error: "请先确认已经核对日期、金额、币种和保单号。" }, { status: 400 });
+  }
+  if (app.slug === "image-card" && !isImageCardRemix && isEmptyCreationFieldValue(values.source)) {
+    return Response.json({ error: "请填写卡片内容，或切换为上传图片进行二创。" }, { status: 400 });
+  }
+  if (isImageCardRemix && isEmptyCreationFieldValue(values.reference_image)) {
+    return Response.json({ error: "二创模式需要先上传一张原图。" }, { status: 400 });
   }
 
   const quota = await requireQuota(user, "write_script");
@@ -101,14 +112,17 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     : app.slug === "ip-positioning"
       ? buildIpPositioningPrompt(app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
         : buildPrompt(app.name, app.fields, values, app.promptHint, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null);
+  const referenceKnowledge = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix"
+    ? await extractKnowledgeFromReferenceImage(values.reference_image)
+    : "";
   const imagePrompt = isPolicyRenewalCard
     ? buildPolicyRenewalImagePrompt(values)
-    : buildImagePrompt(app.name, app.fields, values, caseContext, app.promptHint);
+    : buildImagePrompt(app.name, app.fields, values, caseContext, app.promptHint, referenceKnowledge);
   const resolvedPrompt = app.resultType === "image" || app.resultType === "image-plan" ? imagePrompt : content;
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
   const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
-  if (needsAvatarPhoto && visualAssetIds.length === 0 && isEmptyCreationFieldValue(values.reference_image)) {
+  if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     return Response.json({ error: "请选择数字分身形象照，或临时上传一张形象照。" }, { status: 400 });
   }
   const visualReferences = app.resultType === "image"
@@ -129,7 +143,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
           count: wechatImagePlan?.prompts.length ?? 1,
           budgetMs: isStudioInternalStep ? 270000 : undefined,
           variantPrompts: wechatImagePlan?.prompts,
-          referenceImages: [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
+          referenceImages: isImageCardRemix
+            ? [...extractReferenceImages(values), ...visualReferences.map((item) => item.dataUrl)].slice(0, 4)
+            : [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
           })
       : null;
 
@@ -588,7 +604,7 @@ function buildImagePlan(appName: string, fields: CreationField[], values: Record
   return output.join("\n");
 }
 
-function buildImagePrompt(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string) {
+function buildImagePrompt(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string, referenceKnowledge = "") {
   const isWechatArticleVisual = appName === "文章配图生成" || appName === "公众号文章封面";
   const isXiaohongshuVisual = stringifyValue(values.studio_parent) === "xiaohongshu-studio";
   const lines = [
@@ -598,11 +614,18 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
     hint,
   ];
   const styleValue = stringifyValue(values.style);
+  const isImageCardRemix = appName === "知识卡片制作（图片）" && stringifyValue(values.creation_mode) === "image_remix";
   for (const field of fields) {
     const value = values[field.id];
     if (isEmptyCreationFieldValue(value)) continue;
     if (field.id === "reference_image") {
-      lines.push(`${field.label}：已上传参考图。请尽量贴近参考图的配色、材质、笔触、留白、主体关系与版式节奏，但不要照搬其中的文字内容。`);
+      lines.push(isImageCardRemix
+        ? `${field.label}：已上传二创原图。必须准确保留并重新排版其中可确认的知识文字、数字与层级，不得把原图的知识内容简化成无文字插画。`
+        : `${field.label}：已上传参考图。请尽量贴近参考图的配色、材质、笔触、留白、主体关系与版式节奏，但不要照搬其中的文字内容。`);
+      continue;
+    }
+    if (field.id === "portrait_reference_image") {
+      lines.push(`${field.label}：已上传临时形象照。仅用于保持人物外貌特征，不得替代二创原图中的知识内容、主体或版式。`);
       continue;
     }
     lines.push(`${field.label}：${Array.isArray(value) ? value.join("、") : value}`);
@@ -610,6 +633,10 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
   const styleDirective = getImageStyleDirective(styleValue, appName);
   if (styleDirective) {
     lines.push(`风格细化：${styleDirective}`);
+  }
+  if (isImageCardRemix) {
+    if (referenceKnowledge) lines.push(`原图已识别的知识内容（这是文字准确性的硬约束，必须完整呈现在新卡片中）：\n${referenceKnowledge}`);
+    lines.push("二创优先级：用户填写的“二创改造要求”拥有最高优先级，必须严格遵从；只有用户未明确指定的部分，才能根据原图和所选风格自主决定。默认任务是先完整理解上传图片中的知识内容，准确提取其主标题、核心结论、关键要点、层级关系、可确认的数据与行动提示，再把这些重点重组为一张信息完整、可独立阅读的原创知识卡片。原图文字模糊、缺失或无法确认时不得编造。以上传图片为主要视觉来源，保留用户明确要求保留的主体、构图或配色；按卡片内容和改造要求重绘。若用户选择加入人物形象，第二张及之后的参考图仅用于保持该人物的外貌特征，人物必须服务原图知识主题，不能替代原图的知识内容或主体。去除原图中的 Logo、水印、二维码和不相关文字，不要逐字复制或模仿受版权保护的版式。没有说明时，保留原图核心主体与视觉节奏，并以所选比例重新排版。");
   }
   if (isXiaohongshuVisual) {
     const noteTitle = stringifyValue(values.title);
@@ -690,7 +717,7 @@ function getImageStyleDirective(style: string, appName: string) {
 
 function extractReferenceImages(values: Record<string, FieldValue>) {
   const references: string[] = [];
-  const candidateValues = [values.reference_image];
+  const candidateValues = [values.reference_image, values.portrait_reference_image];
 
   for (const candidate of candidateValues) {
     if (typeof candidate === "string" && candidate.startsWith("data:image/")) {
