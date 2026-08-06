@@ -2142,7 +2142,13 @@ body {
 .avatarCoachActions strong { font-size: 12px; }.avatarCoachActions span { font-size: 10px; color: #64748b; }
 .avatarCoachFollowups { display: grid; gap: 7px; padding: 10px 12px; border: 1px solid #ccfbf1; border-radius: 8px; background: #f8fffe; }
 .avatarCoachFollowups > strong { color: #0f766e; font-size: 11px; }
-.avatarCoachFollowups > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.avatarCoachFollowups > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.avatarCoachFollowups > div a { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 9px 10px; border: 1px solid #a7f3d0; border-radius: 7px; background: #fff; color: #0f766e; text-decoration: none; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.avatarCoachFollowups > div a:hover { border-color: #2dd4bf; background: #ecfdf5; transform: translateY(-1px); }
+.avatarCoachFollowups > div a span { display: grid; gap: 2px; min-width: 0; }
+.avatarCoachFollowups > div a b { overflow: hidden; color: #0f766e; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.avatarCoachFollowups > div a small { color: #64748b; font-size: 10px; line-height: 1.45; }
+.avatarCoachFollowups > div a em { flex: 0 0 auto; color: #0d9488; font-size: 10px; font-style: normal; font-weight: 800; }
 .avatarCoachFollowups button { padding: 6px 9px; border: 1px solid #a7f3d0; border-radius: 999px; background: #fff; color: #0f766e; font-size: 11px; font-weight: 700; }
 .avatarCoachFollowups button:hover { background: #ecfdf5; }
 .avatarCoachFollowups p { margin: 0; color: #64748b; font-size: 11px; }.avatarCoachFollowups p button { margin-left: 4px; padding: 0; border: 0; background: transparent; color: #0f766e; text-decoration: underline; }
@@ -2163,6 +2169,7 @@ body {
   .avatarCoachMentor i { right: -22px; font-size: 8px; }
   .avatarCoachSidebar { grid-template-columns: 1fr; }
   .avatarCoachComposer { grid-template-columns: 1fr; }
+  .avatarCoachFollowups > div { grid-template-columns: 1fr; }
   .avatarCoachComposer button { min-height: 44px; }
   .avatarCoachMessages article { max-width: 96%; }
 }

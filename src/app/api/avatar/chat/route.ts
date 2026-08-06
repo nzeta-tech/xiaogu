@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       `这是数字分身咨询台，当前咨询类型：${modeLabel(mode)}。`,
       "你是小谷精灵，一位面向保险创作者的专业创作与增长教练。你已获得用户数字分身的授权上下文。",
       "先给出清晰判断，再解释依据，然后只推荐最优先的 1-3 个可执行动作。不要虚构数据、客户或效果；不能承诺获客、成交、收益或理赔。",
-      "回答请使用以下固定小标题：\n【我的判断】\n【为什么这样判断】\n【下一步行动】\n【你可以直接做】。",
+      "回答请使用以下固定小标题：\n【我的判断】\n【为什么这样判断】\n【下一步行动】。不要直接输出可发布的完整文案、脚本或标题；需要创作时，说明该用什么工具和要完成什么。",
       "当信息不足时，明确指出缺什么，并给一个最短的补充问题；不要假设用户已有未提供的数据。",
       `用户本次问题：${message}`,
         ].join("\n\n");
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
         await trySaveMessages({ userId: user.id, conversationId, messages: [{ role: "user", content: message }, { role: "assistant", content: assistant }] });
         const proposal = await createExplicitMemoryProposal(user.id, message);
         const memories = await tryListActiveAvatarMemories(user.id, 6);
-        controller.enqueue(send("done", { followups: followupsFor(mode), profilePrompt: memories.length < 5, proposalCreated: proposal }));
+        controller.enqueue(send("done", { nextSteps: nextStepsFor(mode), profilePrompt: memories.length < 5, proposalCreated: proposal }));
       } catch (error) {
         controller.enqueue(send("error", { error: error instanceof Error ? error.message : "小谷暂时无法回答，请稍后重试" }));
       } finally { controller.close(); }
@@ -88,14 +88,14 @@ function modeLabel(mode: CoachMode) {
   return ({ diagnose: "增长诊断", plan: "本周计划", topic: "选题策划", review: "作品复盘", conversion: "获客承接", profile: "更新分身" })[mode];
 }
 
-function followupsFor(mode: CoachMode) {
-  const byMode: Record<CoachMode, string[]> = {
-    diagnose: ["把这周的内容目标拆成 3 个动作", "帮我找一个最值得连续做的内容栏目", "我应该先优化开头还是评论区承接？"],
-    plan: ["把这周计划排成每天能执行的清单", "先帮我写第一条内容", "按我的时间安排缩减为 2 条重点内容"],
-    topic: ["从这 6 个选题里选一个最容易带来咨询的", "把第一个选题写成口播稿", "为这组选题设计统一栏目名和封面"],
-    review: ["根据这次复盘，帮我改下一条的开头", "把有效部分沉淀成固定内容模板", "我还需要补哪些数据才能判断问题？"],
-    conversion: ["帮我写一条自然的评论区承接", "设计私信里的第一轮筛选问题", "把这套承接方式变成一周内容计划"],
-    profile: ["根据我的目标客户重做内容定位", "帮我明确以后不想使用的表达方式", "把今天的结论变成一条长期创作原则"],
+function nextStepsFor(mode: CoachMode) {
+  const byMode: Record<CoachMode, Array<{ title: string; description: string; href: string }>> = {
+    diagnose: [{ title: "把判断变成一条内容", description: "用多平台文案创作完成本周第一条验证内容。", href: "/apps/traffic-copy?from=create&entry=traffic-copy" }, { title: "做成连续栏目", description: "用小红书笔记创作建立可持续的同主题内容。", href: "/apps/xiaohongshu-studio?from=create&entry=xiaohongshu-studio" }],
+    plan: [{ title: "先完成本周第一篇", description: "进入小红书笔记创作，将计划变成可发布内容。", href: "/apps/xiaohongshu-studio?from=create&entry=xiaohongshu-studio" }, { title: "写成深度文章", description: "用公众号文章创作沉淀一篇长期内容资产。", href: "/apps/wechat-studio?from=create&entry=wechat-studio" }],
+    topic: [{ title: "围绕选题写成笔记", description: "进入小红书笔记创作，完成第一篇验证。", href: "/apps/xiaohongshu-studio?from=create&entry=xiaohongshu-studio" }, { title: "同步生成多平台版本", description: "用多平台文案创作适配口播、朋友圈和图文。", href: "/apps/traffic-copy?from=create&entry=traffic-copy" }],
+    review: [{ title: "优化下一条口播", description: "进入口播稿润色，先修正开头和表达节奏。", href: "/apps/video-script-polish?from=create&entry=video-script-polish" }, { title: "重新完成图文版本", description: "用小红书笔记创作把复盘结论落成作品。", href: "/apps/xiaohongshu-studio?from=create&entry=xiaohongshu-studio" }],
+    conversion: [{ title: "生成获客型内容", description: "用营销文案创作完成合规的内容承接。", href: "/apps/marketing-copy?from=create&entry=marketing-copy" }, { title: "设计直播承接话术", description: "进入直播话术工具，把咨询路径讲清楚。", href: "/apps/live-script?from=create&entry=live-script" }],
+    profile: [{ title: "写一条验证内容", description: "用多平台文案创作检验新的定位和表达。", href: "/apps/traffic-copy?from=create&entry=traffic-copy" }, { title: "沉淀为长内容", description: "进入公众号文章创作，完整表达你的核心观点。", href: "/apps/wechat-studio?from=create&entry=wechat-studio" }],
   };
   return byMode[mode];
 }
