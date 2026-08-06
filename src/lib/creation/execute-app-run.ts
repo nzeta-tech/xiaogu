@@ -21,6 +21,7 @@ import {
   isMultiChannelCopyAppSlug,
 } from "@/lib/creation/lead-copy";
 import { buildXiaohongshuCheckPrompt } from "@/lib/creation/xiaohongshu-check";
+import { buildWechatSectionImagePrompts } from "@/lib/creation/wechat-article-images";
 import {
   tryCompleteAppRun,
   tryCreateAppRun,
@@ -138,6 +139,12 @@ export async function executeCreationAppRun(input: {
       ? buildPolicyRenewalImagePrompt(values)
       : buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint, referenceKnowledge)
     : null;
+  // `wechat-images` also powers the Xiaohongshu studio's chapter cards.  A
+  // shared prompt produces near-duplicate variations, so derive one prompt
+  // per section before asking the image model for a set.
+  const sectionImagePlan = app.slug === "wechat-images"
+    ? buildWechatSectionImagePrompts(stringifyCreationFieldValue(values.article), imagePrompt ?? "", 5)
+    : null;
   const resolvedPrompt = imagePrompt ?? prompt;
   const pendingTitle = buildWorkTitle({
     appName: effectiveApp.name,
@@ -206,7 +213,8 @@ export async function executeCreationAppRun(input: {
               prompt: imagePrompt ?? "",
               style: stringifyCreationFieldValue(values.style) || app.name,
               ratio: stringifyCreationFieldValue(values.ratio) || (app.slug === "wechat-images" ? "3:4" : "1:1"),
-              count: isPolicyRenewalCard || app.slug !== "wechat-images" ? 1 : 4,
+              count: sectionImagePlan?.prompts.length ?? (isPolicyRenewalCard || app.slug !== "wechat-images" ? 1 : 4),
+              variantPrompts: sectionImagePlan?.prompts,
               // For image remix, the source card must stay the primary image;
               // avatar references only define the optional inserted person.
               referenceImages: isImageCardRemix
