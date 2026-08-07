@@ -2847,7 +2847,7 @@ export async function tryUpsertAdminViralContent(input: {
        values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6::jsonb, $7, $8, $9,
          $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23,
          coalesce($24, (select coalesce(max(sort_order), 0) + 1 from viral_contents where source_type = 'manual')),
-         $25, $26, $27, $27, case when $21 = 'published' then $27 else null end)
+         $25, $26, $27::uuid, $27::uuid, case when $21 = 'published' then $27::uuid else null end)
        on conflict (id) do update set
          title = excluded.title, platform = excluded.platform, content_type = excluded.content_type,
          category = excluded.category, tags = excluded.tags, source_url = excluded.source_url,
