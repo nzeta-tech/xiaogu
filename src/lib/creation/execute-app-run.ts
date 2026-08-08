@@ -27,6 +27,7 @@ import {
   tryCreateAppRun,
   tryAttachWorkAppRun,
   tryGetCreationAppBySlug,
+  tryGetWorkDetail,
   tryGetLatestThinkingProfileSnapshot,
   tryMergeWechatStudioAssets,
   trySaveUsageLog,
@@ -110,6 +111,8 @@ export async function executeCreationAppRun(input: {
       ? buildGeneralContentPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "link-remix"
       ? buildLinkRemixPrompt(values, caseContext, effectiveApp.promptHint, linkRemixResearch)
+    : app.slug === "traffic-copy"
+      ? buildTrafficCopyPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "xiaohongshu-check"
       ? buildXiaohongshuCheckPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "video-script-polish"
@@ -137,6 +140,8 @@ export async function executeCreationAppRun(input: {
   const imagePrompt = effectiveApp.resultType === "image" || effectiveApp.resultType === "image-plan"
     ? isPolicyRenewalCard
       ? buildPolicyRenewalImagePrompt(values)
+      : app.slug === "video-cover"
+        ? buildVideoCoverPrompt(values, caseContext, effectiveApp.promptHint)
       : buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint, referenceKnowledge)
     : null;
   // `wechat-images` also powers the Xiaohongshu studio's chapter cards.  A
@@ -360,6 +365,17 @@ export async function executeCreationAppRun(input: {
         complianceRisk,
       })
     : null;
+
+  if (app.slug === "video-cover") {
+    await tryAttachTrafficCoverToParent({
+      userId: input.userId,
+      parentWorkId: stringifyCreationFieldValue(values.traffic_parent_work_id),
+      coverWorkId: input.workId ?? "",
+      platform: stringifyCreationFieldValue(values.platform),
+      style: stringifyCreationFieldValue(values.style),
+      images: studioAssets,
+    });
+  }
 
   await reportUsage({
     customerId: input.userId,
@@ -867,6 +883,75 @@ function buildImagePlan(appName: string, fields: CreationField[], values: Record
   return output.join("\n");
 }
 
+async function tryAttachTrafficCoverToParent(input: {
+  userId: string;
+  parentWorkId: string;
+  coverWorkId: string;
+  platform: string;
+  style: string;
+  images: Array<{ id: string; url: string }>;
+}) {
+  if (!input.parentWorkId || !input.coverWorkId || input.images.length === 0) return;
+  const parent = await tryGetWorkDetail({ userId: input.userId, workId: input.parentWorkId, access: "own" });
+  if (!parent || parent.platform !== "traffic-copy") return;
+  const existingState = parent.content_json?.trafficCopyState as { covers?: unknown[] } | undefined;
+  const existingCovers = Array.isArray(existingState?.covers) ? existingState.covers : [];
+  const nextCover = {
+    workId: input.coverWorkId,
+    platform: input.platform,
+    style: input.style,
+    createdAt: new Date().toISOString(),
+    images: input.images,
+  };
+  const covers = [...existingCovers.filter((cover: unknown) => cover && typeof cover === "object" && (cover as { workId?: unknown }).workId !== input.coverWorkId), nextCover];
+  await tryUpdateWorkContent({
+    userId: input.userId,
+    workId: parent.id,
+    content: parent.content,
+    contentJson: {
+      ...(parent.content_json ?? {}),
+      trafficCopyState: { covers },
+    },
+  });
+}
+
+function buildTrafficCopyPrompt(values: Record<string, FieldValue>, caseContext: string[], promptHint: string) {
+  const tone = stringifyCreationFieldValue(values.tone) || "default";
+  const toneGuidance: Record<string, string> = {
+    default: "保持理性、有温度、适合保险内容传播的表达。",
+    sharp: "观点明确、有适度反差，但不攻击、不夸张、不制造焦虑。",
+    empathetic: "从真实生活处境切入，表达温和，先理解读者情绪再给出判断。",
+    analytical: "按事实、原因、影响和建议推进，表达清晰、克制、专业。",
+  };
+  return [
+    ...caseContext,
+    promptHint,
+    `本次内容语气：${toneGuidance[tone] ?? toneGuidance.default}`,
+    "请严格围绕用户原始素材创作，区分事实与个人判断；不得编造新闻细节、数据、案例、政策或产品规则，不制造焦虑，也不得使用收益、承保或理赔承诺。",
+    "只输出可直接发布的完整流量文案，不解释创作过程。",
+    "用户素材：",
+    stringifyCreationFieldValue(values.source),
+  ].filter(Boolean).join("\n\n");
+}
+
+function buildVideoCoverPrompt(values: Record<string, FieldValue>, caseContext: string[], promptHint: string) {
+  const platform = stringifyCreationFieldValue(values.platform);
+  const platformGuidance = platform === "douyin"
+    ? "抖音：首屏冲击力更强，标题控制在 8-14 个字，突出一个冲突或判断。"
+    : "微信视频号：可信、克制，标题控制在 12-16 个字，突出一个清晰判断或生活场景。";
+  return [
+    "你正在为短视频制作一张竖版中文视频封面。",
+    ...caseContext,
+    promptHint,
+    `发布平台：${platform === "douyin" ? "抖音" : "微信视频号"}。${platformGuidance}`,
+    `封面风格：${stringifyCreationFieldValue(values.style)}。`,
+    "先从文案中提炼唯一的核心冲突或判断，作为封面主标题。主标题必须是清晰、可读的简体中文，不要编造文案中没有的事实；副标题可选且简短。",
+    "画面必须预留足够文字留白，标题占画面视觉中心；不要包含二维码、联系方式、平台 Logo、复杂小字、收益承诺、理赔承诺、绝对化用语或恐吓式画面。",
+    "文案内容：",
+    stringifyCreationFieldValue(values.source),
+  ].filter(Boolean).join("\n\n");
+}
+
 function buildImagePrompt(appName: string, fields: CreationField[], values: Record<string, FieldValue>, caseContext: string[], hint: string, referenceKnowledge = "") {
   const lines = [
     `你现在在执行小谷图片类应用：${appName}。请生成适合获客内容场景的视觉图。`,
@@ -912,6 +997,12 @@ function getImageStyleDirective(style: string, appName: string) {
   if (!style) return "";
 
   const directives: Record<string, string> = {
+    "video-bold-opinion": "竖版短视频封面，超大中文主标题占画面中心，高对比深色或明亮纯色背景，只有一个强视觉主体，信息极简、有观点张力。",
+    "video-talking-head": "竖版短视频封面，可信的专业创作者出镜或半身人物为视觉重心，背景干净，标题清晰，整体像高质量口播栏目封面。",
+    "video-news-observation": "竖版短视频封面，纪实观察感，用抽象的新闻现场、城市或生活场景作背景，标题排版克制，专业、可信但不模拟新闻媒体 Logo。",
+    "video-family-emotion": "竖版短视频封面，温暖真实的家庭生活场景、自然光、低饱和配色，标题清晰简短，先建立代入感而非制造焦虑。",
+    "video-knowledge-card": "竖版短视频封面，清爽信息卡片结构，一个核心结论配少量图标或关系图，层级清楚、易读，避免塞入过多文字。",
+    "video-premium-minimal": "竖版短视频封面，高级克制的深蓝、灰、米白或低饱和配色，大量留白、精致排版与单一质感背景，专业但不浮夸。",
     illustration: "暖米色纸张底，铅笔线稿加轻水彩晕染，手绘边框、星星、植物、书本、窗景等温暖小元素穿插。版式像手绘栏目页或知识海报，标题圆润醒目，信息模块有手工描边和轻微不规则感，整体亲和治愈，不要做成 3D 物件拼贴。",
     whiteboard: "真实白板拍照感，白色板面带反光与边框，蓝红马克笔手写，方框、波浪线、圈画标注明显。像老师或顾问在白板上现场写出来的内容，不要做成数码平板字效。",
     zen: "米白宣纸或墙面底，淡墨、浅褐、灰绿低饱和配色，山水、留白、云雾或植物点缀自然出现。版式安静克制，像东方意境海报，不要现代商务科技图表感。",

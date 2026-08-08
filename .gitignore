@@ -14,6 +14,7 @@ __pycache__/
 .DS_Store
 tmp/
 data/*.db
+data/creation-diagnostics/
 *.tsbuildinfo
 # Local UI verification screenshots
 tmp-*.png

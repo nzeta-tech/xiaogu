@@ -1,0 +1,4 @@
+import { requireSessionUser } from "@/lib/auth/session";
+import { readAvatarContactQrCode } from "@/lib/avatar/contact-card";
+export const runtime = "nodejs";
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) { const user = await requireSessionUser(); if (user instanceof Response) return user; const { id } = await context.params; const qr = await readAvatarContactQrCode(user.id, id, new URL(request.url).searchParams.get("original") === "1"); const bytes = qr?.image_data; if (!bytes?.length) return Response.json({ error: "二维码不存在" }, { status: 404 }); return new Response(new Uint8Array(bytes), { headers: { "content-type": qr?.content_type ?? "image/png", "cache-control": "private, max-age=0, must-revalidate", "x-content-type-options": "nosniff" } }); }

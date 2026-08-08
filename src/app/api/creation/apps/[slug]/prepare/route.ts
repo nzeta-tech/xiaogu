@@ -25,7 +25,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
-  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, traceId, requestId, appSlug: slug, eventType: "prepare_received", outcome: "started" });
+  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, userEmail: user.email, traceId, requestId, appSlug: slug, eventType: "prepare_received", outcome: "started" });
 
   if (app.slug === "link-remix") {
     const availability = await getLinkRemixAvailability();
@@ -120,7 +120,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   // runtime can discard the detached task before the work page reconnects.
   await waitForBackgroundWorkRunStart(work.id);
 
-  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, traceId, requestId, appSlug: slug, eventType: "prepare_finished", outcome: "201", detail: { workId: work.id } });
+  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, userEmail: user.email, traceId, requestId, appSlug: slug, eventType: "prepare_finished", outcome: "201", detail: { workId: work.id } });
   return Response.json({
     ok: true,
     work: {

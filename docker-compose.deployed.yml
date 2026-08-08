@@ -20,6 +20,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     volumes:
       - ./runtime:/app:ro
+      - ./data/creation-diagnostics:/var/log/xiaogu/creation-diagnostics
 
   redis:
     image: redis:7-alpine

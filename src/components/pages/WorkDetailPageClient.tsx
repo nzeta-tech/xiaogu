@@ -17,6 +17,7 @@ type WorkDetail = {
     wechatStudioState?: WechatStudioWorkState;
     xiaohongshuStudioState?: XiaohongshuStudioWorkState;
     presentationJobId?: string;
+    trafficCopyState?: TrafficCopyWorkState;
   } | null;
   platform: string;
   status: string;
@@ -41,6 +42,8 @@ type WorkDetail = {
     completed_at?: string | null;
   } | null;
 };
+type TrafficCopyCover = { workId: string; platform: string; style: string; createdAt: string; images: GeneratedImage[] };
+type TrafficCopyWorkState = { covers?: TrafficCopyCover[] };
 
 type WechatTheme = "default" | "warm" | "forest" | "editorial";
 type XhsFormat = "plain" | "image";
@@ -76,6 +79,9 @@ type XiaohongshuStudioWorkState = {
 type ImageGenerationMode = "image" | "demo" | "fallback" | "rate_limited" | "";
 type PreviewField = { label: string; value: string; mode?: "plain" | "markdown" };
 type PreviewImage = { label: string; url: string };
+type ContactQrCode = { id: string; label: string; qr_code_url: string };
+type ContactCard = { qr_codes: ContactQrCode[] };
+type ContactOverlay = { qrUrl: string; size: number; x: number; y: number };
 type WorkStreamState = {
   connected: boolean;
   content: string;
@@ -101,8 +107,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [copied, setCopied] = useState<CopyState>({});
   const [saveMessage, setSaveMessage] = useState("");
   const [imageNotice, setImageNotice] = useState("");
-  const [watermarkText, setWatermarkText] = useState("");
-  const [watermarkEnabled, setWatermarkEnabled] = useState(false);
+  const [contactCard, setContactCard] = useState<ContactCard | null>(null);
+  const [contactQrId, setContactQrId] = useState("");
+  const [contactEnabled, setContactEnabled] = useState(false);
+  const [contactSize, setContactSize] = useState(22);
+  const [contactPosition, setContactPosition] = useState({ x: 74, y: 74 });
+  const [contactPreviewBounds, setContactPreviewBounds] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [selectedImageId, setSelectedImageId] = useState("");
   const [showResultDetails, setShowResultDetails] = useState(false);
   const [selectedTopicId, setSelectedTopicId] = useState("");
@@ -164,6 +174,14 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     void loadWork();
     return () => controller.abort();
   }, [workApiHref]);
+
+  useEffect(() => {
+    if (work?.platform !== "image-card") return;
+    const controller = new AbortController();
+    void fetch(apiPath("/api/avatar/contact-card"), { signal: controller.signal }).then(async (response): Promise<{ contactCard?: ContactCard }> => response.ok ? response.json() as Promise<{ contactCard?: ContactCard }> : {}).then((payload) => { if (payload.contactCard) { setContactCard(payload.contactCard); setContactQrId((current) => current || payload.contactCard?.qr_codes[0]?.id || ""); } }).catch(() => undefined);
+    return () => controller.abort();
+  }, [work?.platform]);
+
 
   useEffect(() => {
     const copyTimer = copyTimerRef.current;
@@ -481,9 +499,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const isWechatStudioWork = work?.platform === "wechat-studio";
   const isXiaohongshuStudioWork = work?.platform === "xiaohongshu-studio";
   const isPptMakerWork = work?.platform === "ppt-maker";
-  const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || isPolicyRenewalCardWork;
-  const defaultWatermark = typeof work?.app_run?.input_payload?.signature === "string" ? work.app_run.input_payload.signature.trim() : "";
-  const effectiveWatermark = watermarkEnabled ? (watermarkText.trim() || defaultWatermark) : "";
+  const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || work?.platform === "video-cover" || isPolicyRenewalCardWork;
+  const selectedContactQr = contactCard?.qr_codes.find((item) => item.id === contactQrId) ?? null;
+  const effectiveContactOverlay: ContactOverlay | null = contactEnabled && selectedContactQr ? { qrUrl: selectedContactQr.qr_code_url, size: contactSize, ...contactPosition } : null;
   const imageScale = isImageWork ? Math.max(90, Math.min(140, fontScale)) : fontScale;
   const isWriteCopyWork = work?.platform === "write-copy";
   const isTrafficCopyWork = work?.platform === "traffic-copy";
@@ -523,6 +541,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const plainResultContent = streamState.content || work?.content || work?.app_run?.result_text || (
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
+  const videoCoverHref = isTrafficCopyWork
+    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(plainResultContent)}`)
+    : "";
   const getActiveItemId = (batch: CreationOutputBatch) => (
     batch.items.some((item) => item.id === activeItemIds[batch.id])
       ? activeItemIds[batch.id]
@@ -546,6 +567,15 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     setActiveSection(sectionId);
     sectionRefs.current[sectionId]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  function startContactDrag(event: import("react").PointerEvent<HTMLImageElement>) {
+    if (!effectiveContactOverlay) return;
+    event.preventDefault(); const canvasRect = event.currentTarget.parentElement?.getBoundingClientRect(); if (!canvasRect || !contactPreviewBounds) return;
+    const move = (moveEvent: PointerEvent) => { const side = Math.min(contactPreviewBounds.width, contactPreviewBounds.height) * contactSize / 100; const x = Math.max(0, Math.min(100, (moveEvent.clientX - canvasRect.left - contactPreviewBounds.left - side / 2) / Math.max(1, contactPreviewBounds.width - side) * 100)); const y = Math.max(0, Math.min(100, (moveEvent.clientY - canvasRect.top - contactPreviewBounds.top - side / 2) / Math.max(1, contactPreviewBounds.height - side) * 100)); setContactPosition({ x, y }); };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); move(event.nativeEvent);
+  }
+
+  function measurePreviewImage(image: HTMLImageElement) { const parent = image.parentElement; if (!parent || !image.naturalWidth || !image.naturalHeight) return; const box = parent.getBoundingClientRect(); const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight); const width = image.naturalWidth * scale, height = image.naturalHeight * scale; setContactPreviewBounds({ left: (box.width - width) / 2, top: (box.height - height) / 2, width, height }); }
 
   async function handleCopy(key: string, text: string) {
     const success = await copyText(text);
@@ -574,13 +604,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   }
 
   async function handleImageDownload(url: string, filename: string) {
-    const finalUrl = await buildWatermarkedAsset(url, effectiveWatermark);
+    const finalUrl = await buildWatermarkedAsset(url, effectiveContactOverlay);
     downloadAsset(finalUrl, filename);
     flashImageNotice("图片已开始下载");
   }
 
   async function handleImageCopy(url: string) {
-    const finalUrl = await buildWatermarkedAsset(url, effectiveWatermark);
+    const finalUrl = await buildWatermarkedAsset(url, effectiveContactOverlay);
     const success = await copyImage(finalUrl);
     flashImageNotice(success ? "图片已复制" : "当前浏览器暂不支持复制图片");
   }
@@ -591,7 +621,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   async function handleBatchDownload(images: GeneratedImage[]) {
     for (const [index, image] of images.entries()) {
-      const finalUrl = await buildWatermarkedAsset(image.url, effectiveWatermark);
+      const finalUrl = await buildWatermarkedAsset(image.url, effectiveContactOverlay);
       downloadAsset(finalUrl, `图片结果-${index + 1}.png`);
     }
     flashImageNotice(`已开始下载 ${images.length} 张图片`);
@@ -735,6 +765,70 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             <ReadOnlyWechatArticle content={articleContent} images={articleImages} />
           </main>
         </div>
+      </div>
+    );
+  }
+
+  if (isTrafficCopyWork) {
+    const trafficState = work.content_json?.trafficCopyState;
+    const covers = Array.isArray(trafficState?.covers) ? trafficState.covers : [];
+    const hasContent = work.app_run?.status === "succeeded" && Boolean(work.content.trim() || work.app_run?.result_text?.trim());
+    return (
+      <div className="workDetailPage trafficCopyStudioPage">
+        <div className="page-content trafficCopyStudioShell">
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={formatWorkTitle(work)} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <section className="trafficCopyStudioHero">
+            <div>
+              <span>流量文案 · 发布工作台</span>
+              <h1>{formatWorkTitle(work)}</h1>
+              <p>从成稿到封面集中管理；这条内容及其封面会作为同一创作链路保留在历史作品中。</p>
+            </div>
+            <div className="trafficCopyStudioProgress" aria-label="创作进度">
+              <span className="done">1 文案成稿</span>
+              <i aria-hidden="true" />
+              <span className={covers.length ? "done" : ""}>2 制作封面</span>
+              <i aria-hidden="true" />
+              <span>3 发布</span>
+            </div>
+          </section>
+
+          {showResultDetails ? <section className="trafficCopyStudioMeta">
+            <div><span>内容语气</span><strong>{formatTrafficTone(work.app_run?.input_payload?.tone)}</strong></div>
+            <div><span>创作状态</span><strong>{getWorkStatusLabel(work)}</strong></div>
+            <div><span>封面资产</span><strong>{covers.reduce((total, cover) => total + (cover.images?.length ?? 0), 0)} 张</strong></div>
+            <div><span>最近更新</span><strong>{formatDate(work.updated_at)}</strong></div>
+          </section> : null}
+
+          <main className="trafficCopyStudioCanvas">
+            <section className="trafficCopyDocumentCard">
+              <header className="trafficCopySectionHeader">
+                <div><span>01 · 文案</span><h2>发布正文</h2></div>
+                <div className="trafficCopyDocumentActions">
+                  <button className="instanceActionButton" disabled={!hasContent} onClick={() => void handleCopy("traffic-copy-studio", plainResultContent)} type="button">{copied["traffic-copy-studio"] ? "已复制" : "复制文案"}</button>
+                  <button className="instanceActionButton" disabled={!hasContent} onClick={() => handleExport(formatWorkTitle(work), plainResultContent)} type="button">导出 Word</button>
+                  {!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref}>制作视频封面 <span aria-hidden="true">→</span></a> : null}
+                </div>
+              </header>
+              <div className="trafficCopyDocumentBody" style={{ fontSize: `${fontScale}%` }}>
+                {work.app_run?.status === "running" ? <span className="trafficCopyGenerating">正在持续生成文案…</span> : <MarkdownContent content={plainResultContent} />}
+              </div>
+            </section>
+
+            <section className="trafficCoverAssetsCard">
+              <header className="trafficCopySectionHeader">
+                <div><span>02 · 封面</span><h2>视频封面资产</h2><p>每次生成都会关联回这条文案，便于以后替换、下载和复用。</p></div>
+                {!isAdminPreview && hasContent && videoCoverHref ? <a className="instanceActionButton" href={videoCoverHref}>新建封面</a> : null}
+              </header>
+              {covers.length ? <div className="trafficCoverAssetGroups">{covers.slice().reverse().map((cover) => (
+                <article className="trafficCoverAssetGroup" key={cover.workId}>
+                  <header><strong>{formatVideoCoverPlatform(cover.platform)} · {formatImageStyleLabel(cover.style)}</strong><span>{formatDate(cover.createdAt)}</span></header>
+                  <div className="trafficCoverAssetGrid">{(cover.images ?? []).map((image, index) => <figure key={image.id || image.url}><img alt={`视频封面 ${index + 1}`} src={image.url} /><figcaption><button className="instanceActionButton" onClick={() => void handleImageDownload(image.url, `视频封面-${index + 1}.png`)} type="button">下载</button><button className="instanceActionButton" onClick={() => void handleImageOpen(image.url)} type="button">查看</button></figcaption></figure>)}</div>
+                </article>
+              ))}</div> : <div className="trafficCoverEmpty"><b>还没有生成封面</b><span>{hasContent ? "选择视频号或抖音以及视觉风格，即可把封面保存到这条作品。" : "文案完成后，即可选择平台和风格制作封面。"}</span>{!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref}>去制作封面 <span aria-hidden="true">→</span></a> : null}</div>}
+            </section>
+          </main>
+        </div>
+        {previewImage ? <PreviewImageModal previewImage={previewImage} onClose={() => setPreviewImage(null)} /> : null}
       </div>
     );
   }
@@ -946,32 +1040,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
 
                 <div className="imageResultTools compact">
-                  <div className="signaturePanel">
-                    <div className="signaturePanelHeader">
-                      <strong>添加签名水印</strong>
-                      <button
-                        aria-pressed={watermarkEnabled}
-                        className={watermarkEnabled ? "signatureSwitch active" : "signatureSwitch"}
-                        onClick={() => setWatermarkEnabled((current) => !current)}
-                        type="button"
-                      >
-                        <span />
-                      </button>
-                    </div>
-                    <div className="signaturePanelInputRow">
-                      <input
-                        className="creationInput el-input__inner signatureInput"
-                        disabled={!watermarkEnabled}
-                        maxLength={50}
-                        onChange={(event) => setWatermarkText(event.target.value)}
-                        placeholder="请输入签名水印内容"
-                        type="text"
-                        value={watermarkText}
-                      />
-                      <span>{(watermarkText.trim() || defaultWatermark).length} / 50</span>
-                    </div>
-                    <p>开启后，下载和复制的图片将带有签名水印</p>
-                  </div>
+                  {work.platform === "image-card" ? <div className="signaturePanel imageContactPanel">
+                    <div className="signaturePanelHeader"><strong>添加联系方式</strong><button aria-pressed={contactEnabled} className={contactEnabled ? "signatureSwitch active" : "signatureSwitch"} disabled={!selectedContactQr} onClick={() => setContactEnabled((current) => !current)} type="button"><span /></button></div>
+                    {contactCard?.qr_codes.length ? <><select disabled={!contactEnabled} onChange={(event) => setContactQrId(event.target.value)} value={contactQrId}>{contactCard.qr_codes.map((qr, index) => <option key={qr.id} value={qr.id}>{qr.label || `二维码 ${index + 1}`}</option>)}</select><label>大小 <input disabled={!contactEnabled} max="34" min="14" onChange={(event) => setContactSize(Number(event.target.value))} type="range" value={contactSize} /> <b>{contactSize}%</b></label></> : <p>暂无可用二维码。<a href={appPath("/avatar?tab=contact")}>去数字分身添加</a></p>}
+                    <p>拖动大图中的二维码调整位置；只应用于本次下载、复制和批量下载。</p>
+                  </div> : null}
+
 
                   <div className="imageResultSummaryCard">
                     <strong>下载前确认</strong>
@@ -983,10 +1057,6 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       <div>
                         <span>{work.platform === "wechat-images" ? "配图类型" : "人物形象"}</span>
                         <strong>{imageMeta.drawPortrait}</strong>
-                      </div>
-                      <div>
-                        <span>签名状态</span>
-                        <strong>{watermarkEnabled ? (effectiveWatermark || "已开启") : "未开启"}</strong>
                       </div>
                     </div>
                     <p>这里保留最关键的确认项，避免下载前还要回头翻输入信息。</p>
@@ -1008,7 +1078,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                         <>
                           {/* Generated image URLs can be external or signed, so keep native img in the preview canvas. */}
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img alt={`当前图片结果 ${selectedImageIndex + 1}`} src={selectedImage.url} />
+                          <img alt={`当前图片结果 ${selectedImageIndex + 1}`} onLoad={(event) => measurePreviewImage(event.currentTarget)} src={selectedImage.url} />
+                          {effectiveContactOverlay && contactPreviewBounds ? <img alt="联系方式二维码预览" className="imageStudioContactQr" onPointerDown={startContactDrag} src={effectiveContactOverlay.qrUrl} style={{ width: `${Math.min(contactPreviewBounds.width, contactPreviewBounds.height) * effectiveContactOverlay.size / 100}px`, left: `${contactPreviewBounds.left + effectiveContactOverlay.x * (contactPreviewBounds.width - Math.min(contactPreviewBounds.width, contactPreviewBounds.height) * effectiveContactOverlay.size / 100) / 100}px`, top: `${contactPreviewBounds.top + effectiveContactOverlay.y * (contactPreviewBounds.height - Math.min(contactPreviewBounds.width, contactPreviewBounds.height) * effectiveContactOverlay.size / 100) / 100}px` }} /> : null}
                         </>
                       ) : (
                         <div className="imageStudioEmpty">
@@ -1054,25 +1125,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       <div><dt>生成模式</dt><dd>{formatImageModeLabel(imageMode)}</dd></div>
                     </dl>
 
-                    <div className="imageStudioWatermark">
-                      <div>
-                        <span>签名水印</span>
-                        <button
-                          aria-label={watermarkEnabled ? "关闭签名水印" : "开启签名水印"}
-                          aria-pressed={watermarkEnabled}
-                          className={watermarkEnabled ? "signatureSwitch active" : "signatureSwitch"}
-                          onClick={() => setWatermarkEnabled((current) => !current)}
-                          type="button"
-                        ><span /></button>
-                      </div>
-                      <input
-                        disabled={!watermarkEnabled}
-                        maxLength={50}
-                        onChange={(event) => setWatermarkText(event.target.value)}
-                        placeholder="输入水印文字"
-                        value={watermarkText}
-                      />
-                    </div>
+                    {work.platform === "image-card" ? <div className="imageStudioWatermark imageStudioContactControls">
+                      <div><span>联系方式二维码</span><button aria-label={contactEnabled ? "关闭联系方式二维码" : "开启联系方式二维码"} aria-pressed={contactEnabled} className={contactEnabled ? "signatureSwitch active" : "signatureSwitch"} disabled={!selectedContactQr} onClick={() => setContactEnabled((current) => !current)} type="button"><span /></button></div>
+                      {contactCard?.qr_codes.length ? <><select disabled={!contactEnabled} onChange={(event) => setContactQrId(event.target.value)} value={contactQrId}>{contactCard.qr_codes.map((qr, index) => <option key={qr.id} value={qr.id}>{qr.label || `二维码 ${index + 1}`}</option>)}</select><label>大小 <input disabled={!contactEnabled} max="34" min="14" onChange={(event) => setContactSize(Number(event.target.value))} type="range" value={contactSize} /> <b>{contactSize}%</b></label></> : <p>暂无可用二维码。<a href={appPath("/avatar?tab=contact")}>去数字分身添加</a></p>}
+                    </div> : null}
 
                     <div className="imageStudioPrimaryActions">
                       <button
@@ -2449,21 +2505,6 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                           <button className="instancePrimaryAction" onClick={() => void handleBatchDownload(imageResults)} type="button">打包下载</button>
                         </div>
                       </div>
-                      <div className="instanceWatermarkPanel">
-                        <div className="instanceWatermarkHeader">
-                          <strong>添加签名水印</strong>
-                          <span>{effectiveWatermark.length} / 50</span>
-                        </div>
-                        <input
-                          className="creationInput el-input__inner"
-                          maxLength={50}
-                          onChange={(event) => setWatermarkText(event.target.value)}
-                          placeholder="开启后，下载和复制的图片将带有签名水印"
-                          type="text"
-                          value={watermarkText}
-                        />
-                        <p>开启后，下载和复制的图片将带有签名水印</p>
-                      </div>
                       <div className="instanceImageGrid">
                         {imageResults.map((image, index) => (
                           <article className="instanceImageCard" key={image.id}>
@@ -2495,6 +2536,11 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       <span>文本预览</span>
                     </div>
                     <div className="instanceResultActions">
+                      {videoCoverHref ? (
+                        <a className="trafficCoverNextAction" href={videoCoverHref}>
+                          下一步：制作视频封面 <span aria-hidden="true">→</span>
+                        </a>
+                      ) : null}
                       <button
                         className="instanceActionButton"
                         disabled={!(streamState.content || work.content).trim()}
@@ -3567,8 +3613,8 @@ async function copyImage(url: string) {
   }
 }
 
-async function buildWatermarkedAsset(url: string, watermark: string) {
-  if (!watermark.trim() || typeof window === "undefined") return url;
+async function buildWatermarkedAsset(url: string, contact: ContactOverlay | null = null) {
+  if (!contact || typeof window === "undefined") return url;
 
   try {
     const blob = await fetchImageBlob(url);
@@ -3583,23 +3629,7 @@ async function buildWatermarkedAsset(url: string, watermark: string) {
       return url;
     }
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const fontSize = Math.max(24, Math.round(canvas.width * 0.035));
-    const paddingX = Math.max(28, Math.round(canvas.width * 0.028));
-    const paddingY = Math.max(24, Math.round(canvas.height * 0.03));
-    context.font = `700 ${fontSize}px Arial, sans-serif`;
-    context.textAlign = "right";
-    context.textBaseline = "bottom";
-    const measured = context.measureText(watermark.trim());
-    const textWidth = measured.width;
-    const backgroundWidth = textWidth + fontSize * 1.4;
-    const backgroundHeight = fontSize * 1.9;
-    const backgroundX = canvas.width - paddingX - backgroundWidth;
-    const backgroundY = canvas.height - paddingY - backgroundHeight;
-    context.fillStyle = "rgba(15, 23, 42, 0.54)";
-    roundRect(context, backgroundX, backgroundY, backgroundWidth, backgroundHeight, Math.max(12, fontSize * 0.45));
-    context.fill();
-    context.fillStyle = "rgba(255, 255, 255, 0.95)";
-    context.fillText(watermark.trim(), canvas.width - paddingX - fontSize * 0.35, canvas.height - paddingY - fontSize * 0.28);
+    await drawContactQr(context, canvas, contact);
     const result = canvas.toDataURL("image/png");
     URL.revokeObjectURL(objectUrl);
     return result;
@@ -3607,6 +3637,16 @@ async function buildWatermarkedAsset(url: string, watermark: string) {
     return url;
   }
 }
+
+async function drawContactQr(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, contact: ContactOverlay) {
+  const blob = await fetchImageBlob(contact.qrUrl); const sourceUrl = URL.createObjectURL(blob);
+  try {
+    const qr = await loadImage(sourceUrl); const side = Math.max(120, Math.round(Math.min(canvas.width, canvas.height) * contact.size / 100)); const padding = Math.max(16, Math.round(side * .11));
+    const x = Math.round(contact.x / 100 * Math.max(0, canvas.width - side)); const y = Math.round(contact.y / 100 * Math.max(0, canvas.height - side));
+    context.fillStyle = "rgba(255,255,255,.98)"; roundRect(context, x, y, side, side, Math.max(12, Math.round(side * .08))); context.fill(); context.imageSmoothingEnabled = false; context.drawImage(qr, x + padding, y + padding, side - padding * 2, side - padding * 2); context.imageSmoothingEnabled = true;
+  } finally { URL.revokeObjectURL(sourceUrl); }
+}
+
 
 function loadImage(url: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -3619,7 +3659,8 @@ function loadImage(url: string) {
 }
 
 async function fetchImageBlob(url: string) {
-  const response = await fetch(resolveImageSource(url), { cache: "no-store" });
+  const isPrivateLocalAsset = typeof window !== "undefined" && (url.startsWith("/") || url.startsWith(window.location.origin));
+  const response = await fetch(isPrivateLocalAsset ? url : resolveImageSource(url), { cache: "no-store", credentials: isPrivateLocalAsset ? "same-origin" : "omit" });
   if (!response.ok) {
     throw new Error("image_fetch_failed");
   }
@@ -4034,6 +4075,7 @@ function formatAppLabel(value?: string | null) {
   if (value === "policy-renewal-card") return "保单续保提醒卡";
   if (value === "lead-copy") return "写引流文案";
   if (value === "traffic-copy") return "流量文案";
+  if (value === "video-cover") return "视频封面制作";
   if (value === "marketing-copy") return "营销文案";
   if (value === "video-script-polish") return "口播文案精修";
   if (value === "wechat-article-polish") return "公众号文章精修";
@@ -4042,6 +4084,17 @@ function formatAppLabel(value?: string | null) {
   if (value === "wechat-studio") return "公众号文章创作";
   if (value === "ppt-maker") return "PPT轻松制作";
   return value ?? "";
+}
+
+function formatTrafficTone(value: unknown) {
+  if (value === "sharp") return "犀利观点";
+  if (value === "empathetic") return "共情提醒";
+  if (value === "analytical") return "理性拆解";
+  return "默认";
+}
+
+function formatVideoCoverPlatform(value?: string | null) {
+  return value === "douyin" ? "抖音" : "微信视频号";
 }
 
 function extractPresentationJobId(content: string) {
@@ -4422,6 +4475,7 @@ function stripImageWorkTitle(title?: string | null) {
   const cleaned = String(title ?? "")
     .replace(/^做图[｜|]/, "")
     .replace(/^公众号配图[｜|]/, "")
+    .replace(/^视频封面制作[｜|]/, "")
     .replace(/^保单续保提醒卡[｜|]/, "")
     .replace(/\billustration\b/gi, "手绘插画")
     .trim();
@@ -4440,6 +4494,12 @@ function formatImageStyleLabel(value?: string | null) {
   if (value === "renewal-handwritten") return "手写服务单";
   if (value === "renewal-warm") return "温暖顾问版";
   if (value === "renewal-business") return "简洁商务版";
+  if (value === "video-bold-opinion") return "观点大字报";
+  if (value === "video-talking-head") return "真人口播感";
+  if (value === "video-news-observation") return "新闻观察";
+  if (value === "video-family-emotion") return "家庭情绪";
+  if (value === "video-knowledge-card") return "知识卡片";
+  if (value === "video-premium-minimal") return "克制高级";
   if (value === "illustration") return "手绘插画";
   if (value === "flat") return "扁平海报";
   if (value === "realistic") return "写实质感";

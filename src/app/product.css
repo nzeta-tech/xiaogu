@@ -1906,7 +1906,9 @@ body {
 }
 
 .avatarConsolePage.coachActive {
-  grid-template-rows: auto minmax(0, 1fr);
+  /* `auto` tracks stretch in a definite-height grid, which can make the tab
+     navigation consume the spare height. Keep this row content-sized. */
+  grid-template-rows: max-content minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -6909,6 +6911,94 @@ body .writeCopyOriginPage .instanceOriginSidebarCard .writeCopyChannelNav {
   line-height: 1.95;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Traffic copy keeps one focused source input, with a fast tone decision before writing. */
+.multiChannelPolishAppPage .trafficCopyField-tone {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e6ece9;
+}
+
+.multiChannelPolishAppPage .trafficCopyField-tone .choiceGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.multiChannelPolishAppPage .trafficCopyField-tone .choiceButton {
+  min-width: 104px;
+  min-height: 42px;
+  border-radius: 10px;
+  background: #fff;
+  color: #53665d;
+  font-weight: 700;
+}
+
+.multiChannelPolishAppPage .trafficCopyField-tone .choiceButton:hover,
+.multiChannelPolishAppPage .trafficCopyField-tone .choiceButton.active {
+  border-color: #16705d;
+  background: #eff9f4;
+  color: #11634f;
+  box-shadow: inset 0 0 0 1px #16705d;
+}
+
+.multiChannelPolishAppPage .trafficCopyField-source .creationTextarea {
+  min-height: 260px;
+  line-height: 1.8;
+}
+
+.trafficCoverNextAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.trafficCoverNextAction:hover {
+  background: #0b5e58;
+  color: #fff;
+}
+
+.trafficCoverNextAction span {
+  font-size: 15px;
+}
+
+.trafficCopyStudioPage { min-height: 100vh; background: #f7faf8; }
+.trafficCopyStudioShell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding-bottom: 52px; }
+.trafficCopyStudioHero { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin: 18px 0; padding: 30px 32px; border: 1px solid #dceae4; border-radius: 14px; background: linear-gradient(125deg, #f2fbf6, #ffffff 68%); }
+.trafficCopyStudioHero > div:first-child > span, .trafficCopySectionHeader > div > span { color: #16705d; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.trafficCopyStudioHero h1 { margin: 8px 0; color: #18342c; font-size: clamp(22px, 3vw, 30px); line-height: 1.35; }
+.trafficCopyStudioHero p { max-width: 620px; margin: 0; color: #688078; font-size: 13px; line-height: 1.7; }
+.trafficCopyStudioProgress { display: flex; align-items: center; flex: 0 0 auto; color: #8aa097; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.trafficCopyStudioProgress span.done { color: #13705a; }.trafficCopyStudioProgress i { width: 26px; height: 1px; margin: 0 8px; background: #cfe0d8; }
+.trafficCopyStudioMeta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; overflow: hidden; margin-bottom: 18px; border: 1px solid #e0eae5; border-radius: 10px; background: #e0eae5; }
+.trafficCopyStudioMeta > div { padding: 14px 17px; background: #fff; }.trafficCopyStudioMeta span { display: block; color: #8a9c94; font-size: 11px; }.trafficCopyStudioMeta strong { display: block; margin-top: 5px; color: #29463d; font-size: 13px; }
+.trafficCopyStudioCanvas { display: grid; gap: 18px; }.trafficCopyDocumentCard, .trafficCoverAssetsCard { border: 1px solid #e0eae5; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(29, 68, 53, .035); }
+.trafficCopySectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid #edf2ef; }.trafficCopySectionHeader h2 { margin: 5px 0 0; color: #203b32; font-size: 18px; }.trafficCopySectionHeader p { margin: 5px 0 0; color: #80918a; font-size: 12px; }.trafficCopyDocumentActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.trafficCopyDocumentBody { width: min(780px, 100%); min-height: 420px; padding: 30px 24px 38px; color: #2c423a; font-size: 16px; line-height: 2; }.trafficCopyDocumentBody .markdownMessage { line-height: 2; }.trafficCopyGenerating { color: #5e8879; }
+.trafficCoverAssetsCard { padding-bottom: 8px; }.trafficCoverAssetGroups { display: grid; gap: 16px; padding: 18px 24px 24px; }.trafficCoverAssetGroup { padding: 14px; border: 1px solid #e5eeea; border-radius: 10px; background: #fbfdfc; }.trafficCoverAssetGroup > header { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 12px; color: #34564a; font-size: 12px; }.trafficCoverAssetGroup > header span { color: #91a199; }
+.trafficCoverAssetGrid { display: flex; flex-wrap: wrap; gap: 12px; }.trafficCoverAssetGrid figure { width: min(188px, 100%); margin: 0; overflow: hidden; border: 1px solid #e5eeea; border-radius: 8px; background: #fff; }.trafficCoverAssetGrid img { display: block; width: 100%; aspect-ratio: 9 / 16; object-fit: cover; }.trafficCoverAssetGrid figcaption { display: flex; gap: 6px; padding: 8px; }
+.trafficCoverEmpty { display: grid; justify-items: start; gap: 8px; padding: 32px 24px; color: #80918a; font-size: 13px; }.trafficCoverEmpty b { color: #31574a; font-size: 15px; }.trafficCoverEmpty .trafficCoverNextAction { margin-top: 5px; }
+
+@media (max-width: 640px) {
+  .multiChannelPolishAppPage .trafficCopyField-tone .choiceButton {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .simpleCopyResultBlock .instanceResultToolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .trafficCopyStudioShell { width: min(100% - 20px, 1120px); }.trafficCopyStudioHero { display: block; padding: 22px 20px; }.trafficCopyStudioProgress { margin-top: 20px; overflow-x: auto; }.trafficCopyStudioMeta { grid-template-columns: repeat(2, 1fr); }.trafficCopySectionHeader { align-items: flex-start; flex-direction: column; padding: 18px; }.trafficCopyDocumentActions { justify-content: flex-start; }.trafficCopyDocumentBody { min-height: 320px; padding: 24px 18px 30px; }.trafficCoverAssetGroups { padding: 14px 18px 18px; }
 }
 
 /* Compact source library: compare ideas first, then open the source when needed. */

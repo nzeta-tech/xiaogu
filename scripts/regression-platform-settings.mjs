@@ -4,8 +4,8 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 const base = process.env.REGRESSION_BASE_URL ?? "http://localhost:3000";
-const password = "Regression123!";
-const newPassword = "Regression789!";
+const password = process.env.REGRESSION_PASSWORD ?? "Regression123!";
+const newPassword = process.env.REGRESSION_NEW_PASSWORD ?? "Regression789!";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const messages = [];
 const smtp = new SMTPServer({ disabledCommands: ["AUTH"], hideSTARTTLS: true, onData(stream, _session, callback) { let raw = ""; stream.on("data", (chunk) => { raw += chunk.toString(); }); stream.on("end", () => { messages.push(raw); callback(); }); } });

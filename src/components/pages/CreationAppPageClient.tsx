@@ -13,7 +13,7 @@ import { usePageMeta } from "@/lib/client/page-meta";
 import type { AvatarVisualAsset } from "@/lib/avatar/types";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 import { articleDocx } from "@/lib/client/docx";
-import { createCreationTraceId, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
+import { browserErrorDetail, createCreationTraceId, rejectionErrorDetail, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
 
 type FieldValue = string | string[];
 
@@ -84,17 +84,19 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   });
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
+  const incomingPrompt = searchParams.get("prompt")?.trim() ?? "";
+  const trafficParentWorkId = searchParams.get("parent_work_id")?.trim() ?? "";
+  const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
+  const promptFieldId = promptField?.id;
   const [values, setValues] = useState<Record<string, FieldValue>>(() => {
     const from = searchParams.get("from");
     const initialValues = createInitialValues(pageApp, from === "workspace" || from === "create");
-    const initialPrompt = searchParams.get("prompt")?.trim();
-    const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
     const sourceUrl = searchParams.get("source_url")?.trim();
     const sourceTitle = searchParams.get("source_title")?.trim();
     const sourcePlatform = searchParams.get("source_platform")?.trim();
     return {
       ...initialValues,
-      ...(initialPrompt && promptField ? { [promptField.id]: initialPrompt } : {}),
+      ...(incomingPrompt && promptFieldId ? { [promptFieldId]: incomingPrompt } : {}),
       ...(sourceUrl && isLinkRemix ? { source_url: sourceUrl } : {}),
       ...(sourceTitle && isLinkRemix ? { source_title: sourceTitle } : {}),
       ...(sourcePlatform && isLinkRemix ? { source_platform: sourcePlatform } : {}),
@@ -179,8 +181,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   useEffect(() => {
     const traceId = createCreationTraceId();
     trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "page_view", detail: { visibility: document.visibilityState } });
-    const reportError = (event: ErrorEvent) => trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "window_error", detail: { visibility: document.visibilityState } });
-    const reportRejection = () => trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "unhandled_rejection", detail: { visibility: document.visibilityState } });
+    const reportError = (event: ErrorEvent) => trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "window_error", detail: { visibility: document.visibilityState, ...browserErrorDetail(event) } });
+    const reportRejection = (event: PromiseRejectionEvent) => trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "unhandled_rejection", detail: { visibility: document.visibilityState, ...rejectionErrorDetail(event) } });
     window.addEventListener("error", reportError);
     window.addEventListener("unhandledrejection", reportRejection);
     return () => { window.removeEventListener("error", reportError); window.removeEventListener("unhandledrejection", reportRejection); };
@@ -274,6 +276,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         setValues((current) => ({
           ...current,
           ...restored,
+          // A link from today's inspiration is an explicit, fresh creation
+          // request and must win over the previously autosaved local draft.
+          ...(incomingPrompt && promptFieldId ? { [promptFieldId]: incomingPrompt } : {}),
           ...(incomingLinkRemixSourceUrl ? { source_url: incomingLinkRemixSourceUrl } : {}),
           ...(incomingLinkRemixSourceTitle ? { source_title: incomingLinkRemixSourceTitle } : {}),
           ...(incomingLinkRemixSourcePlatform ? { source_platform: incomingLinkRemixSourcePlatform } : {}),
@@ -284,7 +289,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     } catch {
       window.sessionStorage.removeItem(draftKey);
     }
-  }, [draftKey, incomingLinkRemixSourcePlatform, incomingLinkRemixSourceTitle, incomingLinkRemixSourceUrl]);
+  }, [draftKey, incomingLinkRemixSourcePlatform, incomingLinkRemixSourceTitle, incomingLinkRemixSourceUrl, incomingPrompt, promptFieldId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -347,7 +352,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
         method: "POST",
         headers: { "content-type": "application/json", "x-creation-trace-id": traceId },
-        body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "" } }),
+        body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "", ...(trafficParentWorkId ? { traffic_parent_work_id: trafficParentWorkId } : {}) } }),
       });
     } catch {
       trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_failed", errorCode: "network_error" });
@@ -612,7 +617,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     document.getElementById(`image-upload-${fieldId}`)?.click();
   }
 
-  async function handleFileChange(fieldId: string, fileList: FileList | null) {
+  async function handleFileChange(fieldId: string, fileList: FileList | readonly File[] | null) {
     const file = fileList?.[0];
     if (!file) return;
 
@@ -1293,7 +1298,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             ) : null;
 
             return (
-            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix })} id={`creation-field-${field.id}`} key={field.id}>
+            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix, isTrafficCopy: app.slug === "traffic-copy" })} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
                   <span className="step-number">{index + 1}</span>
@@ -1753,6 +1758,20 @@ function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
       avatar_visual_asset_ids: [],
     };
   }
+  if (app.slug === "traffic-copy") {
+    return {
+      ...base,
+      tone: "default",
+    };
+  }
+  if (app.slug === "video-cover") {
+    return {
+      ...base,
+      platform: "wechat_video",
+      style: "video-bold-opinion",
+      ratio: "9:16",
+    };
+  }
   if (app.slug === "write-copy") {
     return {
       ...base,
@@ -2120,7 +2139,7 @@ function buildAppPageClassName(appFamily: CreationAppFamily, appSlug?: string, e
 
 function getCreationFieldClassName(
   fieldId: string,
-  flags: { isImageCard: boolean; isLiveScript: boolean; isXiaohongshuCheck: boolean; isLinkRemix: boolean },
+  flags: { isImageCard: boolean; isLiveScript: boolean; isXiaohongshuCheck: boolean; isLinkRemix: boolean; isTrafficCopy: boolean },
 ) {
   const classes = ["field-card", "creationField"];
   if (flags.isImageCard) classes.push("imageCardField");
@@ -2135,6 +2154,7 @@ function getCreationFieldClassName(
     if (fieldId === "remix_strategy") classes.push("linkRemixStrategyField");
     if (fieldId === "article_length") classes.push("linkRemixLengthField");
   }
+  if (flags.isTrafficCopy) classes.push("trafficCopyField", `trafficCopyField-${fieldId}`);
   return classes.join(" ");
 }
 
@@ -2173,7 +2193,7 @@ function renderField({
   uploadError: string;
   uploadSuccess: string;
   uploading: boolean;
-  onFileChange: (fileList: FileList | null) => void;
+  onFileChange: (fileList: FileList | readonly File[] | null) => void;
   styleOptionLimit?: number;
   styleRecommendation?: WechatStyleRecommendation;
   styleRecommendations?: WechatStyleRecommendation[];
@@ -2225,6 +2245,15 @@ function renderField({
       />
     );
   }
+
+  const supportsImagePaste = Boolean(field.accept?.includes("image/"));
+  const pasteImage = (event: React.ClipboardEvent<HTMLElement>) => {
+    if (!supportsImagePaste) return;
+    const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+    if (!images.length) return;
+    event.preventDefault();
+    onFileChange(images);
+  };
 
   if (field.type === "text_or_file") {
     return (
@@ -2415,7 +2444,12 @@ function renderField({
   }
 
   return (
-    <div className={isImageCard ? "imageCardFileField" : "fileFieldPlaceholder"}>
+    <div
+      aria-label={supportsImagePaste ? `${field.label}，可粘贴图片` : undefined}
+      className={isImageCard ? "imageCardFileField" : "fileFieldPlaceholder"}
+      onPaste={pasteImage}
+      tabIndex={supportsImagePaste ? 0 : undefined}
+    >
       <button className="imageCardUploadButton" onClick={() => openFilePicker(field.id)} type="button">{uploading ? "上传中..." : "选择文件"}</button>
       <input
         accept={field.accept}
@@ -2427,6 +2461,7 @@ function renderField({
       {uploadName ? <span className="imageCardUploadName">{uploadName}</span> : null}
       {uploadError ? <span className="imageCardUploadError">{uploadError}</span> : null}
       {uploadSuccess ? <span className="imageCardUploadSuccess">{uploadSuccess}</span> : null}
+      {supportsImagePaste ? <span className="imageCardPasteHint">点击此处后可直接粘贴图片</span> : null}
     </div>
   );
 }

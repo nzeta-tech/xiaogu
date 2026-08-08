@@ -99,3 +99,20 @@ export type AvatarVisualAsset = {
   updated_at: string;
   content_url: string;
 };
+
+export type AvatarContactCard = {
+  display_name: string;
+  organization: string;
+  call_to_action: string;
+  service_motto: string;
+  phone: string;
+  email: string;
+  placement: "bottom-right" | "bottom-bar";
+  enabled_by_default: boolean;
+  business_card_style: "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender";
+  default_qr_code_id: string | null;
+  qr_codes: Array<{ id: string; label: string; qr_code_url: string; original_url: string; created_at: string }>;
+  has_qr_code: boolean;
+  qr_code_url: string | null;
+  updated_at: string | null;
+};

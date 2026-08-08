@@ -187,6 +187,18 @@ const workspaceCards: WorkspaceCard[] = [
     goals: ["attention"],
   },
   {
+    slug: "video-cover",
+    appSlug: "video-cover",
+    name: "短视频封面",
+    emoji: "🎬",
+    pointsLabel: "5",
+    badge: "新",
+    description: "把口播稿、流量文案或一个明确观点做成适合视频号和抖音发布的竖版视频封面。",
+    hint: "先提炼一个最有张力的核心判断，再选择平台和封面风格生成。",
+    actionLabel: "使用",
+    goals: ["attention", "trust"],
+  },
+  {
     slug: "marketing-copy",
     appSlug: "marketing-copy",
     name: "营销文案",
@@ -370,6 +382,7 @@ const hiddenWorkspaceCardSlugs = new Set([
   "personality-card",
   "recruit-script",
   "recruit-followup",
+  "ip-positioning",
 ]);
 
 const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCardSlugs.has(card.slug));
@@ -379,10 +392,11 @@ const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCa
 const workspaceCardPriority = new Map([
   ["xiaohongshu-studio", 0],
   ["traffic-copy", 1],
-  ["image-card", 2],
-  ["wechat-studio", 3],
-  ["ppt-maker", 4],
-  ["link-remix", 5],
+  ["video-cover", 2],
+  ["image-card", 3],
+  ["wechat-studio", 4],
+  ["ppt-maker", 5],
+  ["link-remix", 6],
 ]);
 
 const workspaceIconUrls: Record<string, string> = {
@@ -395,6 +409,7 @@ const workspaceIconUrls: Record<string, string> = {
   "policy-renewal-card": "/icons/creation/calendar.webp",
   "lead-copy": "/icons/creation/sprout.webp",
   "traffic-copy": "/icons/creation/lightning.webp",
+  "video-cover": "/icons/creation/landscape.webp",
   "marketing-copy": "/icons/creation/megaphone.webp",
   "lead-package": "/icons/creation/book-pencil.webp",
   "voice-note-copy": "/icons/creation/microphone.webp",
@@ -622,14 +637,14 @@ function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {
 
 function getCardOutputLabel(card: WorkspaceCard) {
   if (card.slug === "wechat-studio") return "文章 + 配图";
-  if (card.slug === "image-card" || card.slug === "wechat-images" || card.slug === "policy-renewal-card") return "图片结果";
+  if (card.slug === "image-card" || card.slug === "wechat-images" || card.slug === "policy-renewal-card" || card.slug === "video-cover") return "图片结果";
   if (card.slug.includes("check")) return "风险报告";
   if (card.slug === "topic-picker") return "6 个选题";
   return "可编辑文案";
 }
 
 function getWorkspaceCategory(card: WorkspaceCard): Exclude<WorkspaceCategory, "all"> {
-  if (["video-script-polish", "voice-note-copy", "live-script"].includes(card.slug)) return "video";
+  if (["video-script-polish", "voice-note-copy", "live-script", "video-cover"].includes(card.slug)) return "video";
   if (["image-card", "wechat-images", "policy-renewal-card"].includes(card.slug)) return "image";
   if (["topic-picker", "ip-positioning", "letter"].includes(card.slug)) return "brand";
   return "copy";
@@ -655,6 +670,7 @@ function getCardInspiration(card: WorkspaceCard) {
     "live-script": "从开场、讲解到互动收尾，搭好一场直播的完整节奏。",
     "lead-copy": "从一个具体问题切入，让真正需要的人愿意了解。",
     "traffic-copy": "借一个当下话题，说清普通人真正关心的风险。",
+    "video-cover": "把最重要的那句判断，做成让人愿意点开的短视频首屏。",
     "marketing-copy": "不硬推产品，也能把方案价值讲得具体可信。",
     "topic-picker": "围绕你的客群，一次打开六个可持续表达方向。",
     "general-content": "把生活感受和真实经历，沉淀成有共鸣的内容。",

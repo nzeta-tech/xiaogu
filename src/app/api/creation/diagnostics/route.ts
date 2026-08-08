@@ -10,7 +10,11 @@ export async function POST(request: Request) {
   const parsed = payload.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return new Response(null, { status: 400 });
   const user = await getSessionUser({ allowTermsMismatch: true });
-  const detail = Object.fromEntries(Object.entries(parsed.data.detail ?? {}).filter(([key, value]) => ["clientSessionId", "online", "userAgent", "durationMs", "visibility"].includes(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")));
-  await trySaveCreationDiagnostic({ userId: user?.id, ...parsed.data, detail });
+  const allowedDetailKeys = new Set(["clientSessionId", "online", "userAgent", "durationMs", "visibility", "errorName", "errorMessage", "errorStack", "errorSource", "errorLine", "errorColumn"]);
+  const detail = Object.fromEntries(Object.entries(parsed.data.detail ?? {}).flatMap(([key, value]) => {
+    if (!allowedDetailKeys.has(key) || !["string", "number", "boolean"].includes(typeof value)) return [];
+    return [[key, typeof value === "string" ? value.slice(0, 65_536) : value]];
+  }));
+  await trySaveCreationDiagnostic({ userId: user?.id, userEmail: user?.email, ...parsed.data, detail });
   return new Response(null, { status: 204 });
 }

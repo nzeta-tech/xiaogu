@@ -16,6 +16,7 @@ import type {
   AvatarVersion,
   AvatarCoachConversation,
   AvatarCoachMessage,
+  AvatarContactCard,
 } from "@/lib/avatar/types";
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 
@@ -34,9 +35,10 @@ type AvatarWorkspace = {
     updatedAt: string;
   } | null;
   questionnaire: { completionPercent: number; updatedAt: string } | null;
+  contactCard: AvatarContactCard;
 };
 
-type AvatarTab = "coach" | "overview" | "memory" | "visual" | "evolution" | "lab" | "sources" | "versions";
+type AvatarTab = "coach" | "overview" | "memory" | "visual" | "contact" | "evolution" | "lab" | "sources" | "versions";
 type CoachNextStep = { title: string; description: string; href: string };
 
 const tabs: Array<{ id: AvatarTab; label: string; description: string }> = [
@@ -44,6 +46,7 @@ const tabs: Array<{ id: AvatarTab; label: string; description: string }> = [
   { id: "overview", label: "分身主页", description: "成熟度与当前状态" },
   { id: "memory", label: "我的记忆", description: "查看和管理长期记忆" },
   { id: "visual", label: "形象资产", description: "管理可复用的本人照片" },
+  { id: "contact", label: "联系名片", description: "二维码与发布署名" },
   { id: "evolution", label: "进化中心", description: "确认分身如何改变" },
   { id: "lab", label: "分身试验室", description: "对比普通 AI 与你的分身" },
   { id: "sources", label: "学习资料", description: "文章、录音与故事来源" },
@@ -93,6 +96,7 @@ export function ProfilePageClient() {
   const [coachProfilePrompt, setCoachProfilePrompt] = useState(false);
   const [coachThinkingStep, setCoachThinkingStep] = useState(-1);
   const [coachStreamingContent, setCoachStreamingContent] = useState("");
+  const [contactDraft, setContactDraft] = useState({ displayName: "", organization: "", callToAction: "扫码联系我", serviceMotto: "保险不是推销，是长期的守护", phone: "", email: "", businessCardStyle: "classic" as "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender", defaultQrCodeId: null as string | null });
   const coachInputRef = useRef<HTMLTextAreaElement | null>(null);
   usePageMeta({ title: "数字分身 · 人设与表达", description: `数字分身 / ${tabs.find((tab) => tab.id === activeTab)?.label ?? "分身主页"}` });
 
@@ -105,6 +109,7 @@ export function ProfilePageClient() {
         return;
       }
       setWorkspace(payload.avatar);
+      setContactDraft({ displayName: payload.avatar.contactCard.display_name, organization: payload.avatar.contactCard.organization, callToAction: payload.avatar.contactCard.call_to_action, serviceMotto: payload.avatar.contactCard.service_motto, phone: payload.avatar.contactCard.phone, email: payload.avatar.contactCard.email, businessCardStyle: payload.avatar.contactCard.business_card_style, defaultQrCodeId: payload.avatar.contactCard.default_qr_code_id });
       setError("");
     } catch (cause) {
       if (!(cause instanceof DOMException && cause.name === "AbortError")) setError("数字分身暂时无法加载");
@@ -310,6 +315,18 @@ export function ProfilePageClient() {
     }
   }
 
+  async function saveContactCard(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy("contact-card"); setError(""); setNotice("");
+    try { const response = await fetch(apiPath("/api/avatar/contact-card"), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(contactDraft) }); const payload = await response.json() as { error?: string }; if (!response.ok) { setError(payload.error ?? "联系名片保存失败"); return; } setNotice("联系名片已保存，知识卡片下载时可直接使用。"); await loadAvatar(); } catch { setError("联系名片保存失败，请检查网络后重试"); } finally { setBusy(""); }
+  }
+
+  async function uploadContactQr(file: File | undefined) {
+    if (!file) return; setBusy("contact-qr"); setError(""); setNotice(""); const form = new FormData(); form.append("file", file);
+    try { const response = await fetch(apiPath("/api/avatar/contact-card"), { method: "POST", body: form }); const payload = await response.json() as { error?: string }; if (!response.ok) { setError(payload.error ?? "二维码上传失败"); return; } setNotice("联系二维码已更新。"); await loadAvatar(); } catch { setError("二维码上传失败，请检查网络后重试"); } finally { setBusy(""); }
+  }
+
+  async function deleteContactQr(id: string) { if (!window.confirm("确认删除这个联系二维码？")) return; setBusy("contact-qr"); try { const response = await fetch(apiPath(`/api/avatar/contact-card?id=${encodeURIComponent(id)}`), { method: "DELETE" }); const payload = await response.json() as { error?: string }; if (!response.ok) { setError(payload.error ?? "二维码删除失败"); return; } setNotice("二维码已删除。"); await loadAvatar(); } catch { setError("二维码删除失败，请检查网络后重试"); } finally { setBusy(""); } }
+
   return (
     <div className={`avatarConsolePage ${activeTab === "coach" ? "coachActive" : ""}`}>
       {error ? <div className="alertPanel">{error}</div> : null}
@@ -466,6 +483,7 @@ export function ProfilePageClient() {
       {activeTab === "versions" ? (
         <VersionsView privacy={workspace?.privacy ?? emptyPrivacy} versions={workspace?.versions ?? []} onAction={performAction} />
       ) : null}
+      {activeTab === "contact" ? <ContactCardView card={workspace?.contactCard ?? null} draft={contactDraft} busy={busy} onChange={setContactDraft} onSave={saveContactCard} onUpload={uploadContactQr} onDelete={deleteContactQr} /> : null}
     </div>
   );
 }
@@ -485,6 +503,61 @@ const visualScopeOptions = [
   { id: "policy-renewal-card", label: "续费提醒卡" },
   { id: "video-cover", label: "视频封面" },
 ];
+
+function ContactCardView({ card, draft, busy, onChange, onSave, onUpload, onDelete }: {
+  card: AvatarContactCard | null;
+  draft: { displayName: string; organization: string; callToAction: string; serviceMotto: string; phone: string; email: string; businessCardStyle: "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender"; defaultQrCodeId: string | null };
+  busy: string;
+  onChange: (value: { displayName: string; organization: string; callToAction: string; serviceMotto: string; phone: string; email: string; businessCardStyle: "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender"; defaultQrCodeId: string | null }) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpload: (file: File | undefined) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [fullQr, setFullQr] = useState<{ url: string; label: string } | null>(null);
+  const [previewQrIds, setPreviewQrIds] = useState<string[]>([]);
+  useEffect(() => { setPreviewQrIds((current) => { const valid = current.filter((id) => card?.qr_codes.some((qr) => qr.id === id)); if (valid.length) return valid; return card?.default_qr_code_id ? [card.default_qr_code_id] : card?.qr_codes[0] ? [card.qr_codes[0].id] : []; }); }, [card?.default_qr_code_id, card?.qr_codes]);
+  const previewQrs = card?.qr_codes.filter((qr) => previewQrIds.includes(qr.id)) ?? [];
+  return <section className="avatarVisualView">
+    <div className="avatarVisualHeader"><div><span>发布身份</span><h2>我的联系名片</h2><p>二维码不会交给图片模型生成；小谷会在下载知识卡片时清晰、可扫码地合成到成图上。</p></div></div>
+    <div className="avatarContactLayout">
+      <form className="avatarSideForm avatarContactForm" onSubmit={(event) => void onSave(event)}>
+        <label>顾问名称<input maxLength={40} onChange={(event) => onChange({ ...draft, displayName: event.target.value })} placeholder="例如：林顾问" value={draft.displayName} /></label>
+        <label>机构名称（可选）<input maxLength={60} onChange={(event) => onChange({ ...draft, organization: event.target.value })} placeholder="例如：安心家庭保险工作室" value={draft.organization} /></label>
+        <label>引导语<input maxLength={50} onChange={(event) => onChange({ ...draft, callToAction: event.target.value })} required value={draft.callToAction} /></label>
+        <label>服务信条<input maxLength={60} onChange={(event) => onChange({ ...draft, serviceMotto: event.target.value })} placeholder="例如：保险不是推销，是长期的守护" value={draft.serviceMotto} /></label>
+        <label>手机联系方式（可选）<input inputMode="tel" maxLength={30} onChange={(event) => onChange({ ...draft, phone: event.target.value })} placeholder="例如：138 0000 0000" value={draft.phone} /></label>
+        <label>邮箱（可选）<input inputMode="email" maxLength={120} onChange={(event) => onChange({ ...draft, email: event.target.value })} placeholder="例如：name@example.com" value={draft.email} /></label>
+        <div className="avatarBusinessStyles"><span>名片效果</span>{([{ id: "classic", label: "经典商务" }, { id: "emerald", label: "翡翠专业" }, { id: "editorial", label: "留白编辑" }, { id: "ivory", label: "温柔雅致" }, { id: "garden", label: "花园手记" }, { id: "lavender", label: "柔光质感" }] as const).map((style) => <button className={draft.businessCardStyle === style.id ? "active" : ""} key={style.id} onClick={() => onChange({ ...draft, businessCardStyle: style.id })} type="button">{style.label}</button>)}</div>
+        <button className="primaryButton" disabled={busy === "contact-card"} type="submit">{busy === "contact-card" ? "保存中..." : "保存联系名片"}</button>
+      </form>
+      <aside className="avatarContactQrPanel"><strong>联系二维码（最多 8 个）</strong><small>勾选 1–3 个用于当前名片预览和下载。</small><div className="avatarQrList">{card?.qr_codes.map((qr) => { const selected = previewQrIds.includes(qr.id); return <article className={selected ? "active" : ""} key={qr.id}><button onClick={() => onChange({ ...draft, defaultQrCodeId: qr.id })} type="button"><img alt={qr.label || "联系二维码"} src={qr.qr_code_url} /><span>{qr.label || "未命名二维码"}</span></button><div><button disabled={!selected && previewQrIds.length >= 3} onClick={() => setPreviewQrIds((current) => selected ? current.filter((id) => id !== qr.id) : [...current, qr.id])} type="button">{selected ? "移出预览" : "加入预览"}</button><button onClick={() => setFullQr({ url: qr.original_url, label: `${qr.label || "联系二维码"}（原始上传图）` })} type="button">查看全图</button><button aria-label="删除二维码" className="danger" disabled={busy === "contact-qr"} onClick={() => void onDelete(qr.id)} type="button">删除</button></div></article>; })}</div>{!card?.has_qr_code ? <p>还没有上传二维码</p> : null}<label className="avatarVisualUploadButton">{busy === "contact-qr" ? "处理中..." : "上传二维码"}<input accept="image/jpeg,image/png,image/webp" disabled={busy === "contact-qr" || (card?.qr_codes.length ?? 0) >= 8} multiple onChange={(event) => { Array.from(event.target.files ?? []).forEach((file) => void onUpload(file)); event.currentTarget.value = ""; }} type="file" /></label></aside>
+    </div>
+    <BusinessCardPreview draft={draft} qrUrls={previewQrs.map((qr) => qr.qr_code_url)} />
+    {fullQr ? <div className="avatarQrFullPreview" onClick={() => setFullQr(null)} role="presentation"><div onClick={(event) => event.stopPropagation()}><button aria-label="关闭全图预览" onClick={() => setFullQr(null)} type="button">×</button><strong>{fullQr.label}</strong><img alt={`${fullQr.label}全图`} src={fullQr.url} /></div></div> : null}
+  </section>;
+}
+
+function BusinessCardPreview({ draft, qrUrls }: { draft: { displayName: string; organization: string; callToAction: string; serviceMotto: string; phone: string; email: string; businessCardStyle: "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender" }; qrUrls: string[] }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => { void renderBusinessCard(canvasRef.current, draft, qrUrls); }, [draft, qrUrls]);
+  function download() { const canvas = canvasRef.current; if (!canvas) return; const link = document.createElement("a"); link.download = `${draft.displayName || "我的"}-联系名片.png`; link.href = canvas.toDataURL("image/png"); link.click(); }
+  return <div className="avatarBusinessCardPreview"><div><span>名片成品预览</span><strong>专业电子名片</strong><small>选择效果后可直接下载 PNG，用于社交主页、朋友圈或线下物料。</small></div><canvas height="675" ref={canvasRef} width="1200" /><button className="primaryButton" onClick={download} type="button">下载名片 PNG</button></div>;
+}
+
+async function renderBusinessCard(canvas: HTMLCanvasElement | null, draft: { displayName: string; organization: string; callToAction: string; serviceMotto: string; phone: string; email: string; businessCardStyle: "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender" }, qrUrls: string[]) {
+  if (!canvas) return; const ctx = canvas.getContext("2d"); if (!ctx) return; const w = canvas.width, h = canvas.height;
+  const styles = { classic: { bg: "#102a43", accent: "#c9a66b", text: "#f8fafc", sub: "#bed1df" }, emerald: { bg: "#0c4a43", accent: "#b6e3ce", text: "#f2fbf7", sub: "#b8d9ce" }, editorial: { bg: "#f7f3ea", accent: "#1f4d43", text: "#1f2937", sub: "#62737a" }, ivory: { bg: "#fbf4ed", accent: "#ae715b", text: "#463631", sub: "#8a7167" }, garden: { bg: "#e9f1e8", accent: "#547963", text: "#244238", sub: "#6f8577" }, lavender: { bg: "#efebf6", accent: "#76679a", text: "#352e4c", sub: "#756e89" } } as const; const theme = styles[draft.businessCardStyle];
+  ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, w, h); ctx.fillStyle = theme.accent; ctx.globalAlpha = .18; ctx.beginPath(); ctx.arc(w * .86, h * .1, 260, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+  if (draft.businessCardStyle === "editorial") { ctx.strokeStyle = "#d5c5a0"; ctx.lineWidth = 2; ctx.strokeRect(34, 34, w - 68, h - 68); }
+  ctx.fillStyle = theme.accent; ctx.font = "700 26px Arial, sans-serif"; ctx.fillText(draft.organization || "专业保险服务", 80, 105); ctx.fillStyle = theme.text; ctx.font = "700 68px Arial, sans-serif"; ctx.fillText(draft.displayName || "你的姓名", 80, 250); ctx.fillStyle = theme.sub; ctx.font = "400 30px Arial, sans-serif"; ctx.fillText("保险顾问 · 专业服务", 84, 310); ctx.fillStyle = theme.accent; ctx.fillRect(82, 360, 120, 5); ctx.fillStyle = theme.text; ctx.font = "600 34px Arial, sans-serif"; ctx.fillText(draft.callToAction || "扫码联系我", 82, 438);
+  const count = Math.min(3, qrUrls.length); const qrSize = count === 1 ? 220 : count === 2 ? 160 : 145; const positions = count === 1 ? [[900, 152]] : count === 2 ? [[850, 240], [1030, 240]] : [[875, 94], [1045, 94], [960, 280]];
+  for (let index = 0; index < Math.max(1, count); index += 1) { const [x, y] = positions[index] ?? [900, 152]; ctx.fillStyle = "#fff"; ctx.fillRect(x, y, qrSize, qrSize); const url = qrUrls[index]; if (url) { try { const image = await loadBusinessCardImage(url); const inset = Math.round(qrSize * .1); ctx.imageSmoothingEnabled = false; ctx.drawImage(image, x + inset, y + inset, qrSize - inset * 2, qrSize - inset * 2); ctx.imageSmoothingEnabled = true; } catch { drawQrPlaceholder(ctx, x, y, qrSize); } } else drawQrPlaceholder(ctx, x, y, qrSize); }
+  const contactLines = [["电话", draft.phone.trim()], ["邮箱", draft.email.trim()]].filter((item): item is [string, string] => Boolean(item[1]));
+  if (contactLines.length) { ctx.fillStyle = theme.sub; ctx.font = "400 22px Arial, sans-serif"; contactLines.forEach(([label, value], index) => ctx.fillText(`${label}  ${value}`, 82, 505 + index * 34)); }
+  ctx.fillStyle = theme.accent; ctx.font = "600 22px Arial, sans-serif"; ctx.fillText(draft.serviceMotto || "保险不是推销，是长期的守护", 82, contactLines.length ? 605 : 570);
+}
+function drawQrPlaceholder(ctx: CanvasRenderingContext2D, x = 900, y = 152, size = 220) { ctx.fillStyle = "#d7e2dd"; ctx.fillRect(x, y, size, size); ctx.fillStyle = "#49665b"; ctx.font = "600 20px Arial, sans-serif"; ctx.textAlign = "center"; ctx.fillText("选择二维码", x + size / 2, y + size / 2); ctx.textAlign = "left"; }
+function loadBusinessCardImage(url: string) { return new Promise<HTMLImageElement>((resolve, reject) => { const image = document.createElement("img"); image.onload = () => resolve(image); image.onerror = reject; image.src = url; }); }
 
 function VisualAssetsView({
   photos,

@@ -4,6 +4,7 @@ import { getAvatarWorkspace, resolveEvolutionProposal } from "@/lib/avatar/store
 import { requireSessionUser } from "@/lib/auth/session";
 import { query } from "@/lib/db/client";
 import { tryGetLatestThinkingProfileSnapshot, tryGetLatestQuestionnaire } from "@/lib/db/repositories";
+import { tryGetAvatarContactCard } from "@/lib/avatar/contact-card";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -47,10 +48,11 @@ export async function GET() {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
   try {
-    const [workspace, snapshot, questionnaire] = await Promise.all([
+    const [workspace, snapshot, questionnaire, contactCard] = await Promise.all([
       getAvatarWorkspace(user.id),
       tryGetLatestThinkingProfileSnapshot(user.id),
       tryGetLatestQuestionnaire(user.id),
+      tryGetAvatarContactCard(user.id),
     ]);
     return Response.json({
       avatar: {
@@ -66,6 +68,7 @@ export async function GET() {
         questionnaire: questionnaire
           ? { completionPercent: questionnaire.completion_percent, updatedAt: questionnaire.updated_at }
           : null,
+        contactCard,
       },
     });
   } catch {

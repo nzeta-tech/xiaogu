@@ -285,13 +285,27 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     setActiveTab(tab);
   }
 
-  async function uploadArticleImages(files: FileList | null) {
+  async function uploadArticleImages(files: FileList | readonly File[] | null) {
     if (!files?.length) return;
     const selected = Array.from(files).filter((file) => file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024).slice(0, Math.max(0, 8 - uploadedImages.length));
     const next = await Promise.all(selected.map(async (file, index) => ({ id: `upload-${Date.now()}-${index}`, url: await readImageFile(file) })));
     setUploadedImages((current) => [...current, ...next].slice(0, 8));
     if (!cover && next[0]) setCover(next[0]);
     setMessage(`已上传 ${next.length} 张配图；你仍可以继续生成 AI 配图。`);
+  }
+
+  function pasteArticleImages(event: React.ClipboardEvent<HTMLElement>) {
+    const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    void uploadArticleImages(files);
+  }
+
+  function pasteCover(event: React.ClipboardEvent<HTMLElement>) {
+    const file = Array.from(event.clipboardData.files).find((item) => item.type.startsWith("image/"));
+    if (!file) return;
+    event.preventDefault();
+    void uploadCover(file);
   }
 
   async function uploadCover(file: File | undefined) {
@@ -384,7 +398,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     {activeTab === "visual" && content && <section className="wechatStudioEditor">
       <div className="studioSectionTitle"><div><span>文章配图</span><h2>选择配图风格</h2></div><b className="studioSelectedStyle">已选：{styles.find((item) => item.value === style)?.label}</b></div>
       <div className="studioVisualStyle"><div className="studioVisualStyleHead"><div><p>封面与正文配图会沿用同一视觉方向。真实样例可横向滑动查看。</p></div></div><div className="studioStyleGallery" aria-label="配图风格">{orderedStyles.map((item) => <button aria-pressed={style === item.value} className={`studioStyleCard ${style === item.value ? "active" : ""}`} type="button" onClick={() => setStyle(item.value)} key={item.value}><img src={item.preview} alt={`${item.label}样例`} /><div className="studioStyleCardTitle"><strong>{item.label}</strong>{styleUsage[item.value] ? <em>你常用</em> : item.recommended ? <em>推荐</em> : null}{style === item.value ? <i className="studioStyleCheck" aria-hidden="true">✓</i> : null}</div><span>{item.description}</span></button>)}</div></div>
-      <div className="studioAssetSources"><section><span>AI 生成（可选）</span><strong>固定生成 1 张横版封面；正文按大章节生成，每章 1 张、最多 5 张</strong><button className="studioPrimary" type="button" onClick={generateImages} disabled={Boolean(loading)}>{loading === "assets" ? "正在按章节生成…" : images.length ? "重新生成 AI 配图" : "生成封面与配图"}</button></section><section><span>上传自己的图片（可选）</span><strong>最多上传 8 张，可与 AI 配图一起使用</strong><label className="studioUploadButton">上传正文配图<input accept="image/*" multiple type="file" onChange={(event) => void uploadArticleImages(event.target.files)} /></label><label className="studioUploadButton">上传文章封面<input accept="image/*" type="file" onChange={(event) => void uploadCover(event.target.files?.[0])} /></label></section></div>
+      <div className="studioAssetSources"><section><span>AI 生成（可选）</span><strong>固定生成 1 张横版封面；正文按大章节生成，每章 1 张、最多 5 张</strong><button className="studioPrimary" type="button" onClick={generateImages} disabled={Boolean(loading)}>{loading === "assets" ? "正在按章节生成…" : images.length ? "重新生成 AI 配图" : "生成封面与配图"}</button></section><section><span>上传自己的图片（可选）</span><strong>最多上传 8 张，可与 AI 配图一起使用</strong><label className="studioUploadButton" onPaste={pasteArticleImages} tabIndex={0}>上传正文配图<input accept="image/*" multiple type="file" onChange={(event) => void uploadArticleImages(event.target.files)} /></label><label className="studioUploadButton" onPaste={pasteCover} tabIndex={0}>上传文章封面<input accept="image/*" type="file" onChange={(event) => void uploadCover(event.target.files?.[0])} /></label><small className="studioPasteHint">点击对应上传按钮后，可直接粘贴图片</small></section></div>
       {cover ? <div className="studioGeneratedCover"><span>文章封面</span><div className="studioCoverPreview"><img src={cover.url} alt="公众号文章封面" /><div className="studioImageActions"><button type="button" onClick={() => setFullImage({ url: cover.url, label: "文章封面" })}>查看全图</button><button type="button" onClick={() => void downloadImage(cover, "文章封面")}>下载</button><button type="button" onClick={() => setCover(null)}>移除</button></div></div></div> : null}
       {allImages.length > 0 ? <div className="studioGeneratedImages"><span>正文配图 · {allImages.length} 张</span><div className="studioImageGrid">{allImages.map((image, index) => <figure key={image.id}><img src={image.url} alt="文章配图" />{image.sectionTitle ? <figcaption>对应章节：{image.sectionTitle}</figcaption> : <figcaption>用户上传配图</figcaption>}<div className="studioImageActions"><button type="button" onClick={() => setFullImage({ url: image.url, label: image.sectionTitle || `正文配图 ${index + 1}` })}>查看全图</button><button type="button" onClick={() => void downloadImage(image, image.sectionTitle || `正文配图-${index + 1}`)}>下载</button><button type="button" onClick={() => image.id.startsWith("upload-") ? setUploadedImages((current) => current.filter((item) => item.id !== image.id)) : setImages((current) => current.filter((item) => item.id !== image.id))}>移除</button></div></figure>)}</div></div> : <p className="studioAssetEmpty">还没有配图。你可以上传自己的图片、使用 AI 生成，或者两种方式一起用。</p>}
       <div className="studioStepActions studioVisualNext"><button className="studioSecondary" type="button" onClick={() => void moveToTab("article")}>← 上一步</button><div><small className={cover ? "ready" : "missing"}>{cover ? allImages.length ? "封面和正文配图已准备好" : "封面已准备好，正文配图可选" : "还缺少文章封面：请生成封面或上传一张封面"}</small><button className="studioPrimary" type="button" onClick={() => void moveToTab("layout")} disabled={!cover}>下一步：选择整体版式 →</button></div></div>
