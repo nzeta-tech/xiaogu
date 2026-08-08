@@ -107,6 +107,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [copied, setCopied] = useState<CopyState>({});
   const [saveMessage, setSaveMessage] = useState("");
   const [imageNotice, setImageNotice] = useState("");
+  const [mobileDownloadQueue, setMobileDownloadQueue] = useState<GeneratedImage[] | null>(null);
+  const [mobileDownloadIndex, setMobileDownloadIndex] = useState(0);
   const [contactCard, setContactCard] = useState<ContactCard | null>(null);
   const [contactQrId, setContactQrId] = useState("");
   const [contactEnabled, setContactEnabled] = useState(false);
@@ -620,11 +622,37 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   }
 
   async function handleBatchDownload(images: GeneratedImage[]) {
+    if (isMobileDownloadDevice()) {
+      if (!mobileDownloadQueue) {
+        await handleImageDownload(images[0].url, "图片结果-1.png");
+        if (images.length === 1) return;
+        setMobileDownloadQueue(images);
+        setMobileDownloadIndex(1);
+        flashImageNotice("第 1 张已开始下载，请点击“下载下一张”继续");
+        return;
+      }
+      const image = mobileDownloadQueue[mobileDownloadIndex];
+      await handleImageDownload(image.url, `图片结果-${mobileDownloadIndex + 1}.png`);
+      const nextIndex = mobileDownloadIndex + 1;
+      if (nextIndex >= mobileDownloadQueue.length) {
+        setMobileDownloadQueue(null);
+        setMobileDownloadIndex(0);
+        flashImageNotice("全部图片已逐张开始下载");
+      } else {
+        setMobileDownloadIndex(nextIndex);
+        flashImageNotice(`第 ${mobileDownloadIndex + 1} 张已开始下载，请点击“下载下一张”继续`);
+      }
+      return;
+    }
     for (const [index, image] of images.entries()) {
       const finalUrl = await buildWatermarkedAsset(image.url, effectiveContactOverlay);
       downloadAsset(finalUrl, `图片结果-${index + 1}.png`);
     }
     flashImageNotice(`已开始下载 ${images.length} 张图片`);
+  }
+
+  function batchDownloadLabel(defaultLabel: string) {
+    return mobileDownloadQueue ? `下载下一张（${mobileDownloadIndex + 1}/${mobileDownloadQueue.length}）` : defaultLabel;
   }
 
   function flashImageNotice(message: string) {
@@ -909,7 +937,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   onClick={() => void handleBatchDownload(imageResults)}
                   type="button"
                 >
-                  下载全部
+                  {batchDownloadLabel("下载全部")}
                 </button>
                 <button
                   className="instanceActionButton"
@@ -1019,7 +1047,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       onClick={() => void handleBatchDownload(imageResults)}
                       type="button"
                     >
-                      打包下载
+                      {batchDownloadLabel("下载全部")}
                     </button>
                   </div>
                 </div>
@@ -1160,7 +1188,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
                     <div className="imageStudioSecondaryActions">
                       <button disabled={!selectedImage} onClick={() => selectedImage && void handleImageOpen(selectedImage.url)} type="button">查看原图</button>
-                      <button disabled={imageResults.length === 0} onClick={() => void handleBatchDownload(imageResults)} type="button">下载全部</button>
+                      <button disabled={imageResults.length === 0} onClick={() => void handleBatchDownload(imageResults)} type="button">{batchDownloadLabel("下载全部")}</button>
                       {imageRetryable ? <button disabled={retryingImages} onClick={() => void retryImageGeneration()} type="button">{retryingImages ? "排队中..." : "重试生成"}</button> : null}
                     </div>
                   </aside>
@@ -2502,7 +2530,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                         <span className="instanceBadge">已生成 {imageResults.length} 张图片</span>
                         <div className="instanceImageMetaActions">
                           <strong>{formatImageModeLabel(imageMode)}</strong>
-                          <button className="instancePrimaryAction" onClick={() => void handleBatchDownload(imageResults)} type="button">打包下载</button>
+                          <button className="instancePrimaryAction" onClick={() => void handleBatchDownload(imageResults)} type="button">{batchDownloadLabel("下载全部")}</button>
                         </div>
                       </div>
                       <div className="instanceImageGrid">
@@ -3773,6 +3801,10 @@ function downloadAsset(url: string, filename: string) {
   link.target = "_blank";
   link.rel = "noreferrer";
   link.click();
+}
+
+function isMobileDownloadDevice() {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
 }
 
 function sanitizeFilename(value: string) {
