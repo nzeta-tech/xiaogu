@@ -339,6 +339,7 @@ function AdminSectionIcon({ name }: { name: AdminSectionId }) {
     overview: <><rect x="4" y="4" width="6" height="6" /><rect x="14" y="4" width="6" height="6" /><rect x="4" y="14" width="6" height="6" /><rect x="14" y="14" width="6" height="6" /></>,
     users: <><circle cx="9" cy="8" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 6.5a2.5 2.5 0 0 1 0 5M17 14a4.5 4.5 0 0 1 4 4.5" /></>,
     content: <><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></>,
+    "avatar-production": <><path d="M12 3v5M7 6.5l3.5 2M17 6.5l-3.5 2M5 13h14M7 20h10" /><circle cx="12" cy="13" r="4" /></>,
     commerce: <><path d="M7 4h10M8 8h8M12 4v16M7.5 14h9" /></>,
     growth: <><path d="M4 18V11M10 18V7M16 18V3M3 18h18" /></>,
     support: <><path d="M4 5h16v12H8l-4 3zM8 9h8M8 13h5" /></>,

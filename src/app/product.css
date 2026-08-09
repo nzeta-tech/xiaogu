@@ -2069,6 +2069,7 @@ body {
   background: rgba(255, 255, 255, 0.88);
   box-shadow: var(--shadow);
 }
+.adminAvatarProduction { min-width: 0; }.adminAvatarProduction > .avatarConsolePage { min-height: auto; }.adminAvatarProduction .avatarConsoleTabs { margin-top: 16px; }
 
 .avatarCoachView {
   display: grid;

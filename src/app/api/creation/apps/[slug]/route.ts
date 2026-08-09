@@ -1,6 +1,6 @@
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { generateImageSet } from "@/lib/agent/image-generator";
-import { extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
+import { auditImageRemixConsistency, extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
 import { getCreationAppBySlug, type CreationField } from "@/lib/apps/catalog";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
@@ -205,6 +205,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: userError }, { status: 503 });
   }
 
+  const imageRemixConsistency = isImageCardRemix
+    ? await auditImageRemixConsistency({ referenceKnowledge, images: imageResult?.images ?? [] })
+    : null;
+
   const title = buildWorkTitle({
     appName: app.name,
     appSlug: app.slug,
@@ -222,6 +226,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       imageMode: imageResult?.mode ?? null,
       avatarVisualAssetIds: visualReferences.map((item) => item.id),
       imageSections: wechatImagePlan?.sections ?? [],
+      imageRemixConsistency,
     },
   });
 
@@ -284,6 +289,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     images: imageResult?.images ?? [],
     imageSections: wechatImagePlan?.sections ?? [],
     imageMode: imageResult?.mode ?? null,
+    imageRemixConsistency,
   });
 }
 

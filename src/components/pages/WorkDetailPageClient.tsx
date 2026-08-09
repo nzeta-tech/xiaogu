@@ -77,6 +77,11 @@ type XiaohongshuStudioWorkState = {
   previewMode?: "long" | "album";
 };
 type ImageGenerationMode = "image" | "demo" | "fallback" | "rate_limited" | "";
+type ImageRemixConsistencyAudit = {
+  status: "passed" | "warning" | "unavailable";
+  facts: string[];
+  results: Array<{ imageId: string; status: "passed" | "warning" | "unavailable"; mismatches: string[] }>;
+};
 type PreviewField = { label: string; value: string; mode?: "plain" | "markdown" };
 type PreviewImage = { label: string; url: string };
 type ContactQrCode = { id: string; label: string; qr_code_url: string };
@@ -152,6 +157,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const workContent = work?.content ?? "";
   const workPlatform = work?.platform ?? "";
   const workAppRunId = work?.app_run?.id ?? "";
+  const imageRemixConsistency = work?.app_run?.result_json?.imageRemixConsistency as ImageRemixConsistencyAudit | null | undefined;
   const isAdminPreview = searchParams.get("admin") === "1";
   const workApiHref = useMemo(() => apiPath(`/api/works/${workId}${isAdminPreview ? "?admin=1" : ""}`), [isAdminPreview, workId]);
 
@@ -1206,6 +1212,13 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
 
                 <div className="imageNotices">
+                  {imageRemixConsistency && imageRemixConsistency.status !== "unavailable" ? (
+                    <div className={imageRemixConsistency.status === "warning" ? "imageConsistencyNotice warning" : "imageConsistencyNotice"}>
+                      <strong>{imageRemixConsistency.status === "passed" ? "内容一致性校验通过" : "检测到内容可能不一致"}</strong>
+                      {imageRemixConsistency.status === "passed" ? <span>图片文字与原知识卡片的核心事实一致，仍请人工确认后发布。</span> : null}
+                      {imageRemixConsistency.results.flatMap((result) => result.mismatches.map((mismatch) => `图片 ${result.imageId.replace("image-", "")}：${mismatch}`)).map((mismatch) => <span key={mismatch}>{mismatch}</span>)}
+                    </div>
+                  ) : null}
                   {generationNotice ? (
                     <div className="imageModeNotice">{generationNotice}</div>
                   ) : null}
@@ -2912,6 +2925,7 @@ function ResultWorkspaceBar({
   primaryBusy?: boolean;
 }) {
   return (
+    <>
     <header className="resultWorkspaceBar">
       <a className="resultWorkspaceBack" href={returnHref || appPath("/works")} aria-label={returnLabel || "返回创作历史"}>←</a>
       <div className="resultWorkspaceIdentity">
@@ -2935,6 +2949,10 @@ function ResultWorkspaceBar({
         <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)}>{primaryLabel}</a>
       )}
     </header>
+    <div className="aiReviewNotice resultWorkspaceReviewNotice" role="note">
+      AI 已完成创作。发布前请人工确认内容准确无误后再发布。
+    </div>
+    </>
   );
 }
 

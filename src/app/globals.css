@@ -2121,6 +2121,38 @@
   line-height: 1.7;
 }
 
+.aiReviewNotice,
+.imageConsistencyNotice {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #d7e4f2;
+  border-radius: 12px;
+  background: #f7fbff;
+  color: #47617c;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.aiReviewNotice {
+  border-color: #f0d7a5;
+  background: #fffaf0;
+  color: #80612d;
+}
+
+.resultWorkspaceReviewNotice {
+  margin: 0;
+  border-radius: 0;
+  border-width: 0 0 1px;
+}
+
+.imageConsistencyNotice.warning {
+  border-color: #f2c5bd;
+  background: #fff7f5;
+  color: #9b493c;
+}
+
 .signaturePanel {
   display: grid;
   gap: 12px;

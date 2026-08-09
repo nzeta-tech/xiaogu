@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
+import { ProfilePageClient } from "@/components/pages/ProfilePageClient";
 import { apiPath } from "@/lib/client/url";
 import { defaultSystemSettings, type SystemSettings } from "@/lib/system/settings";
 import {
@@ -1632,6 +1633,8 @@ export function AdminPageClient() {
           </AdminDrawer>
         </div>
       ) : null}
+
+      {tab === "avatar-production" ? <section className="adminAvatarProduction"><div className="adminSectionTitle"><div><span>分身生产</span><h2>创作 Skill 训练与版本管理</h2><p>使用授权作品训练可命名分身，并在此查看进度、训练结果和分身对比。</p></div></div><ProfilePageClient /></section> : null}
 
       {tab === "commerce" ? (
         <div className="pageStack">
