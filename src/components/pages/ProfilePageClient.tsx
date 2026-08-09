@@ -948,6 +948,7 @@ function normalizeLabMarkdown(content: string) {
     .replace(/([^\n])(#{2,3}\s)/g, "$1\n\n$2")
     .replace(/###\s*(核心判断|为什么|怎么做|评论互动)\s*/g, "### $1\n\n")
     .replace(/(?<!\n)(\d+\.\s)/g, "\n$1")
+    .replace(/([。！？；])\s*-\s+(?=\*\*)/g, "$1\n\n- ")
     .trim();
 }
 

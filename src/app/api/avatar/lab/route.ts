@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const encoder = new TextEncoder();
     const send = (controller: ReadableStreamDefaultController<Uint8Array>, event: Record<string, unknown>) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
     const task = async (side: "left" | "right", candidate: Candidate, controller: ReadableStreamDefaultController<Uint8Array>) => {
-      const content = [`数字分身对比试写任务：${parsed.data.prompt}`, "输出一篇 500-700 字、可直接发布的完整保险内容，不要解释过程。必须严格使用 Markdown 结构：## 标题；### 核心判断（2-3句）；### 为什么（3个短段或列表）；### 怎么做（3条可执行建议）；### 评论互动（1句）。每段不超过 90 字；不要使用一整段长文，不要为了凑字数重复观点。", candidate.prompt].filter(Boolean).join("\n\n");
+      const content = [`数字分身对比试写任务：${parsed.data.prompt}`, "输出一篇 500-700 字、可直接发布的完整保险内容，不要解释过程。必须严格使用 Markdown 结构：## 标题；### 核心判断（2-3句）；### 为什么（3个短段或列表）；### 怎么做（3条可执行建议）；### 评论互动（1句）。每段不超过 90 字；不要使用一整段长文，不要为了凑字数重复观点。可用 **重点句** 加粗关键判断；每个列表项必须独占一行。", candidate.prompt].filter(Boolean).join("\n\n");
       for await (const chunk of streamInsuranceContentAgent([{ role: "user", content }], candidate.userId, "general")) {
         for (const part of chunk.match(/.{1,24}/gu) ?? []) { send(controller, { type: "chunk", side, content: part }); await new Promise((resolve) => setTimeout(resolve, 18)); }
       }
