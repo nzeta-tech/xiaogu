@@ -51,7 +51,6 @@ const workspaceCategories: Array<{ id: WorkspaceCategory; label: string; descrip
   { id: "copy", label: "文案", description: "选题、引流与多渠道表达" },
   { id: "video", label: "短视频 & 直播", description: "口播、画面与镜头表达" },
   { id: "image", label: "做图", description: "知识卡片与文章配图" },
-  { id: "brand", label: "个人品牌", description: "定位与长期内容资产" },
 ];
 
 const workspaceCards: WorkspaceCard[] = [

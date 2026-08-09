@@ -39,6 +39,7 @@ type Summary = {
   recentUsers: AdminUser[];
   recentOrders: AdminOrder[];
   recentUsage: AdminUsage[];
+  growthTrend: Array<{ date: string; users: number; works: number }>;
 };
 
 type ContentOverview = {
@@ -100,6 +101,8 @@ type AdminViralContent = {
 };
 
 type ViralSourceInspection = {
+  status?: string;
+  taskId?: string;
   finalUrl?: string;
   thumbnailUrl?: string;
   mediaUrl?: string;
@@ -680,7 +683,7 @@ export function AdminPageClient() {
         publishAt: toIso(viralForm.publishAt), expireAt: toIso(viralForm.expireAt),
       }),
     });
-    const payload = await response.json() as { error?: string; content?: { id: string } };
+    const payload = await response.json() as { error?: string; content?: { id: string }; coverCacheError?: string };
     if (!response.ok) return showToast(payload.error ?? "爆款资源保存失败", "error");
     if (viralCoverFile && payload.content?.id) {
       const coverForm = new FormData();
@@ -695,7 +698,7 @@ export function AdminPageClient() {
     setViralDrawerOpen(false);
     if (viralContentTab === "create") setViralContentTab("active");
     await loadSection("content");
-    showToast("爆款资源已保存");
+    showToast(payload.coverCacheError ? `爆款资源已保存，但封面未能本地缓存：${payload.coverCacheError}。请上传本地封面。` : "爆款资源已保存");
   }
 
   function selectViralCover(file: File | undefined) {
@@ -713,8 +716,12 @@ export function AdminPageClient() {
     setActionKey("viral-inspect");
     try {
       const response = await fetch(apiPath("/api/creation/link-remix/inspect"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: sourceUrl, adminOperation: true }) });
-      const payload = await response.json().catch(() => ({})) as ViralSourceInspection;
+      let payload = await response.json().catch(() => ({})) as ViralSourceInspection;
       if (!response.ok) return showToast(payload.error ?? "作品解析失败", "error");
+      if (response.status === 202 && payload.taskId) {
+        showToast("新增爆款解析已进入高优先级队列，将在当前链接完成后优先处理");
+        payload = await waitForAdminViralInspection(payload.taskId);
+      }
       const fields = payload.fields ?? {};
       const finalUrl = payload.finalUrl ?? sourceUrl;
       setViralForm((current) => ({
@@ -742,6 +749,18 @@ export function AdminPageClient() {
     } finally {
       setActionKey("");
     }
+  }
+
+  async function waitForAdminViralInspection(taskId: string): Promise<ViralSourceInspection> {
+    for (let attempt = 0; attempt < 900; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      const response = await fetch(apiPath(`/api/creation/link-remix/inspect/${encodeURIComponent(taskId)}`), { cache: "no-store" });
+      const payload = await response.json().catch(() => ({})) as { status?: string; error?: string; result?: ViralSourceInspection };
+      if (!response.ok) throw new Error(payload.error ?? "爆款解析任务查询失败");
+      if (payload.status === "succeeded" && payload.result) return payload.result;
+      if (payload.status === "failed" || payload.status === "cancelled") throw new Error(payload.error ?? "爆款解析任务失败");
+    }
+    throw new Error("解析时间较长，任务仍会在后台继续执行，请稍后再试。");
   }
 
   async function updateViralContentStatus(id: string, status: string) {
@@ -1309,6 +1328,8 @@ export function AdminPageClient() {
             </div>
           </AdminPanel>
 
+          <GrowthTrendChart data={summary?.growthTrend ?? []} />
+
           <div className="adminGrid">
             <AdminPanel title="最近订单">
               {(summary?.recentOrders ?? []).map((order) => (
@@ -1350,13 +1371,13 @@ export function AdminPageClient() {
           <AdminToolbar actions={selectedUserIds.length ? <><span>已选 {selectedUserIds.length} 人</span><button className="secondaryButton" onClick={() => requestConfirm({ title: "批量停用用户？", description: `${selectedUserIds.length} 个用户将无法继续登录，历史数据会保留。`, confirmLabel: "批量停用", danger: true, requireText: "停用", onConfirm: () => updateUsersBatch("suspended") })} type="button">批量停用</button><button className="secondaryButton" onClick={() => void updateUsersBatch("active")} type="button">批量恢复</button></> : undefined}>
             <input aria-label="搜索用户" value={userSearch} placeholder="搜索姓名、邮箱、角色或状态" onChange={(event) => { setUserSearch(event.target.value); updatePage(1); }} />
           </AdminToolbar>
-          <div className="adminDataTable" style={{ "--admin-columns": "280px 42px minmax(250px,1.5fr) 110px 110px 120px minmax(370px,auto)" } as CSSProperties}>
-            <div className="adminDataHeader"><span>用户 ID</span><label className="adminSelectCell"><input aria-label="选择当前页所有用户" checked={pagedUsers.length > 0 && pagedUsers.every((user) => selectedUserIds.includes(user.id))} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...new Set([...current, ...pagedUsers.map((user) => user.id)])] : current.filter((id) => !pagedUsers.some((user) => user.id === id)))} /></label><span>用户</span><span>角色</span><span>状态</span><span>可用积分</span><span>操作</span></div>
+          <div className="adminDataTable" style={{ "--admin-columns": "42px minmax(250px,1.5fr) 280px 110px 110px 120px minmax(370px,auto)" } as CSSProperties}>
+            <div className="adminDataHeader"><label className="adminSelectCell"><input aria-label="选择当前页所有用户" checked={pagedUsers.length > 0 && pagedUsers.every((user) => selectedUserIds.includes(user.id))} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...new Set([...current, ...pagedUsers.map((user) => user.id)])] : current.filter((id) => !pagedUsers.some((user) => user.id === id)))} /></label><span>用户</span><span>用户 ID</span><span>角色</span><span>状态</span><span>可用积分</span><span>操作</span></div>
             {pagedUsers.map((user) => (
               <div className="adminDataRow" key={user.id}>
-                <div className="adminDataCell"><code>{user.user_number}</code></div>
                 <label className="adminSelectCell"><input aria-label={`选择 ${user.email}`} checked={selectedUserIds.includes(user.id)} type="checkbox" onChange={(event) => setSelectedUserIds((current) => event.target.checked ? [...current, user.id] : current.filter((id) => id !== user.id))} /></label>
                 <div className="adminDataCell"><strong>{user.email}</strong><span>{user.name} · 注册于 {formatDate(user.created_at)}</span></div>
+                <div className="adminDataCell"><code>{user.user_number}</code></div>
                 <div><AdminStatus value={user.role} /></div>
                 <div><AdminStatus value={user.status} /></div>
                 <div className="adminDataCell"><strong>{user.current_balance ?? 0} 点</strong><span>消费 ¥{((user.order_total ?? 0) / 100).toFixed(0)}</span></div>
@@ -2015,6 +2036,49 @@ function Row({ title, meta, href }: { title: string; meta: string; href?: string
 
 function adminWorkHref(workId: string) {
   return apiPath(`/works/${workId}?from=admin&admin=1`);
+}
+
+function GrowthTrendChart({ data }: { data: Array<{ date: string; users: number; works: number }> }) {
+  const width = 760;
+  const height = 240;
+  const padding = { top: 22, right: 20, bottom: 32, left: 38 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(1, ...data.flatMap((point) => [point.users, point.works]));
+  const pointFor = (value: number, index: number) => ({
+    x: padding.left + (data.length <= 1 ? chartWidth / 2 : (index / (data.length - 1)) * chartWidth),
+    y: padding.top + chartHeight - (value / maxValue) * chartHeight,
+  });
+  const pathFor = (key: "users" | "works") => data.map((point, index) => {
+    const { x, y } = pointFor(point[key], index);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const totalUsers = data.reduce((sum, point) => sum + point.users, 0);
+  const totalWorks = data.reduce((sum, point) => sum + point.works, 0);
+  const labels = data.length ? [0, Math.floor((data.length - 1) / 2), data.length - 1] : [];
+
+  return (
+    <AdminPanel title="作品与用户增长趋势（最近 30 天）">
+      <div className="adminGrowthSummary">
+        <span><i className="users" />新增用户 <strong>{totalUsers}</strong></span>
+        <span><i className="works" />新增作品 <strong>{totalWorks}</strong></span>
+      </div>
+      {data.length ? <div className="adminGrowthChart" role="img" aria-label={`最近 30 天新增 ${totalUsers} 位用户和 ${totalWorks} 份作品`}>
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+          {[0, 0.5, 1].map((ratio) => {
+            const y = padding.top + chartHeight * ratio;
+            return <line className="adminGrowthGridLine" key={ratio} x1={padding.left} x2={width - padding.right} y1={y} y2={y} />;
+          })}
+          <text className="adminGrowthAxis" x={padding.left - 8} y={padding.top + 4} textAnchor="end">{maxValue}</text>
+          <text className="adminGrowthAxis" x={padding.left - 8} y={padding.top + chartHeight / 2 + 4} textAnchor="end">{Math.round(maxValue / 2)}</text>
+          <text className="adminGrowthAxis" x={padding.left - 8} y={padding.top + chartHeight + 4} textAnchor="end">0</text>
+          <path className="adminGrowthLine users" d={pathFor("users")} />
+          <path className="adminGrowthLine works" d={pathFor("works")} />
+          {labels.map((index) => <text className="adminGrowthAxis" key={index} x={pointFor(0, index).x} y={height - 8} textAnchor="middle">{data[index].date.slice(5).replace("-", "/")}</text>)}
+        </svg>
+      </div> : <AdminEmptyState title="暂无增长数据" description="有新用户注册或作品创建后，这里会显示趋势。" />}
+    </AdminPanel>
+  );
 }
 
 function formatMoney(amountCents: number, currency: string) {

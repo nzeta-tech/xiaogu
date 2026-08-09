@@ -119,7 +119,9 @@ export async function enqueueLocalAgentTask(input: {
     `insert into local_agent_tasks(task_type,owner_user_id,payload,dedupe_key,priority,max_attempts)
      values($1,$2,$3,$4,$5,$6)
      on conflict (task_type,dedupe_key) where dedupe_key is not null and status in ('pending','leased')
-     do update set priority=greatest(local_agent_tasks.priority,excluded.priority),updated_at=now()
+     do update set
+       payload=case when excluded.priority>local_agent_tasks.priority then excluded.payload else local_agent_tasks.payload end,
+       priority=greatest(local_agent_tasks.priority,excluded.priority),updated_at=now()
      returning ${taskColumns}`,
     [input.taskType, input.ownerUserId ?? null, input.payload, input.dedupeKey ?? null, input.priority ?? 0, input.maxAttempts ?? 3],
   );

@@ -372,6 +372,52 @@ export async function tryMergeWechatStudioAssets(input: {
   }
 }
 
+/** Persist a Xiaohongshu image step without replacing the note draft or its primary run. */
+export async function tryMergeXiaohongshuStudioAssets(input: {
+  userId: string | null;
+  workId: string;
+  kind: "images" | "cover";
+  images: Array<{ id: string; url: string }>;
+}) {
+  if (!input.userId) return null;
+  const value = input.kind === "cover" ? input.images[0] ?? null : input.images;
+  if (!value) return null;
+  const stateKey = input.kind === "cover" ? "headImage" : "cards";
+  try {
+    const result = await query<{ id: string }>(
+      `with latest as (
+         select wv.id, wv.content_json
+         from work_versions wv
+         join works w on w.id = wv.work_id
+         where w.id = $1 and w.user_id = $2
+         order by wv.version_no desc
+         limit 1
+         for update
+       ), updated_version as (
+         update work_versions wv
+         set content_json = jsonb_set(
+           coalesce(latest.content_json, '{}'::jsonb),
+           '{xiaohongshuStudioState}',
+           coalesce(latest.content_json->'xiaohongshuStudioState', '{}'::jsonb)
+             || jsonb_build_object($3::text, $4::jsonb, 'tab', 'cards', 'updatedAt', now()::text),
+           true
+         )
+         from latest
+         where wv.id = latest.id
+         returning wv.work_id
+       )
+       update works w set updated_at = now()
+       from updated_version uv
+       where w.id = uv.work_id
+       returning w.id`,
+      [input.workId, input.userId, stateKey, JSON.stringify(value)],
+    );
+    return result.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function tryListWorks(userId: string | null) {
   if (!userId) return [];
 
@@ -1808,6 +1854,14 @@ export async function tryCompleteAppRun(input: {
         input.errorMessage ?? null,
       ],
     );
+    if (result.rows[0]) {
+      await query(
+        `update works
+         set has_avatar_visual = jsonb_array_length(coalesce($2::jsonb->'avatarVisualAssetIds', '[]'::jsonb)) > 0
+         where app_run_id = $1`,
+        [input.runId, JSON.stringify(input.resultJson ?? {})],
+      );
+    }
     return result.rows[0] ?? null;
   } catch {
     return null;
@@ -2096,7 +2150,7 @@ export async function tryGetCreationAppBySlug(slug: string) {
 
 export async function tryGetAdminSummary() {
   try {
-    const [users, activeUsers, conversations, drafts, orders, paidOrders, paidUsers, usage, todayRevenue, yesterdayRevenue, newUsersToday, newUsersYesterday, openFeedback, failedRuns, compliance, recentUsers, recentOrders, recentUsage, announcements, promoCodes] =
+    const [users, activeUsers, conversations, drafts, orders, paidOrders, paidUsers, usage, todayRevenue, yesterdayRevenue, newUsersToday, newUsersYesterday, openFeedback, failedRuns, compliance, recentUsers, recentOrders, recentUsage, announcements, promoCodes, growthTrend] =
       await Promise.all([
       query<{ count: string }>("select count(*) from users"),
       query<{ count: string }>("select count(*) from users where status = 'active'"),
@@ -2155,6 +2209,28 @@ export async function tryGetAdminSummary() {
       ),
       query<{ count: string }>("select count(*) from announcements where status = 'published'"),
       query<{ count: string }>("select count(*) from promo_codes where status = 'active'"),
+      query<{ date: string; users: string; works: string }>(
+        `with days as (
+           select generate_series(current_date - interval '29 days', current_date, interval '1 day')::date as day
+         ), user_growth as (
+           select created_at::date as day, count(*)::text as count
+           from users
+           where created_at >= current_date - interval '29 days'
+           group by created_at::date
+         ), work_growth as (
+           select created_at::date as day, count(*)::text as count
+           from works
+           where created_at >= current_date - interval '29 days'
+           group by created_at::date
+         )
+         select to_char(days.day, 'YYYY-MM-DD') as date,
+                coalesce(user_growth.count, '0') as users,
+                coalesce(work_growth.count, '0') as works
+         from days
+         left join user_growth on user_growth.day = days.day
+         left join work_growth on work_growth.day = days.day
+         order by days.day`,
+      ),
     ]);
 
     return {
@@ -2178,6 +2254,11 @@ export async function tryGetAdminSummary() {
       recentUsers: recentUsers.rows,
       recentOrders: recentOrders.rows,
       recentUsage: recentUsage.rows,
+      growthTrend: growthTrend.rows.map((row) => ({
+        date: row.date,
+        users: Number(row.users ?? 0),
+        works: Number(row.works ?? 0),
+      })),
     };
   } catch {
     return null;
@@ -3666,7 +3747,7 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
     }
     if (input.state === "favorite") filters.push("w.is_favorite = true");
     if (input.state === "noted") filters.push("length(trim(coalesce(w.note, ''))) > 0");
-    if (input.state === "avatar") filters.push("jsonb_array_length(coalesce(ar.result_json->'avatarVisualAssetIds', '[]'::jsonb)) > 0");
+    if (input.state === "avatar") filters.push("w.has_avatar_visual = true");
     if (input.from) {
       values.push(input.from);
       filters.push(`w.updated_at >= $${values.length}::date`);
@@ -3700,12 +3781,18 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
       app_run_status: string | null;
       app_run_error_message: string | null;
       quota_cost: number | null;
-      result_json: Record<string, unknown> | null;
+      image_url: string;
+      has_avatar_visual: boolean;
       filtered_count: string;
     }>(
       `select w.id, w.title, w.status, w.compliance_risk, w.created_at, w.updated_at,
-              w.source_channel, w.note, w.is_favorite, w.is_used, ar.status as app_run_status, ar.error_message as app_run_error_message, ar.quota_cost, ar.result_json,
+              w.source_channel, w.note, w.is_favorite, w.is_used, w.has_avatar_visual, ar.status as app_run_status, ar.error_message as app_run_error_message, ar.quota_cost,
               count(*) over() as filtered_count,
+              case
+                when left(coalesce(ar.result_json #>> '{images,0,url}', ''), 8) in ('https://', 'http://')
+                  then ar.result_json #>> '{images,0,url}'
+                else ''
+              end as image_url,
               coalesce(
                 (select wv.content from work_versions wv where wv.work_id = w.id order by wv.version_no desc limit 1),
                 ''
@@ -3723,8 +3810,8 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
         `select count(*) as all_count,
                 count(*) filter (where is_favorite) as favorite_count,
                 count(*) filter (where length(trim(coalesce(w.note, ''))) > 0) as noted_count,
-                count(*) filter (where jsonb_array_length(coalesce(ar.result_json->'avatarVisualAssetIds', '[]'::jsonb)) > 0) as avatar_count
-         from works w left join app_runs ar on ar.id = w.app_run_id where w.user_id = $1 and w.status <> 'archived'`,
+                count(*) filter (where w.has_avatar_visual) as avatar_count
+         from works w where w.user_id = $1 and w.status <> 'archived'`,
         [userId],
       ),
       query<{ platform: string; count: string }>(
@@ -3778,23 +3865,13 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
         appRunStatus: work.app_run_status ?? "",
         errorMessage: work.app_run_error_message ?? "",
         quotaCost: Number(work.quota_cost ?? 0),
-        imageUrl: firstGeneratedImageUrl(work.result_json),
-        usesAvatarVisual: Array.isArray(work.result_json?.avatarVisualAssetIds) && work.result_json.avatarVisualAssetIds.length > 0,
+        imageUrl: work.image_url,
+        usesAvatarVisual: work.has_avatar_visual,
       })),
     };
   } catch {
     return null;
   }
-}
-
-function firstGeneratedImageUrl(result: Record<string, unknown> | null) {
-  if (!Array.isArray(result?.images)) return "";
-  for (const item of result.images) {
-    if (!item || typeof item !== "object") continue;
-    const url = (item as { url?: unknown }).url;
-    if (typeof url === "string" && url.trim()) return url.trim();
-  }
-  return "";
 }
 
 function inferTitle(content: string) {

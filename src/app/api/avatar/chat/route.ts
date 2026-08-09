@@ -122,7 +122,14 @@ async function createExplicitMemoryProposal(userId: string, content: string) {
   await query(
     `insert into avatar_evolution_proposals(user_id, category, title, description, confidence, evidence_json, patch_json)
      values ($1, $2, $3, $4, 82, $5::jsonb, $6::jsonb)`,
-    [userId, category, title, "你在咨询中明确提出了这项长期偏好。确认后，小谷会在后续相关创作中参考它。", JSON.stringify([`你的原话：${content}`]), JSON.stringify({ title, content })],
+    [userId, category, title, "你在咨询中明确提出了这项长期偏好。确认后，小谷会在后续相关创作中参考它。", JSON.stringify([`你的原话：${content}`]), JSON.stringify({ title, content, sourceLabel: "与小谷对话", memoryScope: inferMemoryScope(content) })],
   );
   return true;
+}
+
+function inferMemoryScope(content: string) {
+  if (/口播|视频|开头|结尾|完播|短句/.test(content)) return "short_video";
+  if (/私信|客户沟通|咨询/.test(content)) return "customer";
+  if (/营销|成交|转化|卖点/.test(content)) return "marketing";
+  return "global";
 }

@@ -425,6 +425,10 @@ function formatPlatformLabel(platform: string) {
     "traffic-copy": "流量文案", "marketing-copy": "营销文案", "video-script-polish": "口播精修",
     "wechat-article-polish": "公众号精修", "topic-picker": "热点选题", "general-content": "通用创作",
     "xiaohongshu-check": "小红书合规检测", letter: "信件创作", "ppt-maker": "PPT轻松制作",
+    "xiaohongshu-studio": "小红书笔记创作", "wechat-studio": "公众号文章创作", "wechat-cover": "公众号文章封面",
+    "link-remix": "爆款话题二创", "video-cover": "视频封面制作", "lead-package": "制作引流资料",
+    "ip-positioning": "个人品牌定位", breakthrough: "陪你破局增长", "team-recruit": "招募文案",
+    "live-script": "直播脚本生成", "policy-diagnosis": "保单结构复核",
   };
   return labels[platform] || "其他创作";
 }

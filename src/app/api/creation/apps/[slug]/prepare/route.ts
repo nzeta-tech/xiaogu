@@ -15,6 +15,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const { slug } = await context.params;
   const traceId = normalizeCreationTraceId(request.headers.get("x-creation-trace-id"));
   const requestId = creationRequestId();
+  const user = await requireSessionUser();
+  if (user instanceof Response) return user;
+  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, userEmail: user.email, traceId, requestId, appSlug: slug, eventType: "prepare_received", outcome: "arrived" });
   await trySyncCreationCatalog();
   const app = await tryGetCreationAppBySlug(slug);
   if (!app) {
@@ -23,9 +26,6 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const settings = await tryGetSystemSettings();
   if (!settings.features.imageGenerationEnabled && (app.resultType === "image" || app.resultType === "image-plan")) return Response.json({ error: "图片生成功能当前已关闭" }, { status: 403 });
 
-  const user = await requireSessionUser();
-  if (user instanceof Response) return user;
-  if (traceId) await trySaveCreationDiagnostic({ userId: user.id, userEmail: user.email, traceId, requestId, appSlug: slug, eventType: "prepare_received", outcome: "started" });
 
   if (app.slug === "link-remix") {
     const availability = await getLinkRemixAvailability();

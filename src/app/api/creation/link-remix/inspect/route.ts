@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
 import { requireSessionUser } from "@/lib/auth/session";
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { downloadDouyinPublic, transcribeDownloadedDouyin } from "@/lib/creation/douyin-download";
 import { inspectWechatChannelsWithContainerBrowser } from "@/lib/creation/wechat-channels-container";
 import { isAuthorizedLocalAgentRequest } from "@/lib/local-agent/auth";
-import { enqueueLocalAgentTask, getLinkRemixAvailability, isLocalAgentDelegationEnabled } from "@/lib/local-agent/repository";
+import { getLinkRemixAvailability, isLocalAgentDelegationEnabled } from "@/lib/local-agent/repository";
+import { enqueueSourceInspectionTask, SOURCE_INSPECTION_PRIORITIES } from "@/lib/creation/source-inspection";
 import { inferHotTopicCategory } from "@/lib/topics/rules";
+import { transcribePublicMedia } from "@/lib/creation/transcribe-public-media";
 
 const allowedHosts = /(^|\.)((douyin\.com)|(weixin\.qq\.com)|(channels\.weixin\.qq\.com)|(xiaohongshu\.com)|(xhslink\.com))$/i;
 
@@ -26,18 +27,15 @@ export async function POST(request: Request) {
   }
 
   const isAdminInspection = !isAgentExecution && "role" in user && user.role === "admin" && body.adminOperation === true;
-  if (!isAgentExecution && !isAdminInspection && process.env.LOCAL_AGENT_ENABLED === "1") {
+  if (!isAgentExecution && process.env.LOCAL_AGENT_ENABLED === "1") {
     const availability = await getLinkRemixAvailability();
     if (!availability.available) return Response.json({ error: availability.reason, code: "LOCAL_AGENT_OFFLINE" }, { status: 503 });
     if (!await isLocalAgentDelegationEnabled()) return Response.json({ error: "功能暂不可用", code: "LOCAL_AGENT_DISABLED" }, { status: 503 });
-    const canonicalUrl = parsed.toString();
-    const dedupeKey = createHash("sha256").update(`${user.id}:${canonicalUrl}`).digest("hex");
-    const task = await enqueueLocalAgentTask({
-      taskType: "source.inspect",
-      ownerUserId: user.id,
-      payload: { url: canonicalUrl, userId: user.id },
-      dedupeKey,
-      priority: 100,
+    const { task } = await enqueueSourceInspectionTask({
+      userId: user.id,
+      url: parsed.toString(),
+      purpose: isAdminInspection ? "viral_content" : "link_remix",
+      priority: isAdminInspection ? SOURCE_INSPECTION_PRIORITIES.VIRAL_CONTENT : SOURCE_INSPECTION_PRIORITIES.LINK_REMIX,
       maxAttempts: 3,
     });
     return Response.json({ status: "queued", taskId: task.id }, { status: 202, headers: { "cache-control": "no-store" } });
@@ -536,34 +534,6 @@ async function summarizePublicEvidence(input: { title: string; description: stri
     }
     const output = await runInsuranceContentAgent([{ role: "user", content: prompt }], input.userId, "general");
     return output.trim().slice(0, 240);
-  } catch {
-    return "";
-  }
-}
-
-async function transcribePublicMedia(mediaUrl: string) {
-  try {
-    const mediaResponse = await fetch(mediaUrl, { signal: AbortSignal.timeout(15000) });
-    if (!mediaResponse.ok) return "";
-    const contentLength = Number(mediaResponse.headers.get("content-length") ?? 0);
-    if (contentLength > 200 * 1024 * 1024) return "";
-    const bytes = await mediaResponse.arrayBuffer();
-    if (bytes.byteLength > 200 * 1024 * 1024) return "";
-    const form = new FormData();
-    form.append("file", new Blob([bytes], { type: mediaResponse.headers.get("content-type") ?? "video/mp4" }), "source-media.mp4");
-    form.append("language", "zh");
-    const localBase = process.env.VIRAL_TRANSCRIBE_API_BASE?.trim();
-    if (localBase) {
-      const response = await fetch(`${localBase.replace(/\/$/, "")}/transcribe`, {
-        method: "POST",
-        body: form,
-        signal: AbortSignal.timeout(Number(process.env.VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS ?? 1_200_000)),
-      });
-      if (!response.ok) return "";
-      const payload = await response.json() as { text?: string };
-      return payload.text?.trim().slice(0, 12000) ?? "";
-    }
-    return "";
   } catch {
     return "";
   }

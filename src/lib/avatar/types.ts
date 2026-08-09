@@ -12,6 +12,7 @@ export type AvatarMemoryItem = {
   confidence: number;
   sensitivity: "normal" | "sensitive" | "restricted";
   usage_scope: "all" | "content" | "customer" | "private";
+  metadata_json: { sourceLabel?: string; memoryScope?: string };
   created_at: string;
   updated_at: string;
 };
@@ -23,6 +24,22 @@ export type AvatarMemorySource = {
   content: string;
   status: "active" | "disabled" | "archived";
   sensitivity: "normal" | "sensitive" | "restricted";
+  metadata_json: { sourceLabel?: string; memoryScope?: string };
+  created_at: string;
+  updated_at: string;
+};
+
+export type AvatarTrainingRun = {
+  id: string;
+  source_id: string | null;
+  training_type: string;
+  status: "running" | "succeeded" | "failed";
+  phase: string;
+  total_count: number;
+  completed_count: number;
+  successful_count: number;
+  error_message: string;
+  details_json: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
@@ -49,6 +66,29 @@ export type AvatarVersion = {
   source: string;
   status: string;
   created_at: string;
+};
+
+export type AvatarCreatorSkillVersion = {
+  id: string;
+  version: number;
+  training_run_id: string | null;
+  status: "training" | "active" | "superseded" | "restored" | "failed";
+  source_links: string[];
+  sample_count: number;
+  skill_prompt: string;
+  change_summary: string;
+  created_at: string;
+};
+
+export type AvatarCreatorSkill = {
+  id: string;
+  name: string;
+  creator_name: string;
+  status: "active" | "archived";
+  latest_version: number;
+  created_at: string;
+  updated_at: string;
+  versions: AvatarCreatorSkillVersion[];
 };
 
 export type AvatarPrivacySettings = {

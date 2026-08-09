@@ -383,7 +383,7 @@ async function collectHealth() {
   const [executor, transcriber, chromium, wechatChannel, ytDlp, xiaohongshu, werss, wechatSogou, douyinNative, codexCli] = await Promise.all([
     httpHealth(`${executorBase}/api/internal/local-agent/executor-health`),
     httpHealth(`${(process.env.VIRAL_TRANSCRIBE_API_BASE || "http://transcriber:8000").replace(/\/$/, "")}/health`),
-    httpHealth(`${executorBase.replace(/:\d+$/, `:${process.env.CONTAINER_BROWSER_CDP_PORT || "9222"}`)}/json/version`),
+    httpHealth(process.env.LOCAL_AGENT_BROWSER_HEALTH_URL || `${executorBase.replace(/:\d+$/, `:${process.env.CONTAINER_BROWSER_CDP_PORT || "9222"}`)}/json/version`),
     httpHealth(`${(process.env.VIRAL_WECHAT_DISCOVERY_API_BASE || "http://wx-channel:2026").replace(/\/$/, "")}/api/v1/certificate/download`),
     execHealth(process.env.DOUYIN_YT_DLP_PATH || "yt-dlp", ["--version"]),
     optionalHttpHealth(process.env.VIRAL_XHS_BROWSER_ENABLED === "1", `${executorBase.replace(/:\d+$/, `:${process.env.VIRAL_XHS_CDP_PORT || "9223"}`)}/json/version`),

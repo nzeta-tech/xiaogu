@@ -19,6 +19,10 @@ function ReactMarkdown({ children }: { children: string }) {
     : <BaseMarkdown key={`text-${index}`}>{block.content}</BaseMarkdown>)}</>;
 }
 
+function isMobileDownloadDevice() { return typeof window !== "undefined" && window.matchMedia("(max-width: 760px), (pointer: coarse)").matches; }
+function buildImageDownloadUrl(url: string, filename: string) { const sourceUrl = url.startsWith("/") ? new URL(url, window.location.origin).toString() : url; return apiPath(`/api/assets/image-proxy?url=${encodeURIComponent(sourceUrl)}&download=1&filename=${encodeURIComponent(filename)}`); }
+function triggerDownload(url: string, filename: string) { const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); }
+
 function MarkdownTableCard({ table }: { table: MarkdownTable }) {
   const series = table.headers.slice(1).map((label, column) => ({
     label,
@@ -287,8 +291,13 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
 
   async function uploadArticleImages(files: FileList | readonly File[] | null) {
     if (!files?.length) return;
+    const invalid = Array.from(files).filter((file) => !file.type.startsWith("image/") || file.size > 10 * 1024 * 1024);
     const selected = Array.from(files).filter((file) => file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024).slice(0, Math.max(0, 8 - uploadedImages.length));
-    const next = await Promise.all(selected.map(async (file, index) => ({ id: `upload-${Date.now()}-${index}`, url: await readImageFile(file) })));
+    if (invalid.length) setMessage("已跳过不支持的文件或超过 10MB 的图片。");
+    let next: GeneratedImage[];
+    try {
+      next = await Promise.all(selected.map(async (file, index) => ({ id: `upload-${Date.now()}-${index}`, url: await readImageFile(file) })));
+    } catch { setMessage("图片读取或压缩失败，请换一张 JPG、PNG 或 WebP 图片重试。"); return; }
     setUploadedImages((current) => [...current, ...next].slice(0, 8));
     if (!cover && next[0]) setCover(next[0]);
     setMessage(`已上传 ${next.length} 张配图；你仍可以继续生成 AI 配图。`);
@@ -310,11 +319,19 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
 
   async function uploadCover(file: File | undefined) {
     if (!file || !file.type.startsWith("image/")) return;
-    setCover({ id: `cover-upload-${Date.now()}`, url: await readImageFile(file) });
+    if (file.size > 10 * 1024 * 1024) { setMessage("封面图片不能超过 10MB。"); return; }
+    try { setCover({ id: `cover-upload-${Date.now()}`, url: await readImageFile(file) }); }
+    catch { setMessage("图片读取或压缩失败，请换一张 JPG、PNG 或 WebP 图片重试。"); return; }
     setMessage("已使用你上传的图片作为公众号封面。 ");
   }
 
   async function downloadImage(image: GeneratedImage, label: string) {
+    const filename = `${safeFileName(title || "公众号文章")}-${safeFileName(label)}.png`;
+    if (isMobileDownloadDevice() && !image.url.startsWith("data:") && !image.url.startsWith("blob:")) {
+      triggerDownload(buildImageDownloadUrl(image.url, filename), filename);
+      setMessage("图片已开始下载。 ");
+      return;
+    }
     try {
       const response = await fetch(image.url);
       if (!response.ok) throw new Error("图片读取失败");
@@ -362,6 +379,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
   }
 
   async function downloadArticle() {
+    const deliveryWindow = isMobileDownloadDevice() ? window.open("about:blank", "_blank") : null;
     const source = activeTab === "draft"
       ? document.querySelector(".studioDraftPreview .studioMarkdownArticle")
       : document.querySelector(".studioLiveArticle .studioMarkdownArticle");
@@ -370,9 +388,10 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
     anchor.download = `${safeFileName(title || "公众号文章")}.docx`;
-    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    if (deliveryWindow) deliveryWindow.location.href = objectUrl;
+    else { document.body.appendChild(anchor); anchor.click(); anchor.remove(); }
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    setMessage("富文本文章已下载为 Word 文档。 ");
+    setMessage(deliveryWindow ? "Word 已打开，请使用浏览器的保存或分享功能保存。 " : "富文本文章已下载为 Word 文档。 ");
   }
 
   if (restoring) return <div className="wechatStudioPage page-content"><p className="studioMessage">正在恢复未完成的公众号文章…</p></div>;
@@ -478,13 +497,20 @@ function splitArticle(result: string) {
   return { title, content };
 }
 
-function readImageFile(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("图片读取失败"));
-    reader.onerror = () => reject(new Error("图片读取失败"));
-    reader.readAsDataURL(file);
-  });
+async function readImageFile(file: File) {
+  const source = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error("图片读取失败")); element.src = source;
+    });
+    const scale = Math.min(1, 2000 / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+    const context = canvas.getContext("2d"); if (!context) throw new Error("图片压缩不可用");
+    context.fillStyle = "#ffffff"; context.fillRect(0, 0, width, height); context.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", 0.88);
+  } finally { URL.revokeObjectURL(source); }
 }
 
 function safeFileName(value: string) {

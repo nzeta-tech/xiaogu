@@ -109,9 +109,22 @@ export async function inspectWechatChannelsWithContainerBrowser(sourceUrl: strin
 }
 
 async function resolveWechatChannelsMedia(sourceUrl: string, cdpUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
-  if (process.env.VIRAL_WECHAT_DISCOVERY_ENABLED !== "1") return null;
-  const browserResolved = await resolveWechatChannelsMediaWithBrowserCookie(sourceUrl, cdpUrl);
-  if (browserResolved) return browserResolved;
+  if (process.env.VIRAL_WECHAT_DISCOVERY_ENABLED === "1") {
+    const browserResolved = await resolveWechatChannelsMediaWithBrowserCookie(sourceUrl, cdpUrl);
+    if (browserResolved) return browserResolved;
+
+    const localResolved = await resolveWechatChannelsMediaWithLocalAgent(sourceUrl);
+    if (localResolved) return localResolved;
+  }
+
+  // A successful preview-page render only guarantees that its text metadata is
+  // public. The local browser session can still lack the injected media key.
+  // Match Link Remix's public-detail fallback before declaring this work
+  // untranscribable; it returns the same feedInfo shape and no user cookies.
+  return resolveWechatChannelsMediaWithPublicInspector(sourceUrl);
+}
+
+async function resolveWechatChannelsMediaWithLocalAgent(sourceUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
   const base = process.env.VIRAL_WECHAT_DISCOVERY_API_BASE?.trim();
   if (!base) return null;
   try {
@@ -122,8 +135,23 @@ async function resolveWechatChannelsMedia(sourceUrl: string, cdpUrl: string): Pr
       signal: AbortSignal.timeout(Number(process.env.VIRAL_WECHAT_DISCOVERY_TIMEOUT_MS ?? 70_000)),
     });
     if (!response.ok) return null;
-    const payload = await response.json() as Record<string, unknown>;
-    return parseResolvedWechatChannelsMedia(payload);
+    return parseResolvedWechatChannelsMedia(await response.json() as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveWechatChannelsMediaWithPublicInspector(sourceUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
+  const endpoint = process.env.VIRAL_WECHAT_INSPECT_API_BASE?.trim() || "https://sph.litao.workers.dev/api/fetch_video_profile";
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ url: sourceUrl }),
+      signal: AbortSignal.timeout(Number(process.env.VIRAL_WECHAT_INSPECT_TIMEOUT_MS ?? 30_000)),
+    });
+    if (!response.ok) return null;
+    return parseWechatChannelsSphMedia(await response.json() as Record<string, unknown>);
   } catch {
     return null;
   }

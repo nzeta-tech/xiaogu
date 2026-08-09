@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { tryCreateAdminAuditLog, tryListAdminViralContents, tryMoveAdminViralContent, tryUpdateAdminViralContentStatus, tryUpsertAdminViralContent } from "@/lib/db/repositories";
+import { deleteViralCover, storeViralCover } from "@/lib/viral-cover-assets";
 
 const schema = z.object({
   id: z.string().uuid().optional(), title: z.string().trim().min(1).max(160),
@@ -33,8 +34,19 @@ export async function POST(request: Request) {
   if (input.status === "published" && !input.insight?.trim()) return Response.json({ error: "发布前请填写推荐角度" }, { status: 400 });
   const content = await tryUpsertAdminViralContent({ ...input, thumbnailUrl: input.thumbnailUrl || null, mediaUrl: input.mediaUrl || null, embedUrl: input.embedUrl || null, updatedBy: user.id });
   if (!content) return Response.json({ error: "爆款资源保存失败，请确认数据库迁移已执行" }, { status: 503 });
+  const contentId = String(content.id);
+  let coverCacheError = "";
+  if (input.thumbnailUrl) {
+    try {
+      await storeViralCover({ contentId, sourceUrl: input.thumbnailUrl });
+    } catch (error) {
+      coverCacheError = error instanceof Error ? error.message : "封面缓存失败";
+    }
+  } else {
+    await deleteViralCover(contentId);
+  }
   await tryCreateAdminAuditLog({ adminUserId: user.id, action: input.id ? "viral_content.update" : "viral_content.create", targetType: "viral_content", targetId: String(content.id), detail: { title: input.title, status: input.status } });
-  return Response.json({ content, mode: "server" });
+  return Response.json({ content, coverCached: Boolean(input.thumbnailUrl) && !coverCacheError, coverCacheError: coverCacheError || undefined, mode: "server" });
 }
 
 export async function PATCH(request: Request) {

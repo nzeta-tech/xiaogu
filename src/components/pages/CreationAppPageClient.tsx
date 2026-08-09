@@ -293,8 +293,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      window.sessionStorage.setItem(draftKey, JSON.stringify(values));
-      setDraftStatus("saved");
+      if (saveCreationDraft(draftKey, values)) setDraftStatus("saved");
+      else setDraftStatus("");
     }, 500);
     return () => window.clearTimeout(timer);
   }, [draftKey, values]);
@@ -314,21 +314,25 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     const traceId = createCreationTraceId();
     trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_click", detail: { visibility: document.visibilityState } });
     if (remixAutoParsingPending) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_blocked", errorCode: "source_parsing_pending" });
       setError("素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。");
       return;
     }
     const missingField = pageApp.fields.find((field) => field.required && isEmpty(values[field.id]));
     if (missingField) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_blocked", errorCode: "missing_required_field" });
       setError(`${missingField.label}还没有填写。`);
       window.requestAnimationFrame(() => document.getElementById(`creation-field-${missingField.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
     }
     if (isImageCard && values.creation_mode === "text_to_card" && isEmpty(values.source)) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_blocked", errorCode: "missing_card_source" });
       setError("请填写卡片内容，或切换为“上传图片进行二创”。");
       window.requestAnimationFrame(() => document.getElementById("creation-field-source")?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
     }
     if (isImageCard && values.creation_mode === "image_remix" && isEmpty(values.reference_image)) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_blocked", errorCode: "missing_remix_image" });
       setError("二创模式需要先上传一张原图。");
       window.requestAnimationFrame(() => document.getElementById("creation-field-reference_image")?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
@@ -337,6 +341,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     const needsAvatarPhoto = isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || (isWechatImages || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
     const isImageCardRemix = isImageCard && values.creation_mode === "image_remix";
     if (needsAvatarPhoto && selectedVisualIds.length === 0 && (isImageCardRemix ? isEmpty(values.portrait_reference_image) : isEmpty(values.reference_image))) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_blocked", errorCode: "missing_avatar_image" });
       setError("请选择数字分身形象照，或临时上传一张形象照。");
       window.requestAnimationFrame(() => document.getElementById("creation-avatar-visual-picker")?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
@@ -344,21 +349,32 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
     setLoading(true);
     setError("");
-    window.sessionStorage.setItem(draftKey, JSON.stringify(values));
+    if (!saveCreationDraft(draftKey, values)) {
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "client_error", errorCode: "draft_storage_failed" });
+      // Temporary reference images are intentionally excluded from drafts. A
+      // storage error must never prevent this creation request from proceeding.
+      setDraftStatus("");
+    }
 
     let response: Response;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 25_000);
     try {
       trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_started" });
       response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
         method: "POST",
         headers: { "content-type": "application/json", "x-creation-trace-id": traceId },
         body: JSON.stringify({ values: { ...values, app_entry: workspaceEntry || "", ...(trafficParentWorkId ? { traffic_parent_work_id: trafficParentWorkId } : {}) } }),
+        signal: controller.signal,
       });
-    } catch {
-      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_failed", errorCode: "network_error" });
-      setError(CREATION_NETWORK_ERROR);
+    } catch (requestError) {
+      const timedOut = requestError instanceof Error && requestError.name === "AbortError";
+      trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_failed", errorCode: timedOut ? "prepare_timeout" : "network_error" });
+      setError(timedOut ? "提交超过 25 秒仍未响应。请先到作品库确认是否已创建，再重试。" : CREATION_NETWORK_ERROR);
       setLoading(false);
       return;
+    } finally {
+      window.clearTimeout(timeout);
     }
 
     const payload = (await response.json().catch(() => ({ error: CREATION_NETWORK_ERROR }))) as {
@@ -406,14 +422,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   async function downloadRemixTranscript() {
     const transcript = typeof values.source_transcript === "string" ? values.source_transcript.trim() : "";
     if (!transcript) return;
+    const deliveryWindow = isMobileDownloadDevice() ? window.open("about:blank", "_blank") : null;
     const blob = await articleDocx("爆款话题二创｜视频转写", null, transcript);
     const href = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = href;
     link.download = "爆款话题二创-视频转写.docx";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    if (deliveryWindow) deliveryWindow.location.href = href;
+    else { document.body.appendChild(link); link.click(); link.remove(); }
     window.setTimeout(() => URL.revokeObjectURL(href), 1000);
   }
 
@@ -506,7 +522,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }
 
   async function waitForRemixInspection(taskId: string) {
-    for (let attempt = 0; attempt < 180; attempt += 1) {
+    for (let attempt = 0; attempt < 900; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const response = await fetch(apiPath(`/api/creation/link-remix/inspect/${encodeURIComponent(taskId)}`), { cache: "no-store" });
       const payload = await response.json().catch(() => ({})) as {
@@ -1607,6 +1623,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   );
 }
 
+function isMobileDownloadDevice() { return typeof window !== "undefined" && window.matchMedia("(max-width: 760px), (pointer: coarse)").matches; }
+
 function extractShareUrl(value: string) {
   const match = value.match(/https?:\/\/[^\s"'<>]+/i)?.[0] ?? value;
   return match.replace(/[，。！？；：、）》】]+$/g, "");
@@ -2527,6 +2545,20 @@ function appendTextValue(current: FieldValue | undefined, nextChunk: string) {
 function isEmpty(value: FieldValue | undefined) {
   if (Array.isArray(value)) return value.length === 0;
   return !value || !value.trim();
+}
+
+function saveCreationDraft(key: string, values: Record<string, FieldValue>) {
+  try {
+    const draft = Object.fromEntries(Object.entries(values).map(([fieldId, value]) => (
+      fieldId === "reference_image" || fieldId === "portrait_reference_image"
+        ? [fieldId, ""]
+        : [fieldId, value]
+    )));
+    window.sessionStorage.setItem(key, JSON.stringify(draft));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readFileAsDataUrl(file: File) {

@@ -30,6 +30,7 @@ import {
   tryGetWorkDetail,
   tryGetLatestThinkingProfileSnapshot,
   tryMergeWechatStudioAssets,
+  tryMergeXiaohongshuStudioAssets,
   trySaveUsageLog,
   trySyncCreationCatalog,
   tryUpdateWorkContent,
@@ -83,6 +84,7 @@ export async function executeCreationAppRun(input: {
   const values = input.values ?? {};
   const studioParent = stringifyCreationFieldValue(values.studio_parent);
   const isWechatStudioAssetStep = studioParent === "wechat-studio" && (app.slug === "wechat-images" || app.slug === "wechat-cover");
+  const isXiaohongshuStudioAssetStep = studioParent === "xiaohongshu-studio" && (app.slug === "wechat-images" || app.slug === "wechat-cover");
   const isPolicyRenewalCard = app.slug === "policy-renewal-card";
   const missingField = effectiveApp.fields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
   if (missingField) {
@@ -180,7 +182,7 @@ export async function executeCreationAppRun(input: {
       });
 
   if (!input.existingRunId && input.workId && run?.id) {
-    if (isWechatStudioAssetStep) {
+    if (isWechatStudioAssetStep || isXiaohongshuStudioAssetStep) {
       // Asset runs are children of the article. They must never become the
       // work's primary run or replace the durable article draft.
     } else if (app.slug === "wechat-studio") {
@@ -348,6 +350,13 @@ export async function executeCreationAppRun(input: {
   const studioAssets = Array.isArray(resultJson?.images) ? resultJson.images as Array<{ id: string; url: string }> : [];
   const work = isWechatStudioAssetStep
     ? await tryMergeWechatStudioAssets({
+        userId: input.userId,
+        workId: input.workId ?? "",
+        kind: app.slug === "wechat-cover" ? "cover" : "images",
+        images: studioAssets,
+      })
+    : isXiaohongshuStudioAssetStep
+    ? await tryMergeXiaohongshuStudioAssets({
         userId: input.userId,
         workId: input.workId ?? "",
         kind: app.slug === "wechat-cover" ? "cover" : "images",

@@ -38,6 +38,10 @@ export async function storeUploadedViralCover(input: { contentId: string; conten
   return persistViralCover({ contentId: input.contentId, contentType, bytes: input.bytes, sourceUrl: input.sourceUrl ?? "uploaded://admin" });
 }
 
+export async function deleteViralCover(contentId: string) {
+  await query("delete from viral_content_cover_assets where viral_content_id=$1", [contentId]);
+}
+
 async function persistViralCover(input: { contentId: string; contentType: string; bytes: Buffer; sourceUrl: string }) {
   const result = await query<{ updated_at: string }>(
     `insert into viral_content_cover_assets(viral_content_id,content_type,image_data,source_url,sha256,size_bytes)

@@ -1,5 +1,5 @@
 import { hasModelConfig, isDemoModeEnabled } from "@/lib/config/runtime";
-import { formatAvatarMemoriesForPrompt, tryListActiveAvatarMemories, tryLogAvatarUsage } from "@/lib/avatar/store";
+import { formatAvatarMemoriesForPrompt, tryListActiveAvatarMemories, tryLogAvatarUsage, type AvatarMemoryScope } from "@/lib/avatar/store";
 import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt } from "@/lib/thinking/profile-snapshot";
 import { getHotTopics } from "@/lib/topics/hot-topics";
@@ -11,6 +11,7 @@ export type AgentMessage = {
 };
 
 export type WritingStyleMode = "general" | "traffic" | "marketing";
+const memoryScopeForStyle = (styleMode: WritingStyleMode): AvatarMemoryScope => styleMode === "traffic" ? "short_video" : styleMode === "marketing" ? "marketing" : "global";
 
 export async function runInsuranceContentAgent(
   messages: AgentMessage[],
@@ -19,7 +20,7 @@ export async function runInsuranceContentAgent(
 ) {
   const latest = messages.at(-1)?.content ?? "";
   const [profile, thinkingSnapshot, avatarMemories] = userId
-    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId), tryListActiveAvatarMemories(userId)])
+    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId), tryListActiveAvatarMemories(userId, 40, memoryScopeForStyle(styleMode))])
     : [null, null, []];
 
   if (hasModelConfig()) {
@@ -43,7 +44,7 @@ export async function* streamInsuranceContentAgent(
   styleMode: WritingStyleMode = "traffic",
 ) {
   const [profile, thinkingSnapshot, avatarMemories] = userId
-    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId), tryListActiveAvatarMemories(userId)])
+    ? await Promise.all([tryGetBrokerProfile(userId), tryGetLatestThinkingProfileSnapshot(userId), tryListActiveAvatarMemories(userId, 40, memoryScopeForStyle(styleMode))])
     : [null, null, []];
   if (hasModelConfig()) {
     for await (const chunk of streamModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode)) {

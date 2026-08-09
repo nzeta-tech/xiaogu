@@ -5,9 +5,9 @@ services:
       target: local-agent
     ports:
       - "3000:3000"
-      - "${VNC_BIND_ADDRESS:-127.0.0.1}:6080:6080"
-      - "${WERSS_BIND_ADDRESS:-127.0.0.1}:8001:8001"
-      - "${WECHATSOGOU_BIND_ADDRESS:-127.0.0.1}:8010:8010"
+      - "${VNC_BIND_ADDRESS:-127.0.0.1}:${VNC_HOST_PORT:-6081}:6080"
+      - "${WERSS_BIND_ADDRESS:-127.0.0.1}:${WERSS_HOST_PORT:-8002}:8001"
+      - "${WECHATSOGOU_BIND_ADDRESS:-127.0.0.1}:${WECHATSOGOU_HOST_PORT:-8011}:8010"
     env_file:
       - .env
     depends_on:
@@ -20,8 +20,14 @@ services:
       wx-channel:
         condition: service_started
     environment:
+      # Next standalone otherwise inherits Docker's container-id HOSTNAME and
+      # can attempt DNS resolution for it during a local container restart.
+      HOSTNAME: 0.0.0.0
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/insurance_content_agent
       REDIS_URL: redis://redis:6379
+      LOCAL_AGENT_ENABLED: ${LOCAL_AGENT_ENABLED:-1}
+      LOCAL_AGENT_TOKEN: ${LOCAL_AGENT_TOKEN:-xiaogu-local-agent-development-token}
+      LOCAL_AGENT_EXECUTOR: "1"
       VIRAL_INSPECT_OPENAI_API_BASE: ${VIRAL_INSPECT_OPENAI_API_BASE:-https://api.openai.com/v1}
       VIRAL_INSPECT_OPENAI_API_KEY: ${VIRAL_INSPECT_OPENAI_API_KEY:-}
       VIRAL_INSPECT_OPENAI_MODEL: ${VIRAL_INSPECT_OPENAI_MODEL:-gpt-4o-mini}
@@ -49,7 +55,8 @@ services:
       # The app container reaches this service through Docker DNS. Local `next dev`
       # uses VIRAL_TRANSCRIBE_API_BASE from .env and reaches the published loopback port.
       VIRAL_TRANSCRIBE_API_BASE: ${VIRAL_TRANSCRIBE_DOCKER_API_BASE:-http://transcriber:8000}
-      VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS: ${VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS:-240000}
+      VIRAL_PUBLIC_MEDIA_DOWNLOAD_TIMEOUT_MS: ${VIRAL_PUBLIC_MEDIA_DOWNLOAD_TIMEOUT_MS:-600000}
+      VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS: ${VIRAL_INSPECT_TRANSCRIBE_TIMEOUT_MS:-1800000}
       DOUYIN_COOKIES_FROM_BROWSER: ${DOUYIN_COOKIES_FROM_BROWSER:-chromium:/data/douyin-profile}
       DOUYIN_BROWSER_PROFILE_DIR: ${DOUYIN_BROWSER_PROFILE_DIR:-/data/douyin-profile}
       VIRAL_DOUYIN_BROWSER_ENABLED: ${VIRAL_DOUYIN_BROWSER_ENABLED:-1}
@@ -106,6 +113,34 @@ services:
       - viral_media:/tmp/xiaogu-viral-media
       - wx_channel_data:/wx-channel:ro
       - werss_data:/opt/werss/data
+
+  local-agent:
+    build:
+      context: .
+      target: local-agent
+    env_file:
+      - .env
+    environment:
+      LOCAL_AGENT_BASE_URL: http://app:3000
+      LOCAL_AGENT_EXECUTOR_URL: http://app:3000
+      LOCAL_AGENT_BROWSER_HEALTH_URL: http://app:3000/api/internal/local-agent/executor-health
+      LOCAL_AGENT_TOKEN: ${LOCAL_AGENT_TOKEN:-xiaogu-local-agent-development-token}
+      LOCAL_AGENT_ID: xiaogu-local-compose
+      LOCAL_AGENT_CAPABILITIES: source.inspect
+      LOCAL_AGENT_TASK_TIMEOUT_MS: ${LOCAL_AGENT_TASK_TIMEOUT_MS:-1800000}
+      LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS: ${LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS:-600000}
+      VIRAL_TRANSCRIBE_API_BASE: http://transcriber:8000
+      VIRAL_WECHAT_DISCOVERY_API_BASE: http://wx-channel:2026
+      CONTAINER_BROWSER_CDP_PORT: 9222
+    command: ["node", "scripts/local-agent.mjs"]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+      transcriber:
+        condition: service_healthy
+      wx-channel:
+        condition: service_started
 
   viral-worker:
     build:

@@ -606,7 +606,18 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   }
 
   async function handleImageDownload(url: string, filename: string) {
+    if (isMobileDownloadDevice() && !effectiveContactOverlay && !url.startsWith("data:") && !url.startsWith("blob:")) {
+      downloadAsset(buildImageDownloadUrl(url, filename), filename);
+      flashImageNotice("图片已开始下载");
+      return;
+    }
+    const deliveryWindow = isMobileDownloadDevice() ? window.open("about:blank", "_blank") : null;
     const finalUrl = await buildWatermarkedAsset(url, effectiveContactOverlay);
+    if (deliveryWindow) {
+      deliveryWindow.location.href = finalUrl;
+      flashImageNotice("图片已打开，请长按图片保存");
+      return;
+    }
     downloadAsset(finalUrl, filename);
     flashImageNotice("图片已开始下载");
   }
@@ -3703,6 +3714,15 @@ function resolveImageSource(url: string) {
   return proxy.toString();
 }
 
+function buildImageDownloadUrl(url: string, filename: string) {
+  const sourceUrl = url.startsWith("/") ? new URL(url, window.location.origin).toString() : url;
+  const proxy = new URL(apiPath("/api/assets/image-proxy"), window.location.origin);
+  proxy.searchParams.set("url", sourceUrl);
+  proxy.searchParams.set("download", "1");
+  proxy.searchParams.set("filename", filename);
+  return proxy.toString();
+}
+
 function roundRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
   const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
   context.beginPath();
@@ -3722,7 +3742,7 @@ function exportWord(title: string, body: string, options?: { viewMode?: Creation
   link.href = url;
   link.download = `${sanitizeFilename(title)}.doc`;
   link.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function buildWordDocumentHtml(title: string, body: string, options?: { viewMode?: CreationOutputViewMode; theme?: WechatTheme }) {
@@ -4113,8 +4133,17 @@ function formatAppLabel(value?: string | null) {
   if (value === "wechat-article-polish") return "公众号文章精修";
   if (value === "topic-picker") return "找选题";
   if (value === "xiaohongshu-check") return "小红书违规检测";
+  if (value === "xiaohongshu-studio") return "小红书笔记创作";
   if (value === "wechat-studio") return "公众号文章创作";
+  if (value === "wechat-cover") return "公众号文章封面";
   if (value === "ppt-maker") return "PPT轻松制作";
+  if (value === "link-remix") return "爆款话题二创";
+  if (value === "lead-package") return "制作引流资料";
+  if (value === "ip-positioning") return "个人品牌定位";
+  if (value === "breakthrough") return "陪你破局增长";
+  if (value === "team-recruit") return "招募文案";
+  if (value === "live-script") return "直播脚本生成";
+  if (value === "policy-diagnosis") return "保单结构复核";
   return value ?? "";
 }
 

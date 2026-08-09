@@ -6,6 +6,8 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const sourceUrl = searchParams.get("url")?.trim();
+  const download = searchParams.get("download") === "1";
+  const filename = searchParams.get("filename")?.trim() || "图片.png";
   if (!sourceUrl) {
     return Response.json({ error: "缺少图片地址" }, { status: 400 });
   }
@@ -40,12 +42,16 @@ export async function GET(request: Request) {
     }
 
     const buffer = await response.arrayBuffer();
+    const headers = new Headers({
+      "content-type": contentType,
+      "cache-control": "private, no-store, max-age=0",
+    });
+    if (download) {
+      headers.set("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    }
     return new Response(buffer, {
       status: 200,
-      headers: {
-        "content-type": contentType,
-        "cache-control": "private, no-store, max-age=0",
-      },
+      headers,
     });
   } catch {
     return Response.json({ error: "图片代理失败" }, { status: 502 });

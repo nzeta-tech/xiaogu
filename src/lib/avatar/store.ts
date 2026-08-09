@@ -4,20 +4,22 @@ import type {
   AvatarMemoryItem,
   AvatarMemorySource,
   AvatarPrivacySettings,
+  AvatarTrainingRun,
   AvatarVersion,
+  AvatarCreatorSkill,
 } from "@/lib/avatar/types";
 import { listAvatarVisualAssets } from "@/lib/avatar/visual-assets";
 
 export async function getAvatarWorkspace(userId: string) {
-  const [memories, sources, proposals, versions, privacy, usage, photos] = await Promise.all([
+  const [memories, sources, proposals, versions, privacy, usage, photos, trainingRuns, skills, skillVersions] = await Promise.all([
     query<AvatarMemoryItem>(
-      `select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, created_at, updated_at
-       from avatar_memory_items where user_id = $1 and status <> 'archived' order by status desc, updated_at desc limit 200`,
+      `select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, metadata_json, created_at, updated_at
+       from avatar_memory_items where user_id = $1 order by status desc, updated_at desc limit 200`,
       [userId],
     ),
     query<AvatarMemorySource>(
-      `select id, source_type, title, content, status, sensitivity, created_at, updated_at
-       from avatar_memory_sources where user_id = $1 and status <> 'archived' order by updated_at desc limit 100`,
+      `select id, source_type, title, content, status, sensitivity, metadata_json, created_at, updated_at
+       from avatar_memory_sources where user_id = $1 order by updated_at desc, created_at desc limit 100`,
       [userId],
     ),
     query<AvatarEvolutionProposal>(
@@ -40,6 +42,13 @@ export async function getAvatarWorkspace(userId: string) {
       [userId],
     ),
     listAvatarVisualAssets(userId),
+    query<AvatarTrainingRun>(
+      `select id, source_id, training_type, status, phase, total_count, completed_count, successful_count, error_message, details_json, created_at, updated_at
+       from avatar_training_runs where user_id = $1 order by created_at desc limit 20`,
+      [userId],
+    ),
+    query<Omit<AvatarCreatorSkill, "versions">>(`select id, name, creator_name, status, latest_version, created_at, updated_at from avatar_creator_skills where user_id = $1 order by updated_at desc`, [userId]),
+    query<AvatarCreatorSkill["versions"][number] & { skill_id: string }>(`select id, skill_id, version, training_run_id, status, source_links, sample_count, skill_prompt, change_summary, created_at from avatar_creator_skill_versions where user_id = $1 order by version desc`, [userId]),
   ]);
 
   return {
@@ -55,6 +64,8 @@ export async function getAvatarWorkspace(userId: string) {
       visual_creation_enabled: true,
     },
     photos,
+    trainingRuns: trainingRuns.rows,
+    creatorSkills: skills.rows.map((skill) => ({ ...skill, versions: skillVersions.rows.filter((version) => version.skill_id === skill.id) })),
     usage: {
       count: Number(usage.rows[0]?.usage_count ?? 0),
       lastUsedAt: usage.rows[0]?.last_used_at ?? null,
@@ -62,7 +73,8 @@ export async function getAvatarWorkspace(userId: string) {
   };
 }
 
-export async function tryListActiveAvatarMemories(userId: string | null, limit = 40) {
+export type AvatarMemoryScope = "global" | "short_video" | "marketing" | "customer";
+export async function tryListActiveAvatarMemories(userId: string | null, limit = 40, scope: AvatarMemoryScope = "global") {
   if (!userId) return [];
   try {
     const result = await query<AvatarMemoryItem>(
@@ -70,6 +82,7 @@ export async function tryListActiveAvatarMemories(userId: string | null, limit =
          select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, created_at, updated_at
          from avatar_memory_items
          where user_id = $1 and status = 'active' and usage_scope <> 'private'
+           and coalesce(metadata_json->>'memoryScope', 'global') in ('global', $3)
            and (expires_at is null or expires_at > now())
          union all
          select id, 'expression'::text as category, title, left(content, 1400) as content, id as source_id,
@@ -77,9 +90,10 @@ export async function tryListActiveAvatarMemories(userId: string | null, limit =
            'content'::text as usage_scope, created_at, updated_at
          from avatar_memory_sources
          where user_id = $1 and status = 'active'
+           and coalesce(metadata_json->>'memoryScope', 'global') in ('global', $3)
        ) active_context
        order by confidence desc, updated_at desc limit $2`,
-      [userId, limit],
+      [userId, limit, scope],
     );
     return result.rows;
   } catch {
@@ -144,9 +158,16 @@ export async function resolveEvolutionProposal(userId: string, proposalId: strin
       const category = ["identity", "audience", "expertise", "expression", "story", "boundary", "temporary"].includes(row.category) ? row.category : "expression";
       await client.query(
         `insert into avatar_memory_items(user_id, category, title, content, origin, status, confidence, metadata_json)
-         values ($1, $2, $3, $4, 'behavior', 'active', $5, jsonb_build_object('proposalId', $6))`,
-        [userId, category, title, content, row.confidence, proposalId],
+         values ($1, $2, $3, $4, 'behavior', 'active', $5, jsonb_build_object('proposalId', $6, 'sourceLabel', coalesce($7, '进化建议'), 'memoryScope', coalesce($8, 'global')))`,
+        [userId, category, title, content, row.confidence, proposalId, typeof patch.sourceLabel === "string" ? patch.sourceLabel : null, typeof patch.memoryScope === "string" ? patch.memoryScope : null],
       );
+      const sourceId = typeof patch.sourceId === "string" ? patch.sourceId : "";
+      if (sourceId) {
+        await client.query(
+          `update avatar_memory_sources set status = 'active', updated_at = now() where id = $1 and user_id = $2`,
+          [sourceId, userId],
+        );
+      }
       const nextVersion = await client.query<{ version: number }>(
         `select coalesce(max(version), 0) + 1 as version from avatar_versions where user_id = $1`,
         [userId],

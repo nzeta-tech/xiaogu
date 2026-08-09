@@ -9292,6 +9292,20 @@ a {
   line-height: 1.1;
 }
 
+.adminGrowthSummary { display: flex; gap: 18px; padding: 14px 16px 0; color: #64748b; font-size: 12px; font-weight: 700; }
+.adminGrowthSummary span { display: inline-flex; align-items: center; gap: 7px; }
+.adminGrowthSummary strong { color: #0f172a; font-size: 15px; }
+.adminGrowthSummary i { width: 8px; height: 8px; border-radius: 50%; }
+.adminGrowthSummary i.users { background: #14b8a6; }
+.adminGrowthSummary i.works { background: #6366f1; }
+.adminGrowthChart { height: 250px; padding: 10px 12px 12px 4px; }
+.adminGrowthChart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.adminGrowthGridLine { stroke: #e2e8f0; stroke-width: 1; stroke-dasharray: 3 4; }
+.adminGrowthAxis { fill: #94a3b8; font-size: 11px; font-weight: 600; }
+.adminGrowthLine { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.adminGrowthLine.users { stroke: #14b8a6; }
+.adminGrowthLine.works { stroke: #6366f1; }
+
 .adminConsole .panelHeader {
   padding: 13px 16px 12px;
   border-bottom: 1px solid #e2e8f0;

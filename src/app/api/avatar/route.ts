@@ -5,6 +5,7 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { query } from "@/lib/db/client";
 import { tryGetLatestThinkingProfileSnapshot, tryGetLatestQuestionnaire } from "@/lib/db/repositories";
 import { tryGetAvatarContactCard } from "@/lib/avatar/contact-card";
+import { reconcileAvatarTrainingRuns, startAvatarVideoTraining } from "@/lib/avatar/video-training";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -12,6 +13,8 @@ const actionSchema = z.discriminatedUnion("action", [
     category: z.enum(avatarMemoryCategories),
     title: z.string().trim().max(120).default(""),
     content: z.string().trim().min(1).max(5000),
+    sourceLabel: z.string().trim().min(1).max(40).default("手动录入"),
+    memoryScope: z.enum(["global", "short_video", "marketing", "customer"]).default("global"),
     sensitivity: z.enum(["normal", "sensitive", "restricted"]).default("normal"),
     usageScope: z.enum(["all", "content", "customer", "private"]).default("all"),
   }),
@@ -19,10 +22,17 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("resolve-proposal"), proposalId: z.string().uuid(), decision: z.enum(["accepted", "rejected"]) }),
   z.object({
     action: z.literal("add-source"),
-    sourceType: z.enum(["article", "moments", "transcript", "story", "manual"]).default("manual"),
+    sourceType: z.enum(["article", "moments", "transcript", "story", "manual", "video_channel", "douyin"]).default("manual"),
     title: z.string().trim().min(1).max(160),
     content: z.string().trim().min(20).max(50000),
     sensitivity: z.enum(["normal", "sensitive", "restricted"]).default("normal"),
+    sourceLabel: z.string().trim().min(1).max(40).default("手动录入"),
+    memoryScope: z.enum(["global", "short_video", "marketing", "customer"]).default("global"),
+  }),
+  z.object({
+    action: z.literal("train-video-channel-links"),
+    links: z.array(z.string().trim().url().max(1000)).min(3).max(10),
+    authorized: z.literal(true),
   }),
   z.object({ action: z.literal("set-source-status"), sourceId: z.string().uuid(), status: z.enum(["active", "disabled", "archived"]) }),
   z.object({
@@ -42,12 +52,15 @@ const actionSchema = z.discriminatedUnion("action", [
     workId: z.string().max(120).optional(),
   }),
   z.object({ action: z.literal("restore-version"), versionId: z.string().uuid() }),
+  z.object({ action: z.literal("create-creator-skill"), skillId: z.string().uuid().optional(), name: z.string().trim().max(60).default(""), creatorName: z.string().trim().max(80).default(""), links: z.array(z.string().trim().url().max(1000)).min(3).max(10), authorized: z.literal(true) }),
+  z.object({ action: z.literal("restore-creator-skill-version"), skillId: z.string().uuid(), versionId: z.string().uuid() }),
 ]);
 
 export async function GET() {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
   try {
+    await reconcileAvatarTrainingRuns(user.id);
     const [workspace, snapshot, questionnaire, contactCard] = await Promise.all([
       getAvatarWorkspace(user.id),
       tryGetLatestThinkingProfileSnapshot(user.id),
@@ -86,9 +99,9 @@ export async function POST(request: Request) {
   try {
     if (input.action === "add-memory") {
       const result = await query<{ id: string }>(
-        `insert into avatar_memory_items(user_id, category, title, content, origin, status, confidence, sensitivity, usage_scope)
-         values ($1, $2, $3, $4, 'user', 'active', 100, $5, $6) returning id`,
-        [user.id, input.category, input.title, input.content, input.sensitivity, input.usageScope],
+        `insert into avatar_memory_items(user_id, category, title, content, origin, status, confidence, sensitivity, usage_scope, metadata_json)
+         values ($1, $2, $3, $4, 'user', 'active', 100, $5, $6, $7::jsonb) returning id`,
+        [user.id, input.category, input.title, input.content, input.sensitivity, input.usageScope, JSON.stringify({ sourceLabel: input.sourceLabel, memoryScope: input.memoryScope })],
       );
       return Response.json({ ok: true, id: result.rows[0].id });
     }
@@ -105,11 +118,36 @@ export async function POST(request: Request) {
 
     if (input.action === "add-source") {
       const result = await query<{ id: string }>(
-        `insert into avatar_memory_sources(user_id, source_type, title, content, sensitivity)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [user.id, input.sourceType, input.title, input.content, input.sensitivity],
+        `insert into avatar_memory_sources(user_id, source_type, title, content, sensitivity, metadata_json)
+         values ($1, $2, $3, $4, $5, $6::jsonb) returning id`,
+        [user.id, input.sourceType, input.title, input.content, input.sensitivity, JSON.stringify({ sourceLabel: input.sourceLabel, memoryScope: input.memoryScope })],
       );
       return Response.json({ ok: true, id: result.rows[0].id });
+    }
+
+    if (input.action === "train-video-channel-links") {
+      const training = await startAvatarVideoTraining(user.id, input.links);
+      return Response.json({ ok: true, status: "queued", ...training }, { status: 202, headers: { "cache-control": "no-store" } });
+    }
+
+    if (input.action === "create-creator-skill") {
+      if (!input.skillId && !input.name) return Response.json({ error: "请选择已有分身，或填写新分身名称" }, { status: 400 });
+      const skill = input.skillId
+        ? await query<{ id: string; latest_version: number }>(`select id, latest_version from avatar_creator_skills where id=$1 and user_id=$2 and status='active'`, [input.skillId, user.id])
+        : await query<{ id: string; latest_version: number }>(`insert into avatar_creator_skills(user_id, name, creator_name) values ($1, $2, $3) on conflict (user_id, lower(name)) do update set creator_name=excluded.creator_name, updated_at=now() returning id, latest_version`, [user.id, input.name, input.creatorName]);
+      const item = skill.rows[0];
+      if (!item) return Response.json({ error: "选择的分身不存在或已归档" }, { status: 404 });
+      const training = await startAvatarVideoTraining(user.id, input.links, item.id);
+      await query(`insert into avatar_creator_skill_versions(skill_id, user_id, version, training_run_id, source_links, change_summary) values ($1, $2, $3, $4, $5::jsonb, '正在通过授权作品训练')`, [item.id, user.id, item.latest_version + 1, training.runId, JSON.stringify(input.links)]);
+      return Response.json({ ok: true, skillId: item.id, runId: training.runId }, { status: 202 });
+    }
+
+    if (input.action === "restore-creator-skill-version") {
+      const version = await query<{ version: number }>(`select version from avatar_creator_skill_versions where id=$1 and skill_id=$2 and user_id=$3`, [input.versionId, input.skillId, user.id]);
+      if (!version.rows[0]) return Response.json({ error: "Skill 版本不存在" }, { status: 404 });
+      await query(`update avatar_creator_skill_versions set status=case when id=$2 then 'restored' else 'superseded' end where skill_id=$1 and user_id=$3 and status in ('active','restored')`, [input.skillId, input.versionId, user.id]);
+      await query(`update avatar_creator_skills set latest_version=$2, updated_at=now() where id=$1 and user_id=$3`, [input.skillId, version.rows[0].version, user.id]);
+      return Response.json({ ok: true });
     }
 
     if (input.action === "set-source-status") {

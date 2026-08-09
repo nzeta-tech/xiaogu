@@ -6,8 +6,6 @@ export async function GET(request: Request) {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
 
-  await trySyncCreationCatalog();
-
   const url = new URL(request.url);
   const view = url.searchParams.get("view");
 
@@ -37,6 +35,11 @@ export async function GET(request: Request) {
     }
     return Response.json({ works, mode: "server" });
   }
+
+  // The work-history view does not use the catalog. Keeping this write-heavy
+  // synchronization out of its request path prevents every history refresh
+  // from issuing dozens of catalog upserts.
+  await trySyncCreationCatalog();
 
   const hub = await tryGetCreationHubData(user.id);
   const catalog = await tryListCreationCatalog();

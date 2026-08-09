@@ -3,7 +3,7 @@ import path from "node:path";
 
 export type CreationDiagnosticEvent =
   | "page_view" | "submit_click" | "prepare_started" | "prepare_received"
-  | "prepare_finished" | "prepare_failed" | "navigation_started" | "client_error";
+  | "prepare_finished" | "prepare_failed" | "navigation_started" | "client_error" | "submit_blocked";
 
 export type CreationDiagnosticRecord = {
   created_at: string;

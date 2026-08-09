@@ -10,6 +10,7 @@ import type {
   AvatarMemoryCategory,
   AvatarMemoryItem,
   AvatarMemorySource,
+  AvatarTrainingRun,
   AvatarPrivacySettings,
   AvatarVisualAsset,
   AvatarVisualAssetRole,
@@ -17,12 +18,14 @@ import type {
   AvatarCoachConversation,
   AvatarCoachMessage,
   AvatarContactCard,
+  AvatarCreatorSkill,
 } from "@/lib/avatar/types";
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 
 type AvatarWorkspace = {
   memories: AvatarMemoryItem[];
   sources: AvatarMemorySource[];
+  trainingRuns: AvatarTrainingRun[];
   proposals: AvatarEvolutionProposal[];
   versions: AvatarVersion[];
   privacy: AvatarPrivacySettings;
@@ -36,19 +39,20 @@ type AvatarWorkspace = {
   } | null;
   questionnaire: { completionPercent: number; updatedAt: string } | null;
   contactCard: AvatarContactCard;
+  creatorSkills: AvatarCreatorSkill[];
 };
 
 type AvatarTab = "coach" | "overview" | "memory" | "visual" | "contact" | "evolution" | "lab" | "sources" | "versions";
 type CoachNextStep = { title: string; description: string; href: string };
 
 const tabs: Array<{ id: AvatarTab; label: string; description: string }> = [
+  { id: "lab", label: "数字分身实验室", description: "训练、保存并对比分身 Skill" },
   { id: "coach", label: "小谷精灵", description: "和懂你的创作教练聊聊" },
   { id: "overview", label: "分身主页", description: "成熟度与当前状态" },
   { id: "memory", label: "我的记忆", description: "查看和管理长期记忆" },
   { id: "visual", label: "形象资产", description: "管理可复用的本人照片" },
   { id: "contact", label: "联系名片", description: "二维码与发布署名" },
   { id: "evolution", label: "进化中心", description: "确认分身如何改变" },
-  { id: "lab", label: "分身试验室", description: "对比普通 AI 与你的分身" },
   { id: "sources", label: "学习资料", description: "文章、录音与故事来源" },
   { id: "versions", label: "版本与隐私", description: "回滚和学习控制" },
 ];
@@ -74,20 +78,27 @@ const emptyPrivacy: AvatarPrivacySettings = {
 export function ProfilePageClient() {
   const [workspace, setWorkspace] = useState<AvatarWorkspace | null>(null);
   const [activeTab, setActiveTab] = useState<AvatarTab>(() => {
-    if (typeof window === "undefined") return "coach";
+    if (typeof window === "undefined") return "lab";
     const params = new URLSearchParams(window.location.search);
     const requestedTab = params.get("tab");
     if (requestedTab && tabs.some((tab) => tab.id === requestedTab)) return requestedTab as AvatarTab;
-    return "coach";
+    return "lab";
   });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [memoryDraft, setMemoryDraft] = useState<{ category: AvatarMemoryCategory; title: string; content: string }>({ category: "identity", title: "", content: "" });
-  const [sourceDraft, setSourceDraft] = useState({ sourceType: "article", title: "", content: "" });
+  const [memoryFilter, setMemoryFilter] = useState("all"); const [memorySearch, setMemorySearch] = useState("");
+  const [proposalFilter, setProposalFilter] = useState("all"); const [proposalSearch, setProposalSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all"); const [sourceSearch, setSourceSearch] = useState("");
+  const [memoryDraft, setMemoryDraft] = useState<{ category: AvatarMemoryCategory; title: string; content: string; sourceLabel: string; memoryScope: string }>({ category: "identity", title: "", content: "", sourceLabel: "手动录入", memoryScope: "global" });
+  const [sourceDraft, setSourceDraft] = useState({ sourceType: "article", title: "", content: "", sourceLabel: "手动录入", memoryScope: "global" });
+  const [videoChannelDraft, setVideoChannelDraft] = useState({ shareLinks: "", authorized: false });
   const [labPrompt, setLabPrompt] = useState("");
-  const [labResult, setLabResult] = useState<{ avatarText: string; baselineText: string } | null>(null);
+  const [labLeft, setLabLeft] = useState("avatar");
+  const [labRight, setLabRight] = useState("baseline");
+  const [creatorSkillDraft, setCreatorSkillDraft] = useState({ skillId: "", name: "", creatorName: "", shareLinks: "", authorized: false });
+  const [labResult, setLabResult] = useState<{ leftText: string; rightText: string; leftLabel: string; rightLabel: string; leftDone: boolean; rightDone: boolean } | null>(null);
   const [coachConversations, setCoachConversations] = useState<AvatarCoachConversation[]>([]);
   const [coachConversationId, setCoachConversationId] = useState("");
   const [coachMessages, setCoachMessages] = useState<AvatarCoachMessage[]>([]);
@@ -130,6 +141,14 @@ export function ProfilePageClient() {
       if (payload?.conversations) setCoachConversations(payload.conversations);
     }).catch(() => undefined);
   }, [activeTab]);
+
+  const latestTrainingId = workspace?.trainingRuns.find((run) => run.status === "running")?.id ?? "";
+  const latestTrainingStatus = latestTrainingId ? "running" : "";
+  useEffect(() => {
+    if (!latestTrainingId || latestTrainingStatus !== "running") return;
+    const refreshTimer = window.setInterval(() => { void loadAvatar(); }, 2_000);
+    return () => window.clearInterval(refreshTimer);
+  }, [latestTrainingId, latestTrainingStatus]);
 
   const maturity = useMemo(() => calculateMaturity(workspace), [workspace]);
   const activeMemories = workspace?.memories.filter((item) => item.status === "active") ?? [];
@@ -176,28 +195,40 @@ export function ProfilePageClient() {
     if (ok) setSourceDraft((current) => ({ ...current, title: "", content: "" }));
   }
 
+  async function trainVideoChannel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const links = videoChannelDraft.shareLinks.split(/[\n,，]/).map((item) => item.trim()).filter(Boolean);
+    const ok = await performAction({ action: "train-video-channel-links", links, authorized: videoChannelDraft.authorized }, "训练任务已开始。你可以离开页面，小谷会在后台继续解析和转写。");
+    if (ok) setVideoChannelDraft((current) => ({ ...current, authorized: false }));
+  }
+
   async function runLab(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy("lab");
     setError("");
-    setLabResult(null);
+    const labelFor = (value: string) => value === "avatar" ? "我的数字分身" : value === "baseline" ? "默认版本" : (workspace?.creatorSkills ?? []).flatMap((skill) => skill.versions.map((version) => version.id === value ? `${skill.name} · V${version.version}` : "")).find(Boolean) || "已选 Skill";
+    setLabResult({ leftText: "", rightText: "", leftLabel: labelFor(labLeft), rightLabel: labelFor(labRight), leftDone: false, rightDone: false });
     try {
       const response = await fetch(apiPath("/api/avatar/lab"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: labPrompt }),
+        body: JSON.stringify({ prompt: labPrompt, left: labLeft, right: labRight }),
       });
-      const payload = await response.json() as { avatarText?: string; baselineText?: string; error?: string };
-      if (!response.ok || !payload.avatarText || !payload.baselineText) {
-        setError(payload.error ?? "试写失败");
-        return;
-      }
-      setLabResult({ avatarText: payload.avatarText, baselineText: payload.baselineText });
+      if (!response.ok || !response.body) { const payload = await response.json() as { error?: string }; setError(payload.error ?? "试写失败"); return; }
+      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+      while (true) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const events = buffer.split("\n\n"); buffer = events.pop() ?? ""; for (const raw of events) { const line = raw.split("\n").find((item) => item.startsWith("data: ")); if (!line) continue; const item = JSON.parse(line.slice(6)) as { type: string; side?: "left" | "right"; content?: string; left?: string; right?: string; message?: string }; if (item.type === "start") setLabResult({ leftText: "", rightText: "", leftLabel: item.left ?? "左侧", rightLabel: item.right ?? "右侧", leftDone: false, rightDone: false }); if (item.type === "chunk" && item.side) setLabResult((current) => current ? { ...current, [item.side === "left" ? "leftText" : "rightText"]: `${item.side === "left" ? current.leftText : current.rightText}${item.content ?? ""}` } : current); if (item.type === "done" && item.side) setLabResult((current) => current ? { ...current, [item.side === "left" ? "leftDone" : "rightDone"]: true } : current); if (item.type === "error") setError(item.message ?? "对比生成失败"); } }
     } catch {
       setError("网络连接异常，请稍后重试");
     } finally {
       setBusy("");
     }
+  }
+
+  async function trainCreatorSkill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const links = creatorSkillDraft.shareLinks.split(/[\n,，]/).map((item) => item.trim()).filter(Boolean);
+    const ok = await performAction({ action: "create-creator-skill", skillId: creatorSkillDraft.skillId || undefined, name: creatorSkillDraft.name, creatorName: creatorSkillDraft.creatorName, links, authorized: creatorSkillDraft.authorized }, "Skill 训练已开始；完成后会生成一个可选用的新版本。");
+    if (ok) setCreatorSkillDraft((current) => ({ ...current, shareLinks: "", authorized: false }));
   }
 
   async function submitCoach(event: FormEvent<HTMLFormElement>) {
@@ -374,11 +405,12 @@ export function ProfilePageClient() {
           <div className="avatarViewMain">
             <div className="avatarSectionHeader"><div><span>长期记忆</span><h2>小谷现在记住了什么</h2><p>推断内容会显示来源和可信度，你可以确认、停用或删除。</p></div></div>
             {candidateMemories.length > 0 ? (
-              <div className="avatarCandidateBanner"><strong>{candidateMemories.length} 条候选记忆待确认</strong><span>AI 推断不会在确认前进入正式创作上下文。</span></div>
+              <div className="avatarCandidateBanner"><strong>{candidateMemories.length} 条候选记忆待确认</strong><span>小谷推断不会在确认前进入正式创作上下文。</span></div>
             ) : null}
+            <RecordFilters value={memoryFilter} onValue={setMemoryFilter} search={memorySearch} onSearch={setMemorySearch} options={[["active","启用"],["candidate","暂停"],["archived","归档"]]} />
             <div className="avatarMemoryGroups">
               {(Object.keys(categoryMeta) as AvatarMemoryCategory[]).map((category) => {
-                const items = workspace?.memories.filter((item) => item.category === category) ?? [];
+                const items = workspace?.memories.filter((item) => item.category === category && (memoryFilter === "all" || item.status === memoryFilter) && `${item.title} ${item.content} ${item.metadata_json?.sourceLabel ?? ""}`.toLowerCase().includes(memorySearch.toLowerCase())) ?? [];
                 return (
                   <section className="avatarMemoryGroup" key={category}>
                     <div className="avatarMemoryGroupHeader"><div><h3>{categoryMeta[category].label}</h3><p>{categoryMeta[category].description}</p></div><span>{items.length}</span></div>
@@ -386,7 +418,7 @@ export function ProfilePageClient() {
                       {items.map((item) => (
                         <article className={`avatarMemoryItem ${item.status}`} key={item.id}>
                           <div><strong>{item.title || categoryMeta[category].label}</strong><p>{item.content}</p></div>
-                          <div className="avatarMemoryItemMeta"><span>{originLabel(item.origin)}</span><span>可信度 {item.confidence}%</span><span>{item.usage_scope === "private" ? "仅自己可见" : "参与创作"}</span></div>
+                          <div className="avatarMemoryItemMeta"><span>{item.metadata_json?.sourceLabel ?? originLabel(item.origin)}</span><span>{memoryScopeLabel(item.metadata_json?.memoryScope)}</span><span>可信度 {item.confidence}%</span><span>{item.usage_scope === "private" ? "仅自己可见" : "参与创作"}</span></div>
                           <div className="avatarMemoryActions">
                             {item.status === "candidate" ? <button onClick={() => void performAction({ action: "set-memory-status", memoryId: item.id, status: "active" }, "候选记忆已确认。")}>确认</button> : null}
                             {item.status === "active" ? <button onClick={() => void performAction({ action: "set-memory-status", memoryId: item.id, status: "candidate" }, "记忆已暂停使用。")}>暂停</button> : null}
@@ -406,6 +438,8 @@ export function ProfilePageClient() {
               <div><span>新增记忆</span><h2>告诉小谷一件事</h2></div>
               <label>记忆类型<select value={memoryDraft.category} onChange={(event) => setMemoryDraft((current) => ({ ...current, category: event.target.value as AvatarMemoryCategory }))}>{(Object.keys(categoryMeta) as AvatarMemoryCategory[]).map((key) => <option key={key} value={key}>{categoryMeta[key].label}</option>)}</select></label>
               <label>标题<input value={memoryDraft.title} onChange={(event) => setMemoryDraft((current) => ({ ...current, title: event.target.value }))} placeholder="例如：我的服务原则" /></label>
+              <label>来源<input value={memoryDraft.sourceLabel} onChange={(event) => setMemoryDraft((current) => ({ ...current, sourceLabel: event.target.value }))} /></label>
+              <label>作用域<MemoryScopeSelect value={memoryDraft.memoryScope} onChange={(memoryScope) => setMemoryDraft((current) => ({ ...current, memoryScope }))} /></label>
               <label>具体内容<textarea value={memoryDraft.content} onChange={(event) => setMemoryDraft((current) => ({ ...current, content: event.target.value }))} placeholder="写清楚事实、偏好或边界" required /></label>
               <button className="primaryButton" disabled={busy === "add-memory" || !memoryDraft.content.trim()} type="submit">加入长期记忆</button>
               <p>客户姓名、联系方式、身份证件和完整保单信息不建议保存为长期记忆。</p>
@@ -436,13 +470,14 @@ export function ProfilePageClient() {
       {activeTab === "evolution" ? (
         <section className="avatarSingleView">
           <div className="avatarSectionHeader"><div><span>可控进化</span><h2>待确认的进化建议</h2><p>小谷只提出建议，不会未经确认改变你的核心分身。</p></div></div>
+          <RecordFilters value={proposalFilter} onValue={setProposalFilter} search={proposalSearch} onSearch={setProposalSearch} options={[["pending","待确认"],["accepted","已采用"],["rejected","已忽略"]]} />
           <div className="avatarProposalList">
-            {(workspace?.proposals ?? []).map((proposal) => (
+            {(workspace?.proposals ?? []).filter((proposal) => (proposalFilter === "all" || proposal.status === proposalFilter) && `${proposal.title} ${proposal.description}`.toLowerCase().includes(proposalSearch.toLowerCase())).map((proposal) => (
               <article className={`avatarProposal ${proposal.status}`} key={proposal.id}>
-                <div className="avatarProposalTop"><div><span>{categoryMeta[proposal.category as AvatarMemoryCategory]?.label ?? proposal.category}</span><h3>{proposal.title}</h3></div><strong>{proposal.confidence}% 可信</strong></div>
-                <p>{proposal.description}</p>
+                <div className="avatarProposalTop"><div><span>{categoryMeta[proposal.category as AvatarMemoryCategory]?.label ?? proposal.category}</span><h3>{proposal.title}</h3><small>来源：{String(proposal.patch_json.sourceLabel ?? "进化建议")} · {formatDate(proposal.created_at)}</small></div><strong>{proposal.confidence}% 可信</strong></div>
+                <div className="avatarProposalReport"><ReactMarkdown>{proposal.description}</ReactMarkdown></div>
                 <ul>{proposal.evidence_json.map((item) => <li key={item}>{item}</li>)}</ul>
-                {proposal.status === "pending" ? <div><button className="primaryButton" onClick={() => void performAction({ action: "resolve-proposal", proposalId: proposal.id, decision: "accepted" }, "进化建议已接受，并创建了新版本。")}>接受并进化</button><button className="secondaryButton" onClick={() => void performAction({ action: "resolve-proposal", proposalId: proposal.id, decision: "rejected" }, "进化建议已忽略。")}>忽略</button></div> : <em>{proposal.status === "accepted" ? "已接受" : "已忽略"}</em>}
+                {proposal.status === "pending" ? <div><button className="primaryButton" onClick={() => void performAction({ action: "resolve-proposal", proposalId: proposal.id, decision: "accepted" }, "风格报告已确认，训练资料将参与后续内容生成。")}>{proposal.patch_json.sourceId ? "确认并用于创作" : "接受并进化"}</button><button className="secondaryButton" onClick={() => void performAction({ action: "resolve-proposal", proposalId: proposal.id, decision: "rejected" }, "进化建议已忽略。")}>忽略</button></div> : <em>{proposal.status === "accepted" ? "已接受" : "已忽略"}</em>}
               </article>
             ))}
             {(workspace?.proposals.length ?? 0) === 0 ? <div className="avatarEmptyState"><strong>还没有进化建议</strong><p>在分身试验室评价结果，或在作品中持续反馈，小谷会在发现稳定模式后提出建议。</p></div> : null}
@@ -452,16 +487,20 @@ export function ProfilePageClient() {
 
       {activeTab === "lab" ? (
         <section className="avatarLabView">
-          <div className="avatarSectionHeader"><div><span>分身试验室</span><h2>同一个主题，看看分身有什么不同</h2><p>左侧使用你的长期记忆，右侧使用普通保险内容顾问基线。</p></div></div>
+          <div className="avatarSectionHeader"><div><span>数字分身实验室</span><h2>把创作者的创作方式蒸馏为可复用 Skill</h2><p>训练使用与学习资料相同的解析、转写链路；仅可提交本人作品或已获授权的作品。</p></div></div>
+          <div className="creatorSkillGrid">
+            <form className="avatarSideForm avatarVideoTrainingForm" onSubmit={trainCreatorSkill}><div><span>创建 / 继续训练</span><h2>模仿创作者的创作方式</h2></div><label>训练对象<select value={creatorSkillDraft.skillId} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, skillId: event.target.value }))}><option value="">新建一个命名分身</option>{(workspace?.creatorSkills ?? []).filter((skill) => skill.status === "active").map((skill) => <option key={skill.id} value={skill.id}>继续训练：{skill.name} · V{skill.latest_version}</option>)}</select></label>{!creatorSkillDraft.skillId ? <><label>分身名称<input value={creatorSkillDraft.name} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：小红书理性科普分身" required /></label><label>创作者名称（可选）<input value={creatorSkillDraft.creatorName} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, creatorName: event.target.value }))} placeholder="仅用于你自己识别" /></label></> : <p>新作品会沉淀为该分身的下一版本，可在下方回滚。</p>}<label>授权作品链接<textarea value={creatorSkillDraft.shareLinks} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, shareLinks: event.target.value }))} placeholder="每行一条，至少 3 条，最多 10 条视频号或抖音作品链接" required /></label><label className="avatarConsent"><input checked={creatorSkillDraft.authorized} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, authorized: event.target.checked }))} type="checkbox" />我确认拥有这些作品，或已获得创作者授权用于风格训练</label><button className="primaryButton" disabled={busy === "create-creator-skill" || (!creatorSkillDraft.skillId && !creatorSkillDraft.name.trim()) || !creatorSkillDraft.authorized || creatorSkillDraft.shareLinks.trim().length < 20}>{busy === "create-creator-skill" ? "正在创建任务..." : creatorSkillDraft.skillId ? "继续训练并创建新版本" : "开始训练 Skill"}</button></form>
+            <div className="creatorSkillLibrary"><div><span>我的分身库</span><strong>{workspace?.creatorSkills.length ?? 0} 个已命名分身</strong></div>{(workspace?.creatorSkills ?? []).map((skill) => <CreatorSkillCard key={skill.id} skill={skill} runs={workspace?.trainingRuns ?? []} selectedVersionId={labLeft === skill.versions.find((version) => version.id === labLeft)?.id ? labLeft : labRight} onSelect={setLabLeft} onRestore={(versionId, version) => void performAction({ action: "restore-creator-skill-version", skillId: skill.id, versionId }, `已恢复 ${skill.name} V${version}。`)} />)}{!(workspace?.creatorSkills.length) ? <p>训练完成的创作 Skill 会保存在这里；以同名分身再次训练，会生成新版本。</p> : null}</div>
+          </div>
           <div className="avatarVisualLabStrip">
             <div><strong>视觉分身准备度</strong><span>{workspace?.photos.length ? `已有 ${workspace.photos.length} 张形象照，可在做图和个性名片中调用。` : "还没有形象照，图片创作只能使用临时上传。"}</span></div>
             <button onClick={() => setActiveTab("visual")} type="button">{workspace?.photos.length ? "管理形象" : "添加形象"}</button>
           </div>
-          <form className="avatarLabComposer" onSubmit={runLab}><textarea value={labPrompt} onChange={(event) => setLabPrompt(event.target.value)} placeholder="例如：写一段关于中年家庭为什么要先保障收入支柱的朋友圈" /><button className="primaryButton" disabled={busy === "lab" || labPrompt.trim().length < 5}>{busy === "lab" ? "对比生成中" : "开始对比"}</button></form>
+          <form className="avatarLabComposer avatarCompareComposer" onSubmit={runLab}><textarea value={labPrompt} onChange={(event) => setLabPrompt(event.target.value)} placeholder="例如：写一段关于中年家庭为什么要先保障收入支柱的朋友圈" /><label>左侧对比对象<LabCandidateSelect value={labLeft} onChange={setLabLeft} skills={workspace?.creatorSkills ?? []} /></label><label>右侧对比对象<LabCandidateSelect value={labRight} onChange={setLabRight} skills={workspace?.creatorSkills ?? []} /></label><button className="primaryButton" disabled={busy === "lab" || labPrompt.trim().length < 5 || labLeft === labRight}>{busy === "lab" ? "正在流式生成" : "开始对比"}</button>{labLeft === labRight ? <small>左右两侧需要选择不同对象。</small> : null}</form>
           {labResult ? (
             <div className="avatarLabResults">
-              <article><div><span>数字分身版本</span><strong>使用 {activeMemories.length} 条记忆</strong></div><p>{labResult.avatarText}</p><FeedbackActions onFeedback={(eventType) => void performAction({ action: "feedback", eventType, beforeText: labResult.avatarText, feedbackText: labPrompt }, "反馈已记录，稳定模式会进入进化中心。")}/></article>
-              <article><div><span>普通 AI 基线</span><strong>不使用个人记忆</strong></div><p>{labResult.baselineText}</p></article>
+              <article><div><span>{labResult.leftLabel}</span><strong>{labResult.leftDone ? `${labResult.leftText.length} 字 · 已完成` : `${labResult.leftText.length} 字 · 正在生成…`}</strong></div><LabOutput content={labResult.leftText} done={labResult.leftDone} /><FeedbackActions onFeedback={(eventType) => void performAction({ action: "feedback", eventType, beforeText: labResult.leftText, feedbackText: labPrompt }, "反馈已记录，稳定模式会进入进化中心。")}/></article>
+              <article><div><span>{labResult.rightLabel}</span><strong>{labResult.rightDone ? `${labResult.rightText.length} 字 · 已完成` : `${labResult.rightText.length} 字 · 正在生成…`}</strong></div><LabOutput content={labResult.rightText} done={labResult.rightDone} /></article>
             </div>
           ) : <div className="avatarLabPlaceholder"><strong>输入一个你经常创作的真实主题</strong><p>建议选择你熟悉、能够判断“像不像自己”的内容。</p></div>}
         </section>
@@ -471,12 +510,24 @@ export function ProfilePageClient() {
         <section className="avatarViewLayout">
           <div className="avatarViewMain avatarSinglePanel">
             <div className="avatarSectionHeader"><div><span>学习资料</span><h2>数字分身的知识来源</h2><p>每份资料都可单独停用。敏感客户信息不要直接上传。</p></div></div>
+            <RecordFilters value={sourceFilter} onValue={setSourceFilter} search={sourceSearch} onSearch={setSourceSearch} options={[["active","启用"],["disabled","暂停"],["archived","归档"]]} />
             <div className="avatarSourceList">
-              {(workspace?.sources ?? []).map((source) => <article key={source.id}><div><span>{sourceTypeLabel(source.source_type)}</span><h3>{source.title}</h3><p>{source.content}</p></div><div><em>{source.status === "active" ? "参与学习" : "已停用"}</em><button onClick={() => void performAction({ action: "set-source-status", sourceId: source.id, status: source.status === "active" ? "disabled" : "active" }, source.status === "active" ? "资料已停用。" : "资料已启用。")}>{source.status === "active" ? "停用" : "启用"}</button><button className="danger" onClick={() => void performAction({ action: "set-source-status", sourceId: source.id, status: "archived" }, "资料已归档。")}>归档</button></div></article>)}
+              {(workspace?.sources ?? []).filter((source) => (sourceFilter === "all" || source.status === sourceFilter) && `${source.title} ${source.content} ${source.metadata_json?.sourceLabel ?? ""}`.toLowerCase().includes(sourceSearch.toLowerCase())).map((source) => <article key={source.id}><div><span>{sourceTypeLabel(source.source_type)}</span><h3>{source.title}</h3><p>{source.content}</p><small>来源：{source.metadata_json?.sourceLabel ?? sourceTypeLabel(source.source_type)} · {formatDate(source.created_at)}</small></div><div><em>{source.status === "active" ? "参与学习" : source.status === "archived" ? "已归档" : "已停用"}</em><button onClick={() => void performAction({ action: "set-source-status", sourceId: source.id, status: source.status === "active" ? "disabled" : "active" }, source.status === "active" ? "资料已停用。" : "资料已启用。")}>{source.status === "active" ? "停用" : "启用"}</button><button className="danger" onClick={() => void performAction({ action: "set-source-status", sourceId: source.id, status: "archived" }, "资料已归档。")}>归档</button></div></article>)}
               {(workspace?.sources.length ?? 0) === 0 ? <div className="avatarEmptyState"><strong>还没有学习资料</strong><p>可以添加你认可的文章、朋友圈、录音整理稿和个人故事。</p></div> : null}
             </div>
           </div>
-          <aside className="avatarViewAside"><form className="avatarSideForm" onSubmit={addSource}><div><span>添加资料</span><h2>让小谷学习你的原文</h2></div><label>资料类型<select value={sourceDraft.sourceType} onChange={(event) => setSourceDraft((current) => ({ ...current, sourceType: event.target.value }))}><option value="article">文章</option><option value="moments">朋友圈</option><option value="transcript">录音整理稿</option><option value="story">个人故事</option><option value="manual">其他资料</option></select></label><label>标题<input value={sourceDraft.title} onChange={(event) => setSourceDraft((current) => ({ ...current, title: event.target.value }))} required /></label><label>正文<textarea value={sourceDraft.content} onChange={(event) => setSourceDraft((current) => ({ ...current, content: event.target.value }))} placeholder="至少 20 个字" required /></label><button className="primaryButton" disabled={busy === "add-source" || sourceDraft.content.trim().length < 20}>添加学习资料</button></form></aside>
+          <aside className="avatarViewAside">
+            <form className="avatarSideForm avatarVideoTrainingForm" onSubmit={trainVideoChannel}>
+              <div><span>短视频风格训练</span><h2>让小谷学习你的作品</h2></div>
+              <p>粘贴你自己的视频号或抖音单条作品分享链接，小谷会通过爆款二创的同一条链路提取标题和口播转写稿。</p>
+              <label>作品分享链接<textarea maxLength={12000} onChange={(event) => setVideoChannelDraft((current) => ({ ...current, shareLinks: event.target.value }))} placeholder={"每行粘贴一条作品分享链接，至少 3 条，最多 10 条\nhttps://weixin.qq.com/sph/...\nhttps://v.douyin.com/..."} required value={videoChannelDraft.shareLinks} /></label>
+              <label className="avatarConsent"><input checked={videoChannelDraft.authorized} onChange={(event) => setVideoChannelDraft((current) => ({ ...current, authorized: event.target.checked }))} type="checkbox" />我确认这些是我的作品，或已获得创作者授权用于个人风格训练</label>
+              <button className="primaryButton" disabled={busy === "train-video-channel-links" || videoChannelDraft.shareLinks.trim().length < 20 || !videoChannelDraft.authorized} type="submit">{busy === "train-video-channel-links" ? "正在创建任务..." : "开始风格训练"}</button>
+              <small>仅使用标题和口播转写稿训练；任务会在后台持续执行，服务重启后也可恢复。候选记忆确认前不会参与内容生成。</small>
+              <VideoTrainingStatus run={workspace?.trainingRuns[0] ?? null} />
+            </form>
+            <form className="avatarSideForm" onSubmit={addSource}><div><span>手动添加</span><h2>补充你的原文</h2></div><label>资料类型<select value={sourceDraft.sourceType} onChange={(event) => setSourceDraft((current) => ({ ...current, sourceType: event.target.value }))}><option value="article">文章</option><option value="moments">朋友圈</option><option value="transcript">录音整理稿</option><option value="story">个人故事</option><option value="douyin">抖音作品资料</option><option value="manual">其他资料</option></select></label><label>来源<input value={sourceDraft.sourceLabel} onChange={(event) => setSourceDraft((current) => ({ ...current, sourceLabel: event.target.value }))} /></label><label>作用域<MemoryScopeSelect value={sourceDraft.memoryScope} onChange={(memoryScope) => setSourceDraft((current) => ({ ...current, memoryScope }))} /></label><label>标题<input value={sourceDraft.title} onChange={(event) => setSourceDraft((current) => ({ ...current, title: event.target.value }))} required /></label><label>正文<textarea value={sourceDraft.content} onChange={(event) => setSourceDraft((current) => ({ ...current, content: event.target.value }))} placeholder="至少 20 个字" required /></label><button className="primaryButton" disabled={busy === "add-source" || sourceDraft.content.trim().length < 20}>添加学习资料</button></form>
+          </aside>
         </section>
       ) : null}
 
@@ -503,6 +554,18 @@ const visualScopeOptions = [
   { id: "policy-renewal-card", label: "续费提醒卡" },
   { id: "video-cover", label: "视频封面" },
 ];
+
+function MemoryScopeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="global">全局</option><option value="short_video">短视频通用（视频号/抖音）</option><option value="marketing">营销转化</option><option value="customer">客户沟通</option></select>;
+}
+
+function memoryScopeLabel(value?: string) {
+  return ({ global: "全局", short_video: "短视频通用", marketing: "营销转化", customer: "客户沟通" } as Record<string, string>)[value ?? "global"] ?? "全局";
+}
+
+function RecordFilters({ value, onValue, search, onSearch, options }: { value: string; onValue: (value: string) => void; search: string; onSearch: (value: string) => void; options: Array<[string, string]> }) {
+  return <div className="avatarRecordFilters"><div>{[["all", "全部"], ...options].map(([id, label]) => <button className={value === id ? "active" : ""} key={id} onClick={() => onValue(id)} type="button">{label}</button>)}</div><input onChange={(event) => onSearch(event.target.value)} placeholder="搜索标题、内容或来源" value={search} /></div>;
+}
 
 function ContactCardView({ card, draft, busy, onChange, onSave, onUpload, onDelete }: {
   card: AvatarContactCard | null;
@@ -675,7 +738,7 @@ function VersionsView({ versions, privacy, onAction }: { versions: AvatarVersion
     const next = { ...privacy, [key]: value };
     void onAction({ action: "privacy", learningEnabled: next.learning_enabled, behaviorLearningEnabled: next.behavior_learning_enabled, customerMemoryEnabled: next.customer_memory_enabled, autoInferenceEnabled: next.auto_inference_enabled, visualCreationEnabled: next.visual_creation_enabled }, "隐私设置已更新。");
   }
-  return <section className="avatarVersionsGrid"><div className="avatarSinglePanel"><div className="avatarSectionHeader"><div><span>版本时间线</span><h2>每次进化都可以回退</h2><p>接受进化建议后自动创建新版本。</p></div></div><div className="avatarVersionList">{versions.map((version) => <article key={version.id}><div><strong>V{version.version} · {version.label || "数字分身"}</strong><span>{formatDate(version.created_at)}</span></div><p>{version.change_summary || "分身画像与记忆快照"}</p><em>{version.status === "active" ? "当前版本" : version.status === "restored" ? "已恢复" : "历史版本"}</em>{version.status !== "active" ? <button onClick={() => void onAction({ action: "restore-version", versionId: version.id }, `已恢复到 V${version.version}。`)}>恢复此版本</button> : null}</article>)}{versions.length === 0 ? <div className="avatarEmptyState"><strong>当前还没有版本记录</strong><p>第一次接受进化建议后会创建 V1。</p></div> : null}</div></div><aside className="avatarPrivacyPanel"><div className="avatarSectionHeader compact"><div><span>隐私控制</span><h2>记忆如何被使用</h2></div></div><PrivacyToggle label="允许数字分身学习" detail="关闭后停止新增学习，但保留现有记忆" checked={privacy.learning_enabled} onChange={(value) => update("learning_enabled", value)} /><PrivacyToggle label="从修改行为学习" detail="根据你对作品的修改生成进化建议" checked={privacy.behavior_learning_enabled} onChange={(value) => update("behavior_learning_enabled", value)} /><PrivacyToggle label="允许客户记忆" detail="默认关闭；即使开启也应只保存脱敏信息" checked={privacy.customer_memory_enabled} onChange={(value) => update("customer_memory_enabled", value)} /><PrivacyToggle label="允许 AI 推断候选记忆" detail="推断只进入待确认区，不直接成为事实" checked={privacy.auto_inference_enabled} onChange={(value) => update("auto_inference_enabled", value)} /><PrivacyToggle label="允许图片创作调用形象照" detail="关闭后保留照片，但新任务不再读取" checked={privacy.visual_creation_enabled} onChange={(value) => update("visual_creation_enabled", value)} /><p>客户身份证件、联系方式、健康资料和完整保单默认不进入长期记忆。</p></aside></section>;
+  return <section className="avatarVersionsGrid"><div className="avatarSinglePanel"><div className="avatarSectionHeader"><div><span>版本时间线</span><h2>每次进化都可以回退</h2><p>接受进化建议后自动创建新版本。</p></div></div><div className="avatarVersionList">{versions.map((version) => <article key={version.id}><div><strong>V{version.version} · {version.label || "数字分身"}</strong><span>{formatDate(version.created_at)}</span></div><p>{version.change_summary || "分身画像与记忆快照"}</p><em>{version.status === "active" ? "当前版本" : version.status === "restored" ? "已恢复" : "历史版本"}</em>{version.status !== "active" ? <button onClick={() => void onAction({ action: "restore-version", versionId: version.id }, `已恢复到 V${version.version}。`)}>恢复此版本</button> : null}</article>)}{versions.length === 0 ? <div className="avatarEmptyState"><strong>当前还没有版本记录</strong><p>第一次接受进化建议后会创建 V1。</p></div> : null}</div></div><aside className="avatarPrivacyPanel"><div className="avatarSectionHeader compact"><div><span>隐私控制</span><h2>记忆如何被使用</h2></div></div><PrivacyToggle label="允许数字分身学习" detail="关闭后停止新增学习，但保留现有记忆" checked={privacy.learning_enabled} onChange={(value) => update("learning_enabled", value)} /><PrivacyToggle label="从修改行为学习" detail="根据你对作品的修改生成进化建议" checked={privacy.behavior_learning_enabled} onChange={(value) => update("behavior_learning_enabled", value)} /><PrivacyToggle label="允许客户记忆" detail="默认关闭；即使开启也应只保存脱敏信息" checked={privacy.customer_memory_enabled} onChange={(value) => update("customer_memory_enabled", value)} /><PrivacyToggle label="允许小谷推断候选记忆" detail="推断只进入待确认区，不直接成为事实" checked={privacy.auto_inference_enabled} onChange={(value) => update("auto_inference_enabled", value)} /><PrivacyToggle label="允许图片创作调用形象照" detail="关闭后保留照片，但新任务不再读取" checked={privacy.visual_creation_enabled} onChange={(value) => update("visual_creation_enabled", value)} /><p>客户身份证件、联系方式、健康资料和完整保单默认不进入长期记忆。</p></aside></section>;
 }
 
 function PrivacyToggle({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange: (value: boolean) => void }) {
@@ -683,7 +746,7 @@ function PrivacyToggle({ label, detail, checked, onChange }: { label: string; de
 }
 
 function FeedbackActions({ onFeedback }: { onFeedback: (eventType: string) => void }) {
-  return <div className="avatarFeedbackActions"><button onClick={() => onFeedback("more-like-me")}>更像我</button><button onClick={() => onFeedback("too-salesy")}>太销售</button><button onClick={() => onFeedback("too-formal")}>太正式</button><button onClick={() => onFeedback("remember-style")}>记住这种表达</button></div>;
+  return <div className="avatarFeedbackActions"><span>反馈会记录到分身进化中心；同类反馈累计 3 次后才会生成待确认建议，不会立即改写当前内容。</span><div><button onClick={() => onFeedback("more-like-me")} title="提高当前表达方式的使用权重">更像我</button><button onClick={() => onFeedback("too-salesy")} title="建议减少直接成交和催促表达">太销售</button><button onClick={() => onFeedback("too-formal")} title="建议增加生活化、易懂的表达">太正式</button><button onClick={() => onFeedback("remember-style")} title="建议将本次表达特征加入长期表达记忆">记住这种表达</button></div></div>;
 }
 
 function AvatarCoachView({
@@ -808,7 +871,7 @@ function buildMaturityTips(workspace: AvatarWorkspace | null, maturity: ReturnTy
   } else if (weakest?.key === "expression") {
     tips.push({
       title: "补一段最像你的表达",
-      description: "补充你常用的措辞、结构和不喜欢的说法，能明显减少 AI 味。",
+      description: "补充你常用的措辞、结构和不喜欢的说法，能明显减少模板感。",
       tab: "memory",
     });
   } else if (weakest?.key === "boundary") {
@@ -835,12 +898,53 @@ function score(hasCore: boolean, evidenceCount: number, memoryCount: number) {
 }
 
 function originLabel(origin: AvatarMemoryItem["origin"]) {
-  return ({ user: "本人确认", imported: "资料提取", behavior: "行为学习", inferred: "AI 推断", system: "系统生成" } as const)[origin];
+  return ({ user: "本人确认", imported: "资料提取", behavior: "行为学习", inferred: "小谷推断", system: "系统生成" } as const)[origin];
 }
 
 function sourceTypeLabel(type: string) {
-  return ({ article: "文章", moments: "朋友圈", transcript: "录音稿", story: "个人故事", manual: "手动资料" } as Record<string, string>)[type] ?? type;
+  return ({ article: "文章", moments: "朋友圈", transcript: "短视频/录音稿", story: "个人故事", manual: "手动资料", video_channel: "视频号风格训练", douyin: "抖音风格训练" } as Record<string, string>)[type] ?? type;
 }
+
+function VideoTrainingStatus({ run }: { run: AvatarTrainingRun | null }) {
+  if (!run) return null;
+  const label = run.status === "failed"
+    ? "本次训练失败"
+    : run.status === "succeeded"
+      ? "训练完成，等待确认"
+      : ({ queued: "作品已进入后台队列", validating: "正在校验作品链接", parsing: "正在解析作品信息", transcribing: "正在下载音频并转写", "generating-report": "正在生成候选记忆" } as Record<string, string>)[run.phase] ?? "正在准备训练";
+  const progress = run.total_count > 0 ? Math.min(100, Math.round(run.completed_count / run.total_count * 100)) : 0;
+  const attempts = Array.isArray(run.details_json.attempts)
+    ? run.details_json.attempts.filter((item): item is { link: string; title?: string; platform?: string; status: "queued" | "running" | "succeeded" | "failed"; stage: string; message: string } => Boolean(item) && typeof item === "object" && typeof (item as Record<string, unknown>).link === "string" && typeof (item as Record<string, unknown>).message === "string")
+    : [];
+  return <div className={`avatarTrainingStatus ${run.status}`}>
+    <strong>{label}</strong>
+    {run.status === "running" ? <><span>已处理 {run.completed_count}/{run.total_count} 条，成功转写 {run.successful_count} 条；可以离开页面，后台会继续执行</span><i><b style={{ width: `${progress}%` }} /></i></> : null}
+    {run.status === "succeeded" ? <span>已成功转写 {run.successful_count} 条作品。请前往“进化中心”确认风格报告。</span> : null}
+    {run.status === "failed" ? <span>失败原因：{run.error_message || "暂未返回具体原因"}</span> : null}
+    {attempts.length ? <div className="avatarTrainingAttemptList">{attempts.map((attempt, index) => <div className={attempt.status} key={`${attempt.link}-${index}`}><b>{attempt.status === "succeeded" ? "已完成" : attempt.status === "running" ? "处理中" : attempt.status === "queued" ? "排队中" : stageLabel(attempt.stage)}</b><span title={attempt.link}>{attempt.title || trainingLinkLabel(attempt.link)}</span><small>{attempt.platform === "douyin" ? "抖音 · " : attempt.platform === "video_channel" ? "视频号 · " : ""}{attempt.message}</small></div>)}</div> : null}
+  </div>;
+}
+
+function CreatorSkillCard({ skill, runs, selectedVersionId, onSelect, onRestore }: { skill: AvatarCreatorSkill; runs: AvatarTrainingRun[]; selectedVersionId: string; onSelect: (id: string) => void; onRestore: (id: string, version: number) => void }) {
+  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(skill.versions.find((version) => version.status === "training")?.id ?? null);
+  return <article className="creatorSkillCard"><strong>{skill.name}</strong><small>{skill.creator_name || "自定义创作 Skill"} · 当前 V{skill.latest_version || "训练中"}</small>{skill.versions.map((version) => {
+    const run = version.training_run_id ? runs.find((item) => item.id === version.training_run_id) ?? null : null;
+    const expanded = expandedVersionId === version.id;
+    return <section className={`creatorSkillVersion ${version.status}`} key={version.id}><div><button className={selectedVersionId === version.id ? "active" : ""} disabled={version.status === "training" || version.status === "failed"} onClick={() => onSelect(version.id)} type="button">V{version.version} {version.status === "training" ? "训练中" : version.status === "restored" ? "已回滚" : "选用"}</button>{version.status !== "active" && version.status !== "training" && version.status !== "failed" ? <button onClick={() => onRestore(version.id, version.version)} type="button">回滚到此版本</button> : null}{run || version.skill_prompt ? <button onClick={() => setExpandedVersionId(expanded ? null : version.id)} type="button">{expanded ? "收起详情" : version.status === "training" ? "查看进度" : "查看训练结果"}</button> : null}</div>{expanded && run ? <VideoTrainingStatus run={run} /> : null}{expanded && (version.status === "active" || version.status === "restored") ? <div className="creatorSkillResult"><span>训练结果 · {version.sample_count} 条有效作品</span><p>{version.change_summary || "已完成创作方式蒸馏"}</p><pre>{version.skill_prompt || "训练结果正在同步，请稍后刷新。"}</pre></div> : null}{version.status === "failed" ? <p className="creatorSkillFailure">本版本训练失败，请补充可访问的授权作品后重新训练。</p> : null}</section>;
+  })}</article>;
+}
+
+function LabCandidateSelect({ value, onChange, skills }: { value: string; onChange: (value: string) => void; skills: AvatarCreatorSkill[] }) {
+  return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="avatar">我的数字分身</option><option value="baseline">默认版本</option>{skills.flatMap((skill) => skill.versions.filter((version) => version.status === "active" || version.status === "restored").map((version) => <option key={version.id} value={version.id}>{skill.name} · V{version.version}</option>))}</select>;
+}
+
+function LabOutput({ content, done }: { content: string; done: boolean }) {
+  if (!content) return <div className="avatarLabReading empty"><i /><i /><i /><span>正在等待模型输出…</span></div>;
+  return <div className="avatarLabReading"><ReactMarkdown>{content}</ReactMarkdown>{!done ? <b className="avatarLabCaret" aria-label="正在输出" /> : null}</div>;
+}
+
+function stageLabel(stage: string) { return ({ parsing: "链接解析失败", media: "音频获取失败", transcribing: "口播转写失败" } as Record<string, string>)[stage] ?? "处理失败"; }
+function trainingLinkLabel(link: string) { try { const url = new URL(link); return `${url.hostname}${url.pathname.slice(0, 42)}${url.pathname.length > 42 ? "…" : ""}`; } catch { return link.slice(0, 60); } }
 
 function formatDate(value?: string | null) {
   if (!value) return "刚刚";
