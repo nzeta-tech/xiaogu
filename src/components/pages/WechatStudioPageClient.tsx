@@ -105,7 +105,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
   const [restoring, setRestoring] = useState(true);
   const [copyNotice, setCopyNotice] = useState("");
   const [fullImage, setFullImage] = useState<{ url: string; label: string } | null>(null);
-  const imageGenerationRef = useRef(false);
+  const imageGenerationRef = useRef(false); const restoredAssetTaskRef = useRef(false);
 
   const wordCount = useMemo(() => content.replace(/\s/g, "").length, [content]);
   const allImages = useMemo(() => [...images, ...uploadedImages], [images, uploadedImages]);
@@ -162,6 +162,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
           setTitle(work.title?.replace(/\s*[｜|].*$/, "") || "公众号文章"); setContent(work.content); setActiveTab("article");
         }
         if (work?.studio_asset_runs?.some((run) => run.status === "queued" || run.status === "running")) {
+          restoredAssetTaskRef.current = true;
           setLoading("assets");
           setMessage("已恢复正在生成的封面和配图，请勿重复提交。");
         }
@@ -174,7 +175,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
   }, []);
 
   useEffect(() => {
-    if (!workId || loading !== "assets") return;
+    if (!workId || loading !== "assets" || !restoredAssetTaskRef.current) return;
     let disposed = false;
     const refresh = async () => {
       try {
@@ -189,6 +190,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
         if (state?.cover && typeof state.cover === "object") setCover(state.cover as GeneratedImage);
         const failed = payload.work?.studio_asset_runs?.find((run) => run.status === "failed");
         setLoading("");
+        restoredAssetTaskRef.current = false;
         setMessage(failed ? (failed.error_message || "配图生成失败，请重新发起。") : "封面和配图已生成完成。");
       } catch {
         // Keep the recovered busy state until the next poll succeeds.

@@ -25,7 +25,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
   const [content, setContent] = useState(""); const [cards, setCards] = useState<Card[]>([]); const [coverId, setCoverId] = useState(""); const [headImage, setHeadImage] = useState<Card | null>(null); const [style, setStyle] = useState<(typeof visualStyles)[number]["value"]>("daily-sign");
   const [tab, setTab] = useState<Tab>("write"); const [loading, setLoading] = useState<"note" | "cards" | "">(""); const [message, setMessage] = useState(""); const [workId, setWorkId] = useState(""); const [saveStatus, setSaveStatus] = useState<"" | "saving" | "saved" | "error">(""); const [previewMode, setPreviewMode] = useState<"long" | "album">("long"); const [activeSlide, setActiveSlide] = useState(0); const [restoring, setRestoring] = useState(() => Boolean(searchParams.get("workId")?.trim())); const [fullImage, setFullImage] = useState<{ url: string; label: string } | null>(null); const [copyNotice, setCopyNotice] = useState("");
   const [mobileDownloadQueue, setMobileDownloadQueue] = useState<Card[] | null>(null); const [mobileDownloadIndex, setMobileDownloadIndex] = useState(0);
-  const editorRef = useRef<HTMLTextAreaElement>(null); const previousLoading = useRef(""); const imageGenerationRef = useRef(false);
+  const editorRef = useRef<HTMLTextAreaElement>(null); const previousLoading = useRef(""); const imageGenerationRef = useRef(false); const restoredAssetTaskRef = useRef(false);
   const title = useMemo(() => content.split("\n").find(Boolean)?.replace(/^#\s*/, "") || "未命名笔记", [content]);
   const body = useMemo(() => content.replace(/^#?\s*[^\n]+\n?/, "").trim(), [content]);
   const tags = useMemo(() => body.match(/#[^\s#]+/g) ?? [], [body]);
@@ -62,6 +62,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
           if (typeof state.activeSlide === "number") setActiveSlide(state.activeSlide);
         } else if (work?.content) { setContent(work.content); setTab("note"); }
         if (work?.studio_asset_runs?.some((run) => run.status === "queued" || run.status === "running")) {
+          restoredAssetTaskRef.current = true;
           setLoading("cards");
           setMessage("已恢复正在生成的图文包，请勿重复提交。");
         }
@@ -73,7 +74,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
   }, [searchParams, workId]);
 
   useEffect(() => {
-    if (!workId || loading !== "cards") return;
+    if (!workId || loading !== "cards" || !restoredAssetTaskRef.current) return;
     let disposed = false;
     const refresh = async () => {
       try {
@@ -88,6 +89,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
         if (state?.headImage && typeof state.headImage === "object") setHeadImage(state.headImage as Card);
         const failed = payload.work?.studio_asset_runs?.find((run) => run.status === "failed");
         setLoading("");
+        restoredAssetTaskRef.current = false;
         setMessage(failed ? (failed.error_message || "配图生成失败，请重新发起。") : "图文包已生成完成。");
       } catch {
         // Keep the recovered busy state until the next poll succeeds.
