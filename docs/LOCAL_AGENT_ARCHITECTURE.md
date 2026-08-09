@@ -142,6 +142,27 @@ containers, while launchd reconciles the stack every 60 seconds after macOS
 login. The executor and task poller are critical siblings; either process
 exiting terminates the container so Docker can restart it.
 
+## Release regression policy
+
+Coordinated releases use `scripts/production-mock-source-runner.mjs` as the
+blocking Agent contract check. It registers a disposable user, queues a normal
+`source.inspect` task, then uses the existing authenticated Agent endpoints to
+lease it, emit a status plus transcript delta, complete it, and assert the
+persisted user result and SSE `done` event. The fixture uses a syntactically
+valid Douyin URL but never fetches it, so the gate is deterministic and does
+not depend on third-party availability, login cookies, or a downloader.
+
+Invoke it through the coordinated-release runner contract:
+
+```bash
+export XIAOGU_REAL_SOURCE_RUNNER="$PWD/scripts/production-mock-source-runner.mjs"
+```
+
+`scripts/production-real-source-runner.mjs` remains a separate, low-frequency
+operational monitor for external acquisition and transcription. Its failure
+signals a provider or dependency issue without holding an otherwise healthy
+application release hostage.
+
 Before enabling delegation on AWS, apply `migrations/028_local_agent_tasks.sql`
 through `migrations/033_douyin_deep_verification.sql`. Migration 032 leaves
 the database-backed `features.localAgentEnabled` gate off. Enable it only after
