@@ -4,9 +4,9 @@ import type { SessionUser } from "@/lib/auth/session";
 import { tryExpireStaleAppRuns, tryGetSystemSettings } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
 
-export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number) {
+export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number, options: { skipConcurrentCreationLimit?: boolean } = {}) {
   const settings = await tryGetSystemSettings();
-  if (action === "write_script") {
+  if (action === "write_script" && !options.skipConcurrentCreationLimit) {
     await tryExpireStaleAppRuns(user.id);
   }
   if (settings.site.maintenanceMode && user.role !== "admin") {

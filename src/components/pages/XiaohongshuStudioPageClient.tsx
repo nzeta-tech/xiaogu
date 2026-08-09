@@ -25,7 +25,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
   const [content, setContent] = useState(""); const [cards, setCards] = useState<Card[]>([]); const [coverId, setCoverId] = useState(""); const [headImage, setHeadImage] = useState<Card | null>(null); const [style, setStyle] = useState<(typeof visualStyles)[number]["value"]>("daily-sign");
   const [tab, setTab] = useState<Tab>("write"); const [loading, setLoading] = useState<"note" | "cards" | "">(""); const [message, setMessage] = useState(""); const [workId, setWorkId] = useState(""); const [saveStatus, setSaveStatus] = useState<"" | "saving" | "saved" | "error">(""); const [previewMode, setPreviewMode] = useState<"long" | "album">("long"); const [activeSlide, setActiveSlide] = useState(0); const [restoring, setRestoring] = useState(() => Boolean(searchParams.get("workId")?.trim())); const [fullImage, setFullImage] = useState<{ url: string; label: string } | null>(null); const [copyNotice, setCopyNotice] = useState("");
   const [mobileDownloadQueue, setMobileDownloadQueue] = useState<Card[] | null>(null); const [mobileDownloadIndex, setMobileDownloadIndex] = useState(0);
-  const editorRef = useRef<HTMLTextAreaElement>(null); const previousLoading = useRef("");
+  const editorRef = useRef<HTMLTextAreaElement>(null); const previousLoading = useRef(""); const imageGenerationRef = useRef(false);
   const title = useMemo(() => content.split("\n").find(Boolean)?.replace(/^#\s*/, "") || "未命名笔记", [content]);
   const body = useMemo(() => content.replace(/^#?\s*[^\n]+\n?/, "").trim(), [content]);
   const tags = useMemo(() => body.match(/#[^\s#]+/g) ?? [], [body]);
@@ -149,6 +149,8 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
 
   async function generateImages() {
     if (!content.trim()) return setMessage("请先完成笔记文案。");
+    if (imageGenerationRef.current) return;
+    imageGenerationRef.current = true;
     setLoading("cards"); setMessage("");
     try {
       const resolvedWorkId = await ensureStudioWork();
@@ -160,7 +162,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
       const next = sectionImages.map((card, index) => ({ ...card, sectionTitle: sectionTitles[index] || `正文第 ${index + 1} 部分` }));
       if (!next.length || !headerImages[0]) throw new Error("图文包生成失败，请稍后再试。");
       setCards(next); setCoverId(next[0].id); setHeadImage(headerImages[0]); setActiveSlide(0); setMessage("完整图文包已生成：包含 1 张头图和按段落生成的章节配图。");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "网络连接失败，请重试。"); } finally { setLoading(""); }
+    } catch (error) { setMessage(error instanceof Error ? error.message : "网络连接失败，请重试。"); } finally { imageGenerationRef.current = false; setLoading(""); }
   }
 
   function moveCard(index: number, direction: -1 | 1) { const nextIndex = index + direction; if (nextIndex < 0 || nextIndex >= cards.length) return; setCards((current) => { const next = [...current]; [next[index], next[nextIndex]] = [next[nextIndex], next[index]]; return next; }); }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import BaseMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
@@ -105,6 +105,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
   const [restoring, setRestoring] = useState(true);
   const [copyNotice, setCopyNotice] = useState("");
   const [fullImage, setFullImage] = useState<{ url: string; label: string } | null>(null);
+  const imageGenerationRef = useRef(false);
 
   const wordCount = useMemo(() => content.replace(/\s/g, "").length, [content]);
   const allImages = useMemo(() => [...images, ...uploadedImages], [images, uploadedImages]);
@@ -253,6 +254,8 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
 
   async function generateImages() {
     if (!content.trim()) { setMessage("请先生成或粘贴文章内容。 "); return; }
+    if (imageGenerationRef.current) return;
+    imageGenerationRef.current = true;
     setLoading("assets"); setMessage("");
     try {
       const resolvedWorkId = workId || await ensureStudioWork();
@@ -269,7 +272,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
       setStyleUsage((current) => { const next = { ...current, [style]: (current[style] ?? 0) + 1 }; window.localStorage.setItem(STYLE_USAGE_KEY, JSON.stringify(next)); return next; });
       setMessage("AI 封面与正文配图已生成；你可以继续上传自己的图片，或进入发布预览。 ");
     } catch (error) { setMessage(error instanceof Error ? error.message : "网络连接失败，请重试。"); }
-    finally { setLoading(""); }
+    finally { imageGenerationRef.current = false; setLoading(""); }
   }
 
 
