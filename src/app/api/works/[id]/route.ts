@@ -77,6 +77,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const { status, title, content, contentJson, note, isFavorite, isUsed } = parsed.data;
   if (typeof content === "string") {
+    const xiaohongshuStudioState = contentJson?.xiaohongshuStudioState;
     const updated = await tryUpdateWorkContent({
       userId: user.id,
       workId: id,
@@ -84,6 +85,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       status: status || undefined,
       content,
       contentJson: contentJson ?? parseCreationOutput(content),
+      preserveXiaohongshuStudioAssets: Boolean(xiaohongshuStudioState && typeof xiaohongshuStudioState === "object"),
     });
     if (!updated) {
       return Response.json({ error: "作品内容保存失败" }, { status: 404 });

@@ -209,6 +209,7 @@ export async function tryUpdateWorkContent(input: {
   content: string;
   contentJson?: Record<string, unknown>;
   preserveWechatStudioState?: boolean;
+  preserveXiaohongshuStudioAssets?: boolean;
 }) {
   if (!input.userId) return null;
 
@@ -260,6 +261,10 @@ export async function tryUpdateWorkContent(input: {
     const existingStudioState = input.preserveWechatStudioState
       ? latestVersion.rows[0]?.content_json?.wechatStudioState
       : null;
+    const existingXiaohongshuState = input.preserveXiaohongshuStudioAssets
+      ? latestVersion.rows[0]?.content_json?.xiaohongshuStudioState
+      : null;
+    const incomingXiaohongshuState = input.contentJson?.xiaohongshuStudioState;
     const contentJson = input.preserveWechatStudioState && existingStudioState && typeof existingStudioState === "object"
       ? {
           ...(input.contentJson ?? {}),
@@ -270,6 +275,24 @@ export async function tryUpdateWorkContent(input: {
             updatedAt: new Date().toISOString(),
           },
         }
+      : input.preserveXiaohongshuStudioAssets
+        && existingXiaohongshuState
+        && typeof existingXiaohongshuState === "object"
+        && incomingXiaohongshuState
+        && typeof incomingXiaohongshuState === "object"
+        ? {
+            ...(input.contentJson ?? {}),
+            xiaohongshuStudioState: {
+              ...(existingXiaohongshuState as Record<string, unknown>),
+              ...(incomingXiaohongshuState as Record<string, unknown>),
+              // The client may auto-save while an async cover task is still
+              // merging. A missing head image must not erase that durable asset.
+              headImage: (incomingXiaohongshuState as Record<string, unknown>).headImage
+                ?? (existingXiaohongshuState as Record<string, unknown>).headImage
+                ?? null,
+              updatedAt: new Date().toISOString(),
+            },
+          }
       : input.contentJson ?? {};
 
     if (latestVersion.rows[0]) {
@@ -562,6 +585,23 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
           completed_at: string | null;
         }> };
 
+    const studioAssetRuns = await query<{
+      id: string;
+      app_slug: string;
+      status: string;
+      error_message: string | null;
+      created_at: string;
+    }>(
+      `select distinct on (a.slug) ar.id, a.slug as app_slug, ar.status, ar.error_message, ar.created_at
+       from app_runs ar
+       join apps a on a.id = ar.app_id
+       where ar.input_payload->>'studio_work_id' = $1
+         and ar.input_payload->>'studio_parent' in ('wechat-studio', 'xiaohongshu-studio')
+         and a.slug in ('wechat-images', 'wechat-cover')
+       order by a.slug, ar.created_at desc`,
+      [workResult.rows[0].id],
+    );
+
     return {
       id: workResult.rows[0].id,
       title: workResult.rows[0].title,
@@ -576,6 +616,7 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
       is_favorite: workResult.rows[0].is_favorite,
       is_used: workResult.rows[0].is_used,
       app_run: run.rows[0] ?? null,
+      studio_asset_runs: studioAssetRuns.rows,
       versions: versions.rows,
       content_json: versions.rows[0]?.content_json ?? null,
     };

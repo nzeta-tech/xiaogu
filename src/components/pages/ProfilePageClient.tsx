@@ -940,7 +940,15 @@ function LabCandidateSelect({ value, onChange, skills }: { value: string; onChan
 
 function LabOutput({ content, done }: { content: string; done: boolean }) {
   if (!content) return <div className="avatarLabReading empty"><i /><i /><i /><span>正在等待模型输出…</span></div>;
-  return <div className="avatarLabReading"><ReactMarkdown>{content}</ReactMarkdown>{!done ? <b className="avatarLabCaret" aria-label="正在输出" /> : null}</div>;
+  return <div className="avatarLabReading"><ReactMarkdown>{normalizeLabMarkdown(content)}</ReactMarkdown>{!done ? <b className="avatarLabCaret" aria-label="正在输出" /> : null}</div>;
+}
+
+function normalizeLabMarkdown(content: string) {
+  return content
+    .replace(/([^\n])(#{2,3}\s)/g, "$1\n\n$2")
+    .replace(/###\s*(核心判断|为什么|怎么做|评论互动)\s*/g, "### $1\n\n")
+    .replace(/(?<!\n)(\d+\.\s)/g, "\n$1")
+    .trim();
 }
 
 function stageLabel(stage: string) { return ({ parsing: "链接解析失败", media: "音频获取失败", transcribing: "口播转写失败" } as Record<string, string>)[stage] ?? "处理失败"; }

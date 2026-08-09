@@ -10,6 +10,7 @@ import { type CreationApp } from "@/lib/apps/catalog";
 
 type Card = { id: string; url: string; sectionTitle?: string };
 type Tab = "write" | "note" | "cards" | "preview";
+type StudioAssetRun = { id: string; app_slug: "wechat-images" | "wechat-cover"; status: string; error_message?: string | null };
 const visualStyles = [
   { value: "daily-sign", label: "生活共鸣", note: "用真实日常场景承接情绪和判断" },
   { value: "study", label: "清单干货", note: "把选择条件、步骤和结论讲清楚" },
@@ -43,7 +44,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
     setRestoring(true);
     const controller = new AbortController();
     void fetch(apiPath(`/api/works/${restoredId}`), { signal: controller.signal })
-      .then(async (response) => { if (!response.ok) throw new Error("草稿读取失败"); return response.json() as Promise<{ work?: { content?: string; content_json?: { xiaohongshuStudioState?: Record<string, unknown> } } }>; })
+      .then(async (response) => { if (!response.ok) throw new Error("草稿读取失败"); return response.json() as Promise<{ work?: { content?: string; content_json?: { xiaohongshuStudioState?: Record<string, unknown> }; studio_asset_runs?: StudioAssetRun[] } }>; })
       .then((payload) => {
         const work = payload.work; const state = work?.content_json?.xiaohongshuStudioState;
         setWorkId(restoredId);
@@ -60,12 +61,42 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
           if (state.previewMode === "long" || state.previewMode === "album") setPreviewMode(state.previewMode);
           if (typeof state.activeSlide === "number") setActiveSlide(state.activeSlide);
         } else if (work?.content) { setContent(work.content); setTab("note"); }
+        if (work?.studio_asset_runs?.some((run) => run.status === "queued" || run.status === "running")) {
+          setLoading("cards");
+          setMessage("已恢复正在生成的图文包，请勿重复提交。");
+        }
         setSaveStatus("saved");
       })
       .catch((error) => { if (!(error instanceof DOMException && error.name === "AbortError")) { setSaveStatus("error"); setMessage("作品读取失败，请稍后重试。"); } })
       .finally(() => { if (!controller.signal.aborted) setRestoring(false); });
     return () => controller.abort();
   }, [searchParams, workId]);
+
+  useEffect(() => {
+    if (!workId || loading !== "cards") return;
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const response = await fetch(apiPath(`/api/works/${workId}`));
+        if (!response.ok || disposed) return;
+        const payload = await response.json() as { work?: { content_json?: { xiaohongshuStudioState?: Record<string, unknown> }; studio_asset_runs?: StudioAssetRun[] } };
+        const active = payload.work?.studio_asset_runs?.some((run) => run.status === "queued" || run.status === "running");
+        if (active || disposed) return;
+        const state = payload.work?.content_json?.xiaohongshuStudioState;
+        if (Array.isArray(state?.cards)) setCards(state.cards as Card[]);
+        if (typeof state?.coverId === "string") setCoverId(state.coverId);
+        if (state?.headImage && typeof state.headImage === "object") setHeadImage(state.headImage as Card);
+        const failed = payload.work?.studio_asset_runs?.find((run) => run.status === "failed");
+        setLoading("");
+        setMessage(failed ? (failed.error_message || "配图生成失败，请重新发起。") : "图文包已生成完成。");
+      } catch {
+        // Keep the recovered busy state until the next poll succeeds.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [loading, workId]);
 
   const saveProgress = useCallback(async () => {
     if (!workId) return;

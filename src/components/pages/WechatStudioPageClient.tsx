@@ -9,6 +9,7 @@ import { articleDocx } from "@/lib/client/docx";
 import { getCreationAppBySlug, type CreationApp } from "@/lib/apps/catalog";
 
 type GeneratedImage = { id: string; url: string; sectionIndex?: number; sectionTitle?: string };
+type StudioAssetRun = { id: string; app_slug: "wechat-images" | "wechat-cover"; status: string; error_message?: string | null };
 
 type MarkdownTable = { headers: string[]; rows: string[][] };
 
@@ -138,7 +139,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     void fetch(apiPath(`/api/works/${restoredId}`), { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("草稿读取失败");
-        return response.json() as Promise<{ work?: { title?: string; content?: string; content_json?: { wechatStudioState?: Record<string, unknown> } } }>;
+        return response.json() as Promise<{ work?: { title?: string; content?: string; content_json?: { wechatStudioState?: Record<string, unknown> }; studio_asset_runs?: StudioAssetRun[] } }>;
       })
       .then((payload) => {
         const work = payload.work; const state = work?.content_json?.wechatStudioState;
@@ -159,6 +160,10 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
         } else if (work?.content) {
           setTitle(work.title?.replace(/\s*[｜|].*$/, "") || "公众号文章"); setContent(work.content); setActiveTab("article");
         }
+        if (work?.studio_asset_runs?.some((run) => run.status === "queued" || run.status === "running")) {
+          setLoading("assets");
+          setMessage("已恢复正在生成的封面和配图，请勿重复提交。");
+        }
         setSaveStatus("saved");
       })
       .catch((error) => { if (!(error instanceof DOMException && error.name === "AbortError")) setSaveStatus("error"); })
@@ -166,6 +171,32 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     return () => controller.abort();
   // The work id is fixed for the lifetime of this mounted workspace.
   }, []);
+
+  useEffect(() => {
+    if (!workId || loading !== "assets") return;
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const response = await fetch(apiPath(`/api/works/${workId}`));
+        if (!response.ok || disposed) return;
+        const payload = await response.json() as { work?: { content_json?: { wechatStudioState?: Record<string, unknown> }; studio_asset_runs?: StudioAssetRun[] } };
+        const active = payload.work?.studio_asset_runs?.some((run) => run.status === "queued" || run.status === "running");
+        if (active || disposed) return;
+        const state = payload.work?.content_json?.wechatStudioState;
+        if (Array.isArray(state?.images)) setImages(state.images as GeneratedImage[]);
+        if (Array.isArray(state?.uploadedImages)) setUploadedImages(state.uploadedImages as GeneratedImage[]);
+        if (state?.cover && typeof state.cover === "object") setCover(state.cover as GeneratedImage);
+        const failed = payload.work?.studio_asset_runs?.find((run) => run.status === "failed");
+        setLoading("");
+        setMessage(failed ? (failed.error_message || "配图生成失败，请重新发起。") : "封面和配图已生成完成。");
+      } catch {
+        // Keep the recovered busy state until the next poll succeeds.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [loading, workId]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
