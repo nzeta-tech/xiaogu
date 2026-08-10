@@ -137,7 +137,11 @@ export async function POST(request: Request) {
       if (input.skillScope === "platform" && user.role !== "admin") return Response.json({ error: "仅管理员可生产平台分身" }, { status: 403 });
       if (!input.skillId && !input.name) return Response.json({ error: "请选择已有分身，或填写新分身名称" }, { status: 400 });
       const skill = input.skillId
-        ? await query<{ id: string; latest_version: number }>(`select id, latest_version from avatar_creator_skills where id=$1 and user_id=$2`, [input.skillId, user.id])
+        ? await query<{ id: string; latest_version: number }>(
+          `select id, latest_version from avatar_creator_skills
+            where id=$1 and (user_id=$2 or (skill_scope='platform' and $3::boolean))`,
+          [input.skillId, user.id, user.role === "admin"],
+        )
         : await query<{ id: string; latest_version: number }>(`insert into avatar_creator_skills(user_id, name, creator_name, skill_scope, status) values ($1, $2, $3, $4, 'archived') on conflict (user_id, skill_scope, lower(name)) do update set creator_name=excluded.creator_name, updated_at=now() returning id, latest_version`, [user.id, input.name, input.creatorName, input.skillScope]);
       const item = skill.rows[0];
       if (!item) return Response.json({ error: "选择的分身不存在或已归档" }, { status: 404 });
@@ -155,22 +159,29 @@ export async function POST(request: Request) {
     }
 
     if (input.action === "restore-creator-skill-version") {
-      const version = await query<{ version: number }>(`select version from avatar_creator_skill_versions where id=$1 and skill_id=$2 and user_id=$3`, [input.versionId, input.skillId, user.id]);
+      const version = await query<{ version: number }>(
+        `select v.version
+           from avatar_creator_skill_versions v
+           join avatar_creator_skills s on s.id=v.skill_id
+          where v.id=$1 and v.skill_id=$2 and (s.user_id=$3 or (s.skill_scope='platform' and $4::boolean))`,
+        [input.versionId, input.skillId, user.id, user.role === "admin"],
+      );
       if (!version.rows[0]) return Response.json({ error: "Skill 版本不存在" }, { status: 404 });
       await query(
         `update avatar_creator_skill_versions
             set status=case when id=$2 then 'restored' else 'superseded' end
-          where skill_id=$1 and user_id=$3 and (id=$2 or status in ('active','restored'))`,
-        [input.skillId, input.versionId, user.id],
+          where skill_id=$1 and (id=$2 or status in ('active','restored'))`,
+        [input.skillId, input.versionId],
       );
-      await query(`update avatar_creator_skills set latest_version=$2, updated_at=now() where id=$1 and user_id=$3`, [input.skillId, version.rows[0].version, user.id]);
+      await query(`update avatar_creator_skills set latest_version=$2, updated_at=now() where id=$1`, [input.skillId, version.rows[0].version]);
       return Response.json({ ok: true });
     }
 
     if (input.action === "set-creator-skill-status") {
       const skill = await query<{ name: string; skill_scope: "personal" | "platform" }>(
-        `select name, skill_scope from avatar_creator_skills where id=$1 and user_id=$2`,
-        [input.skillId, user.id],
+        `select name, skill_scope from avatar_creator_skills
+          where id=$1 and (user_id=$2 or (skill_scope='platform' and $3::boolean))`,
+        [input.skillId, user.id, user.role === "admin"],
       );
       if (!skill.rows[0]) return Response.json({ error: "分身不存在" }, { status: 404 });
       if (skill.rows[0].skill_scope === "platform" && user.role !== "admin") return Response.json({ error: "仅管理员可上架平台分身" }, { status: 403 });
@@ -181,7 +192,7 @@ export async function POST(request: Request) {
         );
         if (!ready.rows[0]?.ready) return Response.json({ error: "分身尚未完成训练，不能上架" }, { status: 400 });
       }
-      await query(`update avatar_creator_skills set status=$3, updated_at=now() where id=$1 and user_id=$2`, [input.skillId, user.id, input.status]);
+      await query(`update avatar_creator_skills set status=$2, updated_at=now() where id=$1`, [input.skillId, input.status]);
       return Response.json({ ok: true });
     }
 

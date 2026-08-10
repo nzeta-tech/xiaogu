@@ -32,6 +32,16 @@ async function visibleSkills(userId) {
   return result.rows.filter((row) => row.name.startsWith(marker));
 }
 
+async function managedPlatformSkills(userId) {
+  const result = await pool.query(
+    `select id, name from avatar_creator_skills
+      where skill_scope='platform' and ('platform'='platform' or user_id=$1)
+      order by updated_at desc`,
+    [userId],
+  );
+  return result.rows.filter((row) => row.name.startsWith(marker));
+}
+
 try {
   const organization = await pool.query("insert into organizations(name) values ($1) returning id", [marker]);
   organizationId = organization.rows[0].id;
@@ -39,7 +49,7 @@ try {
   const users = await pool.query(
     `insert into users(organization_id, name, email, password_hash, role, status, email_verified_at, terms_accepted_at)
      values ($1, '分身回归创建者', $2, $4, 'admin', 'active', now(), now()),
-            ($1, '分身回归同伴', $3, $4, 'broker', 'active', now(), now())
+            ($1, '分身回归管理员同伴', $3, $4, 'admin', 'active', now(), now())
      returning id, email`,
     [organizationId, `${marker}-owner@example.invalid`, `${marker}-peer@example.invalid`, passwordHash],
   );
@@ -78,6 +88,7 @@ try {
   check(ownerVisible.length === 2, "owner must see personal and platform skills");
   check(peerVisible.length === 1, "another user must see the active platform skill");
   check(peerVisible[0].skill_scope === "platform", "shared skill must retain platform scope");
+  check((await managedPlatformSkills(peerId)).length === 1, "platform production library must be shared across administrators");
 
   const secondVersion = await pool.query(
     `insert into avatar_creator_skill_versions(skill_id, user_id, version, status, source_links, sample_count, skill_prompt, change_summary)
@@ -99,6 +110,13 @@ try {
   const rolledBack = await visibleSkills(peerId);
   check(rolledBack[0].version === 1, "rollback must restore the selected version");
   check(!rolledBack.some((row) => row.id === secondVersion.rows[0].id), "rollback must supersede the newer version");
+  const crossAdminVersion = await pool.query(
+    `select v.version from avatar_creator_skill_versions v
+      join avatar_creator_skills s on s.id=v.skill_id
+      where v.id=$1 and v.skill_id=$2 and (s.user_id=$3 or (s.skill_scope='platform' and $4::boolean))`,
+    [firstVersionId, platformSkillId, peerId, true],
+  );
+  check(crossAdminVersion.rowCount === 1, "another administrator must be authorized to manage a platform version");
 
   console.log(JSON.stringify({ status: "passed", assertions, fixture: "avatar-skill-scope-lifecycle" }));
 } finally {

@@ -47,8 +47,22 @@ export async function getAvatarWorkspace(userId: string, skillScope: "personal" 
        from avatar_training_runs where user_id = $1 order by created_at desc limit 20`,
       [userId],
     ),
-    query<Omit<AvatarCreatorSkill, "versions">>(`select id, name, creator_name, status, skill_scope, latest_version, created_at, updated_at from avatar_creator_skills where user_id = $1 and skill_scope = $2 order by updated_at desc`, [userId, skillScope]),
-    query<AvatarCreatorSkill["versions"][number] & { skill_id: string }>(`select id, skill_id, version, training_run_id, status, source_links, sample_count, skill_prompt, change_summary, created_at from avatar_creator_skill_versions where user_id = $1 order by version desc`, [userId]),
+    query<Omit<AvatarCreatorSkill, "versions">>(
+      `select id, name, creator_name, status, skill_scope, latest_version, created_at, updated_at
+         from avatar_creator_skills
+        where skill_scope = $2 and ($2 = 'platform' or user_id = $1)
+        order by updated_at desc`,
+      [userId, skillScope],
+    ),
+    query<AvatarCreatorSkill["versions"][number] & { skill_id: string }>(
+      `select v.id, v.skill_id, v.version, v.training_run_id, v.status, v.source_links, v.sample_count,
+              v.skill_prompt, v.change_summary, v.created_at
+         from avatar_creator_skill_versions v
+         join avatar_creator_skills s on s.id=v.skill_id
+        where s.skill_scope=$2 and ($2='platform' or s.user_id=$1)
+        order by v.version desc`,
+      [userId, skillScope],
+    ),
   ]);
 
   return {
