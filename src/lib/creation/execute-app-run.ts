@@ -162,8 +162,9 @@ export async function executeCreationAppRun(input: {
         : ["default"])].slice(0, 2)
     : ["default"];
   const creatorStyles = await Promise.all(requestedCreatorStyleIds.map((versionId) => resolveCreatorSkillPrompt(input.userId, versionId)));
+  const requestedTone = stringifyCreationFieldValue(values.tone) || "default";
   const buildCreatorStylePrompt = (style: { prompt: string }) => style.prompt
-    ? `${basePrompt}\n\n【本次选用的分身创作 Skill】\n${style.prompt}\n\n【执行优先级】\n1. 事实准确性、素材边界与合规要求最高。\n2. 分身 Skill 决定主要创作结构、句式、节奏和表达气质。\n3. 不额外叠加通用内容语气，完整遵循分身 Skill。\n请模仿这套创作方式，但不得照抄训练作品中的具体句子、案例或事实。`
+    ? `${basePrompt}\n\n【本次选用的分身创作 Skill】\n${style.prompt}\n\n【执行优先级】\n1. 事实准确性、素材边界与合规要求最高。\n2. 分身 Skill 决定主要创作结构、句式、节奏和表达气质。\n3. 本次内容语气作为表达偏好，不得覆盖或破坏分身的核心风格。\n${requestedTone === "default" ? "本次选择默认语气：完整遵循分身 Skill。" : `本次语气为“${requestedTone}”：在保留分身辨识度的前提下调整表达倾向。`}\n请模仿这套创作方式，但不得照抄训练作品中的具体句子、案例或事实。`
     : basePrompt;
   const prompt = buildCreatorStylePrompt(creatorStyles[0]);
   const referenceKnowledge = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix"
