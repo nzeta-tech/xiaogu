@@ -161,6 +161,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const wechatStyleRecommendations = useMemo(() => recommendWechatImageStyles(wechatArticle), [wechatArticle]);
   const wechatStyleRecommendation = wechatStyleRecommendations[0] ?? { value: "", label: "", reason: "" };
   const wechatStyleOptions = pageApp.fields.find((field) => field.id === "style")?.options ?? [];
+  const selectedCreatorStyles = app.slug === "traffic-copy"
+    ? (Array.isArray(values.creator_skill_version_ids) && values.creator_skill_version_ids.length ? values.creator_skill_version_ids : ["default"])
+    : [];
+  const usesCreatorSkill = selectedCreatorStyles.some((id) => id !== "default");
   const visibleFields = (isWechatImages
     ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
     : filteredFields
@@ -168,6 +172,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     if (isPolicyRenewalCard && values.avatar_visual_mode !== "yes" && ["reference_image", "portrait_treatment"].includes(field.id)) return false;
     if (isImageCard && field.id === "remix_instruction") return false;
     if (isImageCard && field.id === "portrait_reference_image" && !(values.creation_mode === "image_remix" && values.draw_portrait === "yes")) return false;
+    if (app.slug === "traffic-copy" && usesCreatorSkill && field.id === "tone") return false;
     // The third interaction is the actual source: text for a new card, or an image for remix.
     if (isImageCard && values.creation_mode === "image_remix" && field.id === "source") return false;
     return true;
@@ -180,9 +185,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const incomingLinkRemixSourceTitle = isLinkRemix ? searchParams.get("source_title")?.trim() ?? "" : "";
   const incomingLinkRemixSourcePlatform = isLinkRemix ? searchParams.get("source_platform")?.trim() ?? "" : "";
   const linkRemixSourceUrl = isLinkRemix && typeof values.source_url === "string" ? extractShareUrl(values.source_url.trim()) : "";
-  const selectedCreatorStyles = app.slug === "traffic-copy"
-    ? (Array.isArray(values.creator_skill_version_ids) && values.creator_skill_version_ids.length ? values.creator_skill_version_ids : ["default"])
-    : [];
   const remixAutoParsingPending = isLinkRemix
     && isSupportedRemixSource(linkRemixSourceUrl)
     && (inspectingSource || lastAutoInspectedUrlRef.current !== linkRemixSourceUrl);
@@ -450,13 +452,21 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
   function toggleCreatorStyle(styleId: string) {
     const current = selectedCreatorStyles;
+    const applyCreatorStyles = (next: string[]) => {
+      setDraftStatus("saving");
+      setValues((valuesCurrent) => ({
+        ...valuesCurrent,
+        creator_skill_version_ids: next,
+        ...(next.some((id) => id !== "default") ? { tone: "default" } : {}),
+      }));
+    };
     if (current.includes(styleId)) {
       if (current.length === 1) return;
-      updateField("creator_skill_version_ids", current.filter((id) => id !== styleId));
+      applyCreatorStyles(current.filter((id) => id !== styleId));
       return;
     }
     const next = current.length === 1 && current[0] === "default" && styleId !== "default" ? [styleId] : [...current, styleId];
-    if (next.length <= 2) updateField("creator_skill_version_ids", next);
+    if (next.length <= 2) applyCreatorStyles(next);
   }
 
   async function copyRemixTranscript() {
@@ -1363,9 +1373,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             const isTextCardSource = isImageCard && values.creation_mode !== "image_remix" && field.id === "source";
             const fieldLabel = isTextCardSource ? "填写卡片内容" : field.label;
             const fieldRequired = field.required || isImageRemixSource || isTextCardSource;
-            const displayField = app.slug === "traffic-copy" && field.id === "tone" && selectedCreatorStyles.some((id) => id !== "default")
-              ? { ...field, helper: "跟随分身会完整保留训练出的表达气质；其他选项只对本次内容做轻量调整。", options: (field.options ?? []).map((option) => option.value === "default" ? { ...option, label: "跟随分身" } : { ...option, label: `${option.label}（临时微调）` }) }
-              : field;
+            const displayField = field;
             const voicePanel = voiceFieldId === field.id ? (
               <VoiceInputPanel
                 elapsed={voiceElapsed}
