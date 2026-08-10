@@ -224,7 +224,7 @@ function buildMarketingTarget(heading: string, label: string, channelInstruction
 }
 
 function getVariantName(variant: MultiChannelCopyVariant) {
-  if (variant === "traffic") return "流量文案";
+  if (variant === "traffic") return "口播文案（流量型）";
   if (variant === "marketing") return "营销文案";
   return "写引流文案";
 }

@@ -69,7 +69,7 @@ function buildSystemPrompt(
   const styleInstruction =
     styleMode === "traffic"
       ? [
-          "当前任务模式：流量文案。",
+          "当前任务模式：口播文案（流量型）。",
           "任务：把用户输入的事件/观点改写成高传播、高代入、可直接发布的社媒文案。",
           "必须按四段结构输出：1）【开头论点】2）【主体论据】3）【结尾总结】4）【标题建议（3个）】。",
           "目标风格：不是新闻摘要，不是讲义，不是空泛鸡汤；要有观点和普通人可执行启发。素材是具体产品、规则或数据时，优先写成事实清楚的产品解读，不要强行改成趋势泛谈。",
@@ -452,7 +452,7 @@ async function runDemoAgent(
 
   const brief = thinkingSnapshot?.snapshot_json ? buildThinkingProfileBrief(thinkingSnapshot.snapshot_json, thinkingSnapshot.summary_json) : null;
   return [
-    `下面是一版${styleMode === "traffic" ? "流量文案" : styleMode === "marketing" ? "营销文案" : ""}适合${platform}的${duration}口播稿，已按“${brief?.persona ?? profile?.display_name ?? "专业理性，擅长家庭保障和养老规划"}”的人设处理：`,
+    `下面是一版${styleMode === "traffic" ? "口播文案（流量型）" : styleMode === "marketing" ? "营销文案" : ""}适合${platform}的${duration}口播稿，已按“${brief?.persona ?? profile?.display_name ?? "专业理性，擅长家庭保障和养老规划"}”的人设处理：`,
     "",
     `标题：${topic.title}背后，普通家庭真正该看懂的风险`,
     "",

@@ -3,6 +3,7 @@
 node_modules
 .pnpm-store/
 .tmp/
+.local-tools/
 .env
 .env.local
 .env.backup.codex

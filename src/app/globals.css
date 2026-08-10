@@ -9330,6 +9330,7 @@ a {
 .adminGrowthSummary i { width: 8px; height: 8px; border-radius: 50%; }
 .adminGrowthSummary i.users { background: #14b8a6; }
 .adminGrowthSummary i.works { background: #6366f1; }
+.adminGrowthSummary i.dau { background: #f59e0b; }
 .adminGrowthChart { height: 250px; padding: 10px 12px 12px 4px; }
 .adminGrowthChart svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .adminGrowthGridLine { stroke: #e2e8f0; stroke-width: 1; stroke-dasharray: 3 4; }
@@ -9337,6 +9338,7 @@ a {
 .adminGrowthLine { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .adminGrowthLine.users { stroke: #14b8a6; }
 .adminGrowthLine.works { stroke: #6366f1; }
+.adminGrowthLine.dau { stroke: #f59e0b; }
 
 .adminConsole .panelHeader {
   padding: 13px 16px 12px;

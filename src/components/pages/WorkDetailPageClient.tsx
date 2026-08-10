@@ -42,7 +42,7 @@ type WorkDetail = {
     completed_at?: string | null;
   } | null;
 };
-type TrafficCopyCover = { workId: string; platform: string; style: string; createdAt: string; images: GeneratedImage[] };
+type TrafficCopyCover = { workId: string; platform: string; style: string; sourceLabel?: string; sourceBatchId?: string; createdAt: string; images: GeneratedImage[] };
 type TrafficCopyWorkState = { covers?: TrafficCopyCover[] };
 
 type WechatTheme = "default" | "warm" | "forest" | "editorial";
@@ -491,7 +491,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const payload = work?.app_run?.input_payload;
     if (!payload) return [];
     return Object.entries(payload).filter(([key, value]) => {
-      if (key === "app_entry") return false;
+      if (["app_entry", "creator_skill_version_id", "creator_skill_version_ids", "traffic_source_label", "traffic_source_batch_id"].includes(key)) return false;
       if (Array.isArray(value)) return value.length > 0;
       return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
     });
@@ -515,6 +515,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const isTrafficCopyWork = work?.platform === "traffic-copy";
   const isMarketingCopyWork = work?.platform === "marketing-copy";
   const isSimpleCopyWork = isTrafficCopyWork || isMarketingCopyWork;
+  const creatorStyleBatches = isTrafficCopyWork ? batches.filter((batch) => batch.id.startsWith("creator-style-")) : [];
+  const hasCreatorStyleTabs = creatorStyleBatches.length > 1;
   const isLeadCopyWork = work?.platform === "lead-copy";
   const isLinkRemixWork = work?.platform === "link-remix";
   const isStructuredCopyWork = isWriteCopyWork || isLeadCopyWork;
@@ -550,7 +552,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
   const videoCoverHref = isTrafficCopyWork
-    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(plainResultContent)}`)
+    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent)}&source_style_label=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.label ?? "默认版本" : "默认版本")}&source_batch_id=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.id ?? "default" : "default")}`)
     : "";
   const getActiveItemId = (batch: CreationOutputBatch) => (
     batch.items.some((item) => item.id === activeItemIds[batch.id])
@@ -620,7 +622,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const deliveryWindow = isMobileDownloadDevice() ? window.open("about:blank", "_blank") : null;
     const finalUrl = await buildWatermarkedAsset(url, effectiveContactOverlay);
     if (deliveryWindow) {
-      deliveryWindow.location.href = finalUrl;
+      renderMobileImageDelivery(deliveryWindow, finalUrl, filename);
       flashImageNotice("图片已打开，请长按图片保存");
       return;
     }
@@ -817,14 +819,15 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   if (isTrafficCopyWork) {
     const trafficState = work.content_json?.trafficCopyState;
     const covers = Array.isArray(trafficState?.covers) ? trafficState.covers : [];
-    const hasContent = work.app_run?.status === "succeeded" && Boolean(work.content.trim() || work.app_run?.result_text?.trim());
+    const activeTrafficContent = hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? "" : plainResultContent;
+    const hasContent = work.app_run?.status === "succeeded" && Boolean(activeTrafficContent.trim());
     return (
       <div className="workDetailPage trafficCopyStudioPage">
         <div className="page-content trafficCopyStudioShell">
           <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={formatWorkTitle(work)} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="trafficCopyStudioHero">
             <div>
-              <span>流量文案 · 发布工作台</span>
+              <span>口播文案（流量型）· 发布工作台</span>
               <h1>{formatWorkTitle(work)}</h1>
               <p>从成稿到封面集中管理；这条内容及其封面会作为同一创作链路保留在历史作品中。</p>
             </div>
@@ -846,16 +849,17 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
           <main className="trafficCopyStudioCanvas">
             <section className="trafficCopyDocumentCard">
+              {hasCreatorStyleTabs ? <nav className="creatorResultTabs" aria-label="分身作品版本">{creatorStyleBatches.map((batch) => <button className={resolvedBatchId === batch.id ? "active" : ""} key={batch.id} onClick={() => setActiveBatchId(batch.id)} type="button">{batch.label}</button>)}</nav> : null}
               <header className="trafficCopySectionHeader">
-                <div><span>01 · 文案</span><h2>发布正文</h2></div>
+                <div><span>01 · 文案</span><h2>{hasCreatorStyleTabs ? activeBatch?.label ?? "发布正文" : "发布正文"}</h2></div>
                 <div className="trafficCopyDocumentActions">
-                  <button className="instanceActionButton" disabled={!hasContent} onClick={() => void handleCopy("traffic-copy-studio", plainResultContent)} type="button">{copied["traffic-copy-studio"] ? "已复制" : "复制文案"}</button>
-                  <button className="instanceActionButton" disabled={!hasContent} onClick={() => handleExport(formatWorkTitle(work), plainResultContent)} type="button">导出 Word</button>
+                  <button className="instanceActionButton" disabled={!hasContent} onClick={() => void handleCopy("traffic-copy-studio", activeTrafficContent)} type="button">{copied["traffic-copy-studio"] ? "已复制" : "复制文案"}</button>
+                  <button className="instanceActionButton" disabled={!hasContent} onClick={() => handleExport(formatWorkTitle(work), activeTrafficContent)} type="button">导出 Word</button>
                   {!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref}>制作视频封面 <span aria-hidden="true">→</span></a> : null}
                 </div>
               </header>
               <div className="trafficCopyDocumentBody" style={{ fontSize: `${fontScale}%` }}>
-                {work.app_run?.status === "running" ? <span className="trafficCopyGenerating">正在持续生成文案…</span> : <MarkdownContent content={plainResultContent} />}
+                {work.app_run?.status === "running" ? <><span className="trafficCopyGenerating">正在持续生成文案…</span>{streamState.content ? <MarkdownContent content={streamState.content} /> : null}<i className="simpleCopyStreamCaret" aria-label="正在流式输出" /></> : <MarkdownContent content={activeTrafficContent} />}
               </div>
             </section>
 
@@ -866,7 +870,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               </header>
               {covers.length ? <div className="trafficCoverAssetGroups">{covers.slice().reverse().map((cover) => (
                 <article className="trafficCoverAssetGroup" key={cover.workId}>
-                  <header><strong>{formatVideoCoverPlatform(cover.platform)} · {formatImageStyleLabel(cover.style)}</strong><span>{formatDate(cover.createdAt)}</span></header>
+                  <header><strong>{formatVideoCoverPlatform(cover.platform)} · {formatImageStyleLabel(cover.style)}{cover.sourceLabel ? ` · 来源：${cover.sourceLabel}` : ""}</strong><span>{formatDate(cover.createdAt)}</span></header>
                   <div className="trafficCoverAssetGrid">{(cover.images ?? []).map((image, index) => <figure key={image.id || image.url}><img alt={`视频封面 ${index + 1}`} src={image.url} /><figcaption><button className="instanceActionButton" onClick={() => void handleImageDownload(image.url, `视频封面-${index + 1}.png`)} type="button">下载</button><button className="instanceActionButton" onClick={() => void handleImageOpen(image.url)} type="button">查看</button></figcaption></figure>)}</div>
                 </article>
               ))}</div> : <div className="trafficCoverEmpty"><b>还没有生成封面</b><span>{hasContent ? "选择视频号或抖音以及视觉风格，即可把封面保存到这条作品。" : "文案完成后，即可选择平台和风格制作封面。"}</span>{!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref}>去制作封面 <span aria-hidden="true">→</span></a> : null}</div>}
@@ -2391,6 +2395,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     >
                       图片结果x{imageResults.length}
                     </button>
+                  ) : hasCreatorStyleTabs ? (
+                    creatorStyleBatches.map((batch) => (
+                      <button className={activeBatch?.id === batch.id ? "instanceNavButton active" : "instanceNavButton"} key={batch.id} onClick={() => switchBatch(batch.id)} type="button">{batch.label}</button>
+                    ))
                   ) : isSimpleCopyWork ? (
                     <button
                       className={activeSection === "generated-content" ? "instanceNavButton active" : "instanceNavButton"}
@@ -2582,9 +2590,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
               ) : isSimpleCopyWork ? (
                 <article className="instanceResultBlock active simpleCopyResultBlock" aria-live="polite">
+                  {hasCreatorStyleTabs ? <div className="creatorResultTabs">{creatorStyleBatches.map((batch) => <button className={resolvedBatchId === batch.id ? "active" : ""} key={batch.id} onClick={() => setActiveBatchId(batch.id)} type="button">{batch.label}</button>)}</div> : null}
                   <div className="instanceResultToolbar">
                     <div className="instanceResultToolbarTitle">
-                      <strong>正文</strong>
+                      <strong>{hasCreatorStyleTabs ? activeBatch?.label ?? "生成作品" : "正文"}</strong>
                       <span>文本预览</span>
                     </div>
                     <div className="instanceResultActions">
@@ -2595,24 +2604,25 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       ) : null}
                       <button
                         className="instanceActionButton"
-                        disabled={!(streamState.content || work.content).trim()}
-                        onClick={() => void handleCopy("simple-copy", streamState.content || work.content)}
+                        disabled={!(hasCreatorStyleTabs ? activeBatch?.items[0]?.body : streamState.content || work.content)?.trim()}
+                        onClick={() => void handleCopy("simple-copy", hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? "" : streamState.content || work.content)}
                         type="button"
                       >
                         {copied["simple-copy"] ? "已复制" : "复制"}
                       </button>
                       <button
                         className="instanceActionButton"
-                        disabled={!(streamState.content || work.content).trim()}
-                        onClick={() => handleExport(formatWorkTitle(work), streamState.content || work.content)}
+                        disabled={!(hasCreatorStyleTabs ? activeBatch?.items[0]?.body : streamState.content || work.content)?.trim()}
+                        onClick={() => handleExport(formatWorkTitle(work), hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? "" : streamState.content || work.content)}
                         type="button"
                       >
                         导出Word
                       </button>
                     </div>
                   </div>
-                  <div className="instancePlainResult simpleCopyResultBody" style={{ fontSize: `${fontScale}%` }}>
-                    {streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
+                  <div className={streamState.connected ? "instancePlainResult simpleCopyResultBody streaming" : "instancePlainResult simpleCopyResultBody"} style={{ fontSize: `${fontScale}%` }}>
+                    {hasCreatorStyleTabs ? activeBatch?.items[0]?.body || (work.app_run?.status === "running" ? "内容生成中，完成后可在这里切换两份作品..." : "本次生成暂未返回正文。") : streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
+                    {streamState.connected ? <i className="simpleCopyStreamCaret" aria-label="正在流式输出" /> : null}
                   </div>
                 </article>
               ) : hasRenderableBatches ? (
@@ -3836,13 +3846,30 @@ function downloadAsset(url: string, filename: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
-  link.target = "_blank";
-  link.rel = "noreferrer";
+  link.rel = "noopener";
   link.click();
 }
 
 function isMobileDownloadDevice() {
   return typeof window !== "undefined" && window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+}
+
+function renderMobileImageDelivery(deliveryWindow: Window, imageUrl: string, filename: string) {
+  const document = deliveryWindow.document;
+  document.title = filename;
+  document.body.replaceChildren();
+  document.body.style.cssText = "margin:0;min-height:100vh;display:grid;place-items:center;background:#111827;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;";
+  const wrapper = document.createElement("main");
+  wrapper.style.cssText = "display:grid;gap:12px;width:100%;max-width:900px;padding:16px;box-sizing:border-box;text-align:center;";
+  const hint = document.createElement("p");
+  hint.textContent = "长按图片，选择“存储图像”即可保存";
+  hint.style.cssText = "margin:0;color:#d1d5db;font-size:14px;";
+  const image = document.createElement("img");
+  image.src = imageUrl;
+  image.alt = filename;
+  image.style.cssText = "display:block;max-width:100%;max-height:calc(100vh - 70px);margin:auto;border-radius:8px;object-fit:contain;";
+  wrapper.append(hint, image);
+  document.body.append(wrapper);
 }
 
 function sanitizeFilename(value: string) {
@@ -4144,7 +4171,7 @@ function formatAppLabel(value?: string | null) {
   if (value === "wechat-images") return "公众号配图";
   if (value === "policy-renewal-card") return "保单续保提醒卡";
   if (value === "lead-copy") return "写引流文案";
-  if (value === "traffic-copy") return "流量文案";
+  if (value === "traffic-copy") return "口播文案（流量型）";
   if (value === "video-cover") return "视频封面制作";
   if (value === "marketing-copy") return "营销文案";
   if (value === "video-script-polish") return "口播文案精修";

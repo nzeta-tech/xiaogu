@@ -528,13 +528,13 @@ export const creationApps: CreationApp[] = [
   {
     id: "traffic-copy",
     slug: "traffic-copy",
-    name: "流量文案",
+    name: "口播文案（流量型）",
     emoji: "⚡",
     category: "content",
     points: 5,
     badge: "新",
     description: "把热点、事件或观点整理成开头抓人、逻辑清楚且事实边界明确的传播型内容。",
-    promptHint: "沿用流量文案能力：用反常识钩子明确立场，以事实、迁移逻辑和普通人场景推进，最后给出可执行启发与互动动作。",
+    promptHint: "沿用口播文案（流量型）能力：用反常识钩子明确立场，以事实、迁移逻辑和普通人场景推进，最后给出可执行启发与互动动作。",
     resultType: "text",
     fields: [
       {
@@ -567,7 +567,7 @@ export const creationApps: CreationApp[] = [
     category: "content",
     points: 5,
     badge: "发布下一步",
-    description: "把已完成的流量文案做成适合视频号或抖音发布的视频封面。",
+    description: "把已完成的口播文案（流量型）做成适合视频号或抖音发布的视频封面。",
     promptHint: "根据文案提炼一个清晰、有辨识度的中文封面标题；画面优先保证标题可读性、信息聚焦与发布场景适配。",
     resultType: "image",
     fields: [

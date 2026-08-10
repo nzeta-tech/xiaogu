@@ -10,7 +10,7 @@ import type {
 } from "@/lib/avatar/types";
 import { listAvatarVisualAssets } from "@/lib/avatar/visual-assets";
 
-export async function getAvatarWorkspace(userId: string) {
+export async function getAvatarWorkspace(userId: string, skillScope: "personal" | "platform" = "personal") {
   const [memories, sources, proposals, versions, privacy, usage, photos, trainingRuns, skills, skillVersions] = await Promise.all([
     query<AvatarMemoryItem>(
       `select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, metadata_json, created_at, updated_at
@@ -47,7 +47,7 @@ export async function getAvatarWorkspace(userId: string) {
        from avatar_training_runs where user_id = $1 order by created_at desc limit 20`,
       [userId],
     ),
-    query<Omit<AvatarCreatorSkill, "versions">>(`select id, name, creator_name, status, latest_version, created_at, updated_at from avatar_creator_skills where user_id = $1 order by updated_at desc`, [userId]),
+    query<Omit<AvatarCreatorSkill, "versions">>(`select id, name, creator_name, status, skill_scope, latest_version, created_at, updated_at from avatar_creator_skills where user_id = $1 and skill_scope = $2 order by updated_at desc`, [userId, skillScope]),
     query<AvatarCreatorSkill["versions"][number] & { skill_id: string }>(`select id, skill_id, version, training_run_id, status, source_links, sample_count, skill_prompt, change_summary, created_at from avatar_creator_skill_versions where user_id = $1 order by version desc`, [userId]),
   ]);
 

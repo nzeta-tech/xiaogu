@@ -40,7 +40,7 @@ type Summary = {
   recentUsers: AdminUser[];
   recentOrders: AdminOrder[];
   recentUsage: AdminUsage[];
-  growthTrend: Array<{ date: string; users: number; works: number }>;
+  growthTrend: Array<{ date: string; users: number; works: number; dau: number }>;
 };
 
 type ContentOverview = {
@@ -1634,7 +1634,7 @@ export function AdminPageClient() {
         </div>
       ) : null}
 
-      {tab === "avatar-production" ? <section className="adminAvatarProduction"><div className="adminSectionTitle"><div><span>分身生产</span><h2>创作 Skill 训练与版本管理</h2><p>使用授权作品训练可命名分身，并在此查看进度、训练结果和分身对比。</p></div></div><ProfilePageClient /></section> : null}
+      {tab === "avatar-production" ? <section className="adminAvatarProduction"><div className="adminSectionTitle"><div><span>分身生产</span><h2>平台 Skill 训练与版本管理</h2><p>提交授权作品、查看训练进度与结果，并管理平台分身版本。</p></div></div><ProfilePageClient skillScope="platform" trainingOnly /></section> : null}
 
       {tab === "commerce" ? (
         <div className="pageStack">
@@ -2041,23 +2041,24 @@ function adminWorkHref(workId: string) {
   return apiPath(`/works/${workId}?from=admin&admin=1`);
 }
 
-function GrowthTrendChart({ data }: { data: Array<{ date: string; users: number; works: number }> }) {
+function GrowthTrendChart({ data }: { data: Array<{ date: string; users: number; works: number; dau: number }> }) {
   const width = 760;
   const height = 240;
   const padding = { top: 22, right: 20, bottom: 32, left: 38 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const maxValue = Math.max(1, ...data.flatMap((point) => [point.users, point.works]));
+  const maxValue = Math.max(1, ...data.flatMap((point) => [point.users, point.works, point.dau]));
   const pointFor = (value: number, index: number) => ({
     x: padding.left + (data.length <= 1 ? chartWidth / 2 : (index / (data.length - 1)) * chartWidth),
     y: padding.top + chartHeight - (value / maxValue) * chartHeight,
   });
-  const pathFor = (key: "users" | "works") => data.map((point, index) => {
+  const pathFor = (key: "users" | "works" | "dau") => data.map((point, index) => {
     const { x, y } = pointFor(point[key], index);
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const totalUsers = data.reduce((sum, point) => sum + point.users, 0);
   const totalWorks = data.reduce((sum, point) => sum + point.works, 0);
+  const todayDau = data.at(-1)?.dau ?? 0;
   const labels = data.length ? [0, Math.floor((data.length - 1) / 2), data.length - 1] : [];
 
   return (
@@ -2065,8 +2066,9 @@ function GrowthTrendChart({ data }: { data: Array<{ date: string; users: number;
       <div className="adminGrowthSummary">
         <span><i className="users" />新增用户 <strong>{totalUsers}</strong></span>
         <span><i className="works" />新增作品 <strong>{totalWorks}</strong></span>
+        <span><i className="dau" />今日 DAU <strong>{todayDau}</strong></span>
       </div>
-      {data.length ? <div className="adminGrowthChart" role="img" aria-label={`最近 30 天新增 ${totalUsers} 位用户和 ${totalWorks} 份作品`}>
+      {data.length ? <div className="adminGrowthChart" role="img" aria-label={`最近 30 天新增 ${totalUsers} 位用户、${totalWorks} 份作品，今日 DAU 为 ${todayDau}`}>
         <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
           {[0, 0.5, 1].map((ratio) => {
             const y = padding.top + chartHeight * ratio;
@@ -2077,6 +2079,7 @@ function GrowthTrendChart({ data }: { data: Array<{ date: string; users: number;
           <text className="adminGrowthAxis" x={padding.left - 8} y={padding.top + chartHeight + 4} textAnchor="end">0</text>
           <path className="adminGrowthLine users" d={pathFor("users")} />
           <path className="adminGrowthLine works" d={pathFor("works")} />
+          <path className="adminGrowthLine dau" d={pathFor("dau")} />
           {labels.map((index) => <text className="adminGrowthAxis" key={index} x={pointFor(0, index).x} y={height - 8} textAnchor="middle">{data[index].date.slice(5).replace("-", "/")}</text>)}
         </svg>
       </div> : <AdminEmptyState title="暂无增长数据" description="有新用户注册或作品创建后，这里会显示趋势。" />}

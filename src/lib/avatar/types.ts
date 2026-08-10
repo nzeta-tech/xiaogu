@@ -85,6 +85,7 @@ export type AvatarCreatorSkill = {
   name: string;
   creator_name: string;
   status: "active" | "archived";
+  skill_scope: "personal" | "platform";
   latest_version: number;
   created_at: string;
   updated_at: string;

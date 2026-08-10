@@ -2250,7 +2250,7 @@ export async function tryGetAdminSummary() {
       ),
       query<{ count: string }>("select count(*) from announcements where status = 'published'"),
       query<{ count: string }>("select count(*) from promo_codes where status = 'active'"),
-      query<{ date: string; users: string; works: string }>(
+      query<{ date: string; users: string; works: string; dau: string }>(
         `with days as (
            select generate_series(current_date - interval '29 days', current_date, interval '1 day')::date as day
          ), user_growth as (
@@ -2263,13 +2263,20 @@ export async function tryGetAdminSummary() {
            from works
            where created_at >= current_date - interval '29 days'
            group by created_at::date
+         ), daily_active_users as (
+           select created_at::date as day, count(distinct user_id)::text as count
+           from usage_logs
+           where user_id is not null and created_at >= current_date - interval '29 days'
+           group by created_at::date
          )
          select to_char(days.day, 'YYYY-MM-DD') as date,
                 coalesce(user_growth.count, '0') as users,
-                coalesce(work_growth.count, '0') as works
+                coalesce(work_growth.count, '0') as works,
+                coalesce(daily_active_users.count, '0') as dau
          from days
          left join user_growth on user_growth.day = days.day
          left join work_growth on work_growth.day = days.day
+         left join daily_active_users on daily_active_users.day = days.day
          order by days.day`,
       ),
     ]);
@@ -2299,6 +2306,7 @@ export async function tryGetAdminSummary() {
         date: row.date,
         users: Number(row.users ?? 0),
         works: Number(row.works ?? 0),
+        dau: Number(row.dau ?? 0),
       })),
     };
   } catch {

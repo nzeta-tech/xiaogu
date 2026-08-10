@@ -31,7 +31,7 @@ const actionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("train-video-channel-links"),
-    links: z.array(z.string().trim().url().max(1000)).min(3).max(10),
+    links: z.array(z.string().trim().url().max(1000)).min(3).max(20),
     authorized: z.literal(true),
   }),
   z.object({ action: z.literal("set-source-status"), sourceId: z.string().uuid(), status: z.enum(["active", "disabled", "archived"]) }),
@@ -52,17 +52,20 @@ const actionSchema = z.discriminatedUnion("action", [
     workId: z.string().max(120).optional(),
   }),
   z.object({ action: z.literal("restore-version"), versionId: z.string().uuid() }),
-  z.object({ action: z.literal("create-creator-skill"), skillId: z.string().uuid().optional(), name: z.string().trim().max(60).default(""), creatorName: z.string().trim().max(80).default(""), links: z.array(z.string().trim().url().max(1000)).min(3).max(10), authorized: z.literal(true) }),
+  z.object({ action: z.literal("create-creator-skill"), skillId: z.string().uuid().optional(), skillScope: z.enum(["personal", "platform"]).default("personal"), name: z.string().trim().max(60).default(""), creatorName: z.string().trim().max(80).default(""), links: z.array(z.string().trim().url().max(1000)).min(3).max(20), authorized: z.literal(true) }),
   z.object({ action: z.literal("restore-creator-skill-version"), skillId: z.string().uuid(), versionId: z.string().uuid() }),
+  z.object({ action: z.literal("set-creator-skill-status"), skillId: z.string().uuid(), status: z.enum(["active", "archived"]) }),
 ]);
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
   try {
     await reconcileAvatarTrainingRuns(user.id);
+    const skillScope = new URL(request.url).searchParams.get("scope") === "platform" ? "platform" : "personal";
+    if (skillScope === "platform" && user.role !== "admin") return Response.json({ error: "仅管理员可管理平台分身" }, { status: 403 });
     const [workspace, snapshot, questionnaire, contactCard] = await Promise.all([
-      getAvatarWorkspace(user.id),
+      getAvatarWorkspace(user.id, skillScope),
       tryGetLatestThinkingProfileSnapshot(user.id),
       tryGetLatestQuestionnaire(user.id),
       tryGetAvatarContactCard(user.id),
@@ -131,22 +134,54 @@ export async function POST(request: Request) {
     }
 
     if (input.action === "create-creator-skill") {
+      if (input.skillScope === "platform" && user.role !== "admin") return Response.json({ error: "仅管理员可生产平台分身" }, { status: 403 });
       if (!input.skillId && !input.name) return Response.json({ error: "请选择已有分身，或填写新分身名称" }, { status: 400 });
       const skill = input.skillId
-        ? await query<{ id: string; latest_version: number }>(`select id, latest_version from avatar_creator_skills where id=$1 and user_id=$2 and status='active'`, [input.skillId, user.id])
-        : await query<{ id: string; latest_version: number }>(`insert into avatar_creator_skills(user_id, name, creator_name) values ($1, $2, $3) on conflict (user_id, lower(name)) do update set creator_name=excluded.creator_name, updated_at=now() returning id, latest_version`, [user.id, input.name, input.creatorName]);
+        ? await query<{ id: string; latest_version: number }>(`select id, latest_version from avatar_creator_skills where id=$1 and user_id=$2`, [input.skillId, user.id])
+        : await query<{ id: string; latest_version: number }>(`insert into avatar_creator_skills(user_id, name, creator_name, skill_scope, status) values ($1, $2, $3, $4, 'archived') on conflict (user_id, skill_scope, lower(name)) do update set creator_name=excluded.creator_name, updated_at=now() returning id, latest_version`, [user.id, input.name, input.creatorName, input.skillScope]);
       const item = skill.rows[0];
       if (!item) return Response.json({ error: "选择的分身不存在或已归档" }, { status: 404 });
       const training = await startAvatarVideoTraining(user.id, input.links, item.id);
-      await query(`insert into avatar_creator_skill_versions(skill_id, user_id, version, training_run_id, source_links, change_summary) values ($1, $2, $3, $4, $5::jsonb, '正在通过授权作品训练')`, [item.id, user.id, item.latest_version + 1, training.runId, JSON.stringify(input.links)]);
+      // latest_version only advances after a successful training run. Allocate from
+      // the version history so a failed V1 can be retained and retried as V2.
+      await query(
+        `insert into avatar_creator_skill_versions(skill_id, user_id, version, training_run_id, source_links, change_summary)
+         select $1, $2, coalesce(max(version), 0) + 1, $3, $4::jsonb, '正在通过授权作品训练'
+         from avatar_creator_skill_versions
+         where skill_id=$1`,
+        [item.id, user.id, training.runId, JSON.stringify(input.links)],
+      );
       return Response.json({ ok: true, skillId: item.id, runId: training.runId }, { status: 202 });
     }
 
     if (input.action === "restore-creator-skill-version") {
       const version = await query<{ version: number }>(`select version from avatar_creator_skill_versions where id=$1 and skill_id=$2 and user_id=$3`, [input.versionId, input.skillId, user.id]);
       if (!version.rows[0]) return Response.json({ error: "Skill 版本不存在" }, { status: 404 });
-      await query(`update avatar_creator_skill_versions set status=case when id=$2 then 'restored' else 'superseded' end where skill_id=$1 and user_id=$3 and status in ('active','restored')`, [input.skillId, input.versionId, user.id]);
+      await query(
+        `update avatar_creator_skill_versions
+            set status=case when id=$2 then 'restored' else 'superseded' end
+          where skill_id=$1 and user_id=$3 and (id=$2 or status in ('active','restored'))`,
+        [input.skillId, input.versionId, user.id],
+      );
       await query(`update avatar_creator_skills set latest_version=$2, updated_at=now() where id=$1 and user_id=$3`, [input.skillId, version.rows[0].version, user.id]);
+      return Response.json({ ok: true });
+    }
+
+    if (input.action === "set-creator-skill-status") {
+      const skill = await query<{ name: string; skill_scope: "personal" | "platform" }>(
+        `select name, skill_scope from avatar_creator_skills where id=$1 and user_id=$2`,
+        [input.skillId, user.id],
+      );
+      if (!skill.rows[0]) return Response.json({ error: "分身不存在" }, { status: 404 });
+      if (skill.rows[0].skill_scope === "platform" && user.role !== "admin") return Response.json({ error: "仅管理员可上架平台分身" }, { status: 403 });
+      if (input.status === "active") {
+        const ready = await query<{ ready: boolean }>(
+          `select exists(select 1 from avatar_creator_skill_versions where skill_id=$1 and status in ('active','restored') and length(skill_prompt)>0) as ready`,
+          [input.skillId],
+        );
+        if (!ready.rows[0]?.ready) return Response.json({ error: "分身尚未完成训练，不能上架" }, { status: 400 });
+      }
+      await query(`update avatar_creator_skills set status=$3, updated_at=now() where id=$1 and user_id=$2`, [input.skillId, user.id, input.status]);
       return Response.json({ ok: true });
     }
 

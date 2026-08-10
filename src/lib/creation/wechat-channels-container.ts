@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { fetch as proxyFetch, ProxyAgent } from "undici";
 
 type ContainerInspectionResult =
   | { status: "success"; payload: Record<string, unknown> }
@@ -144,7 +145,14 @@ async function resolveWechatChannelsMediaWithLocalAgent(sourceUrl: string): Prom
 async function resolveWechatChannelsMediaWithPublicInspector(sourceUrl: string): Promise<ResolvedWechatChannelsMedia | null> {
   const endpoint = process.env.VIRAL_WECHAT_INSPECT_API_BASE?.trim() || "https://sph.litao.workers.dev/api/fetch_video_profile";
   try {
-    const response = await fetch(endpoint, {
+    const outboundProxy = process.env.OUTBOUND_HTTP_PROXY?.trim();
+    const response = outboundProxy ? await proxyFetch(endpoint, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ url: sourceUrl }),
+      signal: AbortSignal.timeout(Number(process.env.VIRAL_WECHAT_INSPECT_TIMEOUT_MS ?? 30_000)),
+      dispatcher: new ProxyAgent(outboundProxy),
+    }) : await fetch(endpoint, {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({ url: sourceUrl }),

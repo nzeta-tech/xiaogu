@@ -39,6 +39,7 @@ import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingP
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
+import { query } from "@/lib/db/client";
 
 type FieldValue = CreationFieldValue;
 
@@ -49,6 +50,23 @@ export class RetryableCreationRunError extends Error {
     super(message);
     this.name = "RetryableCreationRunError";
   }
+}
+
+async function resolveCreatorSkillPrompt(userId: string, versionId: string) {
+  if (!versionId || versionId === "default") return { id: "default", label: "默认版本", prompt: "" };
+  const result = await query<{ skill_prompt: string; name: string; version: number }>(
+    `select versions.skill_prompt, skills.name, versions.version
+     from avatar_creator_skill_versions versions
+     join avatar_creator_skills skills on skills.id = versions.skill_id
+     where versions.id = $1
+       and versions.status in ('active', 'restored')
+       and skills.status = 'active'
+       and (skills.skill_scope = 'platform' or (skills.skill_scope = 'personal' and skills.user_id = $2))
+     limit 1`,
+    [versionId, userId],
+  );
+  if (!result.rows[0]) throw new Error("所选分身版本不存在或当前不可用，请重新选择。");
+  return { id: versionId, label: `${result.rows[0].name} · V${result.rows[0].version}`, prompt: result.rows[0].skill_prompt.trim() };
 }
 
 export async function executeCreationAppRun(input: {
@@ -103,7 +121,7 @@ export async function executeCreationAppRun(input: {
   const caseContext = buildCreationPromptContext(app, entry);
   const linkRemixResearch = app.slug === "link-remix" ? await buildLinkRemixResearchContext(values) : "";
 
-  const prompt = isPolicyRenewalCard
+  const basePrompt = isPolicyRenewalCard
     ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
     : app.slug === "write-copy"
     ? buildWriteCopyPrompt(values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
@@ -136,6 +154,19 @@ export async function executeCreationAppRun(input: {
             values.source,
           ].filter(Boolean).join("\n\n")
         : `${effectiveApp.name}\n${caseContext.join("\n")}${caseContext.length > 0 ? "\n" : ""}${effectiveApp.promptHint}\n${effectiveApp.fields.map((field) => `${field.label}：${stringifyCreationFieldValue(values[field.id])}`).join("\n")}`;
+  const requestedCreatorStyleIds = app.slug === "traffic-copy"
+    ? [...new Set(Array.isArray(values.creator_skill_version_ids)
+      ? values.creator_skill_version_ids
+      : stringifyCreationFieldValue(values.creator_skill_version_id)
+        ? [stringifyCreationFieldValue(values.creator_skill_version_id)]
+        : ["default"])].slice(0, 2)
+    : ["default"];
+  const creatorStyles = await Promise.all(requestedCreatorStyleIds.map((versionId) => resolveCreatorSkillPrompt(input.userId, versionId)));
+  const requestedTone = stringifyCreationFieldValue(values.tone) || "default";
+  const buildCreatorStylePrompt = (style: { prompt: string }) => style.prompt
+    ? `${basePrompt}\n\n【本次选用的分身创作 Skill】\n${style.prompt}\n\n【执行优先级】\n1. 事实准确性、素材边界与合规要求最高。\n2. 分身 Skill 决定主要创作结构、句式、节奏和表达气质。\n3. 本次内容语气只做局部微调，不得覆盖或破坏分身的核心风格。\n${requestedTone === "default" ? "本次选择“跟随分身”：不要额外叠加通用语气，完整遵循分身 Skill。" : `本次语气为“${requestedTone}”：在保留分身辨识度的前提下轻量调整。`}\n请模仿这套创作方式，但不得照抄训练作品中的具体句子、案例或事实。`
+    : basePrompt;
+  const prompt = buildCreatorStylePrompt(creatorStyles[0]);
   const referenceKnowledge = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix"
     ? await extractKnowledgeFromReferenceImage(values.reference_image)
     : "";
@@ -258,18 +289,32 @@ export async function executeCreationAppRun(input: {
       }
     } else {
       const styleMode = app.slug === "write-copy" ? "general" : getMultiChannelCopyStyleMode(app.slug);
+      const creatorStyleResults: Array<{ id: string; label: string; content: string }> = [];
       // A full multi-channel run can contain ten publishable pieces, including
       // two long-form articles. Generate each channel separately so a model's
       // per-response output cap cannot leave the result at only the first
       // channel (normally the video scripts).
       const prompts = app.slug === "write-copy"
         ? buildWriteCopyChannelPrompts(values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
-        : [prompt];
+        : app.slug === "traffic-copy"
+          ? creatorStyles.map((style) => buildCreatorStylePrompt(style))
+          : [prompt];
 
-      for (const channelPrompt of prompts) {
+      for (const [promptIndex, channelPrompt] of prompts.entries()) {
+        let currentOutput = "";
+        if (app.slug === "traffic-copy" && prompts.length > 1) {
+          const tabNotice = `${promptIndex === 0 ? "" : "\n\n"}【正在生成：${creatorStyles[promptIndex].label}】\n\n`;
+          result += tabNotice;
+          await input.onEvent?.({ type: "delta", content: tabNotice });
+        }
         for await (const chunk of streamInsuranceContentAgent([{ role: "user", content: channelPrompt }], input.userId, styleMode)) {
           result += chunk;
+          currentOutput += chunk;
           await input.onEvent?.({ type: "delta", content: chunk });
+        }
+        if (app.slug === "traffic-copy") {
+          const style = creatorStyles[promptIndex];
+          creatorStyleResults.push({ id: style.id, label: style.label, content: currentOutput.trim() });
         }
         if (result.trim() && !result.endsWith("\n")) {
           result += "\n\n";
@@ -288,7 +333,16 @@ export async function executeCreationAppRun(input: {
       if (app.slug === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
 
       resultJson = {
-        contentJson: buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []),
+        contentJson: app.slug === "traffic-copy" && creatorStyleResults.length > 0
+          ? {
+              plainText: result,
+              batches: creatorStyleResults.map((style, index) => ({
+                id: `creator-style-${style.id}-${index + 1}`,
+                label: style.label,
+                items: [{ id: `creator-style-${style.id}-${index + 1}-item`, title: style.label, body: style.content, viewMode: "plain", summary: style.content.slice(0, 120) }],
+              })),
+            }
+          : buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []),
       };
     }
   } catch (error) {
@@ -382,6 +436,8 @@ export async function executeCreationAppRun(input: {
       coverWorkId: input.workId ?? "",
       platform: stringifyCreationFieldValue(values.platform),
       style: stringifyCreationFieldValue(values.style),
+      sourceLabel: stringifyCreationFieldValue(values.traffic_source_label),
+      sourceBatchId: stringifyCreationFieldValue(values.traffic_source_batch_id),
       images: studioAssets,
     });
   }
@@ -898,6 +954,8 @@ async function tryAttachTrafficCoverToParent(input: {
   coverWorkId: string;
   platform: string;
   style: string;
+  sourceLabel: string;
+  sourceBatchId: string;
   images: Array<{ id: string; url: string }>;
 }) {
   if (!input.parentWorkId || !input.coverWorkId || input.images.length === 0) return;
@@ -909,6 +967,8 @@ async function tryAttachTrafficCoverToParent(input: {
     workId: input.coverWorkId,
     platform: input.platform,
     style: input.style,
+    sourceLabel: input.sourceLabel,
+    sourceBatchId: input.sourceBatchId,
     createdAt: new Date().toISOString(),
     images: input.images,
   };
@@ -937,7 +997,7 @@ function buildTrafficCopyPrompt(values: Record<string, FieldValue>, caseContext:
     promptHint,
     `本次内容语气：${toneGuidance[tone] ?? toneGuidance.default}`,
     "请严格围绕用户原始素材创作，区分事实与个人判断；不得编造新闻细节、数据、案例、政策或产品规则，不制造焦虑，也不得使用收益、承保或理赔承诺。",
-    "只输出可直接发布的完整流量文案，不解释创作过程。",
+    "只输出可直接发布的完整口播文案（流量型），不解释创作过程。",
     "用户素材：",
     stringifyCreationFieldValue(values.source),
   ].filter(Boolean).join("\n\n");

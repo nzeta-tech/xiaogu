@@ -192,7 +192,7 @@ const workspaceCards: WorkspaceCard[] = [
     emoji: "🎬",
     pointsLabel: "5",
     badge: "新",
-    description: "把口播稿、流量文案或一个明确观点做成适合视频号和抖音发布的竖版视频封面。",
+    description: "把口播稿、口播文案（流量型）或一个明确观点做成适合视频号和抖音发布的竖版视频封面。",
     hint: "先提炼一个最有张力的核心判断，再选择平台和封面风格生成。",
     actionLabel: "使用",
     goals: ["attention", "trust"],

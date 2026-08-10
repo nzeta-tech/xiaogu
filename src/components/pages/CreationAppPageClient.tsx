@@ -16,6 +16,7 @@ import { articleDocx } from "@/lib/client/docx";
 import { browserErrorDetail, createCreationTraceId, rejectionErrorDetail, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
 
 type FieldValue = string | string[];
+type CreatorSkillOption = { id: string; name: string; version: number; skill_scope: "personal" | "platform" };
 
 const IMAGE_CARD_STYLE_USAGE_KEY = "image-card:style-usage";
 const IMAGE_CARD_LEGACY_RECENT_STYLES_KEY = "image-card:recent-styles";
@@ -94,12 +95,16 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     const sourceUrl = searchParams.get("source_url")?.trim();
     const sourceTitle = searchParams.get("source_title")?.trim();
     const sourcePlatform = searchParams.get("source_platform")?.trim();
+    const sourceStyleLabel = searchParams.get("source_style_label")?.trim();
+    const sourceBatchId = searchParams.get("source_batch_id")?.trim();
     return {
       ...initialValues,
       ...(incomingPrompt && promptFieldId ? { [promptFieldId]: incomingPrompt } : {}),
       ...(sourceUrl && isLinkRemix ? { source_url: sourceUrl } : {}),
       ...(sourceTitle && isLinkRemix ? { source_title: sourceTitle } : {}),
       ...(sourcePlatform && isLinkRemix ? { source_platform: sourcePlatform } : {}),
+      ...(app.slug === "video-cover" && sourceStyleLabel ? { traffic_source_label: sourceStyleLabel } : {}),
+      ...(app.slug === "video-cover" && sourceBatchId ? { traffic_source_batch_id: sourceBatchId } : {}),
     };
   });
   const [loading, setLoading] = useState(false);
@@ -122,6 +127,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [imageCardStyleUsage, setImageCardStyleUsage] = useState<Record<string, number>>({});
   const [wechatImageStyleUsage, setWechatImageStyleUsage] = useState<Record<string, number>>({});
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
+  const [creatorSkillOptions, setCreatorSkillOptions] = useState<CreatorSkillOption[]>([]);
+  const [creatorSkillsLoading, setCreatorSkillsLoading] = useState(app.slug === "traffic-copy");
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const valuesRef = useRef(values);
@@ -136,8 +143,17 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const missingRequiredFields = requiredFields.filter((field) => isEmpty(values[field.id]));
   const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
   const creationFrom = searchParams.get("from");
-  const creationReturnHref = creationFrom === "dashboard" || creationFrom === "today" ? appPath("/today") : appPath("/create");
-  const creationReturnLabel = creationFrom === "dashboard" || creationFrom === "today" ? "返回今日灵感" : "返回创作广场";
+  const isTrafficCoverStep = app.slug === "video-cover" && Boolean(trafficParentWorkId);
+  const creationReturnHref = isTrafficCoverStep
+    ? appPath(`/works/${encodeURIComponent(trafficParentWorkId)}?from=creation-works&entry=traffic-copy`)
+    : creationFrom === "dashboard" || creationFrom === "today"
+      ? appPath("/today")
+      : appPath("/create");
+  const creationReturnLabel = isTrafficCoverStep
+    ? "返回口播文案（流量型）"
+    : creationFrom === "dashboard" || creationFrom === "today"
+      ? "返回今日灵感"
+      : "返回创作广场";
   const experienceCopy = getAppExperienceCopy(app.slug, workspaceEntry);
   const breakthroughGuideHref = appPath("/templates/breakthrough-growth-guide.md");
   const wechatArticle = typeof values.article === "string" ? values.article : "";
@@ -164,6 +180,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const incomingLinkRemixSourceTitle = isLinkRemix ? searchParams.get("source_title")?.trim() ?? "" : "";
   const incomingLinkRemixSourcePlatform = isLinkRemix ? searchParams.get("source_platform")?.trim() ?? "" : "";
   const linkRemixSourceUrl = isLinkRemix && typeof values.source_url === "string" ? extractShareUrl(values.source_url.trim()) : "";
+  const selectedCreatorStyles = app.slug === "traffic-copy"
+    ? (Array.isArray(values.creator_skill_version_ids) && values.creator_skill_version_ids.length ? values.creator_skill_version_ids : ["default"])
+    : [];
   const remixAutoParsingPending = isLinkRemix
     && isSupportedRemixSource(linkRemixSourceUrl)
     && (inspectingSource || lastAutoInspectedUrlRef.current !== linkRemixSourceUrl);
@@ -177,6 +196,28 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   useEffect(() => {
     return () => recognitionRef.current?.stop();
   }, []);
+
+  useEffect(() => {
+    if (app.slug !== "traffic-copy") return;
+    const controller = new AbortController();
+    void fetch(apiPath("/api/avatar/creator-skills"), { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() as Promise<{ skills?: CreatorSkillOption[] }> : { skills: [] })
+      .then((payload) => {
+        const options = payload.skills ?? [];
+        setCreatorSkillOptions(options);
+        const availableIds = new Set(options.map((skill) => skill.id));
+        setValues((current) => {
+          const selected = Array.isArray(current.creator_skill_version_ids) ? current.creator_skill_version_ids : [];
+          const valid = [...new Set(selected.filter((id): id is string => typeof id === "string" && (id === "default" || availableIds.has(id))))].slice(0, 2);
+          const next = valid.length ? valid : ["default"];
+          if (selected.length === next.length && selected.every((id, index) => id === next[index])) return current;
+          return { ...current, creator_skill_version_ids: next };
+        });
+      })
+      .catch((cause) => { if (!(cause instanceof DOMException && cause.name === "AbortError")) setCreatorSkillOptions([]); })
+      .finally(() => setCreatorSkillsLoading(false));
+    return () => controller.abort();
+  }, [app.slug]);
 
   useEffect(() => {
     const traceId = createCreationTraceId();
@@ -405,6 +446,17 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       }
       return { ...current, [fieldId]: nextValue };
     });
+  }
+
+  function toggleCreatorStyle(styleId: string) {
+    const current = selectedCreatorStyles;
+    if (current.includes(styleId)) {
+      if (current.length === 1) return;
+      updateField("creator_skill_version_ids", current.filter((id) => id !== styleId));
+      return;
+    }
+    const next = current.length === 1 && current[0] === "default" && styleId !== "default" ? [styleId] : [...current, styleId];
+    if (next.length <= 2) updateField("creator_skill_version_ids", next);
   }
 
   async function copyRemixTranscript() {
@@ -1297,11 +1349,23 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         ) : null}
 
         <form className={isLinkRemix ? "create-form creationForm targetCreateForm linkRemixCreateForm" : isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
+          {app.slug === "traffic-copy" ? <section className="creatorStylePicker">
+            <div className="creatorStylePickerHeading"><i>1</i><div><span>分身风格</span><strong>选择本次模仿的创作方式</strong><small>至少选择一个、最多两个；选择两个会分别生成作品，并在结果页用 Tab 切换。</small></div></div>
+            <div className="creatorStyleChoices">
+              <button className={selectedCreatorStyles.includes("default") ? "active" : ""} disabled={creatorSkillsLoading} onClick={() => toggleCreatorStyle("default")} type="button"><strong>默认版本</strong><small>小谷基础创作方式</small></button>
+              {creatorSkillOptions.map((skill) => <button className={selectedCreatorStyles.includes(skill.id) ? "active" : ""} disabled={!selectedCreatorStyles.includes(skill.id) && selectedCreatorStyles.length >= 2} key={skill.id} onClick={() => toggleCreatorStyle(skill.id)} type="button"><strong>{skill.name} · V{skill.version}</strong><small>{skill.skill_scope === "platform" ? "平台分身" : "我的分身"}</small></button>)}
+            </div>
+            <em>已选择 {selectedCreatorStyles.length}/2</em>
+            {!creatorSkillsLoading && creatorSkillOptions.length === 0 ? <p>暂无可用分身，可先到<a href={appPath("/avatar?tab=lab")}>数字分身实验室</a>训练。</p> : null}
+          </section> : null}
           {visibleFields.map((field, index) => {
             const isImageRemixSource = isImageCard && values.creation_mode === "image_remix" && field.id === "reference_image";
             const isTextCardSource = isImageCard && values.creation_mode !== "image_remix" && field.id === "source";
             const fieldLabel = isTextCardSource ? "填写卡片内容" : field.label;
             const fieldRequired = field.required || isImageRemixSource || isTextCardSource;
+            const displayField = app.slug === "traffic-copy" && field.id === "tone" && selectedCreatorStyles.some((id) => id !== "default")
+              ? { ...field, helper: "跟随分身会完整保留训练出的表达气质；其他选项只对本次内容做轻量调整。", options: (field.options ?? []).map((option) => option.value === "default" ? { ...option, label: "跟随分身" } : { ...option, label: `${option.label}（临时微调）` }) }
+              : field;
             const voicePanel = voiceFieldId === field.id ? (
               <VoiceInputPanel
                 elapsed={voiceElapsed}
@@ -1317,7 +1381,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix, isTrafficCopy: app.slug === "traffic-copy" })} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
-                  <span className="step-number">{index + 1}</span>
+                  <span className="step-number">{index + (app.slug === "traffic-copy" ? 2 : 1)}</span>
                 </span>
                 <strong className="field-title">
                   {fieldLabel}
@@ -1346,7 +1410,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                       <div className="imageCardSplitHeader">上传二创原图</div>
                       <div className="imageCardRemixUploadRow">
                         {renderField({
-                          field,
+                          field: displayField,
                           value: values[field.id],
                           onChange: (nextValue) => updateField(field.id, nextValue),
                           isImageCard: true,
@@ -1384,7 +1448,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                     </div>
                   </div>
                 ) : renderField({
-                  field,
+                  field: displayField,
                   value: values[field.id],
                   onChange: (nextValue) => updateField(field.id, nextValue),
                   isImageCard: isImageCard || isXiaohongshuCheck,
@@ -1415,7 +1479,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                     {sourcePreview.mediaUrl ? <video className="linkRemixSourcePreview" controls preload="metadata" poster={sourcePreview.thumbnailUrl} src={sourcePreview.mediaUrl} /> : null}
                   </div>
                 ) : null}
-                {field.helper && !isImageRemixSource && !(isLeadCopy && field.id === "source") ? <span className="field-help">{field.helper}</span> : null}
+                {displayField.helper && !isImageRemixSource && !(isLeadCopy && field.id === "source") ? <span className="field-help">{displayField.helper}</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "source" ? <span className="imageCardMinorTip">可上传文本文件(txt/docx/pdf)，图片请使用下方“上传原图 / 参考图”。</span> : null}
                 {(isImageCard || isWechatImages) && field.id === "reference_image" && !isImageRemixSource ? <span className="imageCardMinorTip">参考图仅用于本次生成，请确认你有权使用。</span> : null}
                 {isWechatImages && field.id === "article" ? (

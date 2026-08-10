@@ -422,7 +422,7 @@ function formatWorkTitle(item: DraftItem) {
 function formatPlatformLabel(platform: string) {
   const labels: Record<string, string> = {
     "write-copy": "写文案", "image-card": "做图", "wechat-images": "公众号配图", "policy-renewal-card": "续保提醒卡", "lead-copy": "引流文案",
-    "traffic-copy": "流量文案", "marketing-copy": "营销文案", "video-script-polish": "口播精修",
+    "traffic-copy": "口播文案（流量型）", "marketing-copy": "营销文案", "video-script-polish": "口播精修",
     "wechat-article-polish": "公众号精修", "topic-picker": "热点选题", "general-content": "通用创作",
     "xiaohongshu-check": "小红书合规检测", letter: "信件创作", "ppt-maker": "PPT轻松制作",
     "xiaohongshu-studio": "小红书笔记创作", "wechat-studio": "公众号文章创作", "wechat-cover": "公众号文章封面",

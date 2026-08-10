@@ -48,7 +48,7 @@ export async function startAvatarVideoTraining(userId: string, rawLinks: string[
 
   const links = [...new Set(rawLinks.map(canonicalizeInspectableSourceUrl))];
   if (links.length < 3) throw new Error("去重后至少需要 3 条单条作品链接。");
-  if (links.length > 10) throw new Error("每次最多训练 10 条作品。");
+  if (links.length > 20) throw new Error("每次最多训练 20 条作品。");
   if (links.some((link) => !isShortVideoUrl(link))) throw new Error("风格训练目前支持视频号和抖音的单条作品链接。");
 
   const initialAttempts: VideoTrainingAttempt[] = links.map((link) => ({
@@ -182,12 +182,29 @@ async function reconcileRun(userId: string, run: TrainingRunRow) {
   }
 
   if (normalized.length < 3) {
-    await query(
-      `update avatar_training_runs set status='failed', phase='failed', completed_count=$3, successful_count=$4,
-       error_message='至少需要成功解析标题并转写 3 条作品。请检查每条作品的失败原因后重试。', details_json=$5::jsonb, updated_at=now()
-       where id=$1 and user_id=$2 and status='running'`,
-      [run.id, userId, terminalCount, normalized.length, JSON.stringify(details)],
-    );
+    const failureMessage = "至少需要成功解析标题并转写 3 条作品。请检查每条作品的失败原因后重试。";
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        `update avatar_training_runs set status='failed', phase='failed', completed_count=$3, successful_count=$4,
+         error_message=$5, details_json=$6::jsonb, updated_at=now()
+         where id=$1 and user_id=$2 and status='running'`,
+        [run.id, userId, terminalCount, normalized.length, failureMessage, JSON.stringify(details)],
+      );
+      await client.query(
+        `update avatar_creator_skill_versions set status='failed', change_summary=$3
+         where training_run_id=$1 and user_id=$2 and status='training'`,
+        [run.id, userId, failureMessage],
+      );
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
     return;
   }
 

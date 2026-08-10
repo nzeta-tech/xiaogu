@@ -57,8 +57,8 @@ const quickActions = ["今天有哪些适合保险经纪人的热点选题？"];
 const writingModes: Array<{ mode: WritingStyleMode; label: string; prefix: string }> = [
   {
     mode: "traffic",
-    label: "写流量文案",
-    prefix: "流量文案：",
+    label: "写口播文案（流量型）",
+    prefix: "口播文案（流量型）：",
   },
   {
     mode: "marketing",
@@ -530,10 +530,10 @@ export function ChatWorkspace() {
               }}
               placeholder={
                 styleMode === "traffic"
-                  ? "输入热点材料或事件背景，小谷会默认按流量文案结构写。"
+                  ? "输入热点材料或事件背景，小谷会默认按口播文案（流量型）结构写。"
                   : styleMode === "marketing"
                     ? "输入客户画像、产品亮点、既往症规则或方案材料，小谷会默认按营销文案写。"
-                    : "输入热点材料、事件背景或客户问题，小谷会默认按流量文案结构写。"
+                    : "输入热点材料、事件背景或客户问题，小谷会默认按口播文案（流量型）结构写。"
               }
             />
             <div className="composerActions">
@@ -627,7 +627,7 @@ export function ChatWorkspace() {
                   className="textButton strong"
                   onClick={() =>
                     void sendMessage(
-                      `流量文案：围绕“${topic.title}”写一条适合社交媒体传播的文案。背景：${topic.summary} 保险角度：${topic.recommendedAngle}`,
+                      `口播文案（流量型）：围绕“${topic.title}”写一条适合社交媒体传播的文案。背景：${topic.summary} 保险角度：${topic.recommendedAngle}`,
                       "traffic",
                     )
                   }
