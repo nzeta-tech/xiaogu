@@ -8,8 +8,10 @@ import { query } from "@/lib/db/client";
 import { isEmptyCreationFieldValue } from "@/lib/creation/output";
 import { isSupportedLinkRemixUrl } from "@/lib/creation/link-remix-source";
 import { creationRequestId, normalizeCreationTraceId, trySaveCreationDiagnostic } from "@/lib/creation/diagnostics";
-import { tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { tryCreateCreationTask, tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
+import { validateCreationFieldLengths } from "@/lib/creation/input-validation";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -26,8 +28,11 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const settings = await tryGetSystemSettings();
   if (!settings.features.imageGenerationEnabled && (app.resultType === "image" || app.resultType === "image-plan")) return Response.json({ error: "图片生成功能当前已关闭" }, { status: 403 });
 
+  const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
+  const values = body.values ?? {};
 
-  if (app.slug === "link-remix") {
+
+  if (app.slug === "link-remix" && !(typeof values.source_transcript === "string" && values.source_transcript.trim())) {
     const availability = await getLinkRemixAvailability();
     if (!availability.available) {
       return Response.json({ error: availability.reason, code: "LOCAL_AGENT_OFFLINE" }, { status: 503 });
@@ -45,14 +50,14 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const quota = await requireQuota(user, "write_script", app.points);
   if (!quota.ok) return quota.response;
 
-  const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
-  const values = body.values ?? {};
   if (app.slug === "link-remix" && !isSupportedLinkRemixUrl(typeof values.source_url === "string" ? values.source_url : "")) {
     return Response.json({ error: "爆款话题二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
   }
 
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
   const effectiveApp = getEntryAdjustedApp(app, entry);
+  const lengthError = validateCreationFieldLengths(effectiveApp.fields, values);
+  if (lengthError) return Response.json({ error: lengthError, code: "INPUT_TOO_LONG" }, { status: 400 });
   const isImageCardRemix = app.slug === "image-card" && values.creation_mode === "image_remix";
   const missingField = effectiveApp.fields.find((field) => {
     if (isImageCardRemix && field.id === "draw_portrait") return false;
@@ -87,6 +92,22 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     result: null,
   });
 
+  const creationTask = app.slug === "link-remix"
+    ? await tryCreateCreationTask({
+        userId: user.id,
+        taskType: "link-remix",
+        title: `${typeof values.source_title === "string" && values.source_title.trim() ? values.source_title.trim().slice(0, 80) : "爆款内容"} · 二创任务`,
+        sourceSnapshot: {
+          ...values,
+          targetLabel: remixCapabilityLabel(values.remix_target),
+        },
+      })
+    : null;
+
+  if (app.slug === "link-remix" && !creationTask) {
+    return Response.json({ error: "二创任务没有成功保存，请稍后重试。" }, { status: 500 });
+  }
+
   const work = await tryCreateWork({
     userId: user.id,
     appCode: app.slug,
@@ -95,6 +116,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     contentJson: { batches: [] },
     sourceChannel: app.slug,
     complianceRisk: "unchecked",
+    creationTaskId: creationTask?.id ?? null,
   });
 
   if (!work) {

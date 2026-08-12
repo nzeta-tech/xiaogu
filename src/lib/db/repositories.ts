@@ -144,6 +144,7 @@ export async function tryCreateWork(input: {
   contentJson?: Record<string, unknown>;
   sourceChannel?: string;
   complianceRisk?: string;
+  creationTaskId?: string | null;
 }) {
   if (!input.userId) return null;
 
@@ -164,8 +165,8 @@ export async function tryCreateWork(input: {
       created_at: string;
       updated_at: string;
     }>(
-      `insert into works(user_id, app_run_id, app_id, conversation_id, title, content_type, source_channel, status, compliance_risk)
-       values ($1, $2, $3, $4, $5, 'text', $6, 'draft', $7)
+      `insert into works(user_id, app_run_id, app_id, conversation_id, title, content_type, source_channel, status, compliance_risk, creation_task_id)
+       values ($1, $2, $3, $4, $5, 'text', $6, 'draft', $7, $8)
        returning id, title, status, compliance_risk, created_at, updated_at`,
       [
         input.userId,
@@ -175,6 +176,7 @@ export async function tryCreateWork(input: {
         resolvedTitle,
         input.sourceChannel ?? input.appCode ?? "",
         input.complianceRisk ?? "unchecked",
+        input.creationTaskId ?? null,
       ],
     );
 
@@ -194,6 +196,26 @@ export async function tryCreateWork(input: {
     }
 
     return result.rows[0];
+  } catch {
+    return null;
+  }
+}
+
+export async function tryCreateCreationTask(input: {
+  userId: string | null;
+  taskType: string;
+  title: string;
+  sourceSnapshot: Record<string, unknown>;
+}) {
+  if (!input.userId) return null;
+  try {
+    const result = await query<{ id: string; title: string; status: string; created_at: string; updated_at: string }>(
+      `insert into creation_tasks(user_id, task_type, title, source_snapshot)
+       values ($1, $2, $3, $4::jsonb)
+       returning id, title, status, created_at, updated_at`,
+      [input.userId, input.taskType, input.title, JSON.stringify(input.sourceSnapshot)],
+    );
+    return result.rows[0] ?? null;
   } catch {
     return null;
   }
@@ -3918,6 +3940,65 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
         usesAvatarVisual: work.has_avatar_visual,
       })),
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function tryListCreationTasks(userId: string | null) {
+  if (!userId) return null;
+  try {
+    const result = await query<{
+      id: string;
+      task_type: string;
+      title: string;
+      status: string;
+      source_snapshot: Record<string, unknown>;
+      created_at: string;
+      updated_at: string;
+      work_count: string;
+      completed_count: string;
+      failed_count: string;
+      latest_work_id: string | null;
+    }>(
+      `select task.id, task.task_type, task.title, task.status, task.source_snapshot,
+              task.created_at, greatest(task.updated_at, coalesce(max(w.updated_at), task.updated_at)) as updated_at,
+              count(w.id)::text as work_count,
+              count(w.id) filter (where ar.status = 'succeeded')::text as completed_count,
+              count(w.id) filter (where ar.status = 'failed')::text as failed_count,
+              (array_agg(w.id order by w.updated_at desc) filter (where w.id is not null))[1]::text as latest_work_id
+       from creation_tasks task
+       left join works w on w.creation_task_id = task.id and w.status <> 'archived'
+       left join app_runs ar on ar.id = w.app_run_id
+       where task.user_id = $1
+       group by task.id
+       order by greatest(task.updated_at, coalesce(max(w.updated_at), task.updated_at)) desc
+       limit 100`,
+      [userId],
+    );
+    return result.rows.map((task) => {
+      const workCount = Number(task.work_count);
+      const completedCount = Number(task.completed_count);
+      const failedCount = Number(task.failed_count);
+      const status = workCount === 0 ? "pending"
+        : completedCount === workCount ? "completed"
+        : failedCount === workCount ? "failed"
+        : completedCount > 0 ? "partial"
+        : "running";
+      return {
+        id: task.id,
+        type: task.task_type,
+        title: task.title,
+        status,
+        source: task.source_snapshot,
+        createdAt: task.created_at,
+        updatedAt: task.updated_at,
+        workCount,
+        completedCount,
+        failedCount,
+        latestWorkId: task.latest_work_id,
+      };
+    });
   } catch {
     return null;
   }

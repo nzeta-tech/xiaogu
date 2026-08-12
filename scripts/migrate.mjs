@@ -27,6 +27,15 @@ try {
     }
 
     const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
+    if (/^\s*--\s*migrate:no-transaction\b/m.test(sql)) {
+      // PostgreSQL operations such as CREATE INDEX CONCURRENTLY must run outside
+      // an explicit transaction. These migrations must remain independently
+      // idempotent because recording the version is a separate statement.
+      await pool.query(sql);
+      await pool.query("insert into schema_migrations(version) values ($1) on conflict do nothing", [file]);
+      console.log(`applied ${file} (no transaction)`);
+      continue;
+    }
     await pool.query("begin");
     try {
       await pool.query(sql);

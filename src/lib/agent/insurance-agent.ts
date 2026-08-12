@@ -140,14 +140,15 @@ async function callModel(
   styleMode: WritingStyleMode,
 ) {
   const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
+  const normalized = normalizeOpenAICompatibleMessages(messages);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
   const runtime = await getModelRuntime();
   const started = Date.now();
   if (!runtime.circuitOpen) {
     try {
       const output = provider === "google"
-        ? await callGoogleGemini(system, messages, runtime.settings.requestTimeoutSeconds)
-        : await callOpenAICompatible(system, messages, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, runtime.settings.requestTimeoutSeconds);
+        ? await callGoogleGemini(system, normalized, runtime.settings.requestTimeoutSeconds)
+        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, runtime.settings.requestTimeoutSeconds);
       await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return output;
     } catch (error) {
@@ -156,7 +157,7 @@ async function callModel(
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
-  const output = await callOpenAICompatible(system, messages, runtime.fallback, undefined, runtime.settings.requestTimeoutSeconds);
+  const output = await callOpenAICompatible(system, normalized, runtime.fallback, undefined, runtime.settings.requestTimeoutSeconds);
   await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
   return output;
 }
@@ -213,7 +214,41 @@ function normalizeOpenAICompatibleMessages(messages: AgentMessage[]) {
     normalized.push({ role: message.role, content });
   }
 
-  return normalized.slice(-16);
+  const maxMessages = 24;
+  const tokenBudget = positiveBudget(process.env.MODEL_MESSAGE_TOKEN_BUDGET, 60_000);
+  const selected: AgentMessage[] = [];
+  let remaining = tokenBudget;
+  for (const message of normalized.slice(-maxMessages).reverse()) {
+    const tokens = approximateTokens(message.content);
+    if (tokens <= remaining) {
+      selected.push(message);
+      remaining -= tokens;
+      continue;
+    }
+    if (remaining > 0) selected.push({ ...message, content: takeTailWithinTokenBudget(message.content, remaining) });
+    break;
+  }
+  return selected.reverse().filter((message) => message.content.trim());
+}
+
+function approximateTokens(value: string) {
+  const cjk = (value.match(/[\u3400-\u9fff\uf900-\ufaff]/g) ?? []).length;
+  return cjk + Math.ceil((value.length - cjk) / 4);
+}
+
+function takeTailWithinTokenBudget(value: string, budget: number) {
+  let low = 0; let high = value.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (approximateTokens(value.slice(-mid)) <= budget) low = mid;
+    else high = mid - 1;
+  }
+  return value.slice(-low);
+}
+
+function positiveBudget(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 async function readModelError(response: Response) {

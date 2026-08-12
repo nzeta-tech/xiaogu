@@ -48,7 +48,7 @@ export async function getAvatarWorkspace(userId: string, skillScope: "personal" 
       [userId],
     ),
     query<Omit<AvatarCreatorSkill, "versions">>(
-      `select id, name, creator_name, status, skill_scope, latest_version, created_at, updated_at
+      `select id, name, creator_name, status, skill_scope, latest_version, identity_card, identity_card_draft, created_at, updated_at
          from avatar_creator_skills
         where skill_scope = $2 and ($2 = 'platform' or user_id = $1)
         order by updated_at desc`,

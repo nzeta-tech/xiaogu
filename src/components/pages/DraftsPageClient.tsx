@@ -9,6 +9,7 @@ type StatusFilter = "all" | "favorite" | "noted" | "avatar";
 type SortMode = "updated-desc" | "updated-asc" | "created-desc";
 type ViewMode = "list" | "grid";
 type LoadState = "loading" | "ready" | "error";
+type HistoryKind = "works" | "tasks";
 
 type DraftItem = {
   id: string;
@@ -38,6 +39,19 @@ type WorksData = {
 };
 
 type WorksPayload = { works: WorksData };
+type CreationTaskItem = {
+  id: string;
+  type: string;
+  title: string;
+  status: "pending" | "running" | "partial" | "completed" | "failed";
+  source: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  workCount: number;
+  completedCount: number;
+  failedCount: number;
+  latestWorkId?: string | null;
+};
 
 const statusOptions: Array<{ value: StatusFilter; label: string; totalKey?: keyof WorksData["totals"] }> = [
   { value: "all", label: "全部", totalKey: "all" },
@@ -68,6 +82,9 @@ export function DraftsPageClient() {
   const [undoItem, setUndoItem] = useState<DraftItem | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [historyKind, setHistoryKind] = useState<HistoryKind>("works");
+  const [tasks, setTasks] = useState<CreationTaskItem[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setIsMounted(true));
@@ -119,6 +136,21 @@ export function DraftsPageClient() {
     const frame = window.requestAnimationFrame(() => void loadWorks(1));
     return () => window.cancelAnimationFrame(frame);
   }, [loadWorks]);
+
+  useEffect(() => {
+    if (historyKind !== "tasks") return;
+    // Loading state begins when the user switches to the task-backed remote view.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTasksLoading(true);
+    fetch(apiPath("/api/creation/hub?view=tasks"), { credentials: "include", cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { tasks?: CreationTaskItem[]; error?: string };
+        if (!response.ok || !payload.tasks) throw new Error(payload.error || "任务数据暂不可用");
+        setTasks(payload.tasks);
+      })
+      .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "任务数据暂不可用"))
+      .finally(() => setTasksLoading(false));
+  }, [historyKind]);
 
   async function patchWork(item: DraftItem, body: Record<string, unknown>) {
     setActionError("");
@@ -242,13 +274,18 @@ export function DraftsPageClient() {
     <div className="creationHistoryPage" onClick={() => openMenuId && setOpenMenuId(null)}>
       <header className="creationHistoryHeader">
         <div>
-          <h1>创作历史 <span>· {data.totals.all} 个作品</span></h1>
-          <p>集中查找、整理和发布你的创作内容</p>
+          <h1>创作历史 <span>· {historyKind === "works" ? `${data.totals.all} 个作品` : `${tasks.length} 个任务`}</span></h1>
+          <p>集中查找作品，也可以回到一项任务继续创作</p>
         </div>
         <a className="creationHistoryPrimary" href={appPath("/create")}><span aria-hidden="true">＋</span> 新建内容</a>
       </header>
 
-      <section className="creationHistoryToolbar" aria-label="作品筛选">
+      <nav className="creationHistoryKindTabs" aria-label="创作历史类型">
+        <button className={historyKind === "works" ? "active" : ""} type="button" onClick={() => setHistoryKind("works")}>作品 <span>{data.totals.all}</span></button>
+        <button className={historyKind === "tasks" ? "active" : ""} type="button" onClick={() => setHistoryKind("tasks")}>任务 <span>{tasks.length || ""}</span></button>
+      </nav>
+
+      {historyKind === "works" ? <><section className="creationHistoryToolbar" aria-label="作品筛选">
         <div className="creationHistorySearchRow">
           <label className="creationHistorySearch">
             <span aria-hidden="true">⌕</span>
@@ -320,8 +357,27 @@ export function DraftsPageClient() {
       ) : null}
 
       {undoItem ? <div className="creationHistoryToast" role="status"><span>作品已归档</span><button type="button" onClick={() => void undoArchive()}>撤销</button><button type="button" aria-label="关闭提示" onClick={() => setUndoItem(null)}>×</button></div> : null}
+      </> : <TaskHistory tasks={tasks} loading={tasksLoading} />}
     </div>
   );
+}
+
+function TaskHistory({ tasks, loading }: { tasks: CreationTaskItem[]; loading: boolean }) {
+  if (loading) return <div className="creationHistoryLoading">正在整理任务历史...</div>;
+  if (tasks.length === 0) return <div className="creationHistoryEmpty"><strong>还没有创作任务</strong><span>从爆款话题二创开始的任务会保留在这里</span><a href={appPath("/apps/link-remix")}>开始二创</a></div>;
+  return <div className="creationTaskItems">{tasks.map((task) => {
+    const sourceTitle = typeof task.source.source_title === "string" ? task.source.source_title : "";
+    const targetLabel = typeof task.source.targetLabel === "string" ? task.source.targetLabel : "";
+    const statusLabel = task.status === "completed" ? "已完成" : task.status === "partial" ? "部分完成" : task.status === "failed" ? "失败" : task.status === "running" ? "创作中" : "待创作";
+    const href = task.latestWorkId
+      ? appPath(`/works/${task.latestWorkId}?from=creation-works&entry=link-remix`)
+      : appPath(`/apps/link-remix?source_url=${encodeURIComponent(typeof task.source.source_url === "string" ? task.source.source_url : "")}`);
+    return <a className="creationTaskItem" href={href} key={task.id}>
+      <span className="creationTaskIcon" aria-hidden="true">↗</span>
+      <div><span className={`creationTaskStatus ${task.status}`}>{statusLabel}</span><strong>{task.title}</strong><p>{sourceTitle || "已保存二创素材"}</p><small>{targetLabel || "爆款话题二创"} · 已生成 {task.completedCount}/{task.workCount} 个作品 · {formatRelativeDate(task.updatedAt)}</small></div>
+      <b>{task.latestWorkId ? "查看作品 →" : "继续创作 →"}</b>
+    </a>;
+  })}</div>;
 }
 
 function WorkCard(props: {

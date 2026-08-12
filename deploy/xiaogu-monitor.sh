@@ -35,6 +35,8 @@ PAID_ORDERS_CURSOR_FILE="${PAID_ORDERS_CURSOR_FILE:-$STATE_DIR/paid-orders.curso
 FAILED_ORDERS_CURSOR_FILE="${FAILED_ORDERS_CURSOR_FILE:-$STATE_DIR/failed-orders.cursor}"
 PENDING_ORDER_ALERTED_FILE="${PENDING_ORDER_ALERTED_FILE:-$STATE_DIR/pending-orders.alerted}"
 MODEL_FAILURE_ALERTED_FILE="${MODEL_FAILURE_ALERTED_FILE:-$STATE_DIR/model-failures.alerted}"
+DATABASE_HEALTH_STATE_FILE="${DATABASE_HEALTH_STATE_FILE:-$STATE_DIR/database-health.state}"
+DATABASE_DEADLOCKS_STATE_FILE="${DATABASE_DEADLOCKS_STATE_FILE:-$STATE_DIR/database-deadlocks.state}"
 PROJECT_DIR="${PROJECT_DIR:-/home/ubuntu/insurance-content-agent}"
 ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env}"
 DB_CONTAINER="${DB_CONTAINER:-insurance-content-agent-postgres-1}"
@@ -49,6 +51,10 @@ BUSINESS_MONITOR_BATCH_LIMIT="${BUSINESS_MONITOR_BATCH_LIMIT:-10}"
 MODEL_FAILURES_ENABLED="${MODEL_FAILURES_ENABLED:-true}"
 MODEL_FAILURE_WINDOW_MINUTES="${MODEL_FAILURE_WINDOW_MINUTES:-5}"
 MODEL_FAILURE_THRESHOLD="${MODEL_FAILURE_THRESHOLD:-1}"
+DATABASE_CONNECTION_WARNING="${DATABASE_CONNECTION_WARNING:-40}"
+DATABASE_CONNECTION_CRITICAL="${DATABASE_CONNECTION_CRITICAL:-60}"
+DATABASE_LONG_QUERY_SECONDS="${DATABASE_LONG_QUERY_SECONDS:-15}"
+DATABASE_IDLE_TRANSACTION_SECONDS="${DATABASE_IDLE_TRANSACTION_SECONDS:-60}"
 TZ="${TZ:-Asia/Shanghai}"
 
 log() {
@@ -58,10 +64,11 @@ log() {
 usage() {
   cat <<'EOF'
 Usage:
-  xiaogu-monitor.sh [--check|--test]
+  xiaogu-monitor.sh [--check|--database-check|--test]
 
 Modes:
   --check  Probe the site and inspect business events.
+  --database-check  Run only the database health checks.
   --test   Send a DingTalk test message immediately.
 EOF
 }
@@ -601,6 +608,62 @@ limit 1;
   write_state "$MODEL_FAILURE_ALERTED_FILE" "$latest_id"
 }
 
+check_database_health() {
+  local rows max_connections total_connections active_connections waiting_connections long_queries idle_transactions database_bytes deadlocks
+  rows="$(psql_query "
+select
+  current_setting('max_connections')::integer,
+  count(*) filter (where pid <> pg_backend_pid()),
+  count(*) filter (where pid <> pg_backend_pid() and state='active'),
+  count(*) filter (where pid <> pg_backend_pid() and state='active' and wait_event is not null),
+  count(*) filter (where pid <> pg_backend_pid() and state='active' and query_start < now()-interval '${DATABASE_LONG_QUERY_SECONDS} seconds'),
+  count(*) filter (where pid <> pg_backend_pid() and state='idle in transaction' and state_change < now()-interval '${DATABASE_IDLE_TRANSACTION_SECONDS} seconds'),
+  pg_database_size(current_database()),
+  coalesce((select deadlocks from pg_stat_database where datname=current_database()),0)
+from pg_stat_activity;
+" 2>&1)" || {
+    log "database-health query failed: $rows"
+    return 1
+  }
+  IFS=$'\t' read -r max_connections total_connections active_connections waiting_connections long_queries idle_transactions database_bytes deadlocks <<<"$rows"
+
+  local severity="healthy" reasons=""
+  if (( total_connections >= DATABASE_CONNECTION_CRITICAL )); then
+    severity="critical"
+    reasons+="连接数达到严重阈值；"
+  elif (( total_connections >= DATABASE_CONNECTION_WARNING )); then
+    severity="warning"
+    reasons+="连接数达到预警阈值；"
+  fi
+  if (( long_queries > 0 )); then severity="critical"; reasons+="存在长查询；"; fi
+  if (( waiting_connections > 0 )); then [[ "$severity" == "healthy" ]] && severity="warning"; reasons+="存在锁或资源等待；"; fi
+  if (( idle_transactions > 0 )); then [[ "$severity" == "healthy" ]] && severity="warning"; reasons+="存在长时间未提交事务；"; fi
+
+  local previous_state previous_deadlocks
+  previous_state="$(read_state "$DATABASE_HEALTH_STATE_FILE" "healthy")"
+  previous_deadlocks="$(read_state "$DATABASE_DEADLOCKS_STATE_FILE" "$deadlocks")"
+  if (( deadlocks > previous_deadlocks )); then
+    send_business_summary "小谷数据库死锁告警" "新增死锁数: $((deadlocks-previous_deadlocks))\n累计死锁数: ${deadlocks}"
+  fi
+  write_state "$DATABASE_DEADLOCKS_STATE_FILE" "$deadlocks"
+
+  if [[ "$severity" == "healthy" ]]; then
+    if [[ "$previous_state" != "healthy" ]]; then
+      send_business_summary "小谷数据库监控已恢复" "连接数: ${total_connections}/${max_connections}\n活跃连接: ${active_connections}\n长查询、等待连接、悬挂事务均已恢复正常。"
+    fi
+    write_state "$DATABASE_HEALTH_STATE_FILE" "healthy"
+    log "database healthy: connections=${total_connections}/${max_connections} active=${active_connections} size_bytes=${database_bytes}"
+    return 0
+  fi
+
+  if [[ "$previous_state" != "$severity" ]]; then
+    send_business_summary "小谷数据库${severity}告警" "原因: ${reasons}\n连接数: ${total_connections}/${max_connections}（预警 ${DATABASE_CONNECTION_WARNING}，严重 ${DATABASE_CONNECTION_CRITICAL}）\n活跃连接: ${active_connections}\n等待连接: ${waiting_connections}\n超过 ${DATABASE_LONG_QUERY_SECONDS} 秒查询: ${long_queries}\n超过 ${DATABASE_IDLE_TRANSACTION_SECONDS} 秒未提交事务: ${idle_transactions}\n数据库大小: ${database_bytes} bytes"
+  fi
+  write_state "$DATABASE_HEALTH_STATE_FILE" "$severity"
+  log "database ${severity}: ${reasons} connections=${total_connections}/${max_connections} long=${long_queries} waiting=${waiting_connections} idle_tx=${idle_transactions}"
+  return 1
+}
+
 run_business_monitor() {
   local previous_state
   previous_state="$(read_state "$BUSINESS_ERROR_STATE_FILE" "ok")"
@@ -675,6 +738,10 @@ run_check() {
     overall_status=1
   fi
 
+  if ! check_database_health; then
+    overall_status=1
+  fi
+
   return "$overall_status"
 }
 
@@ -686,6 +753,9 @@ main() {
       ;;
     --test)
       run_test
+      ;;
+    --database-check)
+      check_database_health
       ;;
     -h|--help)
       usage

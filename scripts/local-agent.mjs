@@ -86,10 +86,33 @@ async function executeTask(task, leaseToken) {
   if (task.taskType === "douyin.deep_verify") return executeDouyinDeepVerification(task, leaseToken);
   if (task.taskType === "ppt.generate") return executePresentationTask(task, leaseToken);
   if (task.taskType !== "source.inspect") throw new Error(`unsupported task type: ${task.taskType}`);
+  if (task.payload?.sourceType === "wechat_channels_media") return inspectWechatChannelMedia(task, leaseToken);
   const url = typeof task.payload?.url === "string" ? task.payload.url : "";
   const userId = typeof task.payload?.userId === "string" ? task.payload.userId : "";
+  const metadataOnly = task.payload?.purpose === "viral_content";
   if (!url) throw new Error("invalid task payload: url is required");
-  return inspectSource(task, leaseToken, url, userId);
+  return inspectSource(task, leaseToken, url, userId, { metadataOnly });
+}
+
+async function inspectWechatChannelMedia(task, leaseToken) {
+  const mediaUrl = stringValue(task.payload?.mediaUrl);
+  const mediaDecryptKey = stringValue(task.payload?.mediaDecryptKey);
+  const sourceUrl = stringValue(task.payload?.sourceUrl);
+  const title = stringValue(task.payload?.title) || "视频号作品";
+  if (!mediaUrl || !sourceUrl) throw new Error("invalid task payload: mediaUrl and sourceUrl are required");
+  const transcript = await streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecryptKey);
+  return sanitizeResult({
+    status: "succeeded",
+    finalUrl: sourceUrl,
+    fields: {
+      source_title: title,
+      source_author: stringValue(task.payload?.authorName),
+      source_published_at: stringValue(task.payload?.publishedAt),
+      source_type: "video_channel",
+      source_transcript: transcript,
+    },
+    note: "TikHub 视频号媒体已由本地 Agent 下载、解密并完成转写。",
+  });
 }
 
 async function executePresentationTask(task, leaseToken) {
@@ -119,18 +142,18 @@ async function executePresentationTask(task, leaseToken) {
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
-async function inspectSource(task, leaseToken, url, userId) {
+async function inspectSource(task, leaseToken, url, userId, options = {}) {
   await publishTaskEvent(task, leaseToken, "status", { message: "正在解析作品信息..." });
   const response = await fetch(`${executorBase}/api/creation/link-remix/inspect`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ url, agentUserId: userId, deferTranscription: true }),
+    body: JSON.stringify({ url, agentUserId: userId, deferTranscription: true, metadataOnly: options.metadataOnly === true }),
     signal: AbortSignal.timeout(boundedNumber("LOCAL_AGENT_TASK_TIMEOUT_MS", 1_200_000, 60000, 1800000)),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `local executor HTTP ${response.status}`);
   if (!result.fields || typeof result.fields !== "object") throw new Error("local executor returned an invalid result");
-  if (typeof result.mediaUrl === "string" && result.mediaUrl) {
+  if (!options.metadataOnly && typeof result.mediaUrl === "string" && result.mediaUrl) {
     const transcript = await streamMediaTranscription(task, leaseToken, result.mediaUrl, result.mediaDecryptKey);
     if (transcript) {
       result.fields.source_transcript = transcript;
@@ -211,7 +234,7 @@ async function streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecrypt
   await publishTaskEvent(task, leaseToken, "status", { message: "正在获取视频音频..." });
   const isLocalMedia = mediaUrl.startsWith("/");
   const isEncryptedWechatMedia = typeof mediaDecryptKey === "string" && /^\d+$/.test(mediaDecryptKey) && isAllowedWechatMediaUrl(mediaUrl);
-  const mediaSource = isEncryptedWechatMedia ? buildWechatMediaProxyUrl(mediaUrl, mediaDecryptKey) : isLocalMedia ? `${executorBase}${mediaUrl}` : mediaUrl;
+  const mediaSource = isLocalMedia ? `${executorBase}${mediaUrl}` : mediaUrl;
   const response = await fetch(mediaSource, {
     headers: isLocalMedia ? { authorization: `Bearer ${token}` } : undefined,
     signal: AbortSignal.timeout(mediaDownloadTimeoutMs),
@@ -219,12 +242,13 @@ async function streamMediaTranscription(task, leaseToken, mediaUrl, mediaDecrypt
   if (!response.ok) throw new Error(`video download HTTP ${response.status}`);
   const declaredLength = Number(response.headers.get("content-length") || 0);
   if (declaredLength > maxTranscribeBytes) throw new Error("video file exceeds the local transcription limit");
-  const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > maxTranscribeBytes) throw new Error("video file exceeds the local transcription limit");
+  const downloadedBytes = Buffer.from(await response.arrayBuffer());
+  if (downloadedBytes.byteLength > maxTranscribeBytes) throw new Error("video file exceeds the local transcription limit");
+  const bytes = isEncryptedWechatMedia ? await decryptWechatMedia(downloadedBytes, mediaDecryptKey) : downloadedBytes;
 
   await publishTaskEvent(task, leaseToken, "status", { message: "正在识别语音..." });
   const form = new FormData();
-  form.append("file", new Blob([bytes], { type: response.headers.get("content-type") || "video/mp4" }), "source-media.mp4");
+  form.append("file", new Blob([bytes], { type: "video/mp4" }), "source-media.mp4");
   form.append("language", "zh");
   const transcriberBase = (process.env.VIRAL_TRANSCRIBE_API_BASE || "http://transcriber:8000").replace(/\/$/, "");
   const upstream = await fetch(`${transcriberBase}/transcribe/stream`, {
@@ -295,18 +319,32 @@ function sanitizeResult(result) {
   return clean;
 }
 
-function buildWechatMediaProxyUrl(mediaUrl, decryptKey) {
-  const base = (process.env.VIRAL_WECHAT_DISCOVERY_API_BASE || "http://wx-channel:2026").replace(/\/$/, "");
-  const proxy = new URL("/api/video/stream", `${base}/`);
-  proxy.searchParams.set("url", mediaUrl);
-  proxy.searchParams.set("key", decryptKey);
-  return proxy.toString();
+async function decryptWechatMedia(bytes, decryptKey) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "xiaogu-wechat-decrypt-"));
+  const encryptedPath = path.join(dir, "encrypted.mp4");
+  const decryptedPath = path.join(dir, "decrypted.mp4");
+  try {
+    await writeFile(encryptedPath, bytes);
+    await execFileAsync("/opt/wechat-venv/bin/python", [
+      "-c",
+      "import sys; from wxipad_video import decrypt_data; data=open(sys.argv[1], 'rb').read(); open(sys.argv[3], 'wb').write(decrypt_data(data, int(sys.argv[2])))",
+      encryptedPath,
+      decryptKey,
+      decryptedPath,
+    ], { timeout: mediaDownloadTimeoutMs });
+    const decrypted = await readFile(decryptedPath);
+    if (decrypted.length < 12 || decrypted.subarray(4, 8).toString("ascii") !== "ftyp") throw new Error("视频号媒体解密后不是有效 MP4");
+    return decrypted;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 function isAllowedWechatMediaUrl(value) {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && /(^|\.)finder\.video\.qq\.com$/i.test(url.hostname);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    return /(^|\.)finder\.video\.qq\.com$/i.test(url.hostname) || url.hostname.toLowerCase() === "wxapp.tc.qq.com";
   } catch {
     return false;
   }

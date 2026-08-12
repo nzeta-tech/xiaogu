@@ -4,6 +4,7 @@ import { getLatestViralDataRun } from "./viral-data-repository";
 import { inspectDouyinPublicMetadata } from "./creation/douyin-download";
 import { inspectWechatChannelsWithContainerBrowser } from "./creation/wechat-channels-container";
 import { parseSogouAccountResults } from "./viral-creator-sources";
+import { getCachedLinkRemixSourceUrls, normalizeLinkRemixCacheUrl } from "./creation/link-remix-cache";
 import { discoverWechatProviderArticles, discoverWechatProviderCreators, type WechatProviderArticle } from "./wechat-provider-adapters";
 
 export type ViralExampleType = "短视频" | "爆文";
@@ -37,6 +38,8 @@ export type ViralExample = {
   viralScore?: number;
   isFallback?: boolean;
   isManual?: boolean;
+  remixCacheAvailable?: boolean;
+  rawData?: Record<string, unknown>;
 };
 
 export type ViralCreatorCandidate = {
@@ -142,7 +145,9 @@ const viralPlatformSearches: NativeSearchConfig[] = [
 
 export async function getViralExamples(options: { refresh?: boolean } = {}) {
   void options;
-  const items = (await tryListPublishedViralContents(24)).map((item) => databaseRowToExample(item));
+  const rows = await tryListPublishedViralContents(24);
+  const cachedUrls = await getCachedLinkRemixSourceUrls(rows.map((row) => row.source_url));
+  const items = rows.map((item) => databaseRowToExample(item, cachedUrls));
   const latestSuccessfulRun = await getLatestViralDataRun("succeeded").catch(() => null);
   const fetchedAt = latestSuccessfulRun?.completed_at ?? null;
   const maxAgeMs = preparedDataMaxAgeMs();
@@ -155,7 +160,7 @@ export async function getViralExamples(options: { refresh?: boolean } = {}) {
   });
 }
 
-function databaseRowToExample(row: Awaited<ReturnType<typeof tryListPublishedViralContents>>[number]): ViralExample {
+function databaseRowToExample(row: Awaited<ReturnType<typeof tryListPublishedViralContents>>[number], cachedUrls: Set<string>): ViralExample {
   return {
     id: row.id, title: row.title, platform: row.platform as ViralExample["platform"],
     type: row.example_type === "爆文" || row.content_type === "爆文" ? "爆文" : "短视频", sourceUrl: row.source_url,
@@ -168,6 +173,7 @@ function databaseRowToExample(row: Awaited<ReturnType<typeof tryListPublishedVir
     status: "ready", statusNote: row.risk_note || "来源作品已入库，发布前请结合实际情况核验",
     viralScore: row.viral_score,
     isManual: row.source_type === "manual",
+    remixCacheAvailable: (() => { try { return cachedUrls.has(normalizeLinkRemixCacheUrl(row.source_url)); } catch { return false; } })(),
   };
 }
 

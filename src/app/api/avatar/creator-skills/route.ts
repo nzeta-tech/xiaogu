@@ -6,6 +6,7 @@ type SkillOption = {
   name: string;
   version: number;
   skill_scope: "personal" | "platform";
+  identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string };
 };
 
 export async function GET() {
@@ -13,7 +14,7 @@ export async function GET() {
   if (user instanceof Response) return user;
 
   const result = await query<SkillOption>(
-    `select versions.id, skills.name, versions.version, skills.skill_scope
+    `select versions.id, skills.name, versions.version, skills.skill_scope, skills.identity_card
      from avatar_creator_skill_versions versions
      join avatar_creator_skills skills on skills.id = versions.skill_id
      where skills.status = 'active'

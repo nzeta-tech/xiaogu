@@ -1,8 +1,9 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  getCreationAppBySlug,
   getCreationAppFamily,
   type CreationApp,
   type CreationAppFamily,
@@ -14,9 +15,10 @@ import type { AvatarVisualAsset } from "@/lib/avatar/types";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 import { articleDocx } from "@/lib/client/docx";
 import { browserErrorDetail, createCreationTraceId, rejectionErrorDetail, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
+import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 
 type FieldValue = string | string[];
-type CreatorSkillOption = { id: string; name: string; version: number; skill_scope: "personal" | "platform" };
+type CreatorSkillOption = { id: string; name: string; version: number; skill_scope: "personal" | "platform"; identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string } };
 
 const IMAGE_CARD_STYLE_USAGE_KEY = "image-card:style-usage";
 const IMAGE_CARD_LEGACY_RECENT_STYLES_KEY = "image-card:recent-styles";
@@ -123,12 +125,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [transcriptCopied, setTranscriptCopied] = useState(false);
   const [showAllWechatStyles, setShowAllWechatStyles] = useState(false);
   const [showAllImageCardStyles, setShowAllImageCardStyles] = useState(false);
-  const [remixPreviewOpen, setRemixPreviewOpen] = useState(false);
+  const [remixPreviewIndex, setRemixPreviewIndex] = useState<number | null>(null);
   const [imageCardStyleUsage, setImageCardStyleUsage] = useState<Record<string, number>>({});
   const [wechatImageStyleUsage, setWechatImageStyleUsage] = useState<Record<string, number>>({});
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [creatorSkillOptions, setCreatorSkillOptions] = useState<CreatorSkillOption[]>([]);
-  const [creatorSkillsLoading, setCreatorSkillsLoading] = useState(app.slug === "traffic-copy");
+  const isRemixTraffic = isLinkRemix && values.remix_target === "traffic-copy";
+  const usesTrafficWorkflow = app.slug === "traffic-copy" || isRemixTraffic;
+  const [creatorSkillsLoading, setCreatorSkillsLoading] = useState(usesTrafficWorkflow);
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const valuesRef = useRef(values);
@@ -138,10 +142,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const lastAutoInspectedUrlRef = useRef("");
   const voiceSupported = useMemo(() => Boolean(getSpeechRecognitionConstructor()), []);
   const draftKey = `creation-draft:${workspaceEntry || app.slug}`;
-  const requiredFields = pageApp.fields.filter((field) => field.required);
-  const completedRequiredFields = requiredFields.filter((field) => !isEmpty(values[field.id]));
-  const missingRequiredFields = requiredFields.filter((field) => isEmpty(values[field.id]));
-  const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
   const creationFrom = searchParams.get("from");
   const isTrafficCoverStep = app.slug === "video-cover" && Boolean(trafficParentWorkId);
   const creationReturnHref = isTrafficCoverStep
@@ -161,12 +161,30 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const wechatStyleRecommendations = useMemo(() => recommendWechatImageStyles(wechatArticle), [wechatArticle]);
   const wechatStyleRecommendation = wechatStyleRecommendations[0] ?? { value: "", label: "", reason: "" };
   const wechatStyleOptions = pageApp.fields.find((field) => field.id === "style")?.options ?? [];
-  const selectedCreatorStyles = app.slug === "traffic-copy"
+  const selectedCreatorStyles = usesTrafficWorkflow
     ? (Array.isArray(values.creator_skill_version_ids) && values.creator_skill_version_ids.length ? values.creator_skill_version_ids : ["default"])
     : [];
+  const remixTargetSlug = values.remix_target === "moments" ? "write-copy" : typeof values.remix_target === "string" ? values.remix_target : "wechat-studio";
+  const remixTargetFields = isLinkRemix
+    ? (getCreationAppBySlug(remixTargetSlug)?.fields ?? []).filter((field) => {
+        if (["source", "topic", "targets", "creation_mode"].includes(field.id)) return false;
+        if (values.remix_target === "moments") return field.id === "tone";
+        return true;
+      })
+    : [];
+  const remixBaseFields = isLinkRemix
+    ? filteredFields.filter((field) => field.id !== "article_length" || values.remix_target === "wechat-studio")
+    : filteredFields;
+  const formFields = isLinkRemix
+    ? remixBaseFields.flatMap((field) => field.id === "remix_target" ? [field, ...remixTargetFields] : [field])
+    : remixBaseFields;
+  const requiredFields = formFields.filter((field) => field.required);
+  const completedRequiredFields = requiredFields.filter((field) => !isEmpty(values[field.id]));
+  const missingRequiredFields = requiredFields.filter((field) => isEmpty(values[field.id]));
+  const completionPercent = requiredFields.length ? Math.round((completedRequiredFields.length / requiredFields.length) * 100) : 100;
   const visibleFields = (isWechatImages
-    ? [...filteredFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
-    : filteredFields
+    ? [...formFields].sort((left, right) => (left.id === "article" ? -1 : right.id === "article" ? 1 : 0))
+    : formFields
   ).filter((field) => {
     if (isPolicyRenewalCard && values.avatar_visual_mode !== "yes" && ["reference_image", "portrait_treatment"].includes(field.id)) return false;
     if (isImageCard && field.id === "remix_instruction") return false;
@@ -179,6 +197,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     const remixOrder = ["style", "creation_mode", "reference_image", "remix_instruction", "signature", "draw_portrait", "portrait_reference_image", "ratio"];
     return remixOrder.indexOf(left.id) - remixOrder.indexOf(right.id);
   });
+  const remixTargetStepIndex = visibleFields.findIndex((field) => field.id === "remix_target");
   const incomingLinkRemixSourceUrl = isLinkRemix ? searchParams.get("source_url")?.trim() ?? "" : "";
   const incomingLinkRemixSourceTitle = isLinkRemix ? searchParams.get("source_title")?.trim() ?? "" : "";
   const incomingLinkRemixSourcePlatform = isLinkRemix ? searchParams.get("source_platform")?.trim() ?? "" : "";
@@ -198,7 +217,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }, []);
 
   useEffect(() => {
-    if (app.slug !== "traffic-copy") return;
+    if (!usesTrafficWorkflow) return;
     const controller = new AbortController();
     void fetch(apiPath("/api/avatar/creator-skills"), { signal: controller.signal, cache: "no-store" })
       .then(async (response) => response.ok ? response.json() as Promise<{ skills?: CreatorSkillOption[] }> : { skills: [] })
@@ -217,7 +236,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       .catch((cause) => { if (!(cause instanceof DOMException && cause.name === "AbortError")) setCreatorSkillOptions([]); })
       .finally(() => setCreatorSkillsLoading(false));
     return () => controller.abort();
-  }, [app.slug]);
+  }, [usesTrafficWorkflow]);
 
   useEffect(() => {
     const traceId = createCreationTraceId();
@@ -261,6 +280,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     try {
       const savedUsage = JSON.parse(window.localStorage.getItem(IMAGE_CARD_STYLE_USAGE_KEY) ?? "null");
       if (savedUsage && typeof savedUsage === "object" && !Array.isArray(savedUsage)) {
+        // Hydrate browser-only usage preferences after mount.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setImageCardStyleUsage(Object.fromEntries(Object.entries(savedUsage).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0)));
         return;
       }
@@ -280,6 +301,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     try {
       const savedUsage = JSON.parse(window.localStorage.getItem(WECHAT_IMAGE_STYLE_USAGE_KEY) ?? "null");
       if (savedUsage && typeof savedUsage === "object" && !Array.isArray(savedUsage)) {
+        // Hydrate browser-only usage preferences after mount.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setWechatImageStyleUsage(Object.fromEntries(Object.entries(savedUsage).filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0)));
       }
     } catch {
@@ -439,7 +462,18 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
   function updateField(fieldId: string, nextValue: FieldValue) {
     setDraftStatus("saving");
+    if (fieldId === "remix_target" && nextValue === "traffic-copy") setCreatorSkillsLoading(true);
     setValues((current) => {
+      if (fieldId === "remix_target" && typeof nextValue === "string") {
+        const targetDefaults: Record<string, FieldValue> = nextValue === "traffic-copy"
+          ? { tone: "default", creator_skill_version_ids: ["default"] }
+          : nextValue === "wechat-studio"
+            ? { audience: "young-family", tone: "professional", article_length: "standard" }
+            : nextValue === "xiaohongshu-studio"
+              ? { creation_mode: "rewrite", length_mode: "standard" }
+              : { tone: "self" };
+        return { ...current, [fieldId]: nextValue, ...targetDefaults };
+      }
       if (fieldId === "draw_portrait" && nextValue === "yes" && (!Array.isArray(current.avatar_visual_asset_ids) || current.avatar_visual_asset_ids.length === 0)) {
         const primary = avatarPhotos.find((photo) => photo.is_primary && photo.status === "active" && photo.allow_creation);
         return { ...current, [fieldId]: nextValue, ...(primary ? { avatar_visual_asset_ids: [primary.id], avatar_visual_mode: "yes" } : {}) };
@@ -457,6 +491,31 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     }
     const next = current.length === 1 && current[0] === "default" && styleId !== "default" ? [styleId] : [...current, styleId];
     if (next.length <= 2) updateField("creator_skill_version_ids", next);
+  }
+
+  function renderCreatorStyleStep(stepNumber: number) {
+    const personalSkills = creatorSkillOptions.filter((skill) => skill.skill_scope === "personal");
+    const platformSkills = creatorSkillOptions.filter((skill) => skill.skill_scope === "platform");
+    const renderSkillCard = (skill: CreatorSkillOption) => {
+      const card = skill.identity_card ?? {};
+      const selected = selectedCreatorStyles.includes(skill.id);
+      return <button aria-pressed={selected} className={`creatorIdentityCard ${selected ? "active" : ""}`} disabled={!selected && selectedCreatorStyles.length >= 2} key={skill.id} onClick={() => toggleCreatorStyle(skill.id)} type="button"><span className="creatorIdentityCardHead"><strong>{skill.name}</strong><em>{skill.skill_scope === "platform" ? "平台分身" : "我的分身"}</em></span><b>{card.title || "个性化创作分身"}</b><small>{card.summary || "根据授权作品提炼的选题、叙事和表达方式。"}</small>{card.styleTags?.length ? <span className="creatorIdentityTags">{card.styleTags.slice(0, 3).map((tag) => <i key={tag}>{tag}</i>)}</span> : null}{card.scenarios?.length ? <span className="creatorIdentityScenarios">适合：{card.scenarios.slice(0, 3).join("、")}</span> : null}{selected ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>;
+    };
+    return <section className="field-card creationField creatorStyleStep" id="creation-field-creator-style">
+      <div className="field-card-header fieldCardHeader">
+        <span className="step-indicator stepIndicator" aria-hidden="true"><span className="step-number">{stepNumber}</span></span>
+        <strong className="field-title">选择分身风格<em className="required-mark">*</em></strong>
+      </div>
+      <div className="field-content">
+        <p className="field-help">至少选择一个、最多两个；选择两个会分别生成作品，并在结果页用 Tab 切换。</p>
+        <div className="creatorStyleChoices">
+          <div className="creatorIdentityGroup"><span>我的基础风格</span><div><button className={`creatorIdentityCard ${selectedCreatorStyles.includes("default") ? "active" : ""}`} disabled={creatorSkillsLoading} onClick={() => toggleCreatorStyle("default")} type="button"><span className="creatorIdentityCardHead"><strong>默认的我</strong><em>基础</em></span><b>使用我的数字分身创作</b><small>根据你的定位、专业经验和表达偏好创作，不额外套用其他创作者风格。</small><span className="creatorIdentityScenarios">个性化程度取决于数字分身资料的完整度</span>{selectedCreatorStyles.includes("default") ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button></div></div>
+          {personalSkills.length ? <div className="creatorIdentityGroup"><span>我的分身</span><div>{personalSkills.map(renderSkillCard)}</div></div> : null}
+          {platformSkills.length ? <div className="creatorIdentityGroup"><span>平台推荐</span><div>{platformSkills.map(renderSkillCard)}</div></div> : null}
+        </div>
+        <div className="creatorStyleStepFooter"><em>已选择 {selectedCreatorStyles.length}/2</em>{!creatorSkillsLoading && creatorSkillOptions.length === 0 ? <p>暂无可用分身，可先到<a href={appPath("/avatar?tab=lab")}>数字分身实验室</a>训练。</p> : null}</div>
+      </div>
+    </section>;
   }
 
   async function copyRemixTranscript() {
@@ -562,7 +621,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         source_url: payload.finalUrl ?? current.source_url,
         targets: ["wechat_article"],
       }));
-      setSourceInspectMessage(Object.keys(fields).length > 0 ? `已自动回填 ${Object.keys(fields).length} 项。${payload.note ?? ""}` : payload.note ?? "页面没有公开可读取的字段。");
+      const cappedFields = [["原作品文字", fields.source_text], ["视频口播稿", fields.source_transcript]].filter(([, value]) => typeof value === "string" && value.length >= 12000).map(([label]) => label);
+      const capNotice = cappedFields.length ? ` ${cappedFields.join("、")}已达到 12,000 字上限，后续内容可能被截断。` : "";
+      setSourceInspectMessage(Object.keys(fields).length > 0 ? `已自动回填 ${Object.keys(fields).length} 项。${payload.note ?? ""}${capNotice}` : payload.note ?? "页面没有公开可读取的字段。");
       if (!delegatedToLocalAgent && payload.mediaUrl && streamWechatTranscript) {
         await streamRemixTranscript(sourceUrl);
       }
@@ -626,9 +687,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             }
             if (eventName === "status" && event.message) setSourceInspectMessage(event.message);
             if (eventName === "delta" && event.content) {
-              transcript += event.content;
+              transcript = `${transcript}${event.content}`.slice(0, 12000);
               setValues((current) => ({ ...current, source_transcript: transcript }));
-              setSourceInspectMessage(`正在识别语音，已输出 ${transcript.length} 字...`);
+              setSourceInspectMessage(transcript.length >= 12000 ? "口播稿已达到 12,000 字上限，后续内容不会继续写入。" : `正在识别语音，已输出 ${transcript.length} 字...`);
             }
             if (eventName === "done" || eventName === "failed" || eventName === "error") finished = true;
           }
@@ -671,14 +732,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           setSourceInspectMessage(event.message);
         }
         if (event.type === "delta" && event.content) {
-          transcript += event.content;
+          transcript = `${transcript}${event.content}`.slice(0, 12000);
           setValues((current) => ({ ...current, source_transcript: transcript }));
-          setSourceInspectMessage(`正在识别语音，已输出 ${transcript.length} 字...`);
+          setSourceInspectMessage(transcript.length >= 12000 ? "口播稿已达到 12,000 字上限，后续内容不会继续写入。" : `正在识别语音，已输出 ${transcript.length} 字...`);
         }
         if (event.type === "error") throw new Error(event.message ?? "本地语音转写失败。");
       }
     }
-    setSourceInspectMessage(transcript ? `视频转写完成，已识别 ${transcript.length} 字。` : "视频中未识别到可用语音内容。");
+    setSourceInspectMessage(transcript ? `视频转写完成，已识别 ${transcript.length} 字。${transcript.length >= 12000 ? " 已达到上限，后续内容未写入。" : ""}` : "视频中未识别到可用语音内容。");
   }
 
   function openFilePicker(fieldId: string) {
@@ -686,11 +747,37 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }
 
   async function handleFileChange(fieldId: string, fileList: FileList | readonly File[] | null) {
-    const file = fileList?.[0];
+    const files = Array.from(fileList ?? []);
+    const file = files[0];
     if (!file) return;
 
+    if (fieldId === "reference_image" && isImageCard && values.creation_mode === "image_remix") {
+      const current = Array.isArray(values.reference_image)
+        ? values.reference_image.filter((item) => item.startsWith("data:image/"))
+        : typeof values.reference_image === "string" && values.reference_image.startsWith("data:image/")
+          ? [values.reference_image]
+          : [];
+      const available = Math.max(0, 3 - current.length);
+      const selected = files.slice(0, available);
+      if (!available) {
+        setUploadErrors((state) => ({ ...state, [fieldId]: "二创原图最多上传 3 张。" }));
+        return;
+      }
+      const invalid = selected.find((item) => !item.type.startsWith("image/") || item.size > 10 * 1024 * 1024);
+      if (invalid) {
+        setUploadErrors((state) => ({ ...state, [fieldId]: !invalid.type.startsWith("image/") ? "请上传 JPG、PNG 或 WebP 图片。" : `“${invalid.name}”超过限制，每张图片大小上限为 10MB。` }));
+        return;
+      }
+      const encoded = (await Promise.all(selected.map((item) => readFileAsDataUrl(item).catch(() => "")))).filter(Boolean);
+      updateField(fieldId, [...current, ...encoded]);
+      setUploadNames((state) => ({ ...state, [fieldId]: `已选择 ${current.length + encoded.length} 张图片` }));
+      setUploadErrors((state) => ({ ...state, [fieldId]: files.length > available ? `二创原图最多上传 3 张，本次已添加其中 ${available} 张。` : "" }));
+      setUploadSuccess((state) => ({ ...state, [fieldId]: "" }));
+      return;
+    }
+
     if (file.size > 10 * 1024 * 1024) {
-      setUploadErrors((current) => ({ ...current, [fieldId]: "文件不能超过 10MB。" }));
+      setUploadErrors((current) => ({ ...current, [fieldId]: file.type.startsWith("image/") ? `“${file.name}”超过限制，每张图片大小上限为 10MB。` : "文件大小上限为 10MB。" }));
       return;
     }
 
@@ -1349,21 +1436,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         ) : null}
 
         <form className={isLinkRemix ? "create-form creationForm targetCreateForm linkRemixCreateForm" : isImageCard ? "create-form creationForm targetCreateForm imageCardCreateForm" : isPolicyRenewalCard ? "create-form creationForm targetCreateForm policyRenewalCreateForm" : isLiveScript ? "create-form creationForm targetCreateForm liveScriptCreateForm" : "create-form creationForm targetCreateForm"} onSubmit={(event) => event.preventDefault()}>
-          {app.slug === "traffic-copy" ? <section className="creatorStylePicker">
-            <div className="creatorStylePickerHeading"><i>1</i><div><span>分身风格</span><strong>选择本次模仿的创作方式</strong><small>至少选择一个、最多两个；选择两个会分别生成作品，并在结果页用 Tab 切换。</small></div></div>
-            <div className="creatorStyleChoices">
-              <button className={selectedCreatorStyles.includes("default") ? "active" : ""} disabled={creatorSkillsLoading} onClick={() => toggleCreatorStyle("default")} type="button"><strong>默认版本</strong><small>小谷基础创作方式</small></button>
-              {creatorSkillOptions.map((skill) => <button className={selectedCreatorStyles.includes(skill.id) ? "active" : ""} disabled={!selectedCreatorStyles.includes(skill.id) && selectedCreatorStyles.length >= 2} key={skill.id} onClick={() => toggleCreatorStyle(skill.id)} type="button"><strong>{skill.name} · V{skill.version}</strong><small>{skill.skill_scope === "platform" ? "平台分身" : "我的分身"}</small></button>)}
-            </div>
-            <em>已选择 {selectedCreatorStyles.length}/2</em>
-            {!creatorSkillsLoading && creatorSkillOptions.length === 0 ? <p>暂无可用分身，可先到<a href={appPath("/avatar?tab=lab")}>数字分身实验室</a>训练。</p> : null}
-          </section> : null}
+          {usesTrafficWorkflow && !isLinkRemix ? renderCreatorStyleStep(1) : null}
           {visibleFields.map((field, index) => {
             const isImageRemixSource = isImageCard && values.creation_mode === "image_remix" && field.id === "reference_image";
             const isTextCardSource = isImageCard && values.creation_mode !== "image_remix" && field.id === "source";
             const fieldLabel = isTextCardSource ? "填写卡片内容" : field.label;
             const fieldRequired = field.required || isImageRemixSource || isTextCardSource;
-            const displayField = app.slug === "traffic-copy" && field.id === "tone" && selectedCreatorStyles.some((id) => id !== "default")
+            const displayField = usesTrafficWorkflow && field.id === "tone" && selectedCreatorStyles.some((id) => id !== "default")
               ? { ...field, helper: "分身决定主要创作风格；内容语气只影响本次作品的表达倾向。" }
               : field;
             const voicePanel = voiceFieldId === field.id ? (
@@ -1377,11 +1456,15 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
               />
             ) : null;
 
+            const fieldStepNumber = index + (app.slug === "traffic-copy" ? 2 : 1) + (isRemixTraffic && index > remixTargetStepIndex ? 1 : 0);
+            const insertRemixCreatorStep = isRemixTraffic && index === remixTargetStepIndex + 1;
             return (
-            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix, isTrafficCopy: app.slug === "traffic-copy" })} id={`creation-field-${field.id}`} key={field.id}>
+            <Fragment key={field.id}>
+            {insertRemixCreatorStep ? renderCreatorStyleStep(remixTargetStepIndex + 2) : null}
+            <label className={getCreationFieldClassName(field.id, { isImageCard, isLiveScript, isXiaohongshuCheck, isLinkRemix, isTrafficCopy: usesTrafficWorkflow })} id={`creation-field-${field.id}`} key={field.id}>
               <span className="field-card-header fieldCardHeader">
                 <span className="step-indicator stepIndicator" aria-hidden="true">
-                  <span className="step-number">{index + (app.slug === "traffic-copy" ? 2 : 1)}</span>
+                  <span className="step-number">{fieldStepNumber}</span>
                 </span>
                 <strong className="field-title">
                   {fieldLabel}
@@ -1424,15 +1507,22 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                           uploadSuccess: uploadSuccess[field.id] ?? "",
                           uploading: Boolean(uploadingFields[field.id]),
                           onFileChange: (fileList) => handleFileChange(field.id, fileList),
+                          multiple: true,
                         })}
-                        {typeof values.reference_image === "string" && values.reference_image.startsWith("data:image/") ? (
-                          <figure className="imageCardRemixPreview">
-                            <img alt="二创原图预览" src={values.reference_image} />
-                            <figcaption><span>原图预览</span><button onClick={() => setRemixPreviewOpen(true)} type="button">查看全图</button></figcaption>
-                          </figure>
-                        ) : null}
+                        <div className="imageCardRemixPreviewGrid">
+                          {(Array.isArray(values.reference_image) ? values.reference_image : typeof values.reference_image === "string" ? [values.reference_image] : []).filter((item) => item.startsWith("data:image/")).map((image, imageIndex) => (
+                            <figure className="imageCardRemixPreview" key={`${image.slice(0, 40)}-${imageIndex}`}>
+                              <img alt={`二创原图 ${imageIndex + 1} 预览`} src={image} />
+                              <figcaption>
+                                <span>原图 {imageIndex + 1}</span>
+                                <button onClick={() => setRemixPreviewIndex(imageIndex)} type="button">查看</button>
+                                <button onClick={() => updateField("reference_image", (Array.isArray(values.reference_image) ? values.reference_image : [values.reference_image as string]).filter((_, index) => index !== imageIndex))} type="button">删除</button>
+                              </figcaption>
+                            </figure>
+                          ))}
+                        </div>
                       </div>
-                      <span className="imageCardMinorTip">原图会用于本次二创，请确认你拥有编辑和使用权限。</span>
+                      <span className="imageCardMinorTip">最多上传 3 张原图，每张大小上限为 10MB，可分批选择；系统会按上传顺序综合提取内容。请确认你拥有编辑和使用权限。</span>
                     </div>
                     <div className="imageCardSplitColumn">
                       <div className="imageCardSplitHeader">二创改造要求（可选）</div>
@@ -1501,6 +1591,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                 ) : null}
               </span>
             </label>
+            </Fragment>
             );
           })}
 
@@ -1639,7 +1730,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             <button className="primaryButton submit-button submitButton" disabled={loading || remixAutoParsingPending} onClick={() => void handleSubmit()} type="button">
               {loading
                 ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
-                : remixAutoParsingPending ? "素材自动解析中..." : isLinkRemix ? `生成公众号文章（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                : remixAutoParsingPending ? "素材自动解析中..." : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>
@@ -1674,11 +1765,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
         />
       ) : null}
 
-      {isImageCard && remixPreviewOpen && typeof values.reference_image === "string" && values.reference_image.startsWith("data:image/") ? (
-        <div className="imageCardFullPreviewOverlay" onClick={() => setRemixPreviewOpen(false)} role="presentation">
+      {isImageCard && remixPreviewIndex !== null && (Array.isArray(values.reference_image) ? values.reference_image[remixPreviewIndex] : values.reference_image) ? (
+        <div className="imageCardFullPreviewOverlay" onClick={() => setRemixPreviewIndex(null)} role="presentation">
           <section aria-label="二创原图全图预览" className="imageCardFullPreviewDialog" onClick={(event) => event.stopPropagation()} role="dialog">
-            <header><strong>二创原图全图预览</strong><button aria-label="关闭全图预览" onClick={() => setRemixPreviewOpen(false)} type="button">×</button></header>
-            <img alt="二创原图全图" src={values.reference_image} />
+            <header><strong>二创原图 {remixPreviewIndex + 1}</strong><button aria-label="关闭全图预览" onClick={() => setRemixPreviewIndex(null)} type="button">×</button></header>
+            <img alt={`二创原图 ${remixPreviewIndex + 1} 全图`} src={Array.isArray(values.reference_image) ? values.reference_image[remixPreviewIndex] : values.reference_image as string} />
           </section>
         </div>
       ) : null}
@@ -1865,6 +1956,7 @@ function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
   if (app.slug === "link-remix") {
     return {
       ...base,
+      remix_target: "wechat-studio",
       remix_strategy: "auto",
       article_length: "standard",
       targets: ["wechat_article"],
@@ -2173,7 +2265,7 @@ function getAppExperienceCopy(appSlug: string, entry: string) {
   if (entry === "personality-card") return { input: "个人介绍、目标客户和清晰形象照", output: "可展示和传播的个人名片" };
   const copy: Record<string, { input: string; output: string }> = {
     "write-copy": { input: "一份有事实和观点的真实素材", output: "口播、小红书、公众号和朋友圈版本" },
-    "link-remix": { input: "一条公开分享链接，选择一种改编方向", output: "一篇可直接发布的原创公众号文章" },
+    "link-remix": { input: "一条公开分享链接，选择创作题材和改编方向", output: "调用对应正式能力生成可发布作品" },
     "image-card": { input: "文章、口播稿或清晰主题", output: "按指定风格和比例生成知识卡片" },
     "policy-renewal-card": { input: "已核对的客户称呼、续保日期、保费与顾问信息", output: "一张由图片模型直接生成的图文融合提醒卡" },
     "lead-copy": { input: "客户问题、个人观点或参考内容", output: "适合引流承接的多平台文案" },
@@ -2255,6 +2347,7 @@ function renderField({
   uploadSuccess,
   uploading,
   onFileChange,
+  multiple = false,
   styleOptionLimit,
   styleRecommendation,
   styleRecommendations,
@@ -2276,6 +2369,7 @@ function renderField({
   uploadSuccess: string;
   uploading: boolean;
   onFileChange: (fileList: FileList | readonly File[] | null) => void;
+  multiple?: boolean;
   styleOptionLimit?: number;
   styleRecommendation?: WechatStyleRecommendation;
   styleRecommendations?: WechatStyleRecommendation[];
@@ -2537,6 +2631,7 @@ function renderField({
         accept={field.accept}
         className="imageCardHiddenInput"
         id={`image-upload-${field.id}`}
+        multiple={multiple}
         onChange={(event) => onFileChange(event.target.files)}
         type="file"
       />

@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { getPool, query } from "@/lib/db/client";
 import { LOCAL_AGENT_PROTOCOL_VERSION, type LinkRemixAvailability, type LocalAgentHeartbeat, type LocalAgentTask, type LocalAgentTaskEvent, type LocalAgentTaskEventType, type LocalAgentTaskType } from "@/lib/local-agent/contracts";
 import { buildDouyinDeepVerificationResult, isDouyinDeepVerificationResult } from "@/lib/douyin-deep-verification";
+import { saveLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
 
 type TaskRow = {
   id: string; task_type: LocalAgentTaskType; status: LocalAgentTask["status"]; priority: number;
@@ -236,6 +237,10 @@ export async function completeLocalAgentTask(id: string, agentId: string, leaseT
     if (task.task_type === "douyin.deep_verify") {
       await persistDouyinDeepVerification(client, task.payload, resultPayload, id);
     }
+    const cacheableSourceUrl = typeof task.payload.url === "string" ? task.payload.url : typeof task.payload.sourceUrl === "string" ? task.payload.sourceUrl : "";
+    if (task.task_type === "source.inspect" && ["link_remix", "avatar_training"].includes(String(task.payload.purpose)) && cacheableSourceUrl) {
+      await saveLinkRemixSourceCache(client, cacheableSourceUrl, resultPayload);
+    }
     await client.query("commit");
     return true;
   } catch (error) {
@@ -244,6 +249,15 @@ export async function completeLocalAgentTask(id: string, agentId: string, leaseT
   } finally {
     client.release();
   }
+}
+
+export async function createCompletedSourceInspectionTask(input: { ownerUserId: string; url: string; purpose: string; result: Record<string, unknown> }) {
+  const row = await query<TaskRow>(
+    `insert into local_agent_tasks(task_type,owner_user_id,payload,status,result,completed_at)
+     values('source.inspect',$1,$2,'succeeded',$3,now()) returning ${taskColumns}`,
+    [input.ownerUserId, { url: input.url, userId: input.ownerUserId, purpose: input.purpose, cacheHit: true }, input.result],
+  );
+  return mapTask(row.rows[0]);
 }
 
 async function persistDouyinDeepVerification(

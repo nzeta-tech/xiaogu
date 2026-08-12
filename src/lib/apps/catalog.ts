@@ -1,4 +1,5 @@
 export type CreationCategoryId = "content" | "ip" | "growth";
+import { remixCapabilityOptions } from "@/lib/creation/capabilities";
 
 export type CreationFieldType = "textarea" | "select" | "multiselect" | "radio" | "file" | "text" | "text_or_file";
 
@@ -193,8 +194,8 @@ export const creationApps: CreationApp[] = [
     points: 8,
     badge: "新",
     featured: true,
-    description: "粘贴一条爆款内容，自动提炼可借鉴的结构，生成一篇适合你发布的原创公众号文章。",
-    promptHint: "只提炼公开内容的主题、观点和结构，结合用户选择的改编方向重新创作公众号文章；不逐句改写、不复刻原文，不虚构原作者未提供的事实。",
+    description: "粘贴一条爆款内容，自动提炼素材，并交给小谷已有的口播、公众号、小红书或朋友圈能力继续创作。",
+    promptHint: "只提炼公开内容的主题、观点和结构，再调用用户选择的正式题材创作能力；不逐句改写、不复刻原文，不虚构原作者未提供的事实。",
     resultType: "text",
     fields: [
       {
@@ -216,6 +217,14 @@ export const creationApps: CreationApp[] = [
       { id: "source_text", label: "补充原作品文字", type: "textarea", placeholder: "解析不完整时，可粘贴标题、正文或关键段落；不填也能继续。", maxLength: 12000 },
       { id: "source_transcript", label: "补充视频口播稿", type: "textarea", placeholder: "解析不完整时，可粘贴口播稿或关键内容；不填也能继续。", maxLength: 12000 },
       {
+        id: "remix_target",
+        label: "想创作成什么",
+        type: "radio",
+        required: true,
+        helper: "这里直接使用对应的正式创作能力；对应能力的规则更新后，二创会同步生效。",
+        options: remixCapabilityOptions,
+      },
+      {
         id: "remix_strategy",
         label: "改编表达方式（可选）",
         type: "radio",
@@ -229,13 +238,13 @@ export const creationApps: CreationApp[] = [
       },
       {
         id: "article_length",
-        label: "文章长度",
+        label: "内容长度",
         type: "radio",
         required: true,
         options: [
-          { label: "极简｜约 500–700 字", value: "concise" },
-          { label: "普通｜约 900–1200 字", value: "standard" },
-          { label: "长文｜约 1400–1800 字", value: "long" },
+          { label: "精简", value: "concise", hint: "口播和朋友圈更短，图文保留核心判断" },
+          { label: "标准", value: "standard", hint: "按所选题材的常规长度输出" },
+          { label: "深度", value: "long", hint: "适合需要充分展开的公众号或小红书内容" },
         ],
       },
       {
@@ -334,7 +343,7 @@ export const creationApps: CreationApp[] = [
         label: "上传原图 / 参考图",
         type: "file",
         accept: "image/*",
-        helper: "二创模式必须上传原图；文字制卡时可作为风格或人物参考图。",
+        helper: "二创模式可上传 1–3 张原图，每张大小上限为 10MB；文字制卡时可作为风格或人物参考图。",
       },
       {
         id: "remix_instruction",

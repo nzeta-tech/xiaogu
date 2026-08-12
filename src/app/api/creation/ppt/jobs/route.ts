@@ -27,6 +27,7 @@ export async function POST(request: Request) {
   const style = typeof body.style === "string" ? body.style.trim() : "professional";
   const pageCount = Number(body.pageCount);
   if (!topic && !source) return Response.json({ error: "请填写主题或上传资料。" }, { status: 400 });
+  if (source.length > MAX_SOURCE_CHARS) return Response.json({ error: `PPT 资料最多支持 ${MAX_SOURCE_CHARS} 个字符，当前为 ${source.length} 个字符；系统不会静默截断，请精简或拆分资料后重试。`, code: "INPUT_TOO_LONG", input: { originalChars: source.length, acceptedChars: MAX_SOURCE_CHARS, truncated: true } }, { status: 400 });
   if (!pageCounts.has(pageCount)) return Response.json({ error: "页数仅支持 5、8 或 12 页。" }, { status: 400 });
   const quota = await requireQuota(user, "write_script", 12);
   if (!quota.ok) return quota.response;
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
   try {
     const work = await tryCreateWork({ userId: user.id, appCode: "ppt-maker", sourceChannel: "ppt-maker", title, content: "PPT 任务已提交，正在由本地 Agent 制作。" });
     const job = await createPresentationJob({ userId: user.id, title, brief, workId: work?.id });
-    return Response.json({ ok: true, job });
+    return Response.json({ ok: true, job, input: { originalChars: source.length, acceptedChars: source.length, truncated: false } });
   } catch {
     return Response.json({ error: "PPT 任务暂时无法创建，请稍后重试。" }, { status: 503 });
   }

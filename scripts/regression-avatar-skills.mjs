@@ -34,7 +34,7 @@ async function visibleSkills(userId) {
 
 async function managedPlatformSkills(userId) {
   const result = await pool.query(
-    `select id, name from avatar_creator_skills
+    `select id, name, identity_card, identity_card_draft from avatar_creator_skills
       where skill_scope='platform' and ('platform'='platform' or user_id=$1)
       order by updated_at desc`,
     [userId],
@@ -89,6 +89,29 @@ try {
   check(peerVisible.length === 1, "another user must see the active platform skill");
   check(peerVisible[0].skill_scope === "platform", "shared skill must retain platform scope");
   check((await managedPlatformSkills(peerId)).length === 1, "platform production library must be shared across administrators");
+
+  const identityCard = {
+    title: "回归身份定位",
+    summary: "用于验证平台分身身份卡可以稳定保存并跨管理员读取。",
+    scenarios: ["场景一", "场景二"],
+    styleTags: ["清晰", "克制"],
+    bestFor: "发布回归测试",
+  };
+  await pool.query(
+    `update avatar_creator_skills
+        set identity_card=$2::jsonb, identity_card_draft='{}'::jsonb, updated_at=now()
+      where id=$1`,
+    [platformSkillId, JSON.stringify(identityCard)],
+  );
+  const peerManagedIdentity = (await managedPlatformSkills(peerId))[0];
+  check(peerManagedIdentity.identity_card.title === identityCard.title, "another administrator must read the latest platform identity card");
+  check(peerManagedIdentity.identity_card.scenarios.length === 2, "platform identity card arrays must round-trip");
+  check(Object.keys(peerManagedIdentity.identity_card_draft).length === 0, "publishing an identity card must clear its draft");
+  const peerPersonalIdentity = await pool.query(
+    `select id from avatar_creator_skills where id=$1 and user_id=$2`,
+    [personalSkillId, peerId],
+  );
+  check(peerPersonalIdentity.rowCount === 0, "another administrator must not acquire ownership of a personal identity card");
 
   const secondVersion = await pool.query(
     `insert into avatar_creator_skill_versions(skill_id, user_id, version, status, source_links, sample_count, skill_prompt, change_summary)

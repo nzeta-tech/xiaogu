@@ -39,6 +39,7 @@ import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingP
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
+import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { query } from "@/lib/db/client";
 
 type FieldValue = CreationFieldValue;
@@ -53,7 +54,7 @@ export class RetryableCreationRunError extends Error {
 }
 
 async function resolveCreatorSkillPrompt(userId: string, versionId: string) {
-  if (!versionId || versionId === "default") return { id: "default", label: "默认版本", prompt: "" };
+  if (!versionId || versionId === "default") return { id: "default", label: "默认的我", prompt: "" };
   const result = await query<{ skill_prompt: string; name: string; version: number }>(
     `select versions.skill_prompt, skills.name, versions.version
      from avatar_creator_skill_versions versions
@@ -112,7 +113,7 @@ export async function executeCreationAppRun(input: {
     throw new Error("请先确认已经核对日期、金额、币种和保单号。");
   }
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
-  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard || isXiaohongshuStudioAssetStep && app.slug === "wechat-cover") && values.avatar_visual_mode === "yes";
   const isImageCardRemix = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix";
   if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     throw new Error("请选择数字分身形象照，或临时上传一张形象照。");
@@ -154,7 +155,7 @@ export async function executeCreationAppRun(input: {
             values.source,
           ].filter(Boolean).join("\n\n")
         : `${effectiveApp.name}\n${caseContext.join("\n")}${caseContext.length > 0 ? "\n" : ""}${effectiveApp.promptHint}\n${effectiveApp.fields.map((field) => `${field.label}：${stringifyCreationFieldValue(values[field.id])}`).join("\n")}`;
-  const requestedCreatorStyleIds = app.slug === "traffic-copy"
+  const requestedCreatorStyleIds = app.slug === "traffic-copy" || app.slug === "link-remix" && normalizeRemixCapability(values.remix_target) === "traffic-copy"
     ? [...new Set(Array.isArray(values.creator_skill_version_ids)
       ? values.creator_skill_version_ids
       : stringifyCreationFieldValue(values.creator_skill_version_id)
@@ -240,7 +241,7 @@ export async function executeCreationAppRun(input: {
       const visualReferences = await resolveAvatarVisualReferences({
         userId: input.userId,
         assetIds: visualAssetIds,
-        appSlug: entry === "personality-card" ? "personality-card" : app.slug,
+        appSlug: entry === "personality-card" ? "personality-card" : isXiaohongshuStudioAssetStep ? "image-card" : app.slug,
       });
       if (needsAvatarPhoto && visualAssetIds.length > 0 && visualReferences.length === 0) {
         throw new Error("数字分身形象照当前不可用，请检查隐私设置、照片状态和使用范围。");
@@ -733,6 +734,49 @@ function buildLinkRemixPrompt(
     long: "长文：约1400–1800字，充分展开场景、判断依据、边界与行动建议；绝不超过1800字。",
   };
 
+  const capability = normalizeRemixCapability(values.remix_target);
+  const sourceMaterial = [
+    `来源平台：${platform}`,
+    `原作品链接：${url}`,
+    `原作品标题或开头：${sourceTitle || "未提供"}`,
+    `作者或账号：${sourceAuthor || "未提供"}`,
+    `发布时间：${publishedAt || "未核验"}`,
+    `点赞数：${likeCount || "未核验"}`,
+    `内容形态：${contentType || "未确认"}`,
+    `主题：${topic || "未确认"}`,
+    `标签：${tags || "未确认"}`,
+    `事实证据摘要：${evidence || "未提供"}`,
+    sourceText ? `作品文字：\n${sourceText}` : "",
+    transcript ? `语音转写：\n${transcript}` : "",
+    researchContext,
+    angle ? `用户补充想法：${angle}` : "",
+  ].filter(Boolean).join("\n\n");
+  const targetValues: Record<string, FieldValue> = {
+    ...values,
+    source: sourceMaterial,
+    topic: sourceMaterial,
+    creation_mode: "rewrite",
+    length_mode: stringifyCreationFieldValue(values.length_mode) || (articleLength === "long" ? "long" : "standard"),
+    lengthMode: articleLength === "long" ? "long" : articleLength === "concise" ? "concise" : "standard",
+    targets: ["moments"],
+  };
+  const targetPrompt = capability === "traffic-copy"
+    ? buildTrafficCopyPrompt(targetValues, caseContext, promptHint)
+    : capability === "xiaohongshu-studio"
+      ? buildXiaohongshuStudioPrompt(targetValues, caseContext)
+      : capability === "moments"
+        ? buildWriteCopyPrompt(targetValues, caseContext, null, null)
+        : buildWechatStudioPrompt(targetValues, caseContext);
+
+  return [
+    `你正在通过“爆款话题二创”使用小谷现有的“${remixCapabilityLabel(capability)}”正式创作能力。以下题材结构、交互语义和输出规则以该能力为准。`,
+    `改编表达方式：${strategyGuidance[strategy] ?? strategyGuidance.auto}`,
+    `长度偏好：${articleLengthGuidance[articleLength] ?? articleLengthGuidance.standard}`,
+    "二创事实边界：保持原作品的话题、人物关系、时间、数据、案例、判断和行动建议，不得反转、泛化或虚构。不可核验或违规的表述只能删除或标记待核实；不得复刻原句、独特比喻或长段文字。不要在成稿中输出预检、评分、证据缺口或二创过程。",
+    targetPrompt,
+  ].join("\n\n");
+
+  /* istanbul ignore next -- legacy prompt retained temporarily for migration comparison */
   return [
     "你现在在执行小谷应用：爆款话题二创。",
     "这是一个面向保险顾问的内容再创作任务。链接可能只能提供有限的公开信息，因此不要声称已经读取到链接中不存在的全文、数据或画面。",
@@ -1029,13 +1073,14 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
     hint,
   ];
   const styleValue = stringifyCreationFieldValue(values.style);
+  const isXiaohongshuVisual = stringifyCreationFieldValue(values.studio_parent) === "xiaohongshu-studio";
   const isImageCardRemix = appName === "知识卡片制作（图片）" && stringifyCreationFieldValue(values.creation_mode) === "image_remix";
   for (const field of fields) {
     const value = values[field.id];
     if (isEmptyCreationFieldValue(value)) continue;
     if (field.id === "reference_image") {
       lines.push(isImageCardRemix
-        ? `${field.label}：已上传二创原图。必须准确保留并重新排版其中可确认的知识文字、数字与层级，不得把原图的知识内容简化成无文字插画。`
+        ? `${field.label}：已上传 ${Array.isArray(value) ? value.length : 1} 张二创原图。按上传顺序综合理解，必须准确保留并重新排版其中可确认的知识文字、数字与层级，不得把原图的知识内容简化成无文字插画。`
         : `${field.label}：已上传参考图。请尽量贴近参考图的配色、材质、笔触、留白、主体关系与版式节奏，但不要照搬其中的文字内容。`);
       continue;
     }
@@ -1045,13 +1090,16 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
     }
     lines.push(`${field.label}：${Array.isArray(value) ? value.join("、") : value}`);
   }
+  if (isXiaohongshuVisual) {
+    lines.push("用途覆盖要求：这是小红书图文笔记的 3:4 竖版首图或章节卡片，不是公众号图片。忽略上方公众号封面不得出现文字的要求；首图必须有简短、醒目、准确的中文封面钩子，但不要机械复制完整长标题。画面应像真实小红书创作者制作的内容，不得出现 Logo、水印、二维码或机构广告感。若提供了形象参考照，仅首图严格保持同一人物的可识别外貌；不得把参考照中的背景、衣服或构图当作硬约束。");
+  }
   const styleDirective = getImageStyleDirective(styleValue, appName);
   if (styleDirective) {
     lines.push(`风格细化：${styleDirective}`);
   }
   if (isImageCardRemix) {
     if (referenceKnowledge) lines.push(`原图已识别的知识内容（这是文字准确性的硬约束，必须完整呈现在新卡片中）：\n${referenceKnowledge}`);
-    lines.push("二创优先级：用户填写的“二创改造要求”拥有最高优先级，必须严格遵从；只有用户未明确指定的部分，才能根据原图和所选风格自主决定。默认任务是先完整理解上传图片中的知识内容，准确提取其主标题、核心结论、关键要点、层级关系、可确认的数据与行动提示，再把这些重点重组为一张信息完整、可独立阅读的原创知识卡片。原图文字模糊、缺失或无法确认时不得编造。以上传图片为主要视觉来源，保留用户明确要求保留的主体、构图或配色；按卡片内容和改造要求重绘。若用户选择加入人物形象，第二张及之后的参考图仅用于保持该人物的外貌特征，人物必须服务原图知识主题，不能替代原图的知识内容或主体。去除原图中的 Logo、水印、二维码和不相关文字，不要逐字复制或模仿受版权保护的版式。没有说明时，保留原图核心主体与视觉节奏，并以所选比例重新排版。");
+    lines.push("二创优先级：用户填写的“二创改造要求”拥有最高优先级，必须严格遵从；只有用户未明确指定的部分，才能根据原图和所选风格自主决定。默认任务是先按上传顺序完整理解全部二创原图中的知识内容，准确提取其主标题、核心结论、关键要点、层级关系、可确认的数据与行动提示，再把相互补充的重点重组为一张信息完整、可独立阅读的原创知识卡片；如原图之间存在冲突，不得自行编造或取舍。原图文字模糊、缺失或无法确认时不得编造。以全部二创原图为主要视觉来源，保留用户明确要求保留的主体、构图或配色；按卡片内容和改造要求重绘。若用户选择加入人物形象，独立提供的形象参考图仅用于保持该人物的外貌特征，人物必须服务原图知识主题，不能替代原图的知识内容或主体。去除原图中的 Logo、水印、二维码和不相关文字，不要逐字复制或模仿受版权保护的版式。没有说明时，保留原图核心主体与视觉节奏，并以所选比例重新排版。");
   }
   if (appName === "公众号配图") {
     lines.push("这是一个公众号文章配图应用，不是单张海报应用。请围绕同一篇文章连续生成 4 张风格统一、可插入不同段落的配图。");
@@ -1090,6 +1138,11 @@ function getImageStyleDirective(style: string, appName: string) {
     "science-sketch": "像科普板书或知识栏目页，米白纸底，红棕色手绘标题，模块框线圆润，图示、数字编号、箭头和小插画并重。重点是知识拆解的步骤感和手绘说明感。",
     "dark-pro": "深蓝黑底，金色标题与描边，窄长信息卡分栏清晰，像专业机构深色主视觉。整体沉稳、精英、夜间大屏质感强，但不能花哨。",
     "fresh-card": "浅米白或奶油底，淡蓝、淡粉、浅绿点缀，圆角卡片柔和，图标可爱轻盈。整体像轻松、治愈、干净的内容卡片页，适合亲和表达。",
+    "xhs-talking-head": "小红书真人口播首图结构。严格参考用户上传照片中的同一个人，保持可识别的脸部、发型、肤色与年龄特征；把人物自然放在画面右侧或下半部，占画面约一半，像本人在真实住宅或工作桌前自然表达。标题放在人物旁边的大块安全区，使用两行以内的醒目粗体中文和一个极短角标。保持手机创作者原生感，不要企业宣传照、正式西装、过度磨皮或机构广告。",
+    "xhs-bold-text": "小红书痛点大字首图结构。把当前标题提炼为不超过两行、约 8 至 14 个汉字的封面钩子，以超大粗黑体作为绝对主体，使用红色下划线或黄色荧光块突出一个关键词，可加一个不超过 6 字的小角标。纸张或纯色背景，缩略图一眼读清，避免完整长标题、复杂模块和精致品牌海报感。",
+    "xhs-comparison": "小红书左右对比首图结构。根据正文找出两个真实可比较的选择、做法或状态，左右各一张大卡，中间放 VS，每侧只保留一个短标签和一个简单图形，底部放一句极短结论。不得编造正文没有的产品、数据或结论；像个人整理的对比笔记，不像企业 PPT。",
+    "xhs-checklist": "小红书清单资料首图结构。标题短而醒目，正文只提炼 3 个最重要且有原文依据的短要点，使用 1、2、3 大编号纵向排列，配荧光笔、红笔圈画和极简手绘图标。像值得收藏的个人复习资料第一页，不要密集小字、复杂图表或机构宣传模板。",
+    "xhs-real-scene": "小红书真实场景首图结构。用手机俯拍或近景表现与正文直接相关的真实桌面、笔记、保单样式纸或生活物件，保留自然光、轻微凌乱和使用痕迹；所有姓名、公司、编号、金额等信息必须模糊不可辨。只在纸张或便签上放一个短标题和一个短角标，营造普通用户复盘分享的原生感。",
     "daily-sign": "更像一张氛围日签，主标题和一句副标题最重要，背景要有纸感或柔和光影，元素少但精致。不要做成多模块信息图。",
     study: "学霸笔记和复习资料感，编号明显，模块像知识点总结卡，标注、重点线、荧光笔或手写注释自然出现。整体像好看的学习总结页。",
     "large-sign": "超大中文主标题占画面主体，其他信息极少，适合一句观点或一句提醒。背景简洁，局部有手绘或纸感点缀，重点在字的气质和留白。",
@@ -1113,9 +1166,8 @@ function extractReferenceImages(values: Record<string, FieldValue>) {
   const candidateValues = [values.reference_image, values.portrait_reference_image];
 
   for (const candidate of candidateValues) {
-    if (typeof candidate === "string" && candidate.startsWith("data:image/")) {
-      references.push(candidate);
-    }
+    const images = Array.isArray(candidate) ? candidate : [candidate];
+    references.push(...images.filter((image): image is string => typeof image === "string" && image.startsWith("data:image/")));
   }
 
   return references;

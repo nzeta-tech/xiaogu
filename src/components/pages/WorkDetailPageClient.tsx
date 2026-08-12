@@ -552,7 +552,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
   const videoCoverHref = isTrafficCopyWork
-    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent)}&source_style_label=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.label ?? "默认版本" : "默认版本")}&source_batch_id=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.id ?? "default" : "default")}`)
+    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent)}&source_style_label=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.label ?? "默认的我" : "默认的我")}&source_batch_id=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.id ?? "default" : "default")}`)
     : "";
   const getActiveItemId = (batch: CreationOutputBatch) => (
     batch.items.some((item) => item.id === activeItemIds[batch.id])
@@ -2960,7 +2960,7 @@ function ResultWorkspaceBar({
       )}
     </header>
     <div className="aiReviewNotice resultWorkspaceReviewNotice" role="note">
-      AI 已完成创作。发布前请人工确认内容准确无误后再发布。
+      提示：AI 创作，发布前请人工确认内容准确无误后再发布。
     </div>
     </>
   );

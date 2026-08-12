@@ -87,9 +87,19 @@ export type AvatarCreatorSkill = {
   status: "active" | "archived";
   skill_scope: "personal" | "platform";
   latest_version: number;
+  identity_card: AvatarCreatorIdentityCard;
+  identity_card_draft: AvatarCreatorIdentityCard | Record<string, never>;
   created_at: string;
   updated_at: string;
   versions: AvatarCreatorSkillVersion[];
+};
+
+export type AvatarCreatorIdentityCard = {
+  title: string;
+  summary: string;
+  scenarios: string[];
+  styleTags: string[];
+  bestFor: string;
 };
 
 export type AvatarPrivacySettings = {

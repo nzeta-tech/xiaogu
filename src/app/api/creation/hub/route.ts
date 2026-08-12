@@ -1,5 +1,5 @@
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryGetCreationHubData, tryGetCreationWorksView, tryListCreationCatalog, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { tryGetCreationHubData, tryGetCreationWorksView, tryListCreationCatalog, tryListCreationTasks, trySyncCreationCatalog } from "@/lib/db/repositories";
 import { getLinkRemixAvailability, getPptAvailability } from "@/lib/local-agent/repository";
 
 export async function GET(request: Request) {
@@ -8,6 +8,12 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const view = url.searchParams.get("view");
+
+  if (view === "tasks") {
+    const tasks = await tryListCreationTasks(user.id);
+    if (!tasks) return Response.json({ error: "任务数据暂不可用" }, { status: 503 });
+    return Response.json({ tasks, mode: "server" });
+  }
 
   if (view === "works") {
     const page = Number(url.searchParams.get("page") || "1");

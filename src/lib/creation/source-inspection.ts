@@ -42,7 +42,7 @@ export async function enqueueSourceInspectionTask(input: {
   maxAttempts?: number;
 }) {
   const canonicalUrl = canonicalizeInspectableSourceUrl(input.url);
-  const dedupeKey = createHash("sha256").update(`${input.userId}:${canonicalUrl}`).digest("hex");
+  const dedupeKey = createHash("sha256").update(`${input.userId}:${input.purpose}:${canonicalUrl}`).digest("hex");
   const task = await enqueueLocalAgentTask({
     taskType: "source.inspect",
     ownerUserId: input.userId,
@@ -52,6 +52,24 @@ export async function enqueueSourceInspectionTask(input: {
     maxAttempts: input.maxAttempts ?? 3,
   });
   return { task, canonicalUrl };
+}
+
+export async function enqueueWechatChannelMediaInspectionTask(input: {
+  userId: string;
+  work: { id: string; title: string; authorName: string; publishedAt: string | null; mediaUrl: string; decodeKey: string; sourceUrl: string };
+  priority?: number;
+  maxAttempts?: number;
+}) {
+  const dedupeKey = createHash("sha256").update(`${input.userId}:wechat-channel:${input.work.id}`).digest("hex");
+  const task = await enqueueLocalAgentTask({
+    taskType: "source.inspect",
+    ownerUserId: input.userId,
+    payload: { sourceType: "wechat_channels_media", purpose: "avatar_training", userId: input.userId, ...input.work, mediaDecryptKey: input.work.decodeKey },
+    dedupeKey,
+    priority: input.priority ?? 100,
+    maxAttempts: input.maxAttempts ?? 3,
+  });
+  return { task, canonicalUrl: input.work.sourceUrl };
 }
 
 export function standardizeSourceInspection(input: {

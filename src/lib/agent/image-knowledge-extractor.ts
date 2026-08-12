@@ -11,7 +11,10 @@ export type ImageRemixConsistencyAudit = {
  * infer dense Chinese copy while simultaneously redrawing the card.
  */
 export async function extractKnowledgeFromReferenceImage(referenceImage: unknown) {
-  if (typeof referenceImage !== "string" || !referenceImage.startsWith("data:image/")) return "";
+  const referenceImages = (Array.isArray(referenceImage) ? referenceImage : [referenceImage])
+    .filter((item): item is string => typeof item === "string" && item.startsWith("data:image/"))
+    .slice(0, 3);
+  if (referenceImages.length === 0) return "";
 
   const apiKey = process.env.OPENAI_IMAGE_API_KEY ?? process.env.IMAGE_MODEL_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.MODEL_API_KEY;
   if (!apiKey) return "";
@@ -33,8 +36,11 @@ export async function extractKnowledgeFromReferenceImage(referenceImage: unknown
           {
             role: "user",
             content: [
-              { type: "image_url", image_url: { url: referenceImage } },
-              { type: "text", text: "请完整转写并按层级整理图片中的主标题、所有小标题、关键结论、要点、数字、表格/流程信息和行动提示。尽量保留原文措辞与数字；看不清的内容标记为“[无法确认]”，不要省略已读到的重点。" },
+              ...referenceImages.flatMap((image, index) => [
+                { type: "text", text: `第 ${index + 1} 张原图：` },
+                { type: "image_url", image_url: { url: image } },
+              ]),
+              { type: "text", text: "请按图片顺序，完整转写并综合整理这些图片中的主标题、所有小标题、关键结论、要点、数字、表格/流程信息和行动提示。相互补充的内容应合并，冲突内容必须分别标注来源图片，不可自行取舍。尽量保留原文措辞与数字；看不清的内容标记为“[无法确认]”，不要省略已读到的重点。" },
             ],
           },
         ],

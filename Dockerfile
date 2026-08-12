@@ -71,6 +71,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     /opt/wechat-venv/bin/pip install \
       -r /opt/werss/requirements.txt \
       "cachelib==0.13.0" \
+      "wxipad-video==0.1.1" \
       "https://github.com/chyroc/WechatSogou/archive/6a7e08caa82dd7cf47331d7c303f578a4b325360.tar.gz"
 # WechatSogou still imports Werkzeug's removed contrib cache module. Cachelib
 # is the maintained extraction of that implementation with the same API.
@@ -93,7 +94,8 @@ COPY scripts/local-agent.mjs /xiaogu/scripts/local-agent.mjs
 # Next's standalone output preserves Sharp but can omit its optional
 # platform packages. Install those packages in a Debian temp prefix, then
 # copy them beside Sharp so Node resolves the matching linux-x64 runtime.
-RUN npm install --prefix /tmp/sharp-runtime --include=optional --os=linux --cpu=x64 sharp@0.34.5 \
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --prefix /tmp/sharp-runtime --include=optional --os=linux --cpu=x64 sharp@0.34.5 \
     && mkdir -p /xiaogu/node_modules/.pnpm/sharp@0.34.5/node_modules/@img \
     && cp -R /tmp/sharp-runtime/node_modules/@img/sharp-linux-x64 /tmp/sharp-runtime/node_modules/@img/sharp-libvips-linux-x64 /xiaogu/node_modules/.pnpm/sharp@0.34.5/node_modules/@img/ \
     && rm -rf /tmp/sharp-runtime \

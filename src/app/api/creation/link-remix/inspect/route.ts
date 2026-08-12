@@ -7,11 +7,12 @@ import { getLinkRemixAvailability, isLocalAgentDelegationEnabled } from "@/lib/l
 import { enqueueSourceInspectionTask, SOURCE_INSPECTION_PRIORITIES } from "@/lib/creation/source-inspection";
 import { inferHotTopicCategory } from "@/lib/topics/rules";
 import { transcribePublicMedia } from "@/lib/creation/transcribe-public-media";
+import { getLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
 
 const allowedHosts = /(^|\.)((douyin\.com)|(weixin\.qq\.com)|(channels\.weixin\.qq\.com)|(xiaohongshu\.com)|(xhslink\.com))$/i;
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { url?: string; deferTranscription?: boolean; agentUserId?: string; adminOperation?: boolean };
+  const body = (await request.json().catch(() => ({}))) as { url?: string; deferTranscription?: boolean; metadataOnly?: boolean; agentUserId?: string; adminOperation?: boolean };
   const isAgentExecution = process.env.LOCAL_AGENT_EXECUTOR === "1" && isAuthorizedLocalAgentRequest(request);
   const user = isAgentExecution ? { id: body.agentUserId?.trim() || "local-agent" } : await requireSessionUser();
   if (user instanceof Response) return user;
@@ -27,6 +28,10 @@ export async function POST(request: Request) {
   }
 
   const isAdminInspection = !isAgentExecution && "role" in user && user.role === "admin" && body.adminOperation === true;
+  if (!isAgentExecution && !isAdminInspection) {
+    const cached = await getLinkRemixSourceCache(parsed.toString());
+    if (cached) return Response.json({ ...cached.result, cacheHit: true, cacheExpiresAt: cached.expiresAt }, { headers: { "cache-control": "private, no-store" } });
+  }
   if (!isAgentExecution && process.env.LOCAL_AGENT_ENABLED === "1") {
     const availability = await getLinkRemixAvailability();
     if (!availability.available) return Response.json({ error: availability.reason, code: "LOCAL_AGENT_OFFLINE" }, { status: 503 });
@@ -46,7 +51,7 @@ export async function POST(request: Request) {
       const resolved = await resolveDouyinShareUrl(parsed);
       if (resolved) parsed = resolved;
     }
-    if (/douyin\.com$/i.test(parsed.hostname) && /\/video\/\d+/i.test(parsed.pathname) && process.env.VIRAL_DOUYIN_DOWNLOAD_ENABLED !== "0") {
+    if (!body.metadataOnly && /douyin\.com$/i.test(parsed.hostname) && /\/video\/\d+/i.test(parsed.pathname) && process.env.VIRAL_DOUYIN_DOWNLOAD_ENABLED !== "0") {
       try {
         const downloaded = await downloadDouyinPublic(parsed.toString());
         const mediaBase = `/api/creation/link-remix/media?file=`;
@@ -87,7 +92,7 @@ export async function POST(request: Request) {
       if (configuredResult) return configuredResult;
     }
     if (/^(?:www\.)?weixin\.qq\.com$/i.test(parsed.hostname) || /(^|\.)channels\.weixin\.qq\.com$/i.test(parsed.hostname)) {
-      return inspectWechatChannelsSource(parsed.toString(), user.id, body.deferTranscription === true);
+      return inspectWechatChannelsSource(parsed.toString(), user.id, body.deferTranscription === true, body.metadataOnly === true);
     }
     const deepInspectBase = process.env.VIRAL_INSPECT_API_BASE;
     if (deepInspectBase) {
@@ -254,17 +259,17 @@ async function inspectXhsWithConfiguredApi(sourceUrl: string) {
   }
 }
 
-async function inspectWechatChannelsSource(sourceUrl: string, userId: string, deferTranscription = false) {
+async function inspectWechatChannelsSource(sourceUrl: string, userId: string, deferTranscription = false, metadataOnly = false) {
   const containerResult = await inspectWechatChannelsWithContainerBrowser(sourceUrl);
   if (containerResult.status === "success") {
-    return wechatChannelsPayloadResponse(sourceUrl, containerResult.payload, "已通过容器内 Yuanbao 浏览器会话获取视频号作品信息", userId, deferTranscription);
+    return wechatChannelsPayloadResponse(sourceUrl, containerResult.payload, "已通过容器内 Yuanbao 浏览器会话获取视频号作品信息", userId, deferTranscription, metadataOnly);
   }
   if (containerResult.status === "needs_login") {
     return unavailableWechatChannelsResponse(sourceUrl, containerResult.reason);
   }
   const localBase = process.env.VIRAL_WECHAT_LOCAL_API_BASE?.trim();
   if (localBase) {
-    return inspectWechatChannelsLocalSource(sourceUrl, localBase, userId, deferTranscription);
+    return inspectWechatChannelsLocalSource(sourceUrl, localBase, userId, deferTranscription, metadataOnly);
   }
   const endpoint = process.env.VIRAL_WECHAT_INSPECT_API_BASE ?? "https://sph.litao.workers.dev/api/fetch_video_profile";
   try {
@@ -311,7 +316,9 @@ async function inspectWechatChannelsSource(sourceUrl: string, userId: string, de
       thumbnailUrl: stringValue(feed.coverUrl),
       mediaUrl,
       fields,
-      note: deferTranscription && mediaUrl
+      note: metadataOnly
+        ? "已回填视频号公开信息，未下载或转写视频。"
+        : deferTranscription && mediaUrl
         ? "已回填视频号作品信息，正在准备本地语音转写。"
         : transcript
         ? "已参考 wx_channels_download 的分享链接解析流程，并完成视频号作品转写。"
@@ -322,7 +329,7 @@ async function inspectWechatChannelsSource(sourceUrl: string, userId: string, de
   }
 }
 
-async function wechatChannelsPayloadResponse(sourceUrl: string, payload: Record<string, unknown>, prefix: string, userId: string, deferTranscription = false) {
+async function wechatChannelsPayloadResponse(sourceUrl: string, payload: Record<string, unknown>, prefix: string, userId: string, deferTranscription = false, metadataOnly = false) {
   const data = (payload.data && typeof payload.data === "object" ? payload.data : payload) as Record<string, unknown>;
   const feed = (data.feedInfo && typeof data.feedInfo === "object" ? data.feedInfo : {}) as Record<string, unknown>;
   const authorInfo = (data.authorInfo && typeof data.authorInfo === "object" ? data.authorInfo : {}) as Record<string, unknown>;
@@ -357,13 +364,15 @@ async function wechatChannelsPayloadResponse(sourceUrl: string, payload: Record<
     mediaUrl,
     mediaDecryptKey,
     fields,
-    note: deferTranscription && mediaUrl
+    note: metadataOnly
+      ? `${prefix}，未下载或转写视频。`
+      : deferTranscription && mediaUrl
       ? `${prefix}，正在准备本地语音转写。`
       : transcript ? `${prefix}并完成视频转写。` : `${prefix}；如需口播级分析，请确认转写服务已配置。`,
   });
 }
 
-async function inspectWechatChannelsLocalSource(sourceUrl: string, base: string, userId: string, deferTranscription = false) {
+async function inspectWechatChannelsLocalSource(sourceUrl: string, base: string, userId: string, deferTranscription = false, metadataOnly = false) {
   const endpoint = `${base.replace(/\/$/, "")}/api/channels/parse_sph?url=${encodeURIComponent(sourceUrl)}`;
   try {
     const response = await fetch(endpoint, {
@@ -404,7 +413,9 @@ async function inspectWechatChannelsLocalSource(sourceUrl: string, base: string,
       thumbnailUrl: stringValue(feed.coverUrl),
       mediaUrl,
       fields,
-      note: deferTranscription && mediaUrl
+      note: metadataOnly
+        ? "已通过本机解析服务获取视频号公开信息，未下载或转写视频。"
+        : deferTranscription && mediaUrl
         ? "已通过本机 wx_channels_download 解析服务获取视频号公开信息，正在准备本地语音转写。"
         : transcript
         ? "已通过本机 wx_channels_download 解析服务获取视频并完成转写。"

@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
   turbopack: process.env.NODE_ENV !== "production" ? {
     root: process.cwd(),
   } : undefined,
-  serverExternalPackages: ["pg", "pg-cloudflare"],
+  serverExternalPackages: ["nodemailer", "pg", "pg-cloudflare"],
 };
 
 export default nextConfig;

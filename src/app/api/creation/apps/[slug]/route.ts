@@ -13,6 +13,7 @@ import {
 } from "@/lib/creation/output";
 import { buildWorkTitle } from "@/lib/creation/work-title";
 import { buildCreationPromptContext } from "@/lib/creation/prompt-context";
+import { validateCreationFieldLengths } from "@/lib/creation/input-validation";
 import { buildPolicyRenewalImagePrompt } from "@/lib/creation/policy-renewal-card";
 import {
   buildLeadCopyPrompt,
@@ -76,6 +77,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const isImageCardRemix = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix";
   const isStudioInternalStep = ["wechat-studio", "xiaohongshu-studio"].includes(stringifyCreationFieldValue(values.studio_parent))
     && (app.slug === "wechat-images" || app.slug === "wechat-cover");
+  const lengthError = validateCreationFieldLengths(app.fields, values);
+  if (lengthError) return Response.json({ error: lengthError, code: "INPUT_TOO_LONG" }, { status: 400 });
 
   const missingField = app.fields.find((field) => {
     if (isImageCardRemix && field.id === "draw_portrait") return false;
@@ -626,7 +629,7 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
     if (isEmptyCreationFieldValue(value)) continue;
     if (field.id === "reference_image") {
       lines.push(isImageCardRemix
-        ? `${field.label}：已上传二创原图。必须准确保留并重新排版其中可确认的知识文字、数字与层级，不得把原图的知识内容简化成无文字插画。`
+        ? `${field.label}：已上传 ${Array.isArray(value) ? value.length : 1} 张二创原图。按上传顺序综合理解，必须准确保留并重新排版其中可确认的知识文字、数字与层级，不得把原图的知识内容简化成无文字插画。`
         : `${field.label}：已上传参考图。请尽量贴近参考图的配色、材质、笔触、留白、主体关系与版式节奏，但不要照搬其中的文字内容。`);
       continue;
     }
@@ -642,11 +645,11 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
   }
   if (isImageCardRemix) {
     if (referenceKnowledge) lines.push(`原图已识别的知识内容（这是文字准确性的硬约束，必须完整呈现在新卡片中）：\n${referenceKnowledge}`);
-    lines.push("二创优先级：用户填写的“二创改造要求”拥有最高优先级，必须严格遵从；只有用户未明确指定的部分，才能根据原图和所选风格自主决定。默认任务是先完整理解上传图片中的知识内容，准确提取其主标题、核心结论、关键要点、层级关系、可确认的数据与行动提示，再把这些重点重组为一张信息完整、可独立阅读的原创知识卡片。原图文字模糊、缺失或无法确认时不得编造。以上传图片为主要视觉来源，保留用户明确要求保留的主体、构图或配色；按卡片内容和改造要求重绘。若用户选择加入人物形象，第二张及之后的参考图仅用于保持该人物的外貌特征，人物必须服务原图知识主题，不能替代原图的知识内容或主体。去除原图中的 Logo、水印、二维码和不相关文字，不要逐字复制或模仿受版权保护的版式。没有说明时，保留原图核心主体与视觉节奏，并以所选比例重新排版。");
+    lines.push("二创优先级：用户填写的“二创改造要求”拥有最高优先级，必须严格遵从；只有用户未明确指定的部分，才能根据原图和所选风格自主决定。默认任务是先按上传顺序完整理解全部二创原图中的知识内容，准确提取其主标题、核心结论、关键要点、层级关系、可确认的数据与行动提示，再把相互补充的重点重组为一张信息完整、可独立阅读的原创知识卡片；如原图之间存在冲突，不得自行编造或取舍。原图文字模糊、缺失或无法确认时不得编造。以全部二创原图为主要视觉来源，保留用户明确要求保留的主体、构图或配色；按卡片内容和改造要求重绘。若用户选择加入人物形象，独立提供的形象参考图仅用于保持该人物的外貌特征，人物必须服务原图知识主题，不能替代原图的知识内容或主体。去除原图中的 Logo、水印、二维码和不相关文字，不要逐字复制或模仿受版权保护的版式。没有说明时，保留原图核心主体与视觉节奏，并以所选比例重新排版。");
   }
   if (isXiaohongshuVisual) {
     const noteTitle = stringifyValue(values.title);
-    lines.push(`用途要求：这是小红书图文笔记的 3:4 竖版卡片，不是公众号文章插图。${appName === "公众号文章封面" ? `这张是首屏头图，必须把笔记标题“${noteTitle}”作为画面中的主标题准确排入设计，不能改写、截断或省略；标题必须清晰可读。` : "后续卡片围绕各段落的一个要点，采用易滑读、易收藏的视觉层级，可使用准确、简短的中文小标题、编号、关键词或结论。"}视觉优先选择真实生活场景、日常物件、关系与行动细节，避免万能金融符号、商务西装人物、城市天际线和空泛氛围图。默认使用奶油白、雾蓝、鼠尾草绿、低饱和暖粉或浅棕等耐看的低饱和配色，留白克制、字体易读；不需要用粉色标签化任何群体。画面要像真实的小红书内容创作者制作的笔记卡，不要做成横版编辑插图、商务报道、无文字的氛围空镜、二维码、Logo、水印或长段落文字。多张图保持一套配色、字体气质和人物设定，但每张承担不同信息任务。`);
+    lines.push(`用途要求：这是小红书图文笔记的 3:4 竖版卡片，不是公众号文章插图。${appName === "公众号文章封面" ? `这张是首屏头图。根据笔记标题“${noteTitle}”提炼一个准确、口语化、约 8 至 14 个汉字的封面钩子，最多两行；不得引入原文没有的承诺、数字或结论。` : "后续卡片围绕各段落的一个要点，采用易滑读、易收藏的视觉层级，可使用准确、简短的中文小标题、编号、关键词或结论。"}视觉优先选择真实生活场景、日常物件、关系与行动细节，避免万能金融符号、商务西装人物、城市天际线和空泛氛围图。默认使用奶油白、雾蓝、鼠尾草绿、低饱和暖粉或浅棕等耐看的低饱和配色，留白克制、字体易读；不需要用粉色标签化任何群体。画面要像真实的小红书内容创作者制作的笔记卡，不要做成横版编辑插图、商务报道、无文字的氛围空镜、二维码、Logo、水印或长段落文字。多张图保持一套配色、字体气质和人物设定，但每张承担不同信息任务。`);
   }
   if (isXiaohongshuVisual) {
     // The Xiaohongshu instruction above fully replaces the generic WeChat cover/image rules.
@@ -703,6 +706,11 @@ function getImageStyleDirective(style: string, appName: string) {
     "science-sketch": "像科普板书或知识栏目页，米白纸底，红棕色手绘标题，模块框线圆润，图示、数字编号、箭头和小插画并重。重点是知识拆解的步骤感和手绘说明感。",
     "dark-pro": "深蓝黑底，金色标题与描边，窄长信息卡分栏清晰，像专业机构深色主视觉。整体沉稳、精英、夜间大屏质感强，但不能花哨。",
     "fresh-card": "浅米白或奶油底，淡蓝、淡粉、浅绿点缀，圆角卡片柔和，图标可爱轻盈。整体像轻松、治愈、干净的内容卡片页，适合亲和表达。",
+    "xhs-talking-head": "小红书真人口播首图结构。严格参考用户上传照片中的同一个人，保持可识别的脸部、发型、肤色与年龄特征；把人物自然放在画面右侧或下半部，占画面约一半，像本人在真实住宅或工作桌前自然表达。标题放在人物旁边的大块安全区，使用两行以内的醒目粗体中文和一个极短角标。保持手机创作者原生感，不要企业宣传照、正式西装、过度磨皮或机构广告。",
+    "xhs-bold-text": "小红书痛点大字首图结构。把当前标题提炼为不超过两行、约 8 至 14 个汉字的封面钩子，以超大粗黑体作为绝对主体，使用红色下划线或黄色荧光块突出一个关键词，可加一个不超过 6 字的小角标。纸张或纯色背景，缩略图一眼读清，避免完整长标题、复杂模块和精致品牌海报感。",
+    "xhs-comparison": "小红书左右对比首图结构。根据正文找出两个真实可比较的选择、做法或状态，左右各一张大卡，中间放 VS，每侧只保留一个短标签和一个简单图形，底部放一句极短结论。不得编造正文没有的产品、数据或结论；像个人整理的对比笔记，不像企业 PPT。",
+    "xhs-checklist": "小红书清单资料首图结构。标题短而醒目，正文只提炼 3 个最重要且有原文依据的短要点，使用 1、2、3 大编号纵向排列，配荧光笔、红笔圈画和极简手绘图标。像值得收藏的个人复习资料第一页，不要密集小字、复杂图表或机构宣传模板。",
+    "xhs-real-scene": "小红书真实场景首图结构。用手机俯拍或近景表现与正文直接相关的真实桌面、笔记、保单样式纸或生活物件，保留自然光、轻微凌乱和使用痕迹；所有姓名、公司、编号、金额等信息必须模糊不可辨。只在纸张或便签上放一个短标题和一个短角标，营造普通用户复盘分享的原生感。",
     "daily-sign": "像一张氛围日签，主标题和一句副标题最重要，背景要有纸感或柔和光影，元素少但精致。不要做成多模块信息图。",
     study: "学霸笔记和复习资料感，编号明显，模块像知识点总结卡，标注、重点线、荧光笔或手写注释自然出现。整体像好看的学习总结页。",
     "large-sign": "超大中文主标题占画面主体，其他信息极少，适合一句观点或一句提醒。背景简洁，局部有手绘或纸感点缀，重点在字的气质和留白。",
@@ -726,9 +734,8 @@ function extractReferenceImages(values: Record<string, FieldValue>) {
   const candidateValues = [values.reference_image, values.portrait_reference_image];
 
   for (const candidate of candidateValues) {
-    if (typeof candidate === "string" && candidate.startsWith("data:image/")) {
-      references.push(candidate);
-    }
+    const images = Array.isArray(candidate) ? candidate : [candidate];
+    references.push(...images.filter((image): image is string => typeof image === "string" && image.startsWith("data:image/")));
   }
 
   return references;

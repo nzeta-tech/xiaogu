@@ -2914,8 +2914,37 @@ body {
 .avatarLabTabbedResults { display: grid; gap: 0; }.avatarLabTabbedResults > nav { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid #dbe3ec; }.avatarLabTabbedResults > nav button { display: grid; gap: 2px; min-width: 150px; padding: 10px 14px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #64748b; text-align: left; }.avatarLabTabbedResults > nav button.active { border-bottom-color: #14b8a6; color: #0f766e; }.avatarLabTabbedResults > nav small { color: #94a3b8; font-size: 9px; }.avatarLabTabbedResults > article { padding: 18px; border: 1px solid #e2e8f0; border-top: 0; border-radius: 0 0 8px 8px; background: #fbfdff; }.avatarLabTabbedResults > article > div:first-child { display: flex; justify-content: space-between; gap: 10px; }.avatarLabTabbedResults > article > div:first-child span { color: #0d9488; font-size: 10px; font-weight: 750; }.avatarLabTabbedResults > article > div:first-child strong { color: #94a3b8; font-size: 9px; }
 
 .creatorSkillGrid { display: grid; grid-template-columns: minmax(300px, .9fr) minmax(0, 1.1fr); gap: 14px; margin: 16px 0; }
+.wechatChannelPicker { display: grid; gap: 9px; min-width: 0; margin: 0; padding: 12px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.wechatChannelPicker legend { padding: 0 5px; color: #0f766e; font-size: 12px; font-weight: 800; }
+.wechatChannelDiscovery { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.wechatChannelDiscovery button { white-space: nowrap; }
+.wechatDiscoveryError { padding: 8px 10px; border: 1px solid #fecaca; border-radius: 6px; background: #fef2f2; color: #b91c1c; font-size: 11px; line-height: 1.5; }
+.wechatCandidateToolbar { display: flex; align-items: center; gap: 7px; color: #64748b; font-size: 11px; }.wechatCandidateToolbar span { margin-right: auto; font-weight: 700; }.wechatCandidateToolbar button { padding: 3px 7px; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #475569; font-size: 10px; }
+.wechatCandidateList { display: grid; gap: 6px; max-height: 390px; overflow: auto; }.wechatCandidate { display: grid !important; grid-template-columns: auto 72px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }.wechatCandidate > input { width: 15px; height: 15px; }.wechatCandidate img,.wechatCandidate > i { width: 72px; height: 54px; border-radius: 5px; object-fit: cover; }.wechatCandidate > i { display: grid; place-items: center; background: #e2e8f0; color: #64748b; font-size: 10px; font-style: normal; }.wechatCandidate > span { display: grid; min-width: 0; gap: 3px; }.wechatCandidate strong { overflow: hidden; color: #0f172a; font-size: 11px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }.wechatCandidate small { color: #64748b; font-size: 10px; }
+.avatarTrainingCount { margin: 0 !important; padding: 8px 10px; border-radius: 6px; background: #ecfdf5; color: #047857 !important; font-size: 11px !important; font-weight: 700; }
+@media (max-width: 640px) { .wechatChannelDiscovery { grid-template-columns: 1fr 1fr; }.wechatChannelDiscovery input { grid-column: 1 / -1; } }
 .creatorStylePicker { display: grid; gap: 16px; padding: 22px; border: 1px solid #bfe9df; border-radius: 12px; background: linear-gradient(135deg, #f0fdfa, #f8fafc); }
 .creatorStylePickerHeading { display: flex; align-items: center; gap: 12px; }.creatorStylePickerHeading > i { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border: 2px solid #0f172a; border-radius: 50%; color: #0f172a; font-style: normal; font-weight: 800; }.creatorStylePickerHeading > div { display: grid; gap: 4px; }.creatorStylePicker span { color: #0f766e; font-size: 12px; font-weight: 800; }.creatorStylePicker strong { color: #0f172a; font-size: 16px; }.creatorStylePicker small, .creatorStylePicker p { margin: 0; color: #64748b; font-size: 12px; }.creatorStyleChoices { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }.creatorStyleChoices button { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid #d5dee8; border-radius: 9px; background: #fff; text-align: left; cursor: pointer; }.creatorStyleChoices button.active { border-color: #14b8a6; box-shadow: 0 0 0 2px #ccfbf1; background: #f0fdfa; }.creatorStyleChoices button:disabled { cursor: not-allowed; opacity: .48; }.creatorStyleChoices button strong { font-size: 14px; }.creatorStylePicker > em { justify-self: end; color: #0f766e; font-size: 12px; font-style: normal; font-weight: 800; }.creatorStylePicker a { color: #0f766e; font-weight: 700; }
+.creatorStyleStep .field-content { display: grid; gap: 14px; }
+.creatorStyleStep .field-help { margin: 0; }
+.creatorStyleStepFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.creatorStyleStepFooter > em { color: #0f766e; font-size: 12px; font-style: normal; font-weight: 800; }
+.creatorStyleStepFooter p { margin: 0; color: #64748b; font-size: 12px; }
+.creatorStyleStepFooter a { color: #0f766e; font-weight: 700; }
+.creatorStyleChoices { grid-template-columns: 1fr; gap: 16px; }
+.creatorIdentityGroup { display: grid; gap: 8px; }
+.creatorIdentityGroup > span { color: #475569; font-size: 12px; font-weight: 800; }
+.creatorIdentityGroup > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 10px; }
+.creatorStyleChoices .creatorIdentityCard { position: relative; display: grid; align-content: start; gap: 8px; min-height: 150px; padding: 15px 16px; border-radius: 12px; }
+.creatorIdentityCardHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.creatorIdentityCardHead strong { color: #0f172a; font-size: 15px !important; }
+.creatorIdentityCardHead em { padding: 3px 7px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 10px; font-style: normal; font-weight: 800; }
+.creatorIdentityCard > b { color: #0f766e; font-size: 13px; }
+.creatorIdentityCard > small { color: #64748b; font-size: 12px; line-height: 1.55; }
+.creatorIdentityTags { display: flex; flex-wrap: wrap; gap: 5px; }
+.creatorIdentityTags i { padding: 3px 7px; border-radius: 999px; background: #ecfdf5; color: #0f766e; font-size: 10px; font-style: normal; font-weight: 700; }
+.creatorIdentityScenarios { color: #475569 !important; font-size: 11px !important; font-weight: 600 !important; }
+.creatorIdentitySelected { justify-self: end; color: #0f766e !important; font-size: 11px !important; font-weight: 800 !important; }
 .creatorResultTabs { display: flex; gap: 6px; margin: 0 0 16px; padding: 4px; border-radius: 10px; background: #f1f5f9; }.creatorResultTabs button { flex: 1; padding: 10px 14px; border: 0; border-radius: 7px; background: transparent; color: #64748b; font-weight: 800; cursor: pointer; }.creatorResultTabs button.active { background: #fff; color: #0f766e; box-shadow: 0 1px 4px #0f172a18; }
 .simpleCopyResultBody.streaming { white-space: pre-wrap; }.simpleCopyStreamCaret { display: inline-block; width: 3px; height: 1.1em; margin-left: 3px; vertical-align: -.15em; border-radius: 2px; background: #14b8a6; animation: avatarPulse 1s steps(2, end) infinite; }
 .creatorSkillLibrary { display: grid; align-content: start; gap: 9px; padding: 18px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
@@ -2930,6 +2959,13 @@ body {
 .creatorSkillPublish span { padding: 4px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 11px; font-weight: 800; }
 .creatorSkillPublish span.active { background: #dcfce7; color: #15803d; }
 .creatorSkillPublish button { min-height: 30px; padding: 5px 10px; }
+.creatorSkillIdentityPreview { display: grid !important; gap: 4px !important; padding: 10px; border-radius: 7px; background: #f0fdfa; }
+.creatorSkillIdentityPreview p { margin: 0; color: #475569; font-size: 11px; line-height: 1.5; }
+.creatorSkillIdentityPreview span,.creatorSkillIdentityPreview small { color: #0f766e; font-size: 10px; }
+.creatorSkillIdentityEditor { display: grid; gap: 8px; padding: 12px; border: 1px solid #bfe9df; border-radius: 8px; background: #f8fffd; }
+.creatorSkillIdentityEditor label { display: grid; gap: 4px; color: #475569; font-size: 10px; font-weight: 800; }
+.creatorSkillIdentityEditor input,.creatorSkillIdentityEditor textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #0f172a; font: inherit; }
+.creatorSkillIdentityEditor textarea { min-height: 58px; resize: vertical; }
 .avatarCompareHeader { margin-top: 22px; }
 
 .avatarLabComposer textarea {
@@ -8020,6 +8056,23 @@ body .writeCopyOriginPage .instanceOriginSidebarCard .writeCopyChannelNav {
 .creationHistoryFilterDrawer { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--history-border); border-radius: 8px; background: #fff; }
 .creationHistoryDrawerHeader, .creationHistoryDrawerFooter { display: none; }
 .creationHistoryStatusFilters { display: flex; gap: 4px; overflow-x: auto; }
+.creationHistoryKindTabs { display: flex; gap: 8px; margin: 18px 0 12px; border-bottom: 1px solid var(--history-border); }
+.creationHistoryKindTabs button { padding: 10px 18px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #667384; font-weight: 700; }
+.creationHistoryKindTabs button span { margin-left: 5px; color: #929ba7; font-size: 12px; }
+.creationHistoryKindTabs button.active { border-bottom-color: #16725a; color: #0d654a; }
+.creationTaskItems { display: grid; gap: 10px; }
+.creationTaskItem { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--history-border); border-radius: 9px; background: #fff; color: inherit; text-decoration: none; }
+.creationTaskItem:hover { border-color: #91b8aa; box-shadow: 0 7px 20px rgba(22, 34, 48, .07); }
+.creationTaskIcon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: #e8f4ef; color: #0d654a; font-size: 20px; }
+.creationTaskItem > div { min-width: 0; }
+.creationTaskItem strong { display: block; margin-top: 5px; color: var(--history-ink); font-size: 15px; }
+.creationTaskItem p { margin: 5px 0; overflow: hidden; color: #687384; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.creationTaskItem small { color: #8791a0; }
+.creationTaskItem > b { color: #17684f; font-size: 12px; white-space: nowrap; }
+.creationTaskStatus { padding: 3px 7px; border-radius: 4px; background: #eef1f3; color: #637080; font-size: 10px; }
+.creationTaskStatus.completed { background: #e7f4ee; color: #11684d; }
+.creationTaskStatus.partial, .creationTaskStatus.running { background: #fff4db; color: #845f0b; }
+.creationTaskStatus.failed { background: #fcebea; color: #a23830; }
 .creationHistoryStatusFilters button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 0; border-radius: 5px; background: transparent; color: #596578; white-space: nowrap; }
 .creationHistoryStatusFilters button span { color: #8791a0; font-size: 12px; }
 .creationHistoryStatusFilters button.active { background: #e8f4ef; color: #0d654a; font-weight: 700; }
@@ -9313,6 +9366,18 @@ body .linkRemixCreateForm {
   gap: 14px !important;
 }
 
+/* The remix form now composes fields from the selected creation capability.
+   Keep DOM order authoritative so newly added capability fields cannot jump
+   ahead of the source/target steps, and keep the submit action at the end. */
+body .linkRemixCreateForm > * { order: initial !important; }
+body .linkRemixCreateForm > .creationStickyAction { order: 1000 !important; }
+body .linkRemixAppPage .creationStickyAction {
+  position: static !important;
+  bottom: auto;
+  width: 100%;
+  margin-top: 14px;
+}
+
 body .linkRemixCreateForm .linkRemixField {
   padding: 14px 16px !important;
 }
@@ -9331,7 +9396,6 @@ body .linkRemixCreateForm .linkRemixField .step-indicator {
 }
 
 body .linkRemixCreateForm #creation-field-source_url {
-  order: 1;
   padding: 20px !important;
   border-color: #9bd8cb !important;
   background: #fbfffe;
@@ -9348,7 +9412,6 @@ body .linkRemixCreateForm #creation-field-source_url .creationInput {
 }
 
 body .linkRemixCreateForm .linkRemixMetadata {
-  order: 2;
   margin: -2px 2px 2px;
   border-bottom: 1px solid #e2e8f0;
 }
@@ -9383,11 +9446,7 @@ body .linkRemixMetadataGrid .creationInput { min-height: 32px; padding: 6px 8px;
 body .linkRemixMetadataGrid .linkRemixMetadataEvidence { grid-column: 1 / -1; }
 body .linkRemixMetadataGrid .creationTextarea { min-height: 54px !important; padding: 7px 8px; font-size: 12px; line-height: 1.55; }
 
-body .linkRemixCreateForm #creation-field-source_text { order: 3; }
-body .linkRemixCreateForm #creation-field-source_transcript { order: 4; }
-body .linkRemixCreateForm #creation-field-remix_strategy { order: 4; border-color: #b7ded5 !important; background: #fcfffe; }
-body .linkRemixCreateForm #creation-field-article_length { order: 5; }
-body .linkRemixCreateForm #creation-field-remix_angle { order: 6; }
+body .linkRemixCreateForm #creation-field-remix_strategy { border-color: #b7ded5 !important; background: #fcfffe; }
 
 body .linkRemixCreateForm .linkRemixStrategyField .choiceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 body .linkRemixCreateForm .linkRemixStrategyField .choiceButton { min-height: 92px; padding: 14px !important; color: #35504b; font-size: 13px; line-height: 1.55; text-align: left; white-space: normal; }
@@ -9395,7 +9454,7 @@ body .linkRemixCreateForm .linkRemixStrategyField .choiceButton.active { border-
 body .linkRemixCreateForm .linkRemixLengthField .choiceGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 body .linkRemixCreateForm .linkRemixLengthField .choiceButton { min-height: 54px; padding: 11px 14px !important; font-size: 13px; text-align: center; white-space: normal; }
 
-body .linkRemixManualSource { order: 7; border-bottom: 1px solid #e2e8f0; color: #64748b; margin: -2px 2px 2px; }
+body .linkRemixManualSource { border-bottom: 1px solid #e2e8f0; color: #64748b; margin: -2px 2px 2px; }
 body .linkRemixManualSource summary { cursor: pointer; font-size: 12px; font-weight: 700; list-style: none; padding: 10px 0; }
 body .linkRemixManualSource summary::-webkit-details-marker { display: none; }
 body .linkRemixManualSource summary::before { content: "+"; color: #0f766e; font-size: 16px; font-weight: 400; margin-right: 8px; }
@@ -9406,7 +9465,7 @@ body .linkRemixManualSource label { display: grid; gap: 5px; }
 body .linkRemixManualSource label > span { color: #94a3b8; font-size: 11px; font-weight: 650; }
 body .linkRemixManualSource .creationTextarea { min-height: 112px !important; padding: 9px; font-size: 12px; line-height: 1.6; }
 
-body .linkRemixTranscriptPanel { order: 3; border: 1px solid #b7ded5; border-radius: 12px; background: #fcfffe; overflow: hidden; }
+body .linkRemixTranscriptPanel { border: 1px solid #b7ded5; border-radius: 12px; background: #fcfffe; overflow: hidden; }
 body .linkRemixTranscriptHeader { align-items: center; border-bottom: 1px solid #d8ebe6; display: flex; gap: 12px; justify-content: space-between; padding: 13px 15px; }
 body .linkRemixTranscriptHeader span { color: #0f766e; display: block; font-size: 11px; font-weight: 750; }
 body .linkRemixTranscriptHeader strong { color: #24423d; display: block; font-size: 13px; margin-top: 3px; }
