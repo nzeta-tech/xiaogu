@@ -76,7 +76,7 @@ const emptyPrivacy: AvatarPrivacySettings = {
   visual_creation_enabled: true,
 };
 
-export function ProfilePageClient({ skillScope = "personal", trainingOnly = false }: { skillScope?: "personal" | "platform"; trainingOnly?: boolean } = {}) {
+export function ProfilePageClient({ skillScope = "personal", trainingOnly = false, trainingPurpose = "content" }: { skillScope?: "personal" | "platform"; trainingOnly?: boolean; trainingPurpose?: "content" | "lead-coach" } = {}) {
   const [workspace, setWorkspace] = useState<AvatarWorkspace | null>(null);
   const [activeTab, setActiveTab] = useState<AvatarTab>(() => {
     if (typeof window === "undefined") return "lab";
@@ -511,7 +511,7 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
 
       {activeTab === "lab" ? (
         <section className="avatarLabView">
-          <div className="avatarSectionHeader"><div><span>{skillScope === "platform" ? "平台分身生产" : "数字分身实验室"}</span><h2>把创作者的创作方式蒸馏为可复用 Skill</h2><p>{skillScope === "platform" ? "这里生产的平台分身与管理员个人分身隔离，仅管理员可管理。" : "训练使用与学习资料相同的解析、转写链路；仅可提交本人作品或已获授权的作品。"}</p></div></div>
+          <div className="avatarSectionHeader"><div><span>{skillScope === "platform" && trainingPurpose === "lead-coach" ? "获客教练分身" : skillScope === "platform" ? "平台分身生产" : "数字分身实验室"}</span><h2>{trainingPurpose === "lead-coach" ? "把大 V 的获客方法蒸馏为可复用教练 Skill" : "把创作者的创作方式蒸馏为可复用 Skill"}</h2><p>{trainingPurpose === "lead-coach" ? "综合抖音、视频号和公众号内容，学习用户洞察、获客诊断、策略拆解、行动辅导与转化边界。" : skillScope === "platform" ? "这里生产的平台分身与管理员个人分身隔离，仅管理员可管理。" : "训练使用与学习资料相同的解析、转写链路；仅可提交本人作品或已获授权的作品。"}</p></div></div>
           <div className="creatorSkillGrid">
             <form className="avatarSideForm avatarVideoTrainingForm" onSubmit={trainCreatorSkill}>
               <div><span>创建 / 继续训练</span><h2>模仿创作者的创作方式</h2></div>

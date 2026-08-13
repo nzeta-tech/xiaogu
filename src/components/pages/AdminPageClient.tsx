@@ -367,6 +367,7 @@ export function AdminPageClient() {
   const [feedbackReplies, setFeedbackReplies] = useState<Record<string, string>>({});
   const [loadedSections, setLoadedSections] = useState<Partial<Record<AdminSectionId, boolean>>>({});
   const [actionKey, setActionKey] = useState("");
+  const [avatarProductionView, setAvatarProductionView] = useState<"content" | "lead-coach">("content");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [toast, setToast] = useState<AdminToastMessage | null>(null);
   const [confirmConfig, setConfirmConfig] = useState<AdminConfirmConfig | null>(null);
@@ -1637,7 +1638,7 @@ export function AdminPageClient() {
         </div>
       ) : null}
 
-      {tab === "avatar-production" ? <section className="adminAvatarProduction"><div className="adminSectionTitle"><div><span>分身生产</span><h2>平台 Skill 训练与版本管理</h2><p>提交授权作品、查看训练进度与结果，并管理平台分身版本。</p></div></div><ProfilePageClient skillScope="platform" trainingOnly /></section> : null}
+      {tab === "avatar-production" ? <section className="adminAvatarProduction"><div className="adminSectionTitle"><div><span>分身生产</span><h2>平台 Skill 训练与版本管理</h2><p>提交授权作品、查看训练进度与结果，并管理平台分身版本。</p></div></div><div className="adminSegmented avatarProductionTabs" role="tablist" aria-label="分身生产类型"><button aria-selected={avatarProductionView === "content"} className={avatarProductionView === "content" ? "active" : ""} onClick={() => setAvatarProductionView("content")} role="tab" type="button">内容创作分身</button><button aria-selected={avatarProductionView === "lead-coach"} className={avatarProductionView === "lead-coach" ? "active" : ""} onClick={() => setAvatarProductionView("lead-coach")} role="tab" type="button">获客教练分身</button></div><ProfilePageClient key={avatarProductionView} skillScope="platform" trainingOnly trainingPurpose={avatarProductionView} /></section> : null}
 
       {tab === "commerce" ? (
         <div className="pageStack">

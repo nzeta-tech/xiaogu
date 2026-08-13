@@ -2070,6 +2070,7 @@ body {
   box-shadow: var(--shadow);
 }
 .adminAvatarProduction { min-width: 0; }.adminAvatarProduction > .avatarConsolePage { min-height: auto; }.adminAvatarProduction .avatarConsoleTabs { margin-top: 16px; }
+.avatarProductionTabs { width: fit-content; margin: 16px 0 4px; }
 
 .avatarCoachView {
   display: grid;
