@@ -12,6 +12,7 @@ import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thin
 import type { HotTopic } from "@/lib/topics/types";
 import { defaultSystemSettings, systemSettingKeys, type SystemSettings } from "@/lib/system/settings";
 import { decryptSettingSecret, encryptSettingSecret } from "@/lib/security/secrets";
+import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
 
 export async function tryCreateConversation(input: {
   userId: string | null;
@@ -463,6 +464,16 @@ export async function tryMergeXiaohongshuStudioAssets(input: {
   }
 }
 
+const CREATION_HISTORY_VISIBLE_WORK = `not exists (
+  select 1
+  from app_runs child_step
+  where child_step.id = w.app_run_id
+    and (
+      child_step.input_payload->>'studio_parent' in ('wechat-studio', 'xiaohongshu-studio')
+      or nullif(child_step.input_payload->>'traffic_parent_work_id', '') is not null
+    )
+)`;
+
 export async function tryListWorks(userId: string | null) {
   if (!userId) return [];
 
@@ -494,12 +505,7 @@ export async function tryListWorks(userId: string | null) {
        from works w
        left join app_runs ar on ar.id = w.app_run_id
        where w.user_id = $1 and w.status <> 'archived'
-         and not exists (
-           select 1
-           from app_runs studio_step
-           where studio_step.id = w.app_run_id
-             and studio_step.input_payload->>'studio_parent' in ('wechat-studio', 'xiaohongshu-studio')
-         )
+         and ${CREATION_HISTORY_VISIBLE_WORK}
        order by w.updated_at desc
        limit 50`,
       [userId],
@@ -624,6 +630,52 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
       [workResult.rows[0].id],
     );
 
+    const storedContentJson = versions.rows[0]?.content_json ?? null;
+    const parentForTrafficCover = {
+      platform: workResult.rows[0].source_channel,
+      app_run: run.rows[0] ?? null,
+      content_json: storedContentJson,
+    };
+    const recoveredTrafficCovers = isTrafficCoverParentWork(parentForTrafficCover)
+      ? await query<{
+          work_id: string;
+          input_payload: Record<string, unknown> | null;
+          result_json: Record<string, unknown> | null;
+          completed_at: string | null;
+        }>(
+          `select child_work.id as work_id, child_run.input_payload, child_run.result_json, child_run.completed_at
+           from works child_work
+           join app_runs child_run on child_run.id = child_work.app_run_id
+           join apps child_app on child_app.id = child_work.app_id
+           where child_work.user_id = $2
+             and child_app.slug = 'video-cover'
+             and child_run.status = 'succeeded'
+             and child_run.input_payload->>'traffic_parent_work_id' = $1
+           order by child_run.completed_at asc nulls last, child_run.created_at asc`,
+          [workResult.rows[0].id, input.userId],
+        ).then((result) => result.rows.map((child) => ({
+          workId: child.work_id,
+          platform: typeof child.input_payload?.platform === "string" ? child.input_payload.platform : "",
+          style: typeof child.input_payload?.style === "string" ? child.input_payload.style : "",
+          sourceLabel: typeof child.input_payload?.traffic_source_label === "string" ? child.input_payload.traffic_source_label : "",
+          sourceBatchId: typeof child.input_payload?.traffic_source_batch_id === "string" ? child.input_payload.traffic_source_batch_id : "",
+          createdAt: child.completed_at ?? "",
+          images: Array.isArray(child.result_json?.images) ? child.result_json.images : [],
+        })).filter((cover) => cover.images.length > 0))
+      : [];
+    const storedTrafficState = storedContentJson?.trafficCopyState as { covers?: unknown[] } | undefined;
+    const storedTrafficCovers = Array.isArray(storedTrafficState?.covers) ? storedTrafficState.covers : [];
+    const storedCoverIds = new Set(storedTrafficCovers.flatMap((cover) => cover && typeof cover === "object" && typeof (cover as { workId?: unknown }).workId === "string" ? [(cover as { workId: string }).workId] : []));
+    const contentJson = recoveredTrafficCovers.length > 0
+      ? {
+          ...(storedContentJson ?? {}),
+          trafficCopyState: {
+            ...(storedTrafficState ?? {}),
+            covers: [...storedTrafficCovers, ...recoveredTrafficCovers.filter((cover) => !storedCoverIds.has(cover.workId))],
+          },
+        }
+      : storedContentJson;
+
     return {
       id: workResult.rows[0].id,
       title: workResult.rows[0].title,
@@ -640,7 +692,7 @@ export async function tryGetWorkDetail(input: { userId: string | null; workId: s
       app_run: run.rows[0] ?? null,
       studio_asset_runs: studioAssetRuns.rows,
       versions: versions.rows,
-      content_json: versions.rows[0]?.content_json ?? null,
+      content_json: contentJson,
     };
   } catch {
     return null;
@@ -3803,7 +3855,7 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
     const pageSize = Math.min(50, Math.max(1, Math.floor(input.pageSize ?? 20)));
     const offset = (page - 1) * pageSize;
     const values: unknown[] = [userId];
-    const filters = ["w.user_id = $1", "w.status <> 'archived'"];
+    const filters = ["w.user_id = $1", "w.status <> 'archived'", CREATION_HISTORY_VISIBLE_WORK];
 
     if (input.search?.trim()) {
       values.push(`%${input.search.trim()}%`);
@@ -3882,21 +3934,21 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
                 count(*) filter (where is_favorite) as favorite_count,
                 count(*) filter (where length(trim(coalesce(w.note, ''))) > 0) as noted_count,
                 count(*) filter (where w.has_avatar_visual) as avatar_count
-         from works w where w.user_id = $1 and w.status <> 'archived'`,
+         from works w where w.user_id = $1 and w.status <> 'archived' and ${CREATION_HISTORY_VISIBLE_WORK}`,
         [userId],
       ),
       query<{ platform: string; count: string }>(
-        `select source_channel as platform, count(*) as count
-         from works where user_id = $1 and status <> 'archived'
+        `select w.source_channel as platform, count(*) as count
+         from works w where w.user_id = $1 and w.status <> 'archived' and ${CREATION_HISTORY_VISIBLE_WORK}
          group by source_channel order by count(*) desc, source_channel asc`,
         [userId],
       ),
       query<{ date: string; count: string }>(
         `select to_char((updated_at at time zone 'Asia/Shanghai')::date, 'YYYY-MM-DD') as date, count(*) as count
-         from works
-         where user_id = $1 and status <> 'archived' and updated_at >= now() - interval '100 days'
-         group by (updated_at at time zone 'Asia/Shanghai')::date
-         order by (updated_at at time zone 'Asia/Shanghai')::date asc`,
+         from works w
+         where w.user_id = $1 and w.status <> 'archived' and ${CREATION_HISTORY_VISIBLE_WORK} and w.updated_at >= now() - interval '100 days'
+         group by (w.updated_at at time zone 'Asia/Shanghai')::date
+         order by (w.updated_at at time zone 'Asia/Shanghai')::date asc`,
         [userId],
       ),
     ]);

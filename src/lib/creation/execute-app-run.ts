@@ -39,6 +39,7 @@ import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingP
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
+import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
 import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
@@ -1018,7 +1019,7 @@ async function tryAttachTrafficCoverToParent(input: {
 }) {
   if (!input.parentWorkId || !input.coverWorkId || input.images.length === 0) return;
   const parent = await tryGetWorkDetail({ userId: input.userId, workId: input.parentWorkId, access: "own" });
-  if (!parent || parent.platform !== "traffic-copy") return;
+  if (!parent || !isTrafficCoverParentWork(parent)) return;
   const existingState = parent.content_json?.trafficCopyState as { covers?: unknown[] } | undefined;
   const existingCovers = Array.isArray(existingState?.covers) ? existingState.covers : [];
   const nextCover = {

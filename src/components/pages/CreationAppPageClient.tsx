@@ -476,7 +476,9 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       updateField("creator_skill_version_ids", current.filter((id) => id !== styleId));
       return;
     }
-    const next = current.length === 1 && current[0] === "default" && styleId !== "default" ? [styleId] : [...current, styleId];
+    // Keep the base avatar selected when an additional creator style is chosen.
+    // The user can still explicitly remove it after another style is active.
+    const next = [...current, styleId];
     if (next.length <= 2) updateField("creator_skill_version_ids", next);
   }
 

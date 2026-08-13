@@ -378,7 +378,7 @@ function TaskHistory({ tasks, loading }: { tasks: CreationTaskItem[]; loading: b
       : appPath(`/apps/link-remix?source_url=${encodeURIComponent(typeof task.source.source_url === "string" ? task.source.source_url : "")}`);
     return <a className="creationTaskItem" href={href} key={task.id}>
       <span className="creationTaskIcon" aria-hidden="true">↗</span>
-      <div><span className={`creationTaskStatus ${task.status}`}>{statusLabel}</span><strong>{task.title}</strong><p>{sourceTitle || "已保存二创素材"}</p><small>{targetLabel || "爆款话题二创"} · 已生成 {task.completedCount}/{task.workCount} 个作品 · {formatRelativeDate(task.updatedAt)}</small></div>
+      <div><span className={`creationTaskStatus ${task.status}`}>{statusLabel}</span><strong>{task.title}</strong><p>{sourceTitle || "已保存二创素材"}</p><small>{targetLabel || "爆款话题二创"} · 已生成 {task.completedCount}/{task.workCount} 个作品 · 创建于 {formatCreationDate(task.createdAt)}</small></div>
       <b>{task.latestWorkId ? "查看作品 →" : "继续创作 →"}</b>
     </a>;
   })}</div>;
@@ -413,7 +413,7 @@ function WorkCard(props: {
       </div>
       <div className="creationHistoryItemBody">
         <div className="creationHistoryItemTitleRow"><a href={href}>{formatWorkTitle(item)}</a>{item.appRunStatus === "failed" ? <span className="pending">生成失败</span> : null}</div>
-        <div className="creationHistoryItemMeta"><span>{buildWorkDescriptor(item)}</span><span>{formatRelativeDate(item.updatedAt)}</span>{item.quotaCost ? <span>{item.quotaCost} 积分</span> : null}</div>
+        <div className="creationHistoryItemMeta"><span>{buildWorkDescriptor(item)}</span><span>创作于 {formatCreationDate(item.createdAt)}</span>{item.quotaCost ? <span>{item.quotaCost} 积分</span> : null}</div>
         <p>{buildWorkPreview(item)}</p>
         <div className="creationHistoryItemTags">
           {item.appRunStatus === "failed" && item.errorMessage?.trim() ? <span className="risk high" title={item.errorMessage.trim()}>失败原因：{truncateText(item.errorMessage.trim(), 28)}</span> : null}
@@ -635,14 +635,18 @@ function platformSymbol(platform: string) {
   return "文";
 }
 
-function formatRelativeDate(value?: string) {
+function formatCreationDate(value?: string) {
   if (!value) return "时间未知";
   const date = new Date(value);
-  const diff = Date.now() - date.getTime();
-  if (diff >= 0 && diff < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 60000))} 分钟前`;
-  if (diff >= 0 && diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)} 小时前`;
-  if (diff >= 0 && diff < 7 * 24 * 60 * 60 * 1000) return `${Math.floor(diff / 86400000)} 天前`;
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function normalizeRisk(value?: string) {
