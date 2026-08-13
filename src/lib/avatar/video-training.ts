@@ -8,6 +8,7 @@ import { getLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
 
 type TrainingRunRow = {
   id: string;
+  training_type: string;
   phase: string;
   status: "running" | "succeeded" | "failed";
   total_count: number;
@@ -51,12 +52,12 @@ const TRAINING_DIRECT_WORK_LIMIT = 30;
 const TRAINING_BATCH_SIZE = 30;
 const TRAINING_BATCH_SUMMARY_CHARS = 2_400;
 
-export async function startAvatarVideoTraining(userId: string, rawLinks: string[], creatorSkillId?: string, mediaWorks: WechatChannelTrainingWork[] = []) {
+export async function startAvatarVideoTraining(userId: string, rawLinks: string[], creatorSkillId?: string, mediaWorks: WechatChannelTrainingWork[] = [], trainingPurpose: "content" | "lead-coach" = "content") {
   const links = [...new Set(rawLinks.map(canonicalizeInspectableSourceUrl))];
   const uniqueMediaWorks = [...new Map(mediaWorks.map((work) => [work.id, work])).values()];
   if (links.length + uniqueMediaWorks.length < 3) throw new Error("去重后至少需要 3 条作品。");
   if (links.length + uniqueMediaWorks.length > 500) throw new Error("单次最多训练 500 条作品。");
-  if (links.some((link) => !isShortVideoUrl(link))) throw new Error("风格训练目前支持视频号和抖音的单条作品链接。");
+  if (links.some((link) => !isTrainingSourceUrl(link))) throw new Error("训练支持抖音、视频号和公众号的单条作品链接。");
 
   const trainingSources = [...links, ...uniqueMediaWorks.map((work) => work.sourceUrl)];
   const cachedEntries = await Promise.all(trainingSources.map(async (link) => [link, await getLinkRemixSourceCache(link)] as const));
@@ -77,8 +78,8 @@ export async function startAvatarVideoTraining(userId: string, rawLinks: string[
   }));
   const run = await query<{ id: string }>(
     `insert into avatar_training_runs(user_id, training_type, phase, total_count, details_json, creator_skill_id)
-     values ($1, 'short_video', 'queued', $2, $3::jsonb, $4) returning id`,
-    [userId, trainingSources.length, JSON.stringify({ sourceLinks: trainingSources, attempts: initialAttempts }), creatorSkillId ?? null],
+     values ($1, $5, 'queued', $2, $3::jsonb, $4) returning id`,
+    [userId, trainingSources.length, JSON.stringify({ sourceLinks: trainingSources, attempts: initialAttempts, trainingPurpose }), creatorSkillId ?? null, trainingPurpose === "lead-coach" ? "lead_coach" : "short_video"],
   );
   const runId = run.rows[0].id;
   try {
@@ -132,7 +133,7 @@ export async function startAvatarVideoTraining(userId: string, rawLinks: string[
 
 export async function reconcileAvatarTrainingRuns(userId: string) {
   const runs = await query<TrainingRunRow>(
-    `select id, phase, status, total_count, updated_at from avatar_training_runs
+    `select id, training_type, phase, status, total_count, updated_at from avatar_training_runs
      where user_id=$1 and status='running' order by created_at asc limit 20`,
     [userId],
   );
@@ -248,7 +249,7 @@ async function reconcileRun(userId: string, run: TrainingRunRow) {
     [run.id, userId, terminalCount, normalized.length, JSON.stringify(details)],
   );
   if (!claimed.rows[0]) return;
-  await finalizeTrainingRun(userId, run.id, normalized, details);
+  await finalizeTrainingRun(userId, run.id, normalized, details, run.training_type === "lead_coach" ? "lead-coach" : "content");
 }
 
 function buildAttempt(task: TrainingTaskRow, result: StandardizedSourceInspection | null): VideoTrainingAttempt {
@@ -276,7 +277,7 @@ function buildAttempt(task: TrainingTaskRow, result: StandardizedSourceInspectio
   };
 }
 
-async function finalizeTrainingRun(userId: string, runId: string, works: StandardizedSourceInspection[], details: Record<string, unknown>) {
+async function finalizeTrainingRun(userId: string, runId: string, works: StandardizedSourceInspection[], details: Record<string, unknown>, trainingPurpose: "content" | "lead-coach") {
   const content = buildTrainingContent(works);
   const analysis = await buildTrainingAnalysis(works, userId, async (completedBatches, batchCount) => {
     await query(
@@ -300,8 +301,8 @@ async function finalizeTrainingRun(userId: string, runId: string, works: Standar
       return;
     }
     const platforms = [...new Set(works.map((work) => work.platform))];
-    const sourceType = platforms.length === 1 && platforms[0] === "douyin" ? "douyin" : platforms.length === 1 ? "video_channel" : "transcript";
-    const sourceLabel = platforms.length === 1 && platforms[0] === "douyin" ? "抖音训练" : platforms.length === 1 ? "视频号训练" : "短视频作品训练";
+    const sourceType = platforms.length === 1 && platforms[0] === "douyin" ? "douyin" : platforms.length === 1 && platforms[0] === "wechat_article" ? "article" : platforms.length === 1 ? "video_channel" : "transcript";
+    const sourceLabel = platforms.length === 1 ? `${platformLabel(platforms[0])}训练` : "多平台作品训练";
     const source = await client.query<{ id: string }>(
       `insert into avatar_memory_sources(user_id, source_type, title, content, status, sensitivity, metadata_json)
        values ($1, $2, $3, $4, 'disabled', 'normal', $5::jsonb) returning id`,
@@ -309,15 +310,24 @@ async function finalizeTrainingRun(userId: string, runId: string, works: Standar
     );
     const sourceId = source.rows[0].id;
     if (locked.rows[0].creator_skill_id) {
-      const skillPrompt = await buildCreatorSkillPrompt(analysis.content, works.length, userId);
-      const identityCard = await buildCreatorIdentityCard(skillPrompt, userId);
+      const skillPrompt = await buildCreatorSkillPrompt(analysis.content, works.length, userId, trainingPurpose);
+      const identityCard = await buildCreatorIdentityCard(skillPrompt, userId, trainingPurpose);
       await client.query(`update avatar_creator_skill_versions set status='superseded' where skill_id=$1 and status in ('active', 'restored')`, [locked.rows[0].creator_skill_id]);
       await client.query(
         `update avatar_creator_skill_versions set status='active', sample_count=$3, skill_prompt=$4, change_summary=$5
          where training_run_id=$1 and user_id=$2`,
-        [runId, userId, works.length, skillPrompt, `基于 ${works.length} 条授权作品蒸馏创作方式`],
+        [runId, userId, works.length, skillPrompt, `基于 ${works.length} 条授权作品蒸馏${trainingPurpose === "lead-coach" ? "获客教练方法" : "创作方式"}`],
       );
       await client.query(`update avatar_creator_skills set latest_version = (select version from avatar_creator_skill_versions where training_run_id=$1), identity_card=case when identity_card='{}'::jsonb then $4::jsonb else identity_card end, identity_card_draft=$4::jsonb, updated_at=now() where id=$2 and user_id=$3`, [runId, locked.rows[0].creator_skill_id, userId, JSON.stringify(identityCard)]);
+      if (trainingPurpose === "lead-coach") {
+        const course = buildCoachCourse(identityCard, skillPrompt);
+        await client.query(
+          `insert into avatar_coach_courses(skill_id, title, summary, modules_json, status)
+           values ($1,$2,$3,$4::jsonb,'active')
+           on conflict (skill_id) do update set title=excluded.title, summary=excluded.summary, modules_json=excluded.modules_json, status='active', updated_at=now()`,
+          [locked.rows[0].creator_skill_id, course.title, course.summary, JSON.stringify(course.modules)],
+        );
+      }
     }
     for (const candidate of candidates) {
       await client.query(
@@ -365,8 +375,8 @@ async function summarizeTrainingBatch(works: StandardizedSourceInspection[], bat
 
 function buildBoundedTrainingMaterial(works: StandardizedSourceInspection[]) {
   const transcriptBudget = Math.max(160, Math.min(TRAINING_TRANSCRIPT_MAX_CHARS, Math.floor(TRAINING_TRANSCRIPT_TOTAL_CHARS / Math.max(works.length, 1))));
-  const header = `以下是创作者本人授权导入的 ${works.length} 条短视频作品。请学习标题选题、口播语气、节奏、句式与观点组织。`;
-  const blocks = works.map((work, index) => `【作品 ${index + 1}｜${platformLabel(work.platform)}】\n标题：${work.title}\n口播转写：${work.transcript.slice(0, transcriptBudget)}`);
+  const header = `以下是创作者本人授权导入的 ${works.length} 条多平台作品。请学习选题、表达、结构、观点组织与用户承接方式。`;
+  const blocks = works.map((work, index) => `【作品 ${index + 1}｜${platformLabel(work.platform)}】\n标题：${work.title}\n${work.platform === "wechat_article" ? "正文" : "口播转写"}：${work.transcript.slice(0, transcriptBudget)}`);
   const sourceChars = [header, ...blocks].join("\n\n").length;
   const accepted = [header];
   let analyzedWorkCount = 0;
@@ -377,10 +387,10 @@ function buildBoundedTrainingMaterial(works: StandardizedSourceInspection[]) {
   return { content: accepted.join("\n\n"), analyzedWorkCount, sourceChars, truncated: analyzedWorkCount < works.length };
 }
 
-async function buildCreatorSkillPrompt(content: string, workCount: number, userId: string) {
+async function buildCreatorSkillPrompt(content: string, workCount: number, userId: string, trainingPurpose: "content" | "lead-coach") {
   const request = [
-    "根据以下同一创作者的授权作品，蒸馏一份可直接用于内容创作的创作 Skill。",
-    "只描述可观察的选题切口、开头、叙事节奏、句式、观点组织、结尾互动和边界；不要模仿或复述具体作品，不要冒充创作者，不要加入未经样本支持的个人经历或事实。",
+    trainingPurpose === "lead-coach" ? "根据以下同一创作者的授权作品，蒸馏一份可直接用于获客辅导的教练 Skill。" : "根据以下同一创作者的授权作品，蒸馏一份可直接用于内容创作的创作 Skill。",
+    trainingPurpose === "lead-coach" ? "重点提炼用户洞察、获客问题诊断、策略框架、提问方式、行动任务、复盘标准、转化路径和合规边界；不得照抄原文、冒充创作者或承诺效果。" : "只描述可观察的选题切口、开头、叙事节奏、句式、观点组织、结尾互动和边界；不要模仿或复述具体作品，不要冒充创作者，不要加入未经样本支持的个人经历或事实。",
     "用 6-10 条简洁规则输出，使用第二人称指令式表达。",
     `样本数：${workCount}`,
     content.slice(0, TRAINING_MODEL_INPUT_CHARS),
@@ -388,13 +398,13 @@ async function buildCreatorSkillPrompt(content: string, workCount: number, userI
   try { return (await runInsuranceContentAgent([{ role: "user", content: request }], userId, "general")).slice(0, 6000); } catch { return `基于 ${workCount} 条授权作品：优先保持样本中可观察到的选题切口、口语节奏、观点推进和结尾互动；不得复用原作品中的具体事实、案例或句子。`; }
 }
 
-async function buildCreatorIdentityCard(skillPrompt: string, userId: string) {
+async function buildCreatorIdentityCard(skillPrompt: string, userId: string, trainingPurpose: "content" | "lead-coach") {
   const fallback = {
-    title: "个人创作风格分身",
-    summary: "根据授权作品提炼选题、叙事、句式和观点组织方式。",
-    scenarios: ["短视频口播", "观点表达", "专业科普"],
-    styleTags: ["口语化", "逻辑清晰", "个人风格"],
-    bestFor: "希望沿用已训练表达方式的创作者",
+    title: trainingPurpose === "lead-coach" ? "获客增长教练分身" : "个人创作风格分身",
+    summary: trainingPurpose === "lead-coach" ? "根据授权内容提炼获客诊断、策略拆解、行动辅导和复盘方法。" : "根据授权作品提炼选题、叙事、句式和观点组织方式。",
+    scenarios: trainingPurpose === "lead-coach" ? ["获客诊断", "行动计划", "转化复盘"] : ["短视频口播", "观点表达", "专业科普"],
+    styleTags: trainingPurpose === "lead-coach" ? ["问题导向", "策略清晰", "行动陪跑"] : ["口语化", "逻辑清晰", "个人风格"],
+    bestFor: trainingPurpose === "lead-coach" ? "需要诊断获客卡点并形成可执行增长计划的创作者" : "希望沿用已训练表达方式的创作者",
   };
   const request = [
     "请把下面的创作 Skill 归纳为一张供用户选择的分身身份卡。",
@@ -417,11 +427,26 @@ async function buildCreatorIdentityCard(skillPrompt: string, userId: string) {
   } catch { return fallback; }
 }
 
+function buildCoachCourse(identity: { title: string; summary: string; scenarios: string[]; styleTags: string[]; bestFor: string }, skillPrompt: string) {
+  const focus = identity.scenarios[0] || "获客增长";
+  const rules = skillPrompt.split("\n").filter(Boolean).slice(0, 3).join("；").slice(0, 180);
+  return {
+    title: `${identity.title || "获客教练"} · 实战课程`,
+    summary: `${identity.summary} 课程围绕诊断、内容承接、咨询转化和复盘四步展开。${rules ? `方法依据：${rules}` : ""}`,
+    modules: [
+      { key: "diagnose", title: "第 1 课：定位你的获客卡点", objective: `用 ${focus} 的视角识别渠道、信任与转化中的首要阻力。`, practice: "完成一次获客现状盘点：渠道、目标客户、咨询量与最大阻力。" },
+      { key: "content", title: "第 2 课：建立内容信任", objective: "把用户问题转成可持续的内容主线，而不是只追热点。", practice: "写出 3 个针对目标客户真实顾虑的内容切口。" },
+      { key: "conversion", title: "第 3 课：设计自然承接", objective: "将评论、私信和咨询路径拆成低压力、合规的下一步。", practice: "为一条内容设计一个评论互动与私信承接动作。" },
+      { key: "review", title: "第 4 课：复盘并迭代", objective: "用有效咨询与行动完成度复盘，而非只看曝光数据。", practice: "完成本周一次复盘：保留一项有效动作，停止一项无效动作。" },
+    ],
+  };
+}
+
 function buildTrainingContent(works: StandardizedSourceInspection[]) {
   const transcriptBudget = Math.max(160, Math.min(TRAINING_TRANSCRIPT_MAX_CHARS, Math.floor(TRAINING_TRANSCRIPT_TOTAL_CHARS / Math.max(works.length, 1))));
   return [
-    `以下是创作者本人授权导入的 ${works.length} 条短视频作品。请重点学习标题的选题与切入，以及口播转写稿的语气、节奏、句式与观点组织；不要编造未出现的经历、数据或案例。`,
-    ...works.map((work, index) => `【作品 ${index + 1}｜${platformLabel(work.platform)}】\n标题：${work.title}\n口播转写：${work.transcript.slice(0, transcriptBudget)}\n链接：${work.sourceUrl}`),
+    `以下是创作者本人授权导入的 ${works.length} 条多平台作品。请重点学习选题与切入、表达语气、内容结构、观点组织与用户承接；不要编造未出现的经历、数据或案例。`,
+    ...works.map((work, index) => `【作品 ${index + 1}｜${platformLabel(work.platform)}】\n标题：${work.title}\n${work.platform === "wechat_article" ? "正文" : "口播转写"}：${work.transcript.slice(0, transcriptBudget)}\n链接：${work.sourceUrl}`),
   ].join("\n\n").slice(0, TRAINING_CONTENT_CHARS);
 }
 
@@ -464,8 +489,8 @@ function fallbackVideoMemoryCandidates(workCount: number): VideoMemoryCandidate[
   ];
 }
 
-function isShortVideoUrl(value: string) { return /(^|\.)(douyin\.com|weixin\.qq\.com|channels\.weixin\.qq\.com)$/i.test(new URL(value).hostname) && !/^mp\.weixin\.qq\.com$/i.test(new URL(value).hostname); }
-function platformForUrl(value: string) { return /douyin\.com$/i.test(new URL(value).hostname) ? "douyin" : "video_channel"; }
-function platformLabel(value: string) { return value === "douyin" ? "抖音" : value === "video_channel" ? "视频号" : "短视频"; }
+function isTrainingSourceUrl(value: string) { return /(^|\.)(douyin\.com|weixin\.qq\.com|channels\.weixin\.qq\.com)$/i.test(new URL(value).hostname); }
+function platformForUrl(value: string) { const hostname = new URL(value).hostname; return /douyin\.com$/i.test(hostname) ? "douyin" : /^mp\.weixin\.qq\.com$/i.test(hostname) ? "wechat_article" : "video_channel"; }
+function platformLabel(value: string) { return value === "douyin" ? "抖音" : value === "video_channel" ? "视频号" : value === "wechat_article" ? "公众号" : "作品"; }
 function text(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 function errorMessage(error: unknown, fallback: string) { return error instanceof Error && error.message ? error.message : fallback; }

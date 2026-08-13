@@ -44,6 +44,7 @@ type AvatarWorkspace = {
 
 type AvatarTab = "coach" | "overview" | "memory" | "visual" | "contact" | "evolution" | "lab" | "sources" | "versions";
 type CoachNextStep = { title: string; description: string; href: string };
+type CoachCourse = { id: string; title: string; summary: string; modules: Array<{ key: string; title: string; objective: string; practice: string }>; completed_keys: string[]; matchScore: number; matchReasons: string[] };
 type WechatChannelCandidate = { id: string; title: string; authorName: string; publishedAt: string | null; durationSeconds: number | null; coverUrl: string; likeCount: number | null; commentCount: number | null; forwardCount: number | null; trainingToken: string };
 
 const tabs: Array<{ id: AvatarTab; label: string; description: string }> = [
@@ -112,6 +113,8 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
   const [coachProfilePrompt, setCoachProfilePrompt] = useState(false);
   const [coachThinkingStep, setCoachThinkingStep] = useState(-1);
   const [coachStreamingContent, setCoachStreamingContent] = useState("");
+  const [coachCourses, setCoachCourses] = useState<CoachCourse[]>([]);
+  const [coachCoursesLoading, setCoachCoursesLoading] = useState(false);
   const [contactDraft, setContactDraft] = useState({ displayName: "", organization: "", callToAction: "扫码联系我", serviceMotto: "保险不是推销，是长期的守护", phone: "", email: "", businessCardStyle: "classic" as "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender", defaultQrCodeId: null as string | null });
   const coachInputRef = useRef<HTMLTextAreaElement | null>(null);
   usePageMeta({ title: "数字分身 · 人设与表达", description: `数字分身 / ${tabs.find((tab) => tab.id === activeTab)?.label ?? "分身主页"}` });
@@ -145,7 +148,14 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
     void fetch(apiPath("/api/avatar/chat")).then(async (response) => response.ok ? response.json() : null).then((payload: { conversations?: AvatarCoachConversation[] } | null) => {
       if (payload?.conversations) setCoachConversations(payload.conversations);
     }).catch(() => undefined);
+    void Promise.resolve().then(() => { setCoachCoursesLoading(true); return fetch(apiPath("/api/avatar/coach-program")); }).then(async (response) => response.ok ? response.json() : null).then((payload: { courses?: CoachCourse[] } | null) => setCoachCourses(payload?.courses ?? [])).catch(() => setCoachCourses([])).finally(() => setCoachCoursesLoading(false));
   }, [activeTab]);
+
+  async function updateCourseProgress(courseId: string, moduleKey: string, status: "started" | "completed") {
+    const response = await fetch(apiPath("/api/avatar/coach-program"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ courseId, moduleKey, status }) });
+    if (!response.ok) { setError("学习进度保存失败，请稍后重试"); return; }
+    setCoachCourses((current) => current.map((course) => course.id !== courseId ? course : { ...course, completed_keys: status === "completed" ? [...new Set([...course.completed_keys, moduleKey])] : course.completed_keys.filter((key) => key !== moduleKey) }));
+  }
 
   const latestTrainingId = workspace?.trainingRuns.find((run) => run.status === "running")?.id ?? "";
   const latestTrainingStatus = latestTrainingId ? "running" : "";
@@ -234,7 +244,7 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
     event.preventDefault();
     const links = parseTrainingLinks(creatorSkillDraft.shareLinks);
     const wechatWorkTokens = wechatCandidates.filter((work) => selectedWechatWorkIds.has(work.id)).map((work) => work.trainingToken);
-    const ok = await performAction({ action: "create-creator-skill", skillId: creatorSkillDraft.skillId || undefined, skillScope, trainingPurpose, name: creatorSkillDraft.name, creatorName: creatorSkillDraft.creatorName, links, wechatWorkTokens, authorized: creatorSkillDraft.authorized }, "Skill 训练已开始；完成后会生成一个可选用的新版本。");
+    const ok = await performAction({ action: "create-creator-skill", skillId: creatorSkillDraft.skillId || undefined, skillScope, trainingPurpose, name: creatorSkillDraft.name, creatorName: creatorSkillDraft.creatorName, links, wechatWorkTokens, authorized: creatorSkillDraft.authorized }, `${trainingPurpose === "lead-coach" ? "获客教练" : "内容创作"} Skill 训练已开始；完成后会生成一个可选用的新版本。`);
     if (ok) { setCreatorSkillDraft((current) => ({ ...current, shareLinks: "", authorized: false })); setWechatCandidates([]); setSelectedWechatWorkIds(new Set()); }
   }
 
@@ -397,7 +407,7 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
       </nav> : null}
 
       {activeTab === "coach" ? (
-        <AvatarCoachView busy={busy} thinkingStep={coachThinkingStep} streamingContent={coachStreamingContent} conversations={coachConversations} messages={coachMessages} input={coachInput} nextSteps={coachNextSteps} profilePrompt={coachProfilePrompt} inputRef={coachInputRef} onChangeInput={setCoachInput} onSubmit={submitCoach} onPrompt={(prompt) => void sendCoachMessage(prompt)} onOpenConversation={openCoachConversation} onOpenProfile={() => setActiveTab("memory")} onNew={() => { setCoachConversationId(""); setCoachMessages([]); setCoachStreamingContent(""); setCoachNextSteps([]); setCoachProfilePrompt(false); }} />
+        <><CoachProgramPanel courses={coachCourses} loading={coachCoursesLoading} onProgress={updateCourseProgress} /><AvatarCoachView busy={busy} thinkingStep={coachThinkingStep} streamingContent={coachStreamingContent} conversations={coachConversations} messages={coachMessages} input={coachInput} nextSteps={coachNextSteps} profilePrompt={coachProfilePrompt} inputRef={coachInputRef} onChangeInput={setCoachInput} onSubmit={submitCoach} onPrompt={(prompt) => void sendCoachMessage(prompt)} onOpenConversation={openCoachConversation} onOpenProfile={() => setActiveTab("memory")} onNew={() => { setCoachConversationId(""); setCoachMessages([]); setCoachStreamingContent(""); setCoachNextSteps([]); setCoachProfilePrompt(false); }} /></>
       ) : null}
 
       {activeTab === "overview" ? <>
@@ -511,19 +521,19 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
 
       {activeTab === "lab" ? (
         <section className="avatarLabView">
-          <div className="avatarSectionHeader"><div><span>{skillScope === "platform" && trainingPurpose === "lead-coach" ? "获客教练分身" : skillScope === "platform" ? "平台分身生产" : "数字分身实验室"}</span><h2>{trainingPurpose === "lead-coach" ? "把大 V 的获客方法蒸馏为可复用教练 Skill" : "把创作者的创作方式蒸馏为可复用 Skill"}</h2><p>{trainingPurpose === "lead-coach" ? "综合抖音、视频号和公众号内容，学习用户洞察、获客诊断、策略拆解、行动辅导与转化边界。" : skillScope === "platform" ? "这里生产的平台分身与管理员个人分身隔离，仅管理员可管理。" : "训练使用与学习资料相同的解析、转写链路；仅可提交本人作品或已获授权的作品。"}</p></div></div>
+          <div className="avatarSectionHeader"><div><span>{skillScope === "platform" ? trainingPurpose === "lead-coach" ? "获客教练分身" : "平台分身生产" : "数字分身实验室"}</span><h2>{trainingPurpose === "lead-coach" ? "把大 V 的获客方法蒸馏为可复用教练 Skill" : "把创作者的创作方式蒸馏为可复用 Skill"}</h2><p>{trainingPurpose === "lead-coach" ? "综合抖音、视频号和公众号内容，学习用户洞察、获客诊断、策略拆解、行动辅导与转化边界。" : skillScope === "platform" ? "这里生产的平台分身与管理员个人分身隔离，仅管理员可管理。" : "训练使用与学习资料相同的解析、转写链路；仅可提交本人作品或已获授权的作品。"}</p></div></div>
           <div className="creatorSkillGrid">
             <form className="avatarSideForm avatarVideoTrainingForm" onSubmit={trainCreatorSkill}>
-              <div><span>创建 / 继续训练</span><h2>模仿创作者的创作方式</h2></div>
+              <div><span>创建 / 继续训练</span><h2>{trainingPurpose === "lead-coach" ? "训练大 V 获客教练" : "模仿创作者的创作方式"}</h2></div>
               <label>训练对象<select value={creatorSkillDraft.skillId} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, skillId: event.target.value }))}><option value="">新建一个命名分身</option>{(workspace?.creatorSkills ?? []).map((skill) => <option key={skill.id} value={skill.id}>继续训练：{skill.name} · V{skill.latest_version}{skill.status === "archived" ? "（已下架）" : ""}</option>)}</select></label>
               {!creatorSkillDraft.skillId ? <><label>分身名称<input value={creatorSkillDraft.name} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：小红书理性科普分身" required /></label><label>创作者名称（可选）<input value={creatorSkillDraft.creatorName} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, creatorName: event.target.value }))} placeholder="仅用于你自己识别" /></label></> : <p>新作品会沉淀为该分身的下一版本，可在下方回滚；下架状态不影响继续训练。</p>}
               <fieldset className="wechatChannelPicker"><legend>通过视频号 ID 添加作品</legend><div className="wechatChannelDiscovery"><input value={wechatChannelDraft.channelId} onChange={(event) => { setWechatChannelDraft((current) => ({ ...current, channelId: event.target.value })); setWechatDiscoveryError(""); }} placeholder="视频号 ID，例如 sph5bGYfAn6yQFY" /><select value={wechatChannelDraft.limit} onChange={(event) => setWechatChannelDraft((current) => ({ ...current, limit: event.target.value as typeof current.limit }))}><option value="10">加载10条</option><option value="20">加载20条</option><option value="50">加载50条</option><option value="100">加载100条</option><option value="all">加载全部</option></select><button className="secondaryButton" disabled={busy === "discover-wechat-channel"} onClick={() => void discoverWechatChannelWorks()} type="button">{busy === "discover-wechat-channel" ? "正在获取…" : "获取作品"}</button></div>
               {wechatDiscoveryError ? <div className="wechatDiscoveryError" role="alert">{wechatDiscoveryError}</div> : null}
               {wechatCandidates.length ? <><div className="wechatCandidateToolbar"><span>已选择 {selectedWechatWorkIds.size}/{wechatCandidates.length} 条</span><button onClick={() => setSelectedWechatWorkIds(new Set(wechatCandidates.map((work) => work.id)))} type="button">全选</button><button onClick={() => setSelectedWechatWorkIds(new Set())} type="button">清空</button></div><div className="wechatCandidateList">{wechatCandidates.map((work) => <label className="wechatCandidate" key={work.id}><input checked={selectedWechatWorkIds.has(work.id)} onChange={(event) => setSelectedWechatWorkIds((current) => { const next = new Set(current); if (event.target.checked) next.add(work.id); else next.delete(work.id); return next; })} type="checkbox" />{work.coverUrl ? <Image alt="" height={54} src={work.coverUrl} unoptimized width={72} /> : <i>视频</i>}<span><strong>{work.title}</strong><small>{work.publishedAt ? formatDate(work.publishedAt) : "发布时间未知"}{work.durationSeconds ? ` · ${Math.round(work.durationSeconds)}秒` : ""}</small><small>{work.likeCount !== null ? `点赞 ${work.likeCount}` : ""}{work.commentCount !== null ? ` · 评论 ${work.commentCount}` : ""}{work.forwardCount !== null ? ` · 转发 ${work.forwardCount}` : ""}</small></span></label>)}</div></> : null}</fieldset>
-              <label>授权作品链接<textarea value={creatorSkillDraft.shareLinks} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, shareLinks: event.target.value }))} placeholder="可继续粘贴视频号或抖音作品链接；也可以只从上方视频号作品中选择" /></label>
-              <p className="avatarTrainingCount">合计选择 {creatorTrainingCount} 条作品，分享链接和视频号作品可同时训练。</p>
+              <label>授权作品链接<textarea value={creatorSkillDraft.shareLinks} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, shareLinks: event.target.value }))} placeholder="粘贴抖音、视频号或公众号单篇内容链接，每行一条；也可结合上方视频号作品" /></label>
+              <p className="avatarTrainingCount">合计选择 {creatorTrainingCount} 条作品，抖音、视频号和公众号素材可混合训练。</p>
               <label className="avatarConsent"><input checked={creatorSkillDraft.authorized} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, authorized: event.target.checked }))} type="checkbox" />我确认拥有这些作品，或已获得创作者授权用于风格训练</label>
-              <button className="primaryButton" disabled={busy === "create-creator-skill" || (!creatorSkillDraft.skillId && !creatorSkillDraft.name.trim()) || !creatorSkillDraft.authorized || creatorTrainingCount < 3}>{busy === "create-creator-skill" ? "正在创建任务..." : creatorSkillDraft.skillId ? "继续训练并创建新版本" : "开始训练 Skill"}</button><small>新分身训练完成后默认下架，可先在下方对比验收，再手动上架。</small>
+              <button className="primaryButton" disabled={busy === "create-creator-skill" || (!creatorSkillDraft.skillId && !creatorSkillDraft.name.trim()) || !creatorSkillDraft.authorized || creatorTrainingCount < 3}>{busy === "create-creator-skill" ? "正在创建任务..." : creatorSkillDraft.skillId ? "继续训练并创建新版本" : trainingPurpose === "lead-coach" ? "开始训练获客教练" : "开始训练 Skill"}</button><small>至少 3 条已授权素材；建议混合不同平台与内容长度。训练完成后先对比验收，再手动上架。</small>
             </form>
             <div className="creatorSkillLibrary"><div><span>{skillScope === "platform" ? "平台分身库" : "我的分身库"}</span><strong>{workspace?.creatorSkills.length ?? 0} 个已命名分身</strong></div>{(workspace?.creatorSkills ?? []).map((skill) => <CreatorSkillCard key={skill.id} skill={skill} runs={workspace?.trainingRuns ?? []} selectedVersionId={labCandidates.find((id) => skill.versions.some((version) => version.id === id)) ?? ""} onSelect={(id) => setLabCandidates((current) => current.includes(id) ? current : current.length < 3 ? [...current, id] : [...current.slice(0, 2), id])} onRestore={(versionId, version) => void performAction({ action: "restore-creator-skill-version", skillId: skill.id, versionId }, `已恢复 ${skill.name} V${version}。`)} onIdentitySave={(card) => performAction({ action: "update-creator-skill-identity", skillId: skill.id, ...card }, `${skill.name} 的身份卡已更新。`)} onStatus={(status) => void performAction({ action: "set-creator-skill-status", skillId: skill.id, status }, status === "active" ? `${skill.name} 已上架，创作页现在可以选用。` : `${skill.name} 已下架，创作页将不再展示。`)} />)}{!(workspace?.creatorSkills.length) ? <p>训练完成的创作 Skill 会保存在这里；以同名分身再次训练，会生成新版本。</p> : null}</div>
           </div>
@@ -784,6 +794,12 @@ function PrivacyToggle({ label, detail, checked, onChange }: { label: string; de
 
 function FeedbackActions({ onFeedback }: { onFeedback: (eventType: string) => void }) {
   return <div className="avatarFeedbackActions"><span>反馈会记录到分身进化中心；同类反馈累计 3 次后才会生成待确认建议，不会立即改写当前内容。</span><div><button onClick={() => onFeedback("more-like-me")} title="提高当前表达方式的使用权重">更像我</button><button onClick={() => onFeedback("too-salesy")} title="建议减少直接成交和催促表达">太销售</button><button onClick={() => onFeedback("too-formal")} title="建议增加生活化、易懂的表达">太正式</button><button onClick={() => onFeedback("remember-style")} title="建议将本次表达特征加入长期表达记忆">记住这种表达</button></div></div>;
+}
+
+function CoachProgramPanel({ courses, loading, onProgress }: { courses: CoachCourse[]; loading: boolean; onProgress: (courseId: string, moduleKey: string, status: "started" | "completed") => Promise<void> }) {
+  if (loading) return <section className="coachProgramPanel"><span>教练匹配中心</span><p>正在根据你的数字分身匹配教练与课程…</p></section>;
+  if (!courses.length) return <section className="coachProgramPanel empty"><span>教练匹配中心</span><h2>还没有可匹配的获客教练</h2><p>平台完成“获客教练分身”训练并上架后，小谷会按你的客群、表达偏好与增长卡点推荐课程路径。</p></section>;
+  return <section className="coachProgramPanel"><div className="coachProgramHeading"><div><span>教练匹配中心</span><h2>为你推荐的 AI 教练与课程</h2><p>推荐依据你的数字分身画像；你也可以按需要选择其他教练。</p></div></div><div className="coachProgramGrid">{courses.slice(0, 3).map((course, index) => { const next = course.modules.find((module) => !course.completed_keys.includes(module.key)) ?? course.modules[0]; const completed = course.completed_keys.length; return <article className={index === 0 ? "recommended" : ""} key={course.id}><div className="coachCourseTop"><span>{index === 0 ? "最匹配" : "备选教练"}</span><strong>{course.matchScore}% 匹配</strong></div><h3>{course.title}</h3><p>{course.summary}</p><small>{course.matchReasons.join(" · ")}</small><div className="coachCourseProgress"><span>课程进度 {completed}/{course.modules.length}</span><i><b style={{ width: `${course.modules.length ? completed / course.modules.length * 100 : 0}%` }} /></i></div>{next ? <div className="coachCourseNext"><b>{next.title}</b><span>{next.objective}</span><em>练习：{next.practice}</em><button className="primaryButton" onClick={() => void onProgress(course.id, next.key, "completed")} type="button">{course.completed_keys.includes(next.key) ? "已完成" : "完成本课练习"}</button></div> : null}</article>; })}</div></section>;
 }
 
 function AvatarCoachView({

@@ -2082,6 +2082,14 @@ body {
   overflow: hidden;
 }
 
+.coachProgramPanel { display: grid; gap: 14px; margin-bottom: 16px; padding: 20px 22px; border: 1px solid #bfe9df; border-radius: 8px; background: linear-gradient(135deg, #f0fdfa, #f8fbff); box-shadow: var(--shadow); }
+.coachProgramPanel > span, .coachProgramHeading span { color: #0d9488; font-size: 11px; font-weight: 800; }
+.coachProgramPanel.empty h2, .coachProgramHeading h2 { margin: 4px 0 6px; color: #0f172a; font-size: 20px; }.coachProgramPanel p, .coachProgramHeading p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
+.coachProgramGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }.coachProgramGrid article { display: grid; align-content: start; gap: 9px; padding: 14px; border: 1px solid #dbe7ef; border-radius: 8px; background: #fff; }.coachProgramGrid article.recommended { border-color: #5eead4; box-shadow: inset 0 3px 0 #14b8a6; }
+.coachCourseTop { display: flex; justify-content: space-between; gap: 8px; color: #0f766e; font-size: 10px; font-weight: 800; }.coachCourseTop strong { color: #0369a1; }.coachProgramGrid h3 { margin: 0; color: #0f172a; font-size: 14px; }.coachProgramGrid article > p { font-size: 11px; }.coachProgramGrid article > small { color: #0f766e; font-size: 10px; line-height: 1.5; }
+.coachCourseProgress { display: grid; gap: 5px; color: #64748b; font-size: 10px; }.coachCourseProgress i { display: block; height: 5px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }.coachCourseProgress b { display: block; height: 100%; border-radius: inherit; background: #14b8a6; }
+.coachCourseNext { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid #eef2f7; }.coachCourseNext b { color: #0f172a; font-size: 12px; }.coachCourseNext span, .coachCourseNext em { color: #64748b; font-size: 10px; font-style: normal; line-height: 1.5; }.coachCourseNext button { margin-top: 3px; min-height: 30px; font-size: 11px; }
+
 .avatarCoachSidebar,
 .avatarCoachMain {
   min-width: 0;
