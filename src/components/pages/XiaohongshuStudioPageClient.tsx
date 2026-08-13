@@ -8,6 +8,10 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { streamCreationImages } from "@/lib/client/creation-image-stream";
 import { type CreationApp } from "@/lib/apps/catalog";
 import type { AvatarVisualAsset } from "@/lib/avatar/types";
+import { getRemixCapabilityDefaults } from "@/lib/creation/remix-capability-registry";
+import { useRestoredWorkStream } from "@/lib/client/use-restored-work-stream";
+import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
+import type { StudioBootstrapWork } from "@/lib/creation/studio-bootstrap";
 
 type Card = { id: string; url: string; sectionTitle?: string };
 type Tab = "write" | "note" | "cards" | "preview";
@@ -40,37 +44,42 @@ const coverTypes = [
   { value: "xhs-real-scene", label: "真实场景型", note: "保单、笔记或桌面实拍感", previewUrl: "/examples/xiaohongshu-cover-types/scene.png" },
 ] as const;
 
-export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
+export function XiaohongshuStudioPageClient({ app, initialWork = null }: { app: CreationApp; initialWork?: StudioBootstrapWork | null }) {
   const searchParams = useSearchParams();
-  const [topic, setTopic] = useState("");
-  const [creationMode, setCreationMode] = useState("rewrite");
-  const [lengthMode, setLengthMode] = useState("standard");
-  const [content, setContent] = useState("");
-  const [cards, setCards] = useState<Card[]>([]);
-  const [coverId, setCoverId] = useState("");
-  const [headImage, setHeadImage] = useState<Card | null>(null);
+  const enteringFromRemix = searchParams.get("from") === "link-remix";
+  const defaults = getRemixCapabilityDefaults("xiaohongshu-studio");
+  const initialState = initialWork?.content_json?.xiaohongshuStudioState;
+  const initialSource = buildRemixStudioSource(initialWork?.app_run?.input_payload ?? {});
+  const initialContent = typeof initialState?.content === "string" ? initialState.content : initialWork?.content ?? "";
+  const initialRunActive = initialWork?.app_run?.status === "running" || initialState?.generationPending === true;
+  const [topic, setTopic] = useState(() => typeof initialState?.topic === "string" && initialState.topic.trim() ? initialState.topic : initialSource);
+  const [creationMode, setCreationMode] = useState(() => typeof initialState?.creationMode === "string" ? initialState.creationMode : String(defaults.creation_mode));
+  const [lengthMode, setLengthMode] = useState(() => initialState?.lengthMode === "long" ? "long" : String(defaults.length_mode));
+  const [content, setContent] = useState(initialContent);
+  const [cards, setCards] = useState<Card[]>(() => Array.isArray(initialState?.cards) ? initialState.cards as Card[] : []);
+  const [coverId, setCoverId] = useState(() => typeof initialState?.coverId === "string" ? initialState.coverId : "");
+  const [headImage, setHeadImage] = useState<Card | null>(() => initialState?.headImage && typeof initialState.headImage === "object" ? initialState.headImage as Card : null);
   const [style, setStyle] =
-    useState<(typeof visualStyles)[number]["value"]>("daily-sign");
+    useState<(typeof visualStyles)[number]["value"]>(() => visualStyles.some((item) => item.value === String(initialState?.style)) ? initialState?.style as (typeof visualStyles)[number]["value"] : "daily-sign");
   const [coverType, setCoverType] =
-    useState<(typeof coverTypes)[number]["value"]>("xhs-bold-text");
+    useState<(typeof coverTypes)[number]["value"]>(() => coverTypes.some((item) => item.value === String(initialState?.coverType)) ? initialState?.coverType as (typeof coverTypes)[number]["value"] : "xhs-bold-text");
   const [portraitImage, setPortraitImage] = useState("");
   const [portraitName, setPortraitName] = useState("");
   const [portraitError, setPortraitError] = useState("");
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(true);
   const [selectedAvatarId, setSelectedAvatarId] = useState("");
-  const [tab, setTab] = useState<Tab>("write");
-  const [loading, setLoading] = useState<"note" | "cards" | "">("");
-  const [message, setMessage] = useState("");
-  const [workId, setWorkId] = useState("");
+  const [tab, setTab] = useState<Tab>(() => initialRunActive ? "note" : ["write", "note", "cards", "preview"].includes(String(initialState?.tab)) ? initialState?.tab as Tab : initialContent ? "note" : "write");
+  const [loading, setLoading] = useState<"note" | "cards" | "">(initialRunActive ? "note" : "");
+  const [message, setMessage] = useState(initialRunActive ? "正在继续生成小红书笔记…" : "");
+  const [workId, setWorkId] = useState(initialWork?.id ?? "");
   const [saveStatus, setSaveStatus] = useState<
     "" | "saving" | "saved" | "error"
   >("");
-  const [previewMode, setPreviewMode] = useState<"long" | "album">("long");
-  const [activeSlide, setActiveSlide] = useState(0);
-  const [restoring, setRestoring] = useState(() =>
-    Boolean(searchParams.get("workId")?.trim()),
-  );
+  const [previewMode, setPreviewMode] = useState<"long" | "album">(() => initialState?.previewMode === "album" ? "album" : "long");
+  const [activeSlide, setActiveSlide] = useState(() => typeof initialState?.activeSlide === "number" ? initialState.activeSlide : 0);
+  const [restoring, setRestoring] = useState(() => Boolean(searchParams.get("workId")?.trim()) && !initialWork);
+  const [restoredGeneration, setRestoredGeneration] = useState(initialRunActive);
   const [fullImage, setFullImage] = useState<{
     url: string;
     label: string;
@@ -158,6 +167,7 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
             content?: string;
             content_json?: { xiaohongshuStudioState?: Record<string, unknown> };
             studio_asset_runs?: StudioAssetRun[];
+            app_run?: { status?: string; input_payload?: Record<string, unknown> } | null;
           };
         }>;
       })
@@ -165,8 +175,19 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
         const work = payload.work;
         const state = work?.content_json?.xiaohongshuStudioState;
         setWorkId(restoredId);
+        const restoredSource = buildRemixStudioSource(work?.app_run?.input_payload ?? {});
+        if (restoredSource) setTopic(restoredSource);
+        if (work?.app_run?.status === "running") {
+          const runValues = work.app_run.input_payload ?? {};
+          if (runValues.length_mode === "long" || runValues.length_mode === "standard") setLengthMode(runValues.length_mode);
+          setCreationMode("rewrite");
+          setTab("note");
+          setLoading("note");
+          setMessage("正在继续生成小红书笔记…");
+          setRestoredGeneration(true);
+        }
         if (state) {
-          if (typeof state.topic === "string") setTopic(state.topic);
+          if (typeof state.topic === "string" && state.topic.trim()) setTopic(state.topic);
           if (typeof state.creationMode === "string")
             setCreationMode(state.creationMode);
           if (typeof state.lengthMode === "string")
@@ -212,6 +233,23 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
       });
     return () => controller.abort();
   }, [searchParams, workId]);
+
+  useRestoredWorkStream({
+    workId,
+    enabled: restoredGeneration,
+    onContent: setContent,
+    onDone: (nextContent) => {
+      setContent(nextContent);
+      setLoading("");
+      setRestoredGeneration(false);
+      setMessage("笔记初稿已生成，可以继续编辑和生成配图。");
+    },
+    onError: (nextMessage) => {
+      setLoading("");
+      setRestoredGeneration(false);
+      setMessage(nextMessage);
+    },
+  });
 
   useEffect(() => {
     if (!workId || loading !== "cards" || !restoredAssetTaskRef.current) return;
@@ -662,14 +700,9 @@ export function XiaohongshuStudioPageClient({ app }: { app: CreationApp }) {
     setTab(next);
   }
 
-  if (restoring)
-    return (
-      <div className="xhsStudioPage page-content">
-        <p className="studioMessage">正在恢复未完成的小红书笔记…</p>
-      </div>
-    );
   return (
     <div className="xhsStudioPage page-content">
+      {restoring ? <div className="studioRestoreOverlay" role="status"><i /><span>{enteringFromRemix ? "正在准备小红书创作内容…" : "正在恢复小红书笔记…"}</span></div> : null}
       <div className="page-back-bar pageBackBar">
         <a className="back-btn backLink" href={appPath("/create")}>
           ← 返回创作广场

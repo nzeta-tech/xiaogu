@@ -39,7 +39,9 @@ import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingP
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
+import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
+import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 import { query } from "@/lib/db/client";
 
 type FieldValue = CreationFieldValue;
@@ -94,13 +96,14 @@ export async function executeCreationAppRun(input: {
   }
   const entry = typeof input.values?.app_entry === "string" ? input.values.app_entry.trim() : "";
   const effectiveApp = getEntryAdjustedApp(app, entry);
+  const values = input.values ?? {};
 
-  const thinkingSnapshot = effectiveApp.requiresThinking ? await tryGetLatestThinkingProfileSnapshot(input.userId) : null;
+  const needsThinkingSnapshot = effectiveApp.requiresThinking || app.slug === "link-remix" && normalizeRemixCapability(values.remix_target) === "moments";
+  const thinkingSnapshot = needsThinkingSnapshot ? await tryGetLatestThinkingProfileSnapshot(input.userId) : null;
   if (effectiveApp.requiresThinking && !thinkingSnapshot) {
     throw new Error("这个应用需要先完成思维问卷，再生成更像你的内容。");
   }
 
-  const values = input.values ?? {};
   const studioParent = stringifyCreationFieldValue(values.studio_parent);
   const isWechatStudioAssetStep = studioParent === "wechat-studio" && (app.slug === "wechat-images" || app.slug === "wechat-cover");
   const isXiaohongshuStudioAssetStep = studioParent === "xiaohongshu-studio" && (app.slug === "wechat-images" || app.slug === "wechat-cover");
@@ -121,6 +124,9 @@ export async function executeCreationAppRun(input: {
 
   const caseContext = buildCreationPromptContext(app, entry);
   const linkRemixResearch = app.slug === "link-remix" ? await buildLinkRemixResearchContext(values) : "";
+  const remixDefinition = app.slug === "link-remix" ? getRemixCapabilityDefinition(values.remix_target) : null;
+  const remixTargetApp = remixDefinition ? await tryGetCreationAppBySlug(remixDefinition.appSlug) : null;
+  const remixTargetContext = remixDefinition ? buildCreationPromptContext(remixDefinition.appSlug) : caseContext;
 
   const basePrompt = isPolicyRenewalCard
     ? "保单续费提醒卡使用服务端模板精确排版，客户与保单字段不发送给图片模型。"
@@ -131,7 +137,7 @@ export async function executeCreationAppRun(input: {
     : app.slug === "general-content"
       ? buildGeneralContentPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "link-remix"
-      ? buildLinkRemixPrompt(values, caseContext, effectiveApp.promptHint, linkRemixResearch)
+      ? buildLinkRemixPrompt(values, remixTargetContext, remixTargetApp?.promptHint ?? "", linkRemixResearch, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
     : app.slug === "traffic-copy"
       ? buildTrafficCopyPrompt(values, caseContext, effectiveApp.promptHint)
     : app.slug === "xiaohongshu-check"
@@ -226,7 +232,11 @@ export async function executeCreationAppRun(input: {
         appRunId: run.id,
         title: pendingTitle,
         content: "",
-        contentJson: app.slug === "xiaohongshu-studio" ? { batches: [], xiaohongshuStudioState: { topic: stringifyCreationFieldValue(values.topic), creationMode: stringifyCreationFieldValue(values.creation_mode), lengthMode: stringifyCreationFieldValue(values.length_mode), content: "" } } : { batches: [] },
+        contentJson: app.slug === "link-remix"
+          ? buildPendingRemixContentJson(values)
+          : app.slug === "xiaohongshu-studio"
+            ? { batches: [], xiaohongshuStudioState: { topic: stringifyCreationFieldValue(values.topic), creationMode: stringifyCreationFieldValue(values.creation_mode), lengthMode: stringifyCreationFieldValue(values.length_mode), content: "" } }
+            : { batches: [] },
       });
     }
   }
@@ -289,21 +299,24 @@ export async function executeCreationAppRun(input: {
         throw imageResult?.retryable ? new RetryableCreationRunError(errorMessage) : new Error(errorMessage);
       }
     } else {
-      const styleMode = app.slug === "write-copy" ? "general" : getMultiChannelCopyStyleMode(app.slug);
+      const styleMode = app.slug === "write-copy" || remixDefinition?.id === "moments"
+        ? "general"
+        : getMultiChannelCopyStyleMode(remixDefinition?.appSlug ?? app.slug);
       const creatorStyleResults: Array<{ id: string; label: string; content: string }> = [];
       // A full multi-channel run can contain ten publishable pieces, including
       // two long-form articles. Generate each channel separately so a model's
       // per-response output cap cannot leave the result at only the first
       // channel (normally the video scripts).
+      const isTrafficExecution = app.slug === "traffic-copy" || remixDefinition?.id === "traffic-copy";
       const prompts = app.slug === "write-copy"
         ? buildWriteCopyChannelPrompts(values, caseContext, thinkingSnapshot?.snapshot_json ?? null, thinkingSnapshot?.summary_json ?? null)
-        : app.slug === "traffic-copy"
+        : isTrafficExecution
           ? creatorStyles.map((style) => buildCreatorStylePrompt(style))
           : [prompt];
 
       for (const [promptIndex, channelPrompt] of prompts.entries()) {
         let currentOutput = "";
-        if (app.slug === "traffic-copy" && prompts.length > 1) {
+        if (isTrafficExecution && prompts.length > 1) {
           const tabNotice = `${promptIndex === 0 ? "" : "\n\n"}【正在生成：${creatorStyles[promptIndex].label}】\n\n`;
           result += tabNotice;
           await input.onEvent?.({ type: "delta", content: tabNotice });
@@ -313,7 +326,7 @@ export async function executeCreationAppRun(input: {
           currentOutput += chunk;
           await input.onEvent?.({ type: "delta", content: chunk });
         }
-        if (app.slug === "traffic-copy") {
+        if (isTrafficExecution) {
           const style = creatorStyles[promptIndex];
           creatorStyleResults.push({ id: style.id, label: style.label, content: currentOutput.trim() });
         }
@@ -331,10 +344,12 @@ export async function executeCreationAppRun(input: {
         }
       }
 
-      if (app.slug === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
+      if (app.slug === "xiaohongshu-studio" || remixDefinition?.id === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
 
       resultJson = {
-        contentJson: app.slug === "traffic-copy" && creatorStyleResults.length > 0
+        contentJson: app.slug === "link-remix"
+          ? buildLinkRemixResultJson(result, values, creatorStyleResults)
+          : app.slug === "traffic-copy" && creatorStyleResults.length > 0
           ? {
               plainText: result,
               batches: creatorStyleResults.map((style, index) => ({
@@ -500,6 +515,62 @@ export async function executeCreationAppRun(input: {
     result,
     resultJson,
     title,
+  };
+}
+
+function buildLinkRemixResultJson(result: string, values: Record<string, FieldValue>, creatorStyles: Array<{ id: string; label: string; content: string }> = []) {
+  const capability = values.remix_target;
+  const meta = getRemixResultMeta(capability);
+  const normalizedCapability = normalizeRemixCapability(capability);
+  const definition = getRemixCapabilityDefinition(capability);
+  if (normalizedCapability === "moments") {
+    return {
+      ...buildCreationOutputJson(result, ["moments"]),
+      capability: normalizedCapability,
+      effectiveAppSlug: definition.appSlug,
+      remixTarget: normalizedCapability,
+    };
+  }
+  const body = result.trim();
+  const firstLine = body.split("\n").find((line) => line.trim())?.replace(/^#{1,6}\s*/, "").trim();
+  return {
+    plainText: result,
+    capability: normalizedCapability,
+    effectiveAppSlug: definition.appSlug,
+    remixTarget: normalizedCapability,
+    ...(normalizedCapability === "wechat-studio" ? { wechatStudioState: {
+      topic: buildRemixStudioSource(values),
+      audience: stringifyCreationFieldValue(values.audience),
+      tone: stringifyCreationFieldValue(values.tone),
+      lengthMode: stringifyCreationFieldValue(values.lengthMode),
+      title: firstLine || meta.label,
+      content: body.replace(/^#\s+[^\n]+\n+/, "").trim(),
+      activeTab: "article",
+      generationPending: false,
+    } } : {}),
+    ...(normalizedCapability === "xiaohongshu-studio" ? { xiaohongshuStudioState: {
+      topic: buildRemixStudioSource(values),
+      creationMode: "rewrite",
+      lengthMode: stringifyCreationFieldValue(values.length_mode) || "standard",
+      content: body,
+      tab: "note",
+      generationPending: false,
+    } } : {}),
+    batches: creatorStyles.length > 0 ? creatorStyles.map((style, index) => ({
+      id: `creator-style-${style.id}-${index + 1}`,
+      label: style.label,
+      items: [{ id: `creator-style-${style.id}-${index + 1}-item`, title: style.label, body: style.content, viewMode: meta.viewMode, summary: style.content.slice(0, 120) }],
+    })) : body ? [{
+      id: meta.id,
+      label: meta.label,
+      items: [{
+        id: `${meta.id}-1`,
+        title: firstLine || meta.label,
+        body,
+        viewMode: meta.viewMode,
+        summary: body.replace(/\s+/g, " ").slice(0, 120),
+      }],
+    }] : [],
   };
 }
 
@@ -706,6 +777,8 @@ function buildLinkRemixPrompt(
   caseContext: string[],
   promptHint: string,
   researchContext = "",
+  thinkingSnapshot: ThinkingProfileSnapshot | null = null,
+  thinkingSummary: ThinkingProfileSummary | null = null,
 ) {
   const platform = stringifyCreationFieldValue(values.source_platform).trim() || "未说明平台";
   const url = stringifyCreationFieldValue(values.source_url).trim();
@@ -719,21 +792,7 @@ function buildLinkRemixPrompt(
   const evidence = stringifyCreationFieldValue(values.source_evidence).trim();
   const sourceText = stringifyCreationFieldValue(values.source_text).trim();
   const transcript = stringifyCreationFieldValue(values.source_transcript).trim();
-  const strategy = stringifyCreationFieldValue(values.remix_strategy).trim();
-  const articleLength = stringifyCreationFieldValue(values.article_length).trim();
   const angle = stringifyCreationFieldValue(values.remix_angle).trim();
-  const strategyGuidance: Record<string, string> = {
-    auto: "自动重写：优先遵循用户数字分身中的表达习惯、专业边界和账号特点，自然重组文章。",
-    warm: "温暖共情：在不改变信息的前提下，使用更有陪伴感、生活化的叙述节奏。",
-    professional: "专业解读：在不改变信息的前提下，使用更清晰、克制、有条理的专业表达。",
-    opinionated: "观点鲜明：在不改变信息的前提下，使用更有节奏和阅读张力的表达，但不夸张、不制造焦虑。",
-  };
-  const articleLengthGuidance: Record<string, string> = {
-    concise: "极简：约500–700字，只保留一个核心场景、一个判断和一组可执行动作。",
-    standard: "普通：约900–1200字，有完整的场景、观点展开和行动建议。",
-    long: "长文：约1400–1800字，充分展开场景、判断依据、边界与行动建议；绝不超过1800字。",
-  };
-
   const capability = normalizeRemixCapability(values.remix_target);
   const sourceMaterial = [
     `来源平台：${platform}`,
@@ -751,64 +810,19 @@ function buildLinkRemixPrompt(
     researchContext,
     angle ? `用户补充想法：${angle}` : "",
   ].filter(Boolean).join("\n\n");
-  const targetValues: Record<string, FieldValue> = {
-    ...values,
-    source: sourceMaterial,
-    topic: sourceMaterial,
-    creation_mode: "rewrite",
-    length_mode: stringifyCreationFieldValue(values.length_mode) || (articleLength === "long" ? "long" : "standard"),
-    lengthMode: articleLength === "long" ? "long" : articleLength === "concise" ? "concise" : "standard",
-    targets: ["moments"],
-  };
+  const targetValues = adaptRemixCapabilityInput(capability, values, sourceMaterial);
   const targetPrompt = capability === "traffic-copy"
     ? buildTrafficCopyPrompt(targetValues, caseContext, promptHint)
     : capability === "xiaohongshu-studio"
       ? buildXiaohongshuStudioPrompt(targetValues, caseContext)
       : capability === "moments"
-        ? buildWriteCopyPrompt(targetValues, caseContext, null, null)
+        ? buildWriteCopyPrompt(targetValues, caseContext, thinkingSnapshot, thinkingSummary)
         : buildWechatStudioPrompt(targetValues, caseContext);
 
   return [
     `你正在通过“爆款话题二创”使用小谷现有的“${remixCapabilityLabel(capability)}”正式创作能力。以下题材结构、交互语义和输出规则以该能力为准。`,
-    `改编表达方式：${strategyGuidance[strategy] ?? strategyGuidance.auto}`,
-    `长度偏好：${articleLengthGuidance[articleLength] ?? articleLengthGuidance.standard}`,
     "二创事实边界：保持原作品的话题、人物关系、时间、数据、案例、判断和行动建议，不得反转、泛化或虚构。不可核验或违规的表述只能删除或标记待核实；不得复刻原句、独特比喻或长段文字。不要在成稿中输出预检、评分、证据缺口或二创过程。",
     targetPrompt,
-  ].join("\n\n");
-
-  /* istanbul ignore next -- legacy prompt retained temporarily for migration comparison */
-  return [
-    "你现在在执行小谷应用：爆款话题二创。",
-    "这是一个面向保险顾问的内容再创作任务。链接可能只能提供有限的公开信息，因此不要声称已经读取到链接中不存在的全文、数据或画面。",
-    ...caseContext,
-    `应用提示：${promptHint}`,
-    `原作品平台：${platform}`,
-    `原作品链接：${url}`,
-    `原作品标题或开头：${sourceTitle || "未提供"}`,
-    `作者或账号：${sourceAuthor || "未提供"}`,
-    `详情页发布时间：${publishedAt || "未核验"}`,
-    `详情页点赞数：${likeCount || "未核验"}`,
-    `来源内容形态：${contentType || "未确认"}`,
-    `自动归类主题：${topic || "未确认"}`,
-    `自动提取标签：${tags || "未确认"}`,
-    `可核验事实证据摘要：${evidence || "未提供"}`,
-    `作品文字内容：${sourceText || "未提供"}`,
-    `作品语音转写：${transcript || "未提供"}`,
-    researchContext,
-    angle
-      ? `用户补充的想法建议：${angle}`
-      : "用户未补充想法建议，请结合用户的内容画像、保险顾问身份、目标客户和账号特点完成二创。",
-    `本次改编表达方式：${strategyGuidance[strategy] ?? strategyGuidance.auto}`,
-    `文章长度：${articleLengthGuidance[articleLength] ?? articleLengthGuidance.standard}`,
-    "先在内部做参考作品预检：检查发布时间是否在研究时间前30天内且可核验；点赞数是否为详情页明确标注且严格大于1000；链接是否是单条作品而非检索页；作者和事实证据是否清楚；是否为重复搬运、纯产品推销、无法访问或证据不足。任何硬过滤项不满足时，不把该作品的具体数据、案例或产品结论作为事实依据，也不要用猜测补齐；不得在最终渠道正文输出预检过程或结论。",
-    "仅供内部判断时，可按40分元数据评分：主题匹配12分、信息增量8分、来源清晰度7分、证据线索6分、时效与适用性4分、可转写性3分。24分以下时只借鉴可迁移结构，不直接套用具体事实。",
-    transcript ? "已有完整转写时，仅供内部判断可按100分转写评分：信息增量30分、证据强度20分、实施具体性15分、来源接近度10分、主题相关性10分、风险边界8分、编辑可用性4分、时效与可迁移性3分；总分低于70分，或信息增量低于18分、证据强度低于10分时，只保留结构与用户问题，不直接沿用具体结论。" : "未提供完整转写，不得声称已完成逐字稿级别分析。",
-    "这是忠实改写，不是改主题创作：必须保持原作品的话题、讨论对象、人物关系、时间地点、数据、案例、事实信息、判断结论和行动建议不变。不得把原内容换成新的目标人群、新的场景、新的案例或新的事实，也不得增删、反转或泛化具体结论。只允许结合用户数字分身的表达习惯或指定表达方式，重组段落、调整句式、衔接和叙述节奏，使文字成为原创表达。",
-    "对原作品中不可核验、违规或收益承诺类表述，不得编造替代事实；仅可删去该表述，或明确保留“待核实”提示。不得使用原句、独特比喻或长段复刻。",
-    "如果无法访问链接，只能基于平台、链接、转写、补充检索资料和用户指定题材完成原创选题与文案；不要编造原作品细节。不要在任何可发布渠道正文中输出“参考链接内容待核验”、评分、过滤结论、证据缺口、二创说明或你的分析过程。",
-    "所有保险产品、费率、收益、理赔、核保和政策信息都必须以用户提供且可核实的事实为准；缺少依据时写“待核实”或给出替换提示。不得承诺收益、保证理赔、制造恐慌或使用绝对化表述。",
-    "只输出一篇可直接发布的公众号文章，绝不能给出多个版本或多篇文章。严格以“## 微信公众号文章”开头，随后依次输出唯一的“标题：”、“导语：”和完整正文。标题必须具体、有辨识度，准确概括原话题的核心矛盾或判断；不得使用“关于保险的思考”“家庭保障提醒”“一篇文章讲清楚”这类泛标题。正文可使用 Markdown 三级标题作为文章内小标题；应有清晰的小标题、短段落、真实场景或可执行核对动作、克制的文末互动引导。必须遵守用户选择的文章长度，任何情况下不得超过1800字。不要输出参考作品评估、二创说明、评分、证据缺口或任何分析报告。",
-    "不要输出额外前言，不要输出 Markdown 表格，不要使用代码块。",
   ].join("\n\n");
 }
 

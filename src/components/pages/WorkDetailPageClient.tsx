@@ -7,6 +7,7 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import { parseCreationOutput, type CreationOutputBatch, type CreationOutputItem, type CreationOutputViewMode } from "@/lib/creation/output";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
+import { getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 
 type WorkDetail = {
   id: string;
@@ -14,6 +15,8 @@ type WorkDetail = {
   content: string;
   content_json?: {
     batches?: CreationOutputBatch[];
+    effectiveAppSlug?: string;
+    remixTarget?: string;
     wechatStudioState?: WechatStudioWorkState;
     xiaohongshuStudioState?: XiaohongshuStudioWorkState;
     presentationJobId?: string;
@@ -137,6 +140,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   });
   const [streamRetryKey, setStreamRetryKey] = useState(0);
   const workFrom = searchParams.get("from");
+  const pendingRemixTarget = searchParams.get("remix_target");
   const workReturnHref = workFrom === "admin" ? appPath("/admin?view=works#content") : workFrom === "dashboard" || workFrom === "today" ? appPath("/today") : appPath("/works");
   const workReturnLabel = workFrom === "admin" ? "返回内容管理" : workFrom === "dashboard" || workFrom === "today" ? "返回今日灵感" : "返回创作历史";
   usePageMeta({
@@ -389,12 +393,15 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const batches = useMemo(() => {
     if (!work) return [];
     if (work.platform === "link-remix") {
+      const remixTarget = getRemixCapabilityDefinition(work.app_run?.input_payload?.remix_target).id;
+      const fallbackContent = streamState.content || work.content || work.app_run?.result_text || "";
       return chooseBatchSource([
         parseLinkRemixOutput(streamState.content),
+        resultJsonBatches.filter((batch) => batch.items.some((item) => item.viewMode !== "plain") || remixTarget === "moments" || remixTarget === "traffic-copy"),
+        storedBatches.filter((batch) => batch.items.some((item) => item.viewMode !== "plain") || remixTarget === "moments" || remixTarget === "traffic-copy"),
         parseLinkRemixOutput(work.content),
         parseLinkRemixOutput(work.app_run?.result_text || ""),
-        storedBatches,
-        resultJsonBatches,
+        buildLinkRemixTargetBatch(fallbackContent, remixTarget),
       ]);
     }
     if (work.platform === "live-script") {
@@ -503,22 +510,35 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       : ""
   );
   const imageRetryable = streamState.retryable || Boolean(work?.app_run?.result_json?.retryable);
+  const isLinkRemixWork = work?.platform === "link-remix";
+  const storedRemixTarget = work?.app_run?.input_payload?.remix_target ?? work?.content_json?.remixTarget;
+  const linkRemixDefinition = isLinkRemixWork && storedRemixTarget
+    ? getRemixCapabilityDefinition(storedRemixTarget)
+    : null;
+  const linkRemixView = linkRemixDefinition?.result.view ?? null;
+
+  useEffect(() => {
+    if (!work || work.platform !== "link-remix") return;
+    const targetSlug = work.content_json?.effectiveAppSlug ?? linkRemixDefinition?.appSlug;
+    if (targetSlug !== "wechat-studio" && targetSlug !== "xiaohongshu-studio") return;
+    window.location.replace(appPath(`/apps/${targetSlug}?workId=${work.id}&from=link-remix`));
+  }, [linkRemixDefinition?.appSlug, work]);
   const isPolicyRenewalCardWork = work?.platform === "policy-renewal-card";
-  const isWechatStudioWork = work?.platform === "wechat-studio";
-  const isXiaohongshuStudioWork = work?.platform === "xiaohongshu-studio";
+  const isWechatStudioWork = work?.platform === "wechat-studio" || linkRemixView === "wechat-studio";
+  const isXiaohongshuStudioWork = work?.platform === "xiaohongshu-studio" || linkRemixView === "xiaohongshu-studio";
   const isPptMakerWork = work?.platform === "ppt-maker";
   const isImageWork = work?.platform === "image-card" || work?.platform === "wechat-images" || work?.platform === "video-cover" || isPolicyRenewalCardWork;
   const selectedContactQr = contactCard?.qr_codes.find((item) => item.id === contactQrId) ?? null;
   const effectiveContactOverlay: ContactOverlay | null = contactEnabled && selectedContactQr ? { qrUrl: selectedContactQr.qr_code_url, size: contactSize, ...contactPosition } : null;
   const imageScale = isImageWork ? Math.max(90, Math.min(140, fontScale)) : fontScale;
-  const isWriteCopyWork = work?.platform === "write-copy";
-  const isTrafficCopyWork = work?.platform === "traffic-copy";
+  const isWriteCopyWork = work?.platform === "write-copy" || linkRemixView === "write-copy";
+  const isTrafficCopyWork = work?.platform === "traffic-copy" || linkRemixView === "traffic-copy";
   const isMarketingCopyWork = work?.platform === "marketing-copy";
   const isSimpleCopyWork = isTrafficCopyWork || isMarketingCopyWork;
   const creatorStyleBatches = isTrafficCopyWork ? batches.filter((batch) => batch.id.startsWith("creator-style-")) : [];
+  const hasCreatorStyleResult = creatorStyleBatches.length > 0;
   const hasCreatorStyleTabs = creatorStyleBatches.length > 1;
   const isLeadCopyWork = work?.platform === "lead-copy";
-  const isLinkRemixWork = work?.platform === "link-remix";
   const isStructuredCopyWork = isWriteCopyWork || isLeadCopyWork;
   const isGeneralContentWork = work?.platform === "general-content";
   const isLetterWork = work?.platform === "letter";
@@ -552,7 +572,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
   const videoCoverHref = isTrafficCopyWork
-    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent)}&source_style_label=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.label ?? "默认的我" : "默认的我")}&source_batch_id=${encodeURIComponent(hasCreatorStyleTabs ? activeBatch?.id ?? "default" : "default")}`)
+    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(hasCreatorStyleResult ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent)}&source_style_label=${encodeURIComponent(hasCreatorStyleResult ? activeBatch?.label ?? "默认的我" : "默认的我")}&source_batch_id=${encodeURIComponent(hasCreatorStyleResult ? activeBatch?.id ?? "default" : "default")}`)
     : "";
   const getActiveItemId = (batch: CreationOutputBatch) => (
     batch.items.some((item) => item.id === activeItemIds[batch.id])
@@ -606,7 +626,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     } catch {
       window.sessionStorage.setItem(draftKey, JSON.stringify({ ...payload, reference_image: "" }));
     }
-    window.location.href = appPath("/apps/policy-renewal-card?from=create&entry=policy-renewal-card");
+    window.location.href = appPath("/apps/policy-renewal-card?from=create&entry=policy-renewal-card&restore_draft=1");
   }
 
   function handleExport(title: string, body: string, options?: { viewMode?: CreationOutputViewMode; theme?: WechatTheme }) {
@@ -732,7 +752,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     : undefined;
 
   if (loading) {
-    return <div className="pageStack"><section className="panel emptyState">正在加载作品详情...</section></div>;
+    const loadingLabel = pendingRemixTarget === "traffic-copy"
+      ? "正在进入口播文案创作工作台…"
+      : pendingRemixTarget === "moments"
+        ? "正在进入朋友圈文案创作工作台…"
+        : "正在加载作品详情…";
+    return <div className="pageStack"><section className="panel emptyState">{loadingLabel}</section></div>;
   }
 
   if (!work) {
@@ -760,7 +785,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               <h1>{noteTitle}</h1>
               <p>{noteContent ? `${noteContent.replace(/\s/g, "").length.toLocaleString("zh-CN")} 字 · 已按创作时保存的笔记结构还原` : "这篇笔记仍在创作中，已保留当前进度。"}</p>
             </div>
-            {!isAdminPreview ? <a className="studioPrimary" href={appPath(`/apps/xiaohongshu-studio?from=creation-works&workId=${work.id}`)}>继续编辑</a> : <span className="wechatStudioAdminBadge">管理员只读查看</span>}
+            {!isAdminPreview && !isLinkRemixWork ? <a className="studioPrimary" href={appPath(`/apps/xiaohongshu-studio?from=creation-works&workId=${work.id}`)}>继续编辑</a> : <span className="wechatStudioAdminBadge">{isLinkRemixWork ? "二创结果" : "管理员只读查看"}</span>}
           </section>
           {showResultDetails ? <section className="wechatStudioWorkMeta">
             <div><span>创作进度</span><strong>{formatXiaohongshuStudioStep(state?.tab)}</strong></div>
@@ -781,8 +806,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   if (isWechatStudioWork) {
     const state = work.content_json?.wechatStudioState;
-    const articleTitle = state?.title?.trim() || formatWorkTitle(work);
-    const articleContent = state?.content?.trim() || work.content.trim();
+    const storedArticle = state?.content?.trim() || work.content.trim();
+    const remixArticle = isLinkRemixWork ? splitLeadingMarkdownTitle(storedArticle) : null;
+    const articleTitle = state?.title?.trim() || remixArticle?.title || formatWorkTitle(work);
+    const articleContent = remixArticle?.body || storedArticle;
     const articleImages = [...(state?.images ?? []), ...(state?.uploadedImages ?? [])]
       .filter((image): image is WechatStudioImage & { url: string } => typeof image.url === "string" && Boolean(image.url.trim()));
     const coverUrl = typeof state?.cover?.url === "string" ? state.cover.url.trim() : "";
@@ -798,7 +825,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               <h1>{articleTitle}</h1>
               <p>{articleContent ? `${articleContent.replace(/\s/g, "").length.toLocaleString("zh-CN")} 字 · 已按创作时保存的版式还原` : "这篇文章仍在创作中，已保留当前进度。"}</p>
             </div>
-            {!isAdminPreview ? <a className="studioPrimary" href={appPath(`/apps/wechat-studio?from=creation-works&workId=${work.id}`)}>继续编辑</a> : <span className="wechatStudioAdminBadge">管理员只读查看</span>}
+            {!isAdminPreview && !isLinkRemixWork ? <a className="studioPrimary" href={appPath(`/apps/wechat-studio?from=creation-works&workId=${work.id}`)}>继续编辑</a> : <span className="wechatStudioAdminBadge">{isLinkRemixWork ? "二创结果" : "管理员只读查看"}</span>}
           </section>
           {showResultDetails ? <section className="wechatStudioWorkMeta">
             <div><span>创作进度</span><strong>{formatWechatStudioStep(state?.activeTab)}</strong></div>
@@ -819,7 +846,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   if (isTrafficCopyWork) {
     const trafficState = work.content_json?.trafficCopyState;
     const covers = Array.isArray(trafficState?.covers) ? trafficState.covers : [];
-    const activeTrafficContent = hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? "" : plainResultContent;
+    const activeTrafficContent = hasCreatorStyleResult ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent;
     const hasContent = work.app_run?.status === "succeeded" && Boolean(activeTrafficContent.trim());
     return (
       <div className="workDetailPage trafficCopyStudioPage">
@@ -849,9 +876,9 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
           <main className="trafficCopyStudioCanvas">
             <section className="trafficCopyDocumentCard">
-              {hasCreatorStyleTabs ? <nav className="creatorResultTabs" aria-label="分身作品版本">{creatorStyleBatches.map((batch) => <button className={resolvedBatchId === batch.id ? "active" : ""} key={batch.id} onClick={() => setActiveBatchId(batch.id)} type="button">{batch.label}</button>)}</nav> : null}
+              {hasCreatorStyleResult ? <nav className="creatorResultTabs" aria-label="分身作品版本">{creatorStyleBatches.map((batch) => <button className={resolvedBatchId === batch.id ? "active" : ""} key={batch.id} onClick={() => setActiveBatchId(batch.id)} type="button">{batch.label}</button>)}</nav> : null}
               <header className="trafficCopySectionHeader">
-                <div><span>01 · 文案</span><h2>{hasCreatorStyleTabs ? activeBatch?.label ?? "发布正文" : "发布正文"}</h2></div>
+                <div><span>01 · 文案</span><h2>{hasCreatorStyleResult ? activeBatch?.label ?? "发布正文" : "发布正文"}</h2></div>
                 <div className="trafficCopyDocumentActions">
                   <button className="instanceActionButton" disabled={!hasContent} onClick={() => void handleCopy("traffic-copy-studio", activeTrafficContent)} type="button">{copied["traffic-copy-studio"] ? "已复制" : "复制文案"}</button>
                   <button className="instanceActionButton" disabled={!hasContent} onClick={() => handleExport(formatWorkTitle(work), activeTrafficContent)} type="button">导出 Word</button>
@@ -2906,6 +2933,33 @@ function parseLinkRemixOutput(content: string): CreationOutputBatch[] {
     .filter((batch): batch is CreationOutputBatch => Boolean(batch));
 }
 
+function buildLinkRemixTargetBatch(
+  content: string,
+  target: unknown,
+): CreationOutputBatch[] {
+  const body = stripLinkRemixAuditTail(content.replace(/\r\n/g, "\n")).trim();
+  if (!body) return [];
+  const meta = getRemixResultMeta(target);
+  const firstLine = body.split("\n").find((line) => line.trim())?.replace(/^#{1,6}\s*/, "").trim();
+  return [{
+    id: meta.id,
+    label: meta.label,
+    items: [{
+      id: `${meta.id}-1`,
+      title: firstLine || meta.label,
+      body,
+      viewMode: meta.viewMode,
+      summary: body.replace(/\s+/g, " ").slice(0, 120),
+    }],
+  }];
+}
+
+function splitLeadingMarkdownTitle(content: string) {
+  const normalized = content.trim();
+  const match = normalized.match(/^#\s+([^\n]+)\n+([\s\S]*)$/);
+  return match ? { title: match[1].trim(), body: match[2].trim() } : { title: "", body: normalized };
+}
+
 function stripLinkRemixAuditTail(content: string) {
   const auditStart = content.search(/(?:^|\n)(?:#{1,3}\s*)?(?:参考作品评估|二创说明|硬过滤结果|元数据评分[（(]40分[）)])/m);
   return auditStart >= 0 ? content.slice(0, auditStart).trimEnd() : content;
@@ -4010,6 +4064,7 @@ function isMultiChannelCopyPlatform(platform?: string | null) {
 
 function supportsWorkStreaming(platform: string) {
   return new Set([
+    "link-remix",
     "write-copy",
     "lead-copy",
     "traffic-copy",

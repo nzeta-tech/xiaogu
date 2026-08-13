@@ -8,6 +8,7 @@ import { enqueueSourceInspectionTask, SOURCE_INSPECTION_PRIORITIES } from "@/lib
 import { inferHotTopicCategory } from "@/lib/topics/rules";
 import { transcribePublicMedia } from "@/lib/creation/transcribe-public-media";
 import { getLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
+import { isWechatArticleUrl } from "@/lib/creation/link-remix-source";
 
 const allowedHosts = /(^|\.)((douyin\.com)|(weixin\.qq\.com)|(channels\.weixin\.qq\.com)|(xiaohongshu\.com)|(xhslink\.com))$/i;
 
@@ -31,6 +32,13 @@ export async function POST(request: Request) {
   if (!isAgentExecution && !isAdminInspection) {
     const cached = await getLinkRemixSourceCache(parsed.toString());
     if (cached) return Response.json({ ...cached.result, cacheHit: true, cacheExpiresAt: cached.expiresAt }, { headers: { "cache-control": "private, no-store" } });
+  }
+  if (!isAgentExecution && isWechatArticleUrl(parsed.toString())) {
+    try {
+      return await inspectWechatArticleSource(parsed);
+    } catch (error) {
+      return Response.json({ error: error instanceof Error ? error.message : "公众号文章暂时无法解析。" }, { status: 502 });
+    }
   }
   if (!isAgentExecution && process.env.LOCAL_AGENT_ENABLED === "1") {
     const availability = await getLinkRemixAvailability();
@@ -196,6 +204,12 @@ async function inspectWechatArticleSource(parsed: URL) {
   if (!response.ok) return Response.json({ error: `公众号文章暂时不可读（${response.status}）。` }, { status: 502 });
   const html = await response.text();
   const finalUrl = response.url || parsed.toString();
+  if (!isWechatArticleUrl(finalUrl)) {
+    return Response.json({ error: "公众号链接跳转到了非文章页面。" }, { status: 400 });
+  }
+  if (/环境异常|完成验证|访问过于频繁|当前环境存在异常/.test(html)) {
+    return Response.json({ status: "unavailable", finalUrl, fields: {}, note: "微信要求完成访问验证，暂时无法读取文章正文。" });
+  }
   const title = firstMeta(html, ["og:title", "twitter:title"]) || firstTitle(html) || extractWechatArticleTitle(html);
   const description = firstMeta(html, ["og:description", "description"]);
   const articleText = extractWechatArticleText(html);
@@ -211,7 +225,7 @@ async function inspectWechatArticleSource(parsed: URL) {
     }).filter(([, value]) => Boolean(value?.trim())),
   );
   return Response.json({
-    status: articleText || Object.keys(fields).length > 1 ? "partial" : "unavailable",
+    status: articleText.length >= 100 ? "deep" : Object.keys(fields).length > 1 ? "partial" : "unavailable",
     finalUrl,
     thumbnailUrl: firstMeta(html, ["og:image", "twitter:image"]),
     fields,

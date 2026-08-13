@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import BaseMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { streamCreationImages } from "@/lib/client/creation-image-stream";
 import { articleDocx } from "@/lib/client/docx";
 import { getCreationAppBySlug, type CreationApp } from "@/lib/apps/catalog";
+import { getRemixCapabilityDefaults } from "@/lib/creation/remix-capability-registry";
+import { useRestoredWorkStream } from "@/lib/client/use-restored-work-stream";
+import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
+import type { StudioBootstrapWork } from "@/lib/creation/studio-bootstrap";
 
 type GeneratedImage = { id: string; url: string; sectionIndex?: number; sectionTitle?: string };
 type StudioAssetRun = { id: string; app_slug: "wechat-images" | "wechat-cover"; status: string; error_message?: string | null };
@@ -82,27 +87,35 @@ const layouts = [
 
 const STYLE_USAGE_KEY = "wechat-studio:style-usage";
 
-export function WechatStudioPageClient({ app }: { app: CreationApp }) {
-  const [topic, setTopic] = useState("");
-  const [audience, setAudience] = useState("young-family");
-  const [tone, setTone] = useState("professional");
-  const [lengthMode, setLengthMode] = useState<"minimal" | "standard" | "long">("minimal");
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [style, setStyle] = useState(styles[0]?.value ?? "documentary");
-  const [layout, setLayout] = useState<(typeof layouts)[number]["value"]>("clean");
-  const [images, setImages] = useState<GeneratedImage[]>([]);
-  const [uploadedImages, setUploadedImages] = useState<GeneratedImage[]>([]);
-  const [cover, setCover] = useState<GeneratedImage | null>(null);
-  const [loading, setLoading] = useState<"article" | "assets" | "publish" | "" >("");
-  const [activeTab, setActiveTab] = useState<"write" | "article" | "visual" | "layout" | "draft">("write");
+export function WechatStudioPageClient({ app, initialWork = null }: { app: CreationApp; initialWork?: StudioBootstrapWork | null }) {
+  const searchParams = useSearchParams();
+  const enteringFromRemix = searchParams.get("from") === "link-remix";
+  const defaults = getRemixCapabilityDefaults("wechat-studio");
+  const initialState = initialWork?.content_json?.wechatStudioState;
+  const initialSource = buildRemixStudioSource(initialWork?.app_run?.input_payload ?? {});
+  const initialContent = typeof initialState?.content === "string" ? initialState.content : initialWork?.content ?? "";
+  const initialRunActive = initialWork?.app_run?.status === "running" || initialState?.generationPending === true;
+  const [topic, setTopic] = useState(() => typeof initialState?.topic === "string" && initialState.topic.trim() ? initialState.topic : initialSource);
+  const [audience, setAudience] = useState(() => typeof initialState?.audience === "string" ? initialState.audience : String(defaults.audience));
+  const [tone, setTone] = useState(() => typeof initialState?.tone === "string" ? initialState.tone : String(defaults.tone));
+  const [lengthMode, setLengthMode] = useState<"minimal" | "standard" | "long">(() => initialState?.lengthMode === "standard" || initialState?.lengthMode === "long" ? initialState.lengthMode : defaults.lengthMode as "minimal" | "standard" | "long");
+  const [title, setTitle] = useState(() => typeof initialState?.title === "string" ? initialState.title : initialWork?.title?.replace(/\s*[｜|].*$/, "") ?? "");
+  const [content, setContent] = useState(initialContent);
+  const [style, setStyle] = useState(() => typeof initialState?.style === "string" ? initialState.style : styles[0]?.value ?? "documentary");
+  const [layout, setLayout] = useState<(typeof layouts)[number]["value"]>(() => typeof initialState?.layout === "string" && layouts.some((item) => item.value === initialState.layout) ? initialState.layout as (typeof layouts)[number]["value"] : "clean");
+  const [images, setImages] = useState<GeneratedImage[]>(() => Array.isArray(initialState?.images) ? initialState.images as GeneratedImage[] : []);
+  const [uploadedImages, setUploadedImages] = useState<GeneratedImage[]>(() => Array.isArray(initialState?.uploadedImages) ? initialState.uploadedImages as GeneratedImage[] : []);
+  const [cover, setCover] = useState<GeneratedImage | null>(() => initialState?.cover && typeof initialState.cover === "object" ? initialState.cover as GeneratedImage : null);
+  const [loading, setLoading] = useState<"article" | "assets" | "publish" | "" >(initialRunActive ? "article" : "");
+  const [activeTab, setActiveTab] = useState<"write" | "article" | "visual" | "layout" | "draft">(() => initialRunActive ? "article" : ["write", "article", "visual", "layout", "draft"].includes(String(initialState?.activeTab)) ? initialState?.activeTab as "write" | "article" | "visual" | "layout" | "draft" : initialContent ? "article" : "write");
   const [styleUsage, setStyleUsage] = useState<Record<string, number>>({});
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(initialRunActive ? "正在继续生成公众号文章…" : "");
   const [publishState, setPublishState] = useState<"" | "draft" | "published">("");
   const [account, setAccount] = useState<{ connected: boolean; accountName?: string } | null>(null);
-  const [workId, setWorkId] = useState("");
+  const [workId, setWorkId] = useState(initialWork?.id ?? "");
   const [saveStatus, setSaveStatus] = useState<"" | "saving" | "saved" | "error">("");
-  const [restoring, setRestoring] = useState(true);
+  const [restoring, setRestoring] = useState(() => Boolean(searchParams.get("workId")?.trim()) && !initialWork);
+  const [restoredGeneration, setRestoredGeneration] = useState(initialRunActive);
   const [copyNotice, setCopyNotice] = useState("");
   const [fullImage, setFullImage] = useState<{ url: string; label: string } | null>(null);
   const imageGenerationRef = useRef(false); const restoredAssetTaskRef = useRef(false);
@@ -140,13 +153,25 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     void fetch(apiPath(`/api/works/${restoredId}`), { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("草稿读取失败");
-        return response.json() as Promise<{ work?: { title?: string; content?: string; content_json?: { wechatStudioState?: Record<string, unknown> }; studio_asset_runs?: StudioAssetRun[] } }>;
+        return response.json() as Promise<{ work?: { title?: string; content?: string; content_json?: { wechatStudioState?: Record<string, unknown> }; studio_asset_runs?: StudioAssetRun[]; app_run?: { status?: string; input_payload?: Record<string, unknown> } | null } }>;
       })
       .then((payload) => {
         const work = payload.work; const state = work?.content_json?.wechatStudioState;
         setWorkId(restoredId);
+        const restoredSource = buildRemixStudioSource(work?.app_run?.input_payload ?? {});
+        if (restoredSource) setTopic(restoredSource);
+        if (work?.app_run?.status === "running") {
+          const runValues = work.app_run.input_payload ?? {};
+          if (typeof runValues.audience === "string") setAudience(runValues.audience);
+          if (typeof runValues.tone === "string") setTone(runValues.tone);
+          if (runValues.lengthMode === "minimal" || runValues.lengthMode === "standard" || runValues.lengthMode === "long") setLengthMode(runValues.lengthMode);
+          setActiveTab("article");
+          setLoading("article");
+          setMessage("正在继续生成公众号文章…");
+          setRestoredGeneration(true);
+        }
         if (state) {
-          if (typeof state.topic === "string") setTopic(state.topic);
+          if (typeof state.topic === "string" && state.topic.trim()) setTopic(state.topic);
           if (typeof state.audience === "string") setAudience(state.audience);
           if (typeof state.tone === "string") setTone(state.tone);
           if (state.lengthMode === "minimal" || state.lengthMode === "standard" || state.lengthMode === "long") setLengthMode(state.lengthMode);
@@ -173,6 +198,29 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     return () => controller.abort();
   // The work id is fixed for the lifetime of this mounted workspace.
   }, []);
+
+  useRestoredWorkStream({
+    workId,
+    enabled: restoredGeneration,
+    onContent: (nextContent) => {
+      const next = splitArticle(nextContent);
+      setTitle(next.title);
+      setContent(next.content);
+    },
+    onDone: (nextContent) => {
+      const next = splitArticle(nextContent);
+      setTitle(next.title);
+      setContent(next.content);
+      setLoading("");
+      setRestoredGeneration(false);
+      setMessage("文章初稿已生成，可以继续编辑和选择配图。");
+    },
+    onError: (nextMessage) => {
+      setLoading("");
+      setRestoredGeneration(false);
+      setMessage(nextMessage);
+    },
+  });
 
   useEffect(() => {
     if (!workId || loading !== "assets" || !restoredAssetTaskRef.current) return;
@@ -430,9 +478,8 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
     setMessage(deliveryWindow ? "Word 已打开，请使用浏览器的保存或分享功能保存。 " : "富文本文章已下载为 Word 文档。 ");
   }
 
-  if (restoring) return <div className="wechatStudioPage page-content"><p className="studioMessage">正在恢复未完成的公众号文章…</p></div>;
-
   return <div className="wechatStudioPage page-content">
+    {restoring ? <div className="studioRestoreOverlay" role="status"><i /><span>{enteringFromRemix ? "正在准备公众号创作内容…" : "正在恢复公众号文章…"}</span></div> : null}
     <div className="page-back-bar pageBackBar"><a className="back-btn backLink" href={appPath("/create")}>← 返回创作广场</a><span className="subpageBreadcrumb">创作广场 / 公众号文章创作</span></div>
     <section className="wechatStudioHero">
       <div><span>微信公众号创作工作台</span><h1>一篇好文章，从想法到发布</h1><p>先把真实想法说清楚，剩下的文案、配图与发布流程交给我们。</p></div>
@@ -444,7 +491,7 @@ export function WechatStudioPageClient({ app }: { app: CreationApp }) {
         <div className="studioSectionTitle"><div><span>文章创作</span><h2>从一个真实想法开始</h2></div><em>{app.points} 积分 / 篇</em></div>
         <label className="studioTopic"><span>这篇文章想讲什么</span><textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="写下主题、真实经历、读者的问题，或必须保留的观点。越具体，文章越像你。" maxLength={6000} /></label>
         <div className="studioChoices"><fieldset><legend>写给谁看</legend>{app.fields.find((field) => field.id === "audience")?.options?.map((option) => <button type="button" className={audience === option.value ? "active" : ""} onClick={() => setAudience(option.value)} key={option.value}>{option.label}</button>)}</fieldset><fieldset><legend>文章写作风格 <small>只影响文字，不影响配图</small></legend>{app.fields.find((field) => field.id === "tone")?.options?.map((option) => <button type="button" className={tone === option.value ? "active" : ""} onClick={() => setTone(option.value)} key={option.value}>{option.label}</button>)}</fieldset></div>
-        <fieldset className="studioLengthChoices"><legend>正文篇幅</legend>{([['minimal', '极简', '约 600 字 · 推荐'], ['standard', '常规', '约 1200 字'], ['long', '长文', '约 1800 字']] as const).map(([value, label, description]) => <button type="button" className={lengthMode === value ? "active" : ""} onClick={() => setLengthMode(value)} key={value}><strong>{label}</strong><span>{description}</span></button>)}</fieldset>
+        <fieldset className="studioLengthChoices"><legend>正文篇幅</legend>{(app.fields.find((field) => field.id === "lengthMode")?.options ?? []).map((option) => <button type="button" className={lengthMode === option.value ? "active" : ""} onClick={() => setLengthMode(option.value as "minimal" | "standard" | "long")} key={option.value}><strong>{option.label.split(" · ")[0]}</strong><span>{option.label.split(" · ").slice(1).join(" · ")}{option.badge ? ` · ${option.badge}` : ""}</span></button>)}</fieldset>
         <div className="studioStepActions"><span />{content ? <><button className="studioSecondary" type="button" onClick={generateArticle} disabled={Boolean(loading)}>{loading === "article" ? "正在重新生成…" : "重新生成"}</button><button className="studioPrimary" type="button" onClick={() => void moveToTab("article")}>继续使用已有文章 →</button></> : <button className="studioPrimary" type="button" onClick={generateArticle} disabled={Boolean(loading)}>{loading === "article" ? "正在写文章…" : "生成文章初稿 →"}</button>}</div>
       </section>
       <aside className="wechatStudioAside"><span>本次会帮你完成</span><strong>标题、开场、正文结构、收尾行动和阅读节奏</strong><p>所有涉及数据、案例、产品规则的内容，都建议在发布前再核对一次。</p></aside>

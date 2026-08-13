@@ -6,12 +6,13 @@ import { checkLinkRemixDependencies, formatDependencyFailure } from "@/lib/creat
 import { buildWorkTitle } from "@/lib/creation/work-title";
 import { query } from "@/lib/db/client";
 import { isEmptyCreationFieldValue } from "@/lib/creation/output";
-import { isSupportedLinkRemixUrl } from "@/lib/creation/link-remix-source";
+import { isSupportedLinkRemixUrl, isWechatArticleUrl } from "@/lib/creation/link-remix-source";
 import { creationRequestId, normalizeCreationTraceId, trySaveCreationDiagnostic } from "@/lib/creation/diagnostics";
 import { tryCreateCreationTask, tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
 import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
 import { validateCreationFieldLengths } from "@/lib/creation/input-validation";
+import { buildPendingRemixContentJson, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -30,9 +31,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
   const values = body.values ?? {};
+  const linkRemixSourceUrl = typeof values.source_url === "string" ? values.source_url : "";
+  const isServerInspectableWechatArticle = app.slug === "link-remix" && isWechatArticleUrl(linkRemixSourceUrl);
 
-
-  if (app.slug === "link-remix" && !(typeof values.source_transcript === "string" && values.source_transcript.trim())) {
+  if (app.slug === "link-remix" && !isServerInspectableWechatArticle && !(typeof values.source_transcript === "string" && values.source_transcript.trim())) {
     const availability = await getLinkRemixAvailability();
     if (!availability.available) {
       return Response.json({ error: availability.reason, code: "LOCAL_AGENT_OFFLINE" }, { status: 503 });
@@ -51,7 +53,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   if (!quota.ok) return quota.response;
 
   if (app.slug === "link-remix" && !isSupportedLinkRemixUrl(typeof values.source_url === "string" ? values.source_url : "")) {
-    return Response.json({ error: "爆款话题二创目前仅支持抖音和微信视频号作品链接。" }, { status: 400 });
+    return Response.json({ error: "爆款话题二创目前仅支持抖音、微信视频号和公众号文章链接。" }, { status: 400 });
   }
 
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
@@ -65,6 +67,15 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   });
   if (missingField) {
     return Response.json({ error: `${missingField.label}还没有填写。` }, { status: 400 });
+  }
+  if (app.slug === "link-remix") {
+    const targetFields = getRemixCapabilitySettings(values.remix_target);
+    const targetLengthError = validateCreationFieldLengths(targetFields, values);
+    if (targetLengthError) return Response.json({ error: targetLengthError, code: "INPUT_TOO_LONG" }, { status: 400 });
+    const missingTargetField = targetFields.find((field) => field.required && isEmptyCreationFieldValue(values[field.id]));
+    if (missingTargetField) {
+      return Response.json({ error: `${missingTargetField.label}还没有填写。` }, { status: 400 });
+    }
   }
   if (app.slug === "image-card" && !isImageCardRemix && isEmptyCreationFieldValue(values.source)) {
     return Response.json({ error: "请填写卡片内容，或切换为上传图片进行二创。" }, { status: 400 });
@@ -113,7 +124,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     appCode: app.slug,
     title: pendingTitle,
     content: "",
-    contentJson: { batches: [] },
+    contentJson: app.slug === "link-remix"
+      ? buildPendingRemixContentJson(values)
+      : { batches: [] },
     sourceChannel: app.slug,
     complianceRisk: "unchecked",
     creationTaskId: creationTask?.id ?? null,

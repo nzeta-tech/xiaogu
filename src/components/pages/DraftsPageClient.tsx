@@ -368,9 +368,13 @@ function TaskHistory({ tasks, loading }: { tasks: CreationTaskItem[]; loading: b
   return <div className="creationTaskItems">{tasks.map((task) => {
     const sourceTitle = typeof task.source.source_title === "string" ? task.source.source_title : "";
     const targetLabel = typeof task.source.targetLabel === "string" ? task.source.targetLabel : "";
+    const remixTarget = typeof task.source.remix_target === "string" ? task.source.remix_target : "";
     const statusLabel = task.status === "completed" ? "已完成" : task.status === "partial" ? "部分完成" : task.status === "failed" ? "失败" : task.status === "running" ? "创作中" : "待创作";
+    const targetStudio = remixTarget === "wechat-studio" || remixTarget === "xiaohongshu-studio" ? remixTarget : "";
     const href = task.latestWorkId
-      ? appPath(`/works/${task.latestWorkId}?from=creation-works&entry=link-remix`)
+      ? targetStudio
+        ? appPath(`/apps/${targetStudio}?workId=${task.latestWorkId}&from=link-remix`)
+        : appPath(`/works/${task.latestWorkId}?from=creation-works&entry=link-remix&remix_target=${encodeURIComponent(remixTarget)}`)
       : appPath(`/apps/link-remix?source_url=${encodeURIComponent(typeof task.source.source_url === "string" ? task.source.source_url : "")}`);
     return <a className="creationTaskItem" href={href} key={task.id}>
       <span className="creationTaskIcon" aria-hidden="true">↗</span>

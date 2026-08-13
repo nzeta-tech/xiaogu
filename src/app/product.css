@@ -9446,11 +9446,7 @@ body .linkRemixMetadataGrid .creationInput { min-height: 32px; padding: 6px 8px;
 body .linkRemixMetadataGrid .linkRemixMetadataEvidence { grid-column: 1 / -1; }
 body .linkRemixMetadataGrid .creationTextarea { min-height: 54px !important; padding: 7px 8px; font-size: 12px; line-height: 1.55; }
 
-body .linkRemixCreateForm #creation-field-remix_strategy { border-color: #b7ded5 !important; background: #fcfffe; }
 
-body .linkRemixCreateForm .linkRemixStrategyField .choiceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-body .linkRemixCreateForm .linkRemixStrategyField .choiceButton { min-height: 92px; padding: 14px !important; color: #35504b; font-size: 13px; line-height: 1.55; text-align: left; white-space: normal; }
-body .linkRemixCreateForm .linkRemixStrategyField .choiceButton.active { border-color: #0f766e; background: #eaf8f4; color: #0d514a; box-shadow: inset 0 0 0 1px #0f766e; }
 body .linkRemixCreateForm .linkRemixLengthField .choiceGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 body .linkRemixCreateForm .linkRemixLengthField .choiceButton { min-height: 54px; padding: 11px 14px !important; font-size: 13px; text-align: center; white-space: normal; }
 
@@ -9464,6 +9460,10 @@ body .linkRemixManualSource > div { display: grid; gap: 10px; grid-template-colu
 body .linkRemixManualSource label { display: grid; gap: 5px; }
 body .linkRemixManualSource label > span { color: #94a3b8; font-size: 11px; font-weight: 650; }
 body .linkRemixManualSource .creationTextarea { min-height: 112px !important; padding: 9px; font-size: 12px; line-height: 1.6; }
+body .linkRemixPersonalThought { display: grid; gap: 7px; }
+body .linkRemixPersonalThought > span { color: #38504c; font-size: 12px; font-weight: 700; }
+body .linkRemixPersonalThought > span em { color: #94a3b8; font-size: 11px; font-style: normal; font-weight: 500; margin-left: 5px; }
+body .linkRemixPersonalThought .creationTextarea { min-height: 96px !important; padding: 10px 12px; font-size: 12px; line-height: 1.65; }
 
 body .linkRemixTranscriptPanel { border: 1px solid #b7ded5; border-radius: 12px; background: #fcfffe; overflow: hidden; }
 body .linkRemixTranscriptHeader { align-items: center; border-bottom: 1px solid #d8ebe6; display: flex; gap: 12px; justify-content: space-between; padding: 13px 15px; }
@@ -9486,9 +9486,14 @@ body .linkRemixCreateForm .linkRemixExtractedContent {
 
 body .linkRemixCreateForm .linkRemixExtractedContent .field-title { color: #145c54; font-size: 16px !important; }
 body .linkRemixCreateForm .linkRemixExtractedContent .creationTextarea { min-height: 300px !important; padding: 14px; font-size: 14px; line-height: 1.8; }
-body .linkRemixCreateForm #creation-field-remix_angle .creationTextarea { min-height: 104px !important; }
 body .linkRemixCreateForm .linkRemixInspectControls { margin-top: 12px; }
 body .linkRemixCreateForm .linkRemixInspectControls span { flex: 1 1 260px; font-size: 11px; }
+body .linkRemixExtractionArea { display: grid; gap: 12px; }
+body .wechatStudioPage,
+body .xhsStudioPage { position: relative; }
+body .studioRestoreOverlay { align-items: center; background: rgba(255, 255, 255, .9); border: 1px solid #dbe7e4; border-radius: 12px; box-shadow: 0 8px 28px rgba(31, 67, 60, .1); display: flex; gap: 10px; left: 50%; padding: 12px 16px; position: absolute; top: 72px; transform: translateX(-50%); z-index: 20; }
+body .studioRestoreOverlay i { animation: linkRemixTranscriptPulse 1s ease-in-out infinite; background: #14b8a6; border-radius: 50%; height: 8px; width: 8px; }
+body .studioRestoreOverlay span { color: #35504b; font-size: 12px; font-weight: 700; white-space: nowrap; }
 body .linkRemixCreateForm .linkRemixSourcePreview { width: min(220px, 100%); }
 body .linkRemixAppPage .creationStickyAction .submitButton:disabled {
   border-color: #cbd5e1 !important;

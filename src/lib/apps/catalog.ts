@@ -1,5 +1,5 @@
 export type CreationCategoryId = "content" | "ip" | "growth";
-import { remixCapabilityOptions } from "@/lib/creation/capabilities";
+import { remixCapabilityOptions } from "../creation/capabilities.ts";
 
 export type CreationFieldType = "textarea" | "select" | "multiselect" | "radio" | "file" | "text" | "text_or_file";
 
@@ -102,8 +102,13 @@ export const creationApps: CreationApp[] = [
       { id: "audience", label: "写给谁看", type: "radio", required: true, options: [
         { label: "年轻家庭", value: "young-family" }, { label: "宝妈 / 宝爸", value: "parents" }, { label: "职场人", value: "professionals" }, { label: "已有客户", value: "existing-clients" },
       ] },
-      { id: "tone", label: "表达方式", type: "radio", required: true, options: [
+      { id: "tone", label: "文章写作风格", type: "radio", required: true, options: [
         { label: "专业但易懂", value: "professional" }, { label: "温和有共鸣", value: "warm" }, { label: "观点鲜明", value: "insightful" },
+      ] },
+      { id: "lengthMode", label: "正文篇幅", type: "radio", required: true, options: [
+        { label: "极简 · 约 600 字", value: "minimal", badge: "推荐" },
+        { label: "常规 · 约 1200 字", value: "standard" },
+        { label: "长文 · 约 1800 字", value: "long" },
       ] },
     ],
   },
@@ -203,7 +208,7 @@ export const creationApps: CreationApp[] = [
         label: "粘贴分享链接",
         type: "text",
         required: true,
-        placeholder: "粘贴抖音或微信视频号的公开作品链接",
+        placeholder: "粘贴抖音、微信视频号或公众号文章链接",
         maxLength: 2000,
       },
       { id: "source_title", label: "原作品标题或文案开头", type: "text", placeholder: "从作品详情页复制，不要只填搜索结果标题", maxLength: 240 },
@@ -223,29 +228,6 @@ export const creationApps: CreationApp[] = [
         required: true,
         helper: "这里直接使用对应的正式创作能力；对应能力的规则更新后，二创会同步生效。",
         options: remixCapabilityOptions,
-      },
-      {
-        id: "remix_strategy",
-        label: "改编表达方式（可选）",
-        type: "radio",
-        helper: "默认自动重写：话题、人物、事实与结论保持不变，只调整表达和文章组织。",
-        options: [
-          { label: "自动重写｜按你的数字分身自然改写", value: "auto" },
-          { label: "温暖共情｜更有陪伴感和生活化表达", value: "warm" },
-          { label: "专业解读｜更清晰、克制、有条理", value: "professional" },
-          { label: "观点鲜明｜更有节奏和阅读张力", value: "opinionated" },
-        ],
-      },
-      {
-        id: "article_length",
-        label: "内容长度",
-        type: "radio",
-        required: true,
-        options: [
-          { label: "精简", value: "concise", hint: "口播和朋友圈更短，图文保留核心判断" },
-          { label: "标准", value: "standard", hint: "按所选题材的常规长度输出" },
-          { label: "深度", value: "long", hint: "适合需要充分展开的公众号或小红书内容" },
-        ],
       },
       {
         id: "remix_angle",
