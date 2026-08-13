@@ -10,7 +10,7 @@ import type {
 } from "@/lib/avatar/types";
 import { listAvatarVisualAssets } from "@/lib/avatar/visual-assets";
 
-export async function getAvatarWorkspace(userId: string, skillScope: "personal" | "platform" = "personal") {
+export async function getAvatarWorkspace(userId: string, skillScope: "personal" | "platform" = "personal", trainingPurpose: "content" | "lead-coach" = "content") {
   const [memories, sources, proposals, versions, privacy, usage, photos, trainingRuns, skills, skillVersions] = await Promise.all([
     query<AvatarMemoryItem>(
       `select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, metadata_json, created_at, updated_at
@@ -48,20 +48,20 @@ export async function getAvatarWorkspace(userId: string, skillScope: "personal" 
       [userId],
     ),
     query<Omit<AvatarCreatorSkill, "versions">>(
-      `select id, name, creator_name, status, skill_scope, latest_version, identity_card, identity_card_draft, created_at, updated_at
+      `select id, name, creator_name, status, skill_scope, training_purpose, latest_version, identity_card, identity_card_draft, created_at, updated_at
          from avatar_creator_skills
-        where skill_scope = $2 and ($2 = 'platform' or user_id = $1)
+        where skill_scope = $2 and training_purpose = $3 and ($2 = 'platform' or user_id = $1)
         order by updated_at desc`,
-      [userId, skillScope],
+      [userId, skillScope, trainingPurpose],
     ),
     query<AvatarCreatorSkill["versions"][number] & { skill_id: string }>(
       `select v.id, v.skill_id, v.version, v.training_run_id, v.status, v.source_links, v.sample_count,
               v.skill_prompt, v.change_summary, v.created_at
          from avatar_creator_skill_versions v
          join avatar_creator_skills s on s.id=v.skill_id
-        where s.skill_scope=$2 and ($2='platform' or s.user_id=$1)
+        where s.skill_scope=$2 and s.training_purpose=$3 and ($2='platform' or s.user_id=$1)
         order by v.version desc`,
-      [userId, skillScope],
+      [userId, skillScope, trainingPurpose],
     ),
   ]);
 

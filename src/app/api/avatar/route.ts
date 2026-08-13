@@ -53,7 +53,7 @@ const actionSchema = z.discriminatedUnion("action", [
     workId: z.string().max(120).optional(),
   }),
   z.object({ action: z.literal("restore-version"), versionId: z.string().uuid() }),
-  z.object({ action: z.literal("create-creator-skill"), skillId: z.string().uuid().optional(), skillScope: z.enum(["personal", "platform"]).default("personal"), name: z.string().trim().max(60).default(""), creatorName: z.string().trim().max(80).default(""), links: z.array(z.string().trim().url().max(1000)).max(20).default([]), wechatWorkTokens: z.array(z.string().min(20).max(10000)).max(500).default([]), authorized: z.literal(true) }),
+  z.object({ action: z.literal("create-creator-skill"), skillId: z.string().uuid().optional(), skillScope: z.enum(["personal", "platform"]).default("personal"), trainingPurpose: z.enum(["content", "lead-coach"]).default("content"), name: z.string().trim().max(60).default(""), creatorName: z.string().trim().max(80).default(""), links: z.array(z.string().trim().url().max(1000)).max(20).default([]), wechatWorkTokens: z.array(z.string().min(20).max(10000)).max(500).default([]), authorized: z.literal(true) }),
   z.object({ action: z.literal("restore-creator-skill-version"), skillId: z.string().uuid(), versionId: z.string().uuid() }),
   z.object({ action: z.literal("set-creator-skill-status"), skillId: z.string().uuid(), status: z.enum(["active", "archived"]) }),
   z.object({
@@ -72,10 +72,12 @@ export async function GET(request: Request) {
   if (user instanceof Response) return user;
   try {
     await reconcileAvatarTrainingRuns(user.id);
-    const skillScope = new URL(request.url).searchParams.get("scope") === "platform" ? "platform" : "personal";
+    const params = new URL(request.url).searchParams;
+    const skillScope = params.get("scope") === "platform" ? "platform" : "personal";
+    const trainingPurpose = params.get("purpose") === "lead-coach" ? "lead-coach" : "content";
     if (skillScope === "platform" && user.role !== "admin") return Response.json({ error: "仅管理员可管理平台分身" }, { status: 403 });
     const [workspace, snapshot, questionnaire, contactCard] = await Promise.all([
-      getAvatarWorkspace(user.id, skillScope),
+      getAvatarWorkspace(user.id, skillScope, trainingPurpose),
       tryGetLatestThinkingProfileSnapshot(user.id),
       tryGetLatestQuestionnaire(user.id),
       tryGetAvatarContactCard(user.id),
@@ -149,10 +151,10 @@ export async function POST(request: Request) {
       const skill = input.skillId
         ? await query<{ id: string; latest_version: number }>(
           `select id, latest_version from avatar_creator_skills
-            where id=$1 and (user_id=$2 or (skill_scope='platform' and $3::boolean))`,
-          [input.skillId, user.id, user.role === "admin"],
+            where id=$1 and training_purpose=$4 and (user_id=$2 or (skill_scope='platform' and $3::boolean))`,
+          [input.skillId, user.id, user.role === "admin", input.trainingPurpose],
         )
-        : await query<{ id: string; latest_version: number }>(`insert into avatar_creator_skills(user_id, name, creator_name, skill_scope, status) values ($1, $2, $3, $4, 'archived') on conflict (user_id, skill_scope, lower(name)) do update set creator_name=excluded.creator_name, updated_at=now() returning id, latest_version`, [user.id, input.name, input.creatorName, input.skillScope]);
+        : await query<{ id: string; latest_version: number }>(`insert into avatar_creator_skills(user_id, name, creator_name, skill_scope, training_purpose, status) values ($1, $2, $3, $4, $5, 'archived') on conflict (user_id, skill_scope, training_purpose, lower(name)) do update set creator_name=excluded.creator_name, updated_at=now() returning id, latest_version`, [user.id, input.name, input.creatorName, input.skillScope, input.trainingPurpose]);
       const item = skill.rows[0];
       if (!item) return Response.json({ error: "选择的分身不存在或已归档" }, { status: 404 });
       const mediaWorks = decodeWechatChannelTrainingTokens(input.wechatWorkTokens);

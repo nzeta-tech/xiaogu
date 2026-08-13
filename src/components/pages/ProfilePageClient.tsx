@@ -118,7 +118,7 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
 
   async function loadAvatar(signal?: AbortSignal) {
     try {
-      const response = await fetch(apiPath(`/api/avatar${skillScope === "platform" ? "?scope=platform" : ""}`), { signal });
+      const response = await fetch(apiPath(`/api/avatar${skillScope === "platform" ? `?scope=platform&purpose=${trainingPurpose}` : ""}`), { signal });
       const payload = await response.json() as { avatar?: AvatarWorkspace; error?: string };
       if (!response.ok || !payload.avatar) {
         setError(payload.error ?? "数字分身暂时无法加载");
@@ -234,7 +234,7 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
     event.preventDefault();
     const links = parseTrainingLinks(creatorSkillDraft.shareLinks);
     const wechatWorkTokens = wechatCandidates.filter((work) => selectedWechatWorkIds.has(work.id)).map((work) => work.trainingToken);
-    const ok = await performAction({ action: "create-creator-skill", skillId: creatorSkillDraft.skillId || undefined, skillScope, name: creatorSkillDraft.name, creatorName: creatorSkillDraft.creatorName, links, wechatWorkTokens, authorized: creatorSkillDraft.authorized }, "Skill 训练已开始；完成后会生成一个可选用的新版本。");
+    const ok = await performAction({ action: "create-creator-skill", skillId: creatorSkillDraft.skillId || undefined, skillScope, trainingPurpose, name: creatorSkillDraft.name, creatorName: creatorSkillDraft.creatorName, links, wechatWorkTokens, authorized: creatorSkillDraft.authorized }, "Skill 训练已开始；完成后会生成一个可选用的新版本。");
     if (ok) { setCreatorSkillDraft((current) => ({ ...current, shareLinks: "", authorized: false })); setWechatCandidates([]); setSelectedWechatWorkIds(new Set()); }
   }
 

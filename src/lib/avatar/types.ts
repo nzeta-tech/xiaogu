@@ -86,6 +86,7 @@ export type AvatarCreatorSkill = {
   creator_name: string;
   status: "active" | "archived";
   skill_scope: "personal" | "platform";
+  training_purpose: "content" | "lead-coach";
   latest_version: number;
   identity_card: AvatarCreatorIdentityCard;
   identity_card_draft: AvatarCreatorIdentityCard | Record<string, never>;
