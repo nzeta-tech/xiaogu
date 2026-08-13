@@ -64,6 +64,12 @@ export async function updateWechatChannelDiscoveryCache(input: { scope: CacheSco
   await saveCache(cacheKey(input.scope, input.identity), input.scope, input.payload, input.ttlSeconds);
 }
 
+export async function associateWechatChannelAccountCache(input: { fromChannelId: string; toChannelId: string }) {
+  const source = await readCache(cacheKey("account", input.fromChannelId));
+  if (!source) throw new Error("旧视频号 ID 没有可复用的缓存，请先完成一次导入。");
+  await saveCache(cacheKey("account", input.toChannelId), "account", source, null);
+}
+
 async function releaseRefreshLease(key: string) {
   if (!isDatabaseConfigured()) return;
   await query(
