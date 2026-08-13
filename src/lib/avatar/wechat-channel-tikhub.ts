@@ -27,7 +27,7 @@ export type WechatChannelTrainingWork = {
   sourceUrl: string;
 };
 
-export async function discoverWechatChannelWorks(input: { channelId: string; limit: 10 | 20 | 50 | 100 | "all" }) {
+export async function discoverWechatChannelWorks(input: { channelId: string; limit: 10 | 20 | 50 | 100 | "all" }, refreshAccount = false) {
   const token = process.env.TIKHUB_API_TOKEN?.trim();
   if (!token) throw new Error("尚未配置 TIKHUB_API_TOKEN");
   let providerRequestCount = 0;
@@ -35,7 +35,10 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   const accountResult = await getOrLoadWechatChannelCache({
     scope: "account",
     identity: input.channelId,
-    ttlSeconds: 30 * 24 * 60 * 60,
+    // The channel ID → finder username mapping is stable. Keep it indefinitely
+    // and refresh only when a downstream request proves it stale.
+    ttlSeconds: null,
+    forceRefresh: refreshAccount,
     load: async () => {
       providerRequestCount += 1;
       const account = await postTikHub("fetch_channel_id_to_username", { channel_id: input.channelId, raw: false }, token);
@@ -55,21 +58,27 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   let lastBuffer = "";
   let pageCount = 0;
   for (let page = 0; page < 100 && candidates.length < target; page += 1) {
-    const pageResult = await getOrLoadWechatChannelCache({
-      scope: "page",
-      identity: `${username}:${lastBuffer}`,
-      ttlSeconds: lastBuffer ? 30 * 24 * 60 * 60 : 6 * 60 * 60,
-      load: async () => {
-        providerRequestCount += 1;
-        const payload = await postTikHub("fetch_user_videos", { username, last_buffer: lastBuffer, raw: false }, token);
-        const data = record(payload.data);
-        return {
-          works: normalizePageWorks(array(data.videos), authorName),
-          nextBuffer: text(data.last_buffer ?? data.lastBuffer ?? data.next_buffer ?? data.nextBuffer),
-          rawCount: array(data.videos).length,
-        };
-      },
-    });
+    let pageResult: Awaited<ReturnType<typeof getOrLoadWechatChannelCache<{ works: WechatChannelCandidate[]; nextBuffer: string; rawCount: number }>>>;
+    try {
+      pageResult = await getOrLoadWechatChannelCache({
+        scope: "page",
+        identity: `${username}:${lastBuffer}`,
+        ttlSeconds: lastBuffer ? 30 * 24 * 60 * 60 : 6 * 60 * 60,
+        load: async () => {
+          providerRequestCount += 1;
+          const payload = await postTikHub("fetch_user_videos", { username, last_buffer: lastBuffer, raw: false }, token);
+          const data = record(payload.data);
+          return {
+            works: normalizePageWorks(array(data.videos), authorName),
+            nextBuffer: text(data.last_buffer ?? data.lastBuffer ?? data.next_buffer ?? data.nextBuffer),
+            rawCount: array(data.videos).length,
+          };
+        },
+      });
+    } catch (error) {
+      if (!refreshAccount && accountResult.cacheHit && isStaleAccountError(error)) return discoverWechatChannelWorks(input, true);
+      throw error;
+    }
     pageCount += 1;
     if (pageResult.cacheHit) cacheHitCount += 1;
     const pageWorks = array(pageResult.value.works) as unknown as WechatChannelCandidate[];
@@ -84,6 +93,11 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
     const rawCount = Number(pageResult.value.rawCount ?? pageWorks.length);
     if (!nextBuffer || nextBuffer === lastBuffer || rawCount === 0) break;
     lastBuffer = nextBuffer;
+  }
+  if (!refreshAccount && accountResult.cacheHit && candidates.length === 0) {
+    // Empty data from a cached mapping can indicate a renamed/recycled finder
+    // username. Retry once against TikHub before treating the account as empty.
+    return discoverWechatChannelWorks(input, true);
   }
   return { channelId: input.channelId, username, authorName, candidates, requestCount: pageCount, pageCount, cacheHitCount, providerRequestCount, reachedTrainingLimit: input.limit === "all" && candidates.length >= MAX_CHANNEL_TRAINING_WORKS, maxTrainingWorks: MAX_CHANNEL_TRAINING_WORKS };
 }
@@ -167,6 +181,7 @@ async function postTikHub(endpoint: string, body: Record<string, unknown>, token
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function array(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 function text(value: unknown) { return typeof value === "string" || typeof value === "number" ? String(value).trim() : ""; }
+function isStaleAccountError(error: unknown) { return /账号|username|finder|用户不存在|not found|invalid|404/i.test(error instanceof Error ? error.message : ""); }
 function richText(value: unknown): string {
   const direct = text(value);
   if (direct) return direct;

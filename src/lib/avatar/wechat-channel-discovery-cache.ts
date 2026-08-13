@@ -19,7 +19,7 @@ async function readCache(key: string) {
   if (!isDatabaseConfigured()) return null;
   const result = await query<{ payload: unknown }>(
     `select payload from wechat_channel_discovery_cache
-     where cache_key=$1 and payload is not null and expires_at>now() limit 1`,
+     where cache_key=$1 and payload is not null and (expires_at is null or expires_at>now()) limit 1`,
     [key],
   ).catch(() => ({ rows: [] as Array<{ payload: unknown }> }));
   return objectValue(result.rows[0]?.payload);
@@ -49,11 +49,11 @@ async function waitForRefresh(key: string) {
   return null;
 }
 
-async function saveCache(key: string, scope: CacheScope, payload: Record<string, unknown>, ttlSeconds: number) {
+async function saveCache(key: string, scope: CacheScope, payload: Record<string, unknown>, ttlSeconds: number | null) {
   if (!isDatabaseConfigured()) return;
   await query(
     `insert into wechat_channel_discovery_cache(cache_key,cache_scope,payload,refresh_until,expires_at)
-     values($1,$2,$3,null,now()+($4||' seconds')::interval)
+     values($1,$2,$3,null,case when $4::integer is null then null else now()+($4||' seconds')::interval end)
      on conflict(cache_key) do update set cache_scope=excluded.cache_scope,payload=excluded.payload,
        refresh_until=null,updated_at=now(),expires_at=excluded.expires_at`,
     [key, scope, payload, ttlSeconds],
@@ -72,7 +72,8 @@ async function releaseRefreshLease(key: string) {
 export async function getOrLoadWechatChannelCache<T extends Record<string, unknown>>(input: {
   scope: CacheScope;
   identity: string;
-  ttlSeconds: number;
+  ttlSeconds: number | null;
+  forceRefresh?: boolean;
   load: () => Promise<T>;
 }): Promise<{ value: T; cacheHit: boolean }> {
   const key = cacheKey(input.scope, input.identity);
@@ -81,7 +82,7 @@ export async function getOrLoadWechatChannelCache<T extends Record<string, unkno
 
   let loadedFromCache = false;
   const promise = (async () => {
-    const cached = await readCache(key);
+    const cached = input.forceRefresh ? null : await readCache(key);
     if (cached) {
       loadedFromCache = true;
       return cached as T;
