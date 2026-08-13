@@ -60,6 +60,10 @@ async function saveCache(key: string, scope: CacheScope, payload: Record<string,
   ).catch(() => undefined);
 }
 
+export async function updateWechatChannelDiscoveryCache(input: { scope: CacheScope; identity: string; payload: Record<string, unknown>; ttlSeconds: number | null }) {
+  await saveCache(cacheKey(input.scope, input.identity), input.scope, input.payload, input.ttlSeconds);
+}
+
 async function releaseRefreshLease(key: string) {
   if (!isDatabaseConfigured()) return;
   await query(

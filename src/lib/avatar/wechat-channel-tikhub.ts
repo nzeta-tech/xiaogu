@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { getOrLoadWechatChannelCache } from "./wechat-channel-discovery-cache.ts";
+import { getOrLoadWechatChannelCache, updateWechatChannelDiscoveryCache } from "./wechat-channel-discovery-cache.ts";
 
 const apiBase = "https://api.tikhub.io/api/v1/wechat_channels/v2";
 const MAX_CHANNEL_TRAINING_WORKS = 500;
@@ -50,6 +50,8 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   const username = text(accountData.username);
   if (!username) throw new Error(text(accountData.error) || "没有找到对应的视频号账号");
   const authorName = text(accountData.nickname);
+  const indexedWorks = array(accountData.trainingWorks).filter((item): item is WechatChannelCandidate => Boolean(record(item).id && record(item).trainingToken)) as WechatChannelCandidate[];
+  const indexedWorkIds = new Set(indexedWorks.map((work) => work.id));
   // A training run has a hard 500-work safety limit. “全部” therefore means
   // every discoverable work within that supported training capacity.
   const target = input.limit === "all" ? MAX_CHANNEL_TRAINING_WORKS : input.limit;
@@ -63,7 +65,7 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
       pageResult = await getOrLoadWechatChannelCache({
         scope: "page",
         identity: `${username}:${lastBuffer}`,
-        ttlSeconds: lastBuffer ? 30 * 24 * 60 * 60 : 6 * 60 * 60,
+        ttlSeconds: lastBuffer ? 30 * 24 * 60 * 60 : 7 * 24 * 60 * 60,
         load: async () => {
           providerRequestCount += 1;
           const payload = await postTikHub("fetch_user_videos", { username, last_buffer: lastBuffer, raw: false }, token);
@@ -89,6 +91,18 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
       candidates.push(work);
       if (candidates.length >= target) break;
     }
+    // Once a newly fetched page overlaps with our persisted work index, all
+    // older works are already known. Merge them locally instead of consuming
+    // TikHub requests page by page again.
+    if (pageWorks.some((work) => indexedWorkIds.has(work.id))) {
+      for (const work of indexedWorks) {
+        if (seen.has(work.id)) continue;
+        seen.add(work.id);
+        candidates.push(work);
+        if (candidates.length >= target) break;
+      }
+      break;
+    }
     const nextBuffer = text(pageResult.value.nextBuffer);
     const rawCount = Number(pageResult.value.rawCount ?? pageWorks.length);
     if (!nextBuffer || nextBuffer === lastBuffer || rawCount === 0) break;
@@ -99,6 +113,12 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
     // username. Retry once against TikHub before treating the account as empty.
     return discoverWechatChannelWorks(input, true);
   }
+  await updateWechatChannelDiscoveryCache({
+    scope: "account",
+    identity: input.channelId,
+    payload: { ...accountData, username, nickname: authorName, trainingWorks: candidates.slice(0, MAX_CHANNEL_TRAINING_WORKS) },
+    ttlSeconds: null,
+  });
   return { channelId: input.channelId, username, authorName, candidates, requestCount: pageCount, pageCount, cacheHitCount, providerRequestCount, reachedTrainingLimit: input.limit === "all" && candidates.length >= MAX_CHANNEL_TRAINING_WORKS, maxTrainingWorks: MAX_CHANNEL_TRAINING_WORKS };
 }
 
