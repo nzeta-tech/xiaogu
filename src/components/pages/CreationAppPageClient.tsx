@@ -15,6 +15,7 @@ import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/err
 import { articleDocx } from "@/lib/client/docx";
 import { browserErrorDetail, createCreationTraceId, rejectionErrorDetail, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
 import { readCreationDraft } from "@/lib/client/creation-draft-state";
+import { consumeCreationHandoff } from "@/lib/client/creation-handoff";
 import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getRemixCapabilityDefaults, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
 
@@ -89,6 +90,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const incomingPrompt = searchParams.get("prompt")?.trim() ?? "";
+  const shouldConsumeHandoff = searchParams.get("handoff") === "1";
   const trafficParentWorkId = searchParams.get("parent_work_id")?.trim() ?? "";
   const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
   const promptFieldId = promptField?.id;
@@ -204,6 +206,20 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     description: `创作广场 / ${pageApp.name}`,
     status: loading ? "生成中" : "",
   });
+
+  useEffect(() => {
+    if (!shouldConsumeHandoff) return;
+    const handoff = consumeCreationHandoff(window.sessionStorage, app.slug);
+    const frame = window.requestAnimationFrame(() => {
+      setValues((current) => ({
+        ...current,
+        ...(handoff.prompt && promptFieldId ? { [promptFieldId]: handoff.prompt } : {}),
+        ...(app.slug === "video-cover" && handoff.source_style_label ? { traffic_source_label: handoff.source_style_label } : {}),
+        ...(app.slug === "video-cover" && handoff.source_batch_id ? { traffic_source_batch_id: handoff.source_batch_id } : {}),
+      }));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [app.slug, promptFieldId, shouldConsumeHandoff]);
 
   useEffect(() => {
     return () => recognitionRef.current?.stop();

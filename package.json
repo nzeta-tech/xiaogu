@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:topics": "node --experimental-strip-types --test src/lib/topics/rules.test.mjs",
-    "test:viral": "node --experimental-strip-types --test src/lib/viral-scoring.test.mjs src/lib/viral-creator-sources.test.mjs src/lib/wechat-provider-adapters.test.mjs src/lib/client/creation-draft-state.test.mjs src/lib/creation/link-remix-source.test.mjs src/lib/creation/remix-capability-registry.test.mjs src/lib/creation/wechat-channels-container.test.mjs",
+    "test:viral": "node --experimental-strip-types --test src/lib/viral-scoring.test.mjs src/lib/viral-creator-sources.test.mjs src/lib/wechat-provider-adapters.test.mjs src/lib/client/creation-draft-state.test.mjs src/lib/client/creation-handoff.test.mjs src/lib/creation/link-remix-source.test.mjs src/lib/creation/remix-capability-registry.test.mjs src/lib/creation/wechat-channels-container.test.mjs && node scripts/regression-creation-url-handoff.mjs",
     "test:avatar-skills": "node --env-file=.env scripts/regression-avatar-skills.mjs",
     "test:wechat-avatar-discovery": "node --experimental-strip-types --test src/lib/avatar/wechat-channel-tikhub.test.mjs",
     "viral:worker": "node scripts/viral-data-worker.mjs",

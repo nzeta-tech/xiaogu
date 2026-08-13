@@ -8,6 +8,7 @@ import { usePageMeta } from "@/lib/client/page-meta";
 import { parseCreationOutput, type CreationOutputBatch, type CreationOutputItem, type CreationOutputViewMode } from "@/lib/creation/output";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 import { getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
+import { saveCreationHandoff } from "@/lib/client/creation-handoff";
 
 type WorkDetail = {
   id: string;
@@ -572,8 +573,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
   const videoCoverHref = isTrafficCopyWork
-    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&prompt=${encodeURIComponent(hasCreatorStyleResult ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent)}&source_style_label=${encodeURIComponent(hasCreatorStyleResult ? activeBatch?.label ?? "默认的我" : "默认的我")}&source_batch_id=${encodeURIComponent(hasCreatorStyleResult ? activeBatch?.id ?? "default" : "default")}`)
+    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&handoff=1`)
     : "";
+  const saveVideoCoverHandoff = () => {
+    if (!isTrafficCopyWork) return;
+    saveCreationHandoff(window.sessionStorage, "video-cover", {
+      prompt: hasCreatorStyleResult ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent,
+      source_style_label: hasCreatorStyleResult ? activeBatch?.label ?? "默认的我" : "默认的我",
+      source_batch_id: hasCreatorStyleResult ? activeBatch?.id ?? "default" : "default",
+    });
+  };
   const getActiveItemId = (batch: CreationOutputBatch) => (
     batch.items.some((item) => item.id === activeItemIds[batch.id])
       ? activeItemIds[batch.id]
@@ -882,7 +891,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 <div className="trafficCopyDocumentActions">
                   <button className="instanceActionButton" disabled={!hasContent} onClick={() => void handleCopy("traffic-copy-studio", activeTrafficContent)} type="button">{copied["traffic-copy-studio"] ? "已复制" : "复制文案"}</button>
                   <button className="instanceActionButton" disabled={!hasContent} onClick={() => handleExport(formatWorkTitle(work), activeTrafficContent)} type="button">导出 Word</button>
-                  {!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref}>制作视频封面 <span aria-hidden="true">→</span></a> : null}
+                  {!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref} onClick={saveVideoCoverHandoff}>制作视频封面 <span aria-hidden="true">→</span></a> : null}
                 </div>
               </header>
               <div className="trafficCopyDocumentBody" style={{ fontSize: `${fontScale}%` }}>
@@ -893,14 +902,14 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             <section className="trafficCoverAssetsCard">
               <header className="trafficCopySectionHeader">
                 <div><span>02 · 封面</span><h2>视频封面资产</h2><p>每次生成都会关联回这条文案，便于以后替换、下载和复用。</p></div>
-                {!isAdminPreview && hasContent && videoCoverHref ? <a className="instanceActionButton" href={videoCoverHref}>新建封面</a> : null}
+                {!isAdminPreview && hasContent && videoCoverHref ? <a className="instanceActionButton" href={videoCoverHref} onClick={saveVideoCoverHandoff}>新建封面</a> : null}
               </header>
               {covers.length ? <div className="trafficCoverAssetGroups">{covers.slice().reverse().map((cover) => (
                 <article className="trafficCoverAssetGroup" key={cover.workId}>
                   <header><strong>{formatVideoCoverPlatform(cover.platform)} · {formatImageStyleLabel(cover.style)}{cover.sourceLabel ? ` · 来源：${cover.sourceLabel}` : ""}</strong><span>{formatDate(cover.createdAt)}</span></header>
                   <div className="trafficCoverAssetGrid">{(cover.images ?? []).map((image, index) => <figure key={image.id || image.url}><img alt={`视频封面 ${index + 1}`} src={image.url} /><figcaption><button className="instanceActionButton" onClick={() => void handleImageDownload(image.url, `视频封面-${index + 1}.png`)} type="button">下载</button><button className="instanceActionButton" onClick={() => void handleImageOpen(image.url)} type="button">查看</button></figcaption></figure>)}</div>
                 </article>
-              ))}</div> : <div className="trafficCoverEmpty"><b>还没有生成封面</b><span>{hasContent ? "选择视频号或抖音以及视觉风格，即可把封面保存到这条作品。" : "文案完成后，即可选择平台和风格制作封面。"}</span>{!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref}>去制作封面 <span aria-hidden="true">→</span></a> : null}</div>}
+              ))}</div> : <div className="trafficCoverEmpty"><b>还没有生成封面</b><span>{hasContent ? "选择视频号或抖音以及视觉风格，即可把封面保存到这条作品。" : "文案完成后，即可选择平台和风格制作封面。"}</span>{!isAdminPreview && hasContent && videoCoverHref ? <a className="trafficCoverNextAction" href={videoCoverHref} onClick={saveVideoCoverHandoff}>去制作封面 <span aria-hidden="true">→</span></a> : null}</div>}
             </section>
           </main>
         </div>
@@ -1880,7 +1889,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage instanceStudioPage topicPickerWorkDetailPage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content topicPickerResultShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryHref={appPath(`/apps/write-copy?from=topic-picker&prompt=${encodeURIComponent(topicHandoffPrompt)}`)} primaryLabel="继续写文案" onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} primaryHref={appPath("/apps/write-copy?from=topic-picker&handoff=1")} primaryLabel="继续写文案" onPrimaryHrefClick={() => saveCreationHandoff(window.sessionStorage, "write-copy", { prompt: topicHandoffPrompt })} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="topicPickerResultHero">
             <div className="topicPickerResultHeroHeader">
               <div className="topicPickerResultTitleBlock">
@@ -2625,7 +2634,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     </div>
                     <div className="instanceResultActions">
                       {videoCoverHref ? (
-                        <a className="trafficCoverNextAction" href={videoCoverHref}>
+                        <a className="trafficCoverNextAction" href={videoCoverHref} onClick={saveVideoCoverHandoff}>
                           下一步：制作视频封面 <span aria-hidden="true">→</span>
                         </a>
                       ) : null}
@@ -2975,6 +2984,7 @@ function ResultWorkspaceBar({
   primaryHref,
   primaryLabel = "再次创作",
   onPrimaryAction,
+  onPrimaryHrefClick,
   primaryBusy = false,
 }: {
   detailsOpen: boolean;
@@ -2986,6 +2996,7 @@ function ResultWorkspaceBar({
   primaryHref?: string;
   primaryLabel?: string;
   onPrimaryAction?: (() => void) | undefined;
+  onPrimaryHrefClick?: (() => void) | undefined;
   primaryBusy?: boolean;
 }) {
   return (
@@ -3010,7 +3021,7 @@ function ResultWorkspaceBar({
           {primaryBusy ? "处理中..." : primaryLabel}
         </button>
       ) : (
-        <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)}>{primaryLabel}</a>
+        <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)} onClick={onPrimaryHrefClick}>{primaryLabel}</a>
       )}
     </header>
     <div className="aiReviewNotice resultWorkspaceReviewNotice" role="note">

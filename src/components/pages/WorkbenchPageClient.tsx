@@ -5,6 +5,7 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { isSupportedLinkRemixUrl } from "@/lib/creation/link-remix-source";
 import type { HotTopic } from "@/lib/topics/types";
 import { getHotTopicDisplayCategory } from "@/lib/topics/rules";
+import { saveCreationHandoff } from "@/lib/client/creation-handoff";
 import type { ViralExample } from "@/lib/viral-examples";
 
 type Overview = {
@@ -145,7 +146,7 @@ export function WorkbenchPageClient() {
                       <span>{getHotTopicDisplayCategory(topic)} · {topic.heat}热度</span>
                     </button>
                   </div>
-                  <div className="todayOpportunityActions"><a href={buildTopicCreationHref(topic)}>灵感创作 <span aria-hidden="true">→</span></a></div>
+                  <div className="todayOpportunityActions"><a href={buildTopicCreationHref()} onClick={() => saveTopicCreationHandoff(topic)}>灵感创作 <span aria-hidden="true">→</span></a></div>
                 </article>
               ))}
             </div>
@@ -191,9 +192,13 @@ function formatDate(value?: string) {
   }).format(new Date(value));
 }
 
-function buildTopicCreationHref(topic: HotTopic) {
+function buildTopicCreationHref() {
+  return appPath("/apps/traffic-copy?from=today&entry=traffic-copy&handoff=1");
+}
+
+function saveTopicCreationHandoff(topic: HotTopic) {
   const prompt = `${topic.title}\n\n热点背景：${topic.summary}\n保险内容角度：${topic.recommendedAngle}`;
-  return appPath(`/apps/traffic-copy?from=today&entry=traffic-copy&prompt=${encodeURIComponent(prompt)}`);
+  saveCreationHandoff(window.sessionStorage, "traffic-copy", { prompt });
 }
 
 function buildViralCreationHref(item: ViralExample) {
