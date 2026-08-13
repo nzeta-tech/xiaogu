@@ -4,7 +4,7 @@ import { discoverWechatChannelWorks } from "@/lib/avatar/wechat-channel-tikhub";
 
 const schema = z.object({
   channelId: z.string().trim().regex(/^sph[A-Za-z0-9_-]+$/, "请输入有效的视频号 ID"),
-  limit: z.union([z.literal(10), z.literal(20), z.literal(50), z.literal(100), z.literal("all")]).default(10),
+  limit: z.union([z.literal(10), z.literal(20), z.literal(50), z.literal(100), z.literal("all")]).default("all"),
 });
 
 export async function POST(request: Request) {

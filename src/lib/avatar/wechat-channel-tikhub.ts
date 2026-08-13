@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { getOrLoadWechatChannelCache } from "./wechat-channel-discovery-cache.ts";
 
 const apiBase = "https://api.tikhub.io/api/v1/wechat_channels/v2";
+const MAX_CHANNEL_TRAINING_WORKS = 500;
 
 export type WechatChannelCandidate = {
   id: string;
@@ -34,7 +35,7 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   const accountResult = await getOrLoadWechatChannelCache({
     scope: "account",
     identity: input.channelId,
-    ttlSeconds: 7 * 24 * 60 * 60,
+    ttlSeconds: 30 * 24 * 60 * 60,
     load: async () => {
       providerRequestCount += 1;
       const account = await postTikHub("fetch_channel_id_to_username", { channel_id: input.channelId, raw: false }, token);
@@ -46,7 +47,9 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   const username = text(accountData.username);
   if (!username) throw new Error(text(accountData.error) || "没有找到对应的视频号账号");
   const authorName = text(accountData.nickname);
-  const target = input.limit === "all" ? Number.POSITIVE_INFINITY : input.limit;
+  // A training run has a hard 500-work safety limit. “全部” therefore means
+  // every discoverable work within that supported training capacity.
+  const target = input.limit === "all" ? MAX_CHANNEL_TRAINING_WORKS : input.limit;
   const candidates: WechatChannelCandidate[] = [];
   const seen = new Set<string>();
   let lastBuffer = "";
@@ -55,7 +58,7 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
     const pageResult = await getOrLoadWechatChannelCache({
       scope: "page",
       identity: `${username}:${lastBuffer}`,
-      ttlSeconds: lastBuffer ? 24 * 60 * 60 : 10 * 60,
+      ttlSeconds: lastBuffer ? 30 * 24 * 60 * 60 : 6 * 60 * 60,
       load: async () => {
         providerRequestCount += 1;
         const payload = await postTikHub("fetch_user_videos", { username, last_buffer: lastBuffer, raw: false }, token);
@@ -82,7 +85,7 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
     if (!nextBuffer || nextBuffer === lastBuffer || rawCount === 0) break;
     lastBuffer = nextBuffer;
   }
-  return { channelId: input.channelId, username, authorName, candidates, requestCount: pageCount, pageCount, cacheHitCount, providerRequestCount };
+  return { channelId: input.channelId, username, authorName, candidates, requestCount: pageCount, pageCount, cacheHitCount, providerRequestCount, reachedTrainingLimit: input.limit === "all" && candidates.length >= MAX_CHANNEL_TRAINING_WORKS, maxTrainingWorks: MAX_CHANNEL_TRAINING_WORKS };
 }
 
 function normalizePageWorks(videos: unknown[], fallbackAuthorName: string): WechatChannelCandidate[] {
