@@ -57,6 +57,15 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   const target = input.limit === "all" ? MAX_CHANNEL_TRAINING_WORKS : input.limit;
   const candidates: WechatChannelCandidate[] = [];
   const seen = new Set<string>();
+  const persistWorkIndex = async () => {
+    const merged = [...new Map([...candidates, ...indexedWorks].map((work) => [work.id, work])).values()].slice(0, MAX_CHANNEL_TRAINING_WORKS);
+    await updateWechatChannelDiscoveryCache({
+      scope: "account",
+      identity: input.channelId,
+      payload: { ...accountData, username, nickname: authorName, trainingWorks: merged },
+      ttlSeconds: null,
+    });
+  };
   let lastBuffer = "";
   let pageCount = 0;
   for (let page = 0; page < 100 && candidates.length < target; page += 1) {
@@ -91,6 +100,9 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
       candidates.push(work);
       if (candidates.length >= target) break;
     }
+    // Persist after every successfully read page. This deliberately happens
+    // before pagination continues so a restart never loses completed pages.
+    if (pageWorks.length) await persistWorkIndex();
     // Once a newly fetched page overlaps with our persisted work index, all
     // older works are already known. Merge them locally instead of consuming
     // TikHub requests page by page again.
@@ -113,12 +125,7 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
     // username. Retry once against TikHub before treating the account as empty.
     return discoverWechatChannelWorks(input, true);
   }
-  await updateWechatChannelDiscoveryCache({
-    scope: "account",
-    identity: input.channelId,
-    payload: { ...accountData, username, nickname: authorName, trainingWorks: candidates.slice(0, MAX_CHANNEL_TRAINING_WORKS) },
-    ttlSeconds: null,
-  });
+  await persistWorkIndex();
   return { channelId: input.channelId, username, authorName, candidates, requestCount: pageCount, pageCount, cacheHitCount, providerRequestCount, reachedTrainingLimit: input.limit === "all" && candidates.length >= MAX_CHANNEL_TRAINING_WORKS, maxTrainingWorks: MAX_CHANNEL_TRAINING_WORKS };
 }
 
