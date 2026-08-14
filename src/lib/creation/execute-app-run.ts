@@ -40,6 +40,7 @@ import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avata
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
 import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
+import { buildPersistedCreatorStyleText, type CreatorStyleResult } from "@/lib/creation/creator-style-result";
 import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
@@ -303,7 +304,7 @@ export async function executeCreationAppRun(input: {
       const styleMode = app.slug === "write-copy" || remixDefinition?.id === "moments"
         ? "general"
         : getMultiChannelCopyStyleMode(remixDefinition?.appSlug ?? app.slug);
-      const creatorStyleResults: Array<{ id: string; label: string; content: string }> = [];
+      const creatorStyleResults: CreatorStyleResult[] = [];
       // A full multi-channel run can contain ten publishable pieces, including
       // two long-form articles. Generate each channel separately so a model's
       // per-response output cap cannot leave the result at only the first
@@ -343,6 +344,14 @@ export async function executeCreationAppRun(input: {
         if (result) {
           await input.onEvent?.({ type: "delta", content: result });
         }
+      }
+
+      // Style labels are useful as transient progress notices in the SSE
+      // stream, but they are not publishable copy. Rebuild the completed
+      // result from the generated bodies before persistence and the done
+      // event so app_runs, works and plainText never retain those notices.
+      if (isTrafficExecution && creatorStyleResults.length > 0) {
+        result = buildPersistedCreatorStyleText(creatorStyleResults);
       }
 
       if (app.slug === "xiaohongshu-studio" || remixDefinition?.id === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
