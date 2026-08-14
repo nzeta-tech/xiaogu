@@ -572,15 +572,17 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const plainResultContent = streamState.content || work?.content || work?.app_run?.result_text || (
     work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
   );
+  const coverSourceBatchId = hasCreatorStyleResult ? activeBatch?.id ?? "default" : "default";
+  const coverSourceStyleLabel = hasCreatorStyleResult ? activeBatch?.label ?? "默认的我" : "默认的我";
   const videoCoverHref = isTrafficCopyWork
-    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&handoff=1`)
+    ? appPath(`/apps/video-cover?from=creation-works&entry=traffic-cover&parent_work_id=${encodeURIComponent(work?.id ?? "")}&source_batch_id=${encodeURIComponent(coverSourceBatchId)}&source_style_label=${encodeURIComponent(coverSourceStyleLabel)}&handoff=1`)
     : "";
   const saveVideoCoverHandoff = () => {
     if (!isTrafficCopyWork) return;
     saveCreationHandoff(window.sessionStorage, "video-cover", {
       prompt: hasCreatorStyleResult ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent,
-      source_style_label: hasCreatorStyleResult ? activeBatch?.label ?? "默认的我" : "默认的我",
-      source_batch_id: hasCreatorStyleResult ? activeBatch?.id ?? "default" : "default",
+      source_style_label: coverSourceStyleLabel,
+      source_batch_id: coverSourceBatchId,
     });
   };
   const getActiveItemId = (batch: CreationOutputBatch) => (

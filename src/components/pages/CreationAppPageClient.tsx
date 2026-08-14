@@ -18,6 +18,7 @@ import { readCreationDraft } from "@/lib/client/creation-draft-state";
 import { consumeCreationHandoff } from "@/lib/client/creation-handoff";
 import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getRemixCapabilityDefaults, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
+import { resolveTrafficCoverSource } from "@/lib/creation/traffic-cover-source";
 
 type FieldValue = string | string[];
 type CreatorSkillOption = { id: string; name: string; version: number; skill_scope: "personal" | "platform"; identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string } };
@@ -220,6 +221,26 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [app.slug, promptFieldId, shouldConsumeHandoff]);
+
+  useEffect(() => {
+    if (app.slug !== "video-cover" || !trafficParentWorkId || !promptFieldId) return;
+    const controller = new AbortController();
+    void fetch(apiPath(`/api/works/${encodeURIComponent(trafficParentWorkId)}`), { signal: controller.signal, cache: "no-store" })
+      .then(async (response): Promise<{ work?: { content?: unknown; content_json?: unknown } }> => response.ok ? response.json() : {})
+      .then((payload) => {
+        if (!payload.work) return;
+        const parentWork = payload.work;
+        setValues((current) => {
+          const existing = current[promptFieldId];
+          if (typeof existing === "string" && existing.trim()) return current;
+          const batchId = typeof current.traffic_source_batch_id === "string" ? current.traffic_source_batch_id : "";
+          const recoveredSource = resolveTrafficCoverSource(parentWork, batchId);
+          return recoveredSource ? { ...current, [promptFieldId]: recoveredSource } : current;
+        });
+      })
+      .catch((cause) => { if (!(cause instanceof DOMException && cause.name === "AbortError")) return undefined; });
+    return () => controller.abort();
+  }, [app.slug, promptFieldId, trafficParentWorkId]);
 
   useEffect(() => {
     return () => recognitionRef.current?.stop();
