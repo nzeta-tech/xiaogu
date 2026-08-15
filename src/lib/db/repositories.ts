@@ -464,15 +464,7 @@ export async function tryMergeXiaohongshuStudioAssets(input: {
   }
 }
 
-const CREATION_HISTORY_VISIBLE_WORK = `not exists (
-  select 1
-  from app_runs child_step
-  where child_step.id = w.app_run_id
-    and (
-      child_step.input_payload->>'studio_parent' in ('wechat-studio', 'xiaohongshu-studio')
-      or nullif(child_step.input_payload->>'traffic_parent_work_id', '') is not null
-    )
-)`;
+const CREATION_HISTORY_VISIBLE_WORK = "not w.is_history_child";
 
 export async function tryListWorks(userId: string | null) {
   if (!userId) return [];
