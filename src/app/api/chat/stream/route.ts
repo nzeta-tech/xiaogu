@@ -4,6 +4,7 @@ import {
   type AgentMessage,
   type WritingStyleMode,
 } from "@/lib/agent/insurance-agent";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getMeteringMode, reportUsage } from "@/lib/billing/openmeter";
 import { requireQuota } from "@/lib/billing/enforce";
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
         userId: user.id,
         actionType: "write_script",
         quotaCost: quota.quotaCost,
-        model: process.env.MODEL_NAME ?? "configured-model",
+        model: resolveConfiguredTextModel(),
         metadata: {
           conversationId,
           meteringMode: getMeteringMode(),

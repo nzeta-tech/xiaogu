@@ -1,5 +1,6 @@
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { generateImageSet } from "@/lib/agent/image-generator";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 import { auditImageRemixConsistency, extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
 import { getCreationAppBySlug, type CreationField } from "@/lib/apps/catalog";
 import { requireSessionUser } from "@/lib/auth/session";
@@ -164,7 +165,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     inputPayload: values,
     resolvedPrompt,
     quotaCost: quota.quotaCost,
-    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : resolveConfiguredTextModel(),
   });
 
   let result = "";
@@ -261,7 +262,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     userId: user.id,
     actionType: "creation_app_run",
     quotaCost: quota.quotaCost,
-    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : resolveConfiguredTextModel(),
     metadata: {
       appId: app.id,
       appSlug: app.slug,

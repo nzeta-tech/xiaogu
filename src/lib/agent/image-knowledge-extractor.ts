@@ -1,3 +1,5 @@
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
+
 const MAX_EXTRACTED_KNOWLEDGE_CHARS = 6000;
 export type ImageRemixConsistencyAudit = {
   status: "passed" | "warning" | "unavailable";
@@ -20,7 +22,7 @@ export async function extractKnowledgeFromReferenceImage(referenceImage: unknown
   if (!apiKey) return "";
 
   const baseUrl = process.env.OPENAI_VISION_API_BASE ?? process.env.OPENAI_IMAGE_API_BASE ?? process.env.MODEL_API_BASE ?? "https://api.openai.com/v1";
-  const model = process.env.OPENAI_VISION_MODEL ?? process.env.MODEL_NAME ?? "gpt-4o-mini";
+  const model = process.env.OPENAI_VISION_MODEL ?? resolveConfiguredTextModel("gpt-4o-mini");
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
@@ -72,7 +74,7 @@ export async function auditImageRemixConsistency(input: {
   const apiKey = process.env.OPENAI_IMAGE_API_KEY ?? process.env.IMAGE_MODEL_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.MODEL_API_KEY;
   if (!apiKey) return { status: "unavailable", facts: [], results: [] };
   const baseUrl = process.env.OPENAI_VISION_API_BASE ?? process.env.OPENAI_IMAGE_API_BASE ?? process.env.MODEL_API_BASE ?? "https://api.openai.com/v1";
-  const model = process.env.OPENAI_VISION_MODEL ?? process.env.MODEL_NAME ?? "gpt-4o-mini";
+  const model = process.env.OPENAI_VISION_MODEL ?? resolveConfiguredTextModel("gpt-4o-mini");
 
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {

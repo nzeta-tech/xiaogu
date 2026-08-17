@@ -16,6 +16,8 @@ import { articleDocx } from "@/lib/client/docx";
 import { browserErrorDetail, createCreationTraceId, rejectionErrorDetail, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
 import { readCreationDraft } from "@/lib/client/creation-draft-state";
 import { consumeCreationHandoff } from "@/lib/client/creation-handoff";
+import { normalizeRecreationInputPayload } from "@/lib/client/recreation-prefill";
+import { normalizeImageCardStyles, toggleImageCardStyle } from "@/lib/creation/image-card-styles";
 import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getRemixCapabilityDefaults, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
 import { resolveTrafficCoverSource } from "@/lib/creation/traffic-cover-source";
@@ -91,6 +93,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const incomingPrompt = searchParams.get("prompt")?.trim() ?? "";
+  const sourceWorkId = searchParams.get("source_work_id")?.trim() ?? "";
   const shouldConsumeHandoff = searchParams.get("handoff") === "1";
   const trafficParentWorkId = searchParams.get("parent_work_id")?.trim() ?? "";
   const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
@@ -113,9 +116,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       ...(app.slug === "video-cover" && sourceBatchId ? { traffic_source_batch_id: sourceBatchId } : {}),
     };
   });
+  const imageCardSelectedStyleCount = isImageCard ? normalizeImageCardStyles(values.style).length : 0;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [draftStatus, setDraftStatus] = useState<"restored" | "">("");
+  const [draftStatus, setDraftStatus] = useState<"restored" | "recreated" | "">("");
+  const [recreationPrefillStatus, setRecreationPrefillStatus] = useState<"loading" | "loaded" | "error" | "">(() => sourceWorkId ? "loading" : "");
   const [voiceFieldId, setVoiceFieldId] = useState<string | null>(null);
   const [voicePaused, setVoicePaused] = useState(false);
   const [voiceElapsed, setVoiceElapsed] = useState(0);
@@ -221,6 +226,30 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [app.slug, promptFieldId, shouldConsumeHandoff]);
+
+  useEffect(() => {
+    if (!sourceWorkId || creationFrom !== "result") return;
+    const controller = new AbortController();
+    void fetch(apiPath(`/api/works/${encodeURIComponent(sourceWorkId)}`), { cache: "no-store", signal: controller.signal })
+      .then(async (response): Promise<{ work?: { platform?: string; app_run?: { input_payload?: Record<string, unknown> | null } | null }; error?: string }> => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : "读取上次创作参数失败。");
+        return payload;
+      })
+      .then((payload) => {
+        if (!payload.work || payload.work.platform !== app.slug) throw new Error("原作品与当前创作工具不匹配。");
+        const savedValues = normalizeRecreationInputPayload(payload.work.app_run?.input_payload);
+        setValues((current) => ({ ...current, ...savedValues, ...(incomingPrompt && promptFieldId ? { [promptFieldId]: incomingPrompt } : {}) }));
+        setDraftStatus("recreated");
+        setRecreationPrefillStatus("loaded");
+      })
+      .catch((cause) => {
+        if (cause instanceof Error && cause.name === "AbortError") return;
+        setRecreationPrefillStatus("error");
+        setError(cause instanceof Error ? cause.message : "读取上次创作参数失败，请返回结果页重试。");
+      });
+    return () => controller.abort();
+  }, [app.slug, creationFrom, incomingPrompt, promptFieldId, sourceWorkId]);
 
   useEffect(() => {
     if (app.slug !== "video-cover" || !trafficParentWorkId || !promptFieldId) return;
@@ -464,7 +493,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       return;
     }
 
-    if (isImageCard && typeof values.style === "string") recordImageCardStyleUsage(values.style);
+    if (isImageCard) normalizeImageCardStyles(values.style).forEach(recordImageCardStyleUsage);
     if (isWechatImages && typeof values.style === "string") recordWechatImageStyleUsage(values.style);
     trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_finished", outcome: String(response.status) });
     trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "navigation_started", detail: { visibility: document.visibilityState } });
@@ -555,7 +584,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }
 
   function selectImageCardStyle(nextValue: string) {
-    updateField("style", nextValue);
+    const toggled = toggleImageCardStyle(values.style, nextValue);
+    if (toggled.limitReached) {
+      setError("知识卡片最多同时选择 3 个视觉风格。");
+      return;
+    }
+    setError("");
+    updateField("style", toggled.styles);
   }
 
   function recordImageCardStyleUsage(styleValue: string) {
@@ -1717,6 +1752,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           ) : null}
 
           {error ? <div className="formError submit-alert">{error}</div> : null}
+          {recreationPrefillStatus === "loaded" ? <div className="resultSavedHint submit-alert">已载入上次创作的输入内容，你可以调整后再次生成；本次提交会保存为新作品。</div> : null}
+          {recreationPrefillStatus === "loading" ? <div className="resultSavedHint submit-alert">正在载入上次创作参数…</div> : null}
           {pageApp.requiresThinking ? (
             <div className="resultSavedHint submit-alert">本应用会结合你的数字分身判断内容重点。<a href={appPath("/avatar")}>查看或完善数字分身</a></div>
           ) : null}
@@ -1736,13 +1773,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           <section className="submit-section submitSection creationStickyAction">
             <div className="creationSubmitSummary">
               <strong>{remixAutoParsingPending ? "正在自动解析素材" : missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
-              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : "输入内容不会在下次创作时自动带入"} · 本次消耗 ${app.points} 积分`}</span>
+              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : draftStatus === "recreated" ? "已回填上次创作内容" : "输入内容会随作品保存"} · 本次消耗 ${app.points} 积分`}</span>
               <i aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></i>
             </div>
-            <button className="primaryButton submit-button submitButton" disabled={loading || remixAutoParsingPending} onClick={() => void handleSubmit()} type="button">
+            <button className="primaryButton submit-button submitButton" disabled={loading || remixAutoParsingPending || recreationPrefillStatus === "loading"} onClick={() => void handleSubmit()} type="button">
               {loading
-                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
-                : remixAutoParsingPending ? "素材自动解析中..." : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isImageCard ? `正在生成 ${imageCardSelectedStyleCount || 1} 张知识卡片...` : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
+                : recreationPrefillStatus === "loading" ? "正在载入上次参数..." : remixAutoParsingPending ? "素材自动解析中..." : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isImageCard ? `生成 ${imageCardSelectedStyleCount || 1} 张知识卡片 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>
@@ -1767,13 +1804,12 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           options={pageApp.fields.find((field) => field.id === "style")?.options ?? []}
           recommendation={{ value: "", label: "", reason: "" }}
           eyebrow="全部风格"
-          title="按发布任务选择画面"
-          selectedValue={typeof values.style === "string" ? values.style : ""}
+          title="按发布任务选择画面（最多 3 个）"
+          selectedValue=""
+          selectedValues={normalizeImageCardStyles(values.style)}
+          maxSelection={3}
           onClose={() => setShowAllImageCardStyles(false)}
-          onSelect={(nextValue) => {
-            selectImageCardStyle(nextValue);
-            setShowAllImageCardStyles(false);
-          }}
+          onSelect={selectImageCardStyle}
         />
       ) : null}
 
@@ -2090,6 +2126,8 @@ function WechatArticleAnalysis({ analysis }: { analysis: WechatArticleAnalysis }
 function WechatStyleLibrary({
   options,
   selectedValue,
+  selectedValues,
+  maxSelection,
   recommendation,
   eyebrow = "视觉风格库",
   title = "选择整篇文章的统一风格",
@@ -2099,6 +2137,8 @@ function WechatStyleLibrary({
 }: {
   options: NonNullable<CreationApp["fields"][number]["options"]>;
   selectedValue: string;
+  selectedValues?: string[];
+  maxSelection?: number;
   recommendation: WechatStyleRecommendation;
   eyebrow?: string;
   title?: string;
@@ -2106,11 +2146,13 @@ function WechatStyleLibrary({
   onSelect: (value: string) => void;
   onClose: () => void;
 }) {
+  const resolvedSelectedValues = selectedValues ?? (selectedValue ? [selectedValue] : []);
   const styleItem = (option: NonNullable<CreationApp["fields"][number]["options"]>[number]) => {
-    const active = selectedValue === option.value;
+    const active = resolvedSelectedValues.includes(option.value);
+    const selectionLimitReached = Boolean(maxSelection && resolvedSelectedValues.length >= maxSelection && !active);
     const recommended = recommendation.value === option.value;
     return (
-      <button className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => onSelect(option.value)} type="button">
+      <button aria-disabled={selectionLimitReached} className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => { if (!selectionLimitReached) onSelect(option.value); }} type="button">
         {/* Preview assets come from configurable URLs; native img keeps them flexible here. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {option.previewUrl ? <img alt={option.label} src={option.previewUrl} /> : <span className="wechatStyleLibraryPlaceholder" />}
@@ -2123,7 +2165,7 @@ function WechatStyleLibrary({
 
   return (
     <div className="wechatStyleLibraryBackdrop">
-      <section aria-label="全部视觉风格" aria-modal="true" className="wechatStyleLibrary" role="dialog">
+      <section aria-label="全部视觉风格" aria-modal="true" className={maxSelection ? "wechatStyleLibrary multiSelect" : "wechatStyleLibrary"} role="dialog">
         <header>
           <div>
             <span>{eyebrow}</span>
@@ -2131,6 +2173,7 @@ function WechatStyleLibrary({
           </div>
           <button aria-label="关闭风格库" onClick={onClose} title="关闭" type="button">×</button>
         </header>
+        {maxSelection ? <div className="wechatStyleLibrarySelection"><span>已选择 {resolvedSelectedValues.length}/{maxSelection}</span><button onClick={onClose} type="button">完成</button></div> : null}
         {groups ? (
           <div className="wechatStyleLibraryGroups">
             {groups.map((group) => {
@@ -2538,14 +2581,16 @@ function renderField({
   if (field.type === "radio") {
     if ((isImageCard || field.id === "style") && field.id === "style") {
       const styleOptions = field.options ?? [];
-      const selectedStyle = styleOptions.find((option) => option.value === value);
+      const selectedStyleValues = isImageCard ? normalizeImageCardStyles(value) : typeof value === "string" && value ? [value] : [];
       const initialStyleOptions = typeof styleOptionLimit === "number" ? styleOptions.slice(0, styleOptionLimit) : styleOptions;
-      const visibleStyleOptions = styleOptionLimit && selectedStyle && !initialStyleOptions.some((option) => option.value === selectedStyle.value)
-        ? [...initialStyleOptions.slice(0, -1), selectedStyle]
+      const selectedOutsideInitial = styleOptions.filter((option) => selectedStyleValues.includes(option.value) && !initialStyleOptions.some((initial) => initial.value === option.value));
+      const visibleStyleOptions = styleOptionLimit && selectedOutsideInitial.length
+        ? [...initialStyleOptions.slice(0, Math.max(0, styleOptionLimit - selectedOutsideInitial.length)), ...selectedOutsideInitial]
         : initialStyleOptions;
       const mostUsedStyleOptions = mostUsedStyleValues?.map((styleValue) => styleOptions.find((option) => option.value === styleValue)).filter((option): option is NonNullable<typeof option> => Boolean(option)) ?? [];
       return (
         <div className="imageStylePicker">
+          {isImageCard ? <div className="imageStyleSelectionSummary"><strong>可同时选择 1–3 个风格</strong><span>已选择 {selectedStyleValues.length}/3，每个风格生成 1 张</span></div> : null}
           {styleRecommendation ? (
             <div className="wechatStyleRecommendation">
               <span>智能推荐</span>
@@ -2558,7 +2603,7 @@ function renderField({
               <span>本文适配</span>
               <div>
                 {styleRecommendations.map((recommendation) => (
-                  <button className={value === recommendation.value ? "active" : ""} key={recommendation.value} onClick={() => (onStyleSelect ?? onChange)(recommendation.value)} type="button">
+                  <button className={selectedStyleValues.includes(recommendation.value) ? "active" : ""} key={recommendation.value} onClick={() => (onStyleSelect ?? onChange)(recommendation.value)} type="button">
                     {recommendation.label}
                   </button>
                 ))}
@@ -2570,7 +2615,7 @@ function renderField({
               <span>最常使用</span>
               <div>
                 {mostUsedStyleOptions.map((option) => (
-                  <button className={value === option.value ? "imageStyleMostUsedItem active" : "imageStyleMostUsedItem"} key={option.value} onClick={() => (onStyleSelect ?? onChange)(option.value)} type="button">
+                  <button className={selectedStyleValues.includes(option.value) ? "imageStyleMostUsedItem active" : "imageStyleMostUsedItem"} key={option.value} onClick={() => (onStyleSelect ?? onChange)(option.value)} type="button">
                     <i aria-hidden="true" />
                     {option.label}
                   </button>
@@ -2580,7 +2625,7 @@ function renderField({
           ) : null}
           <div className="imageStyleGrid">
             {visibleStyleOptions.map((option) => {
-              const active = value === option.value;
+              const active = selectedStyleValues.includes(option.value);
               const recommended = styleRecommendation?.value === option.value;
               return (
                 <button

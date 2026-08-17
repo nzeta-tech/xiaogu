@@ -31,6 +31,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
 
   const body = (await request.json().catch(() => ({}))) as { values?: Record<string, string | string[]> };
   const values = body.values ?? {};
+  if (app.slug === "image-card" && Array.isArray(values.style) && new Set(values.style.filter(Boolean)).size > 3) {
+    return Response.json({ error: "知识卡片最多同时选择 3 个视觉风格。" }, { status: 400 });
+  }
   const linkRemixSourceUrl = typeof values.source_url === "string" ? values.source_url : "";
   const isServerInspectableWechatArticle = app.slug === "link-remix" && isWechatArticleUrl(linkRemixSourceUrl);
 

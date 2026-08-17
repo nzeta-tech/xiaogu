@@ -1,4 +1,5 @@
 import { generateImageSet } from "@/lib/agent/image-generator";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 import { extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
 import { runInsuranceContentAgent, streamInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { type CreationField } from "@/lib/apps/catalog";
@@ -42,6 +43,7 @@ import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-researc
 import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
 import { buildPersistedCreatorStyleText, type CreatorStyleResult } from "@/lib/creation/creator-style-result";
 import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
+import { normalizeImageCardStyles } from "@/lib/creation/image-card-styles";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 import { query } from "@/lib/db/client";
@@ -179,13 +181,16 @@ export async function executeCreationAppRun(input: {
   const referenceKnowledge = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix"
     ? await extractKnowledgeFromReferenceImage(values.reference_image)
     : "";
+  const imageCardStyles = app.slug === "image-card" ? normalizeImageCardStyles(values.style) : [];
+  const buildImageCardStylePrompt = (style: string) => buildImagePrompt(effectiveApp.name, effectiveApp.fields, { ...values, style }, caseContext, effectiveApp.promptHint, referenceKnowledge);
   const imagePrompt = effectiveApp.resultType === "image" || effectiveApp.resultType === "image-plan"
     ? isPolicyRenewalCard
       ? buildPolicyRenewalImagePrompt(values)
       : app.slug === "video-cover"
         ? buildVideoCoverPrompt(values, caseContext, effectiveApp.promptHint)
-      : buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint, referenceKnowledge)
+      : imageCardStyles.length ? buildImageCardStylePrompt(imageCardStyles[0]) : buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint, referenceKnowledge)
     : null;
+  const imageCardVariantPrompts = imageCardStyles.length ? imageCardStyles.map(buildImageCardStylePrompt) : undefined;
   // `wechat-images` also powers the Xiaohongshu studio's chapter cards.  A
   // shared prompt produces near-duplicate variations, so derive one prompt
   // per section before asking the image model for a set.
@@ -218,7 +223,7 @@ export async function executeCreationAppRun(input: {
           ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1"
           : effectiveApp.resultType === "image"
           ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1"
-          : process.env.MODEL_NAME ?? "configured-model",
+          : resolveConfiguredTextModel(),
       });
 
   if (!input.existingRunId && input.workId && run?.id) {
@@ -262,10 +267,10 @@ export async function executeCreationAppRun(input: {
         effectiveApp.resultType === "image"
           ? await generateImageSet({
               prompt: imagePrompt ?? "",
-              style: stringifyCreationFieldValue(values.style) || app.name,
+              style: imageCardStyles.length ? imageCardStyles.join("、") : stringifyCreationFieldValue(values.style) || app.name,
               ratio: stringifyCreationFieldValue(values.ratio) || (app.slug === "wechat-images" ? "3:4" : "1:1"),
-              count: sectionImagePlan?.prompts.length ?? (isPolicyRenewalCard || app.slug !== "wechat-images" ? 1 : 4),
-              variantPrompts: sectionImagePlan?.prompts,
+              count: sectionImagePlan?.prompts.length ?? (imageCardStyles.length || (isPolicyRenewalCard || app.slug !== "wechat-images" ? 1 : 4)),
+              variantPrompts: sectionImagePlan?.prompts ?? imageCardVariantPrompts,
               // For image remix, the source card must stay the primary image;
               // avatar references only define the optional inserted person.
               referenceImages: isImageCardRemix
@@ -282,6 +287,7 @@ export async function executeCreationAppRun(input: {
         contentJson: buildCreationOutputJson(result, []),
         images: imageResult?.images ?? [],
         imageMode: imageResult?.mode ?? null,
+        imageStyles: imageCardStyles,
         retryable: imageResult?.retryable ?? false,
         avatarVisualAssetIds: visualReferences.map((item) => item.id),
       };
@@ -488,7 +494,7 @@ export async function executeCreationAppRun(input: {
       ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1"
       : effectiveApp.resultType === "image"
       ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1"
-      : process.env.MODEL_NAME ?? "configured-model",
+      : resolveConfiguredTextModel(),
     metadata: {
       appId: app.id,
       appSlug: app.slug,

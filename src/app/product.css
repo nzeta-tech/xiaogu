@@ -4094,6 +4094,8 @@ body {
   backdrop-filter: blur(18px);
 }
 
+.resultWorkspaceBar:has(.resultWorkspaceEditPrimary) { grid-template-columns: 38px minmax(0, 1fr) auto auto auto auto; }
+
 .resultWorkspaceBack {
   display: grid;
   width: 36px;
@@ -4205,6 +4207,31 @@ body {
   border-color: #14b8a6;
   background: #ccfbf1;
 }
+
+.resultWorkspaceEditPrimary { min-height:36px; padding:0 15px; border:1px solid #0f766e; border-radius:8px; background:#0f766e; color:#fff; font-size:12px; font-weight:750; cursor:pointer; box-shadow:0 5px 14px rgba(15,118,110,.16); }
+.resultWorkspaceEditPrimary:hover:not(:disabled) { border-color:#115e59; background:#115e59; }
+.resultWorkspaceEditPrimary:disabled { cursor:not-allowed; opacity:.45; box-shadow:none; }
+
+.imageEditOverlay { position:fixed; z-index:120; inset:0; display:flex; justify-content:flex-end; background:rgba(15,23,42,.38); backdrop-filter:blur(3px); }
+.imageEditDialog { display:flex; width:min(460px,100%); height:100%; flex-direction:column; gap:16px; padding:24px; overflow-y:auto; background:#fff; box-shadow:-20px 0 55px rgba(15,23,42,.16); }
+.imageEditDialog>header { display:flex; align-items:flex-start; justify-content:space-between; }
+.imageEditDialog>header span { color:#0d9488; font-size:12px; font-weight:750; }
+.imageEditDialog>header h2 { margin:4px 0 0; color:#0f172a; font-size:22px; }
+.imageEditDialog>header button { width:34px; height:34px; border:1px solid #e2e8f0; border-radius:9px; background:#fff; color:#64748b; font-size:22px; cursor:pointer; }
+.imageEditPreview { display:grid; min-height:210px; max-height:340px; place-items:center; padding:12px; border:1px solid #e2e8f0; border-radius:14px; background:#f8fafc; }
+.imageEditPreview img { max-width:100%; max-height:316px; border-radius:8px; object-fit:contain; }
+.imageEditDialog>label { margin-bottom:-8px; color:#334155; font-size:13px; font-weight:750; }
+.imageEditDialog textarea { min-height:144px; resize:vertical; padding:13px 14px; border:1px solid #cbd5e1; border-radius:10px; color:#0f172a; font:inherit; line-height:1.65; outline:none; }
+.imageEditDialog textarea:focus { border-color:#14b8a6; box-shadow:0 0 0 3px rgba(20,184,166,.12); }
+.imageEditHint { display:flex; justify-content:space-between; margin-top:-10px; color:#94a3b8; font-size:11px; }
+.imageEditHint em { font-style:normal; }
+.imageEditError { margin:-4px 0 0; color:#dc2626; font-size:12px; }
+.imageEditDialog>footer { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:auto; padding-top:18px; border-top:1px solid #e2e8f0; }
+.imageEditDialog>footer small { color:#64748b; }
+.imageEditDialog>footer div { display:flex; gap:10px; }
+.imageEditDialog>footer button { min-height:38px; padding:0 15px; border:1px solid #dbe3ec; border-radius:8px; background:#fff; color:#475569; font-weight:700; cursor:pointer; }
+.imageEditDialog>footer button.primary { border-color:#0f766e; background:#0f766e; color:#fff; }
+.imageEditDialog>footer button:disabled { cursor:not-allowed; opacity:.48; }
 
 .resultWorkspaceBar + :is(.imageInstanceHero, .letterResultHero, .topicPickerResultHero, .xiaohongshuCheckHero, .instanceStudioHero) {
   display: none;
@@ -4897,6 +4924,8 @@ body .writeCopyOriginPage .instanceOriginSidebarCard .writeCopyChannelNav {
     padding: 8px 10px;
   }
 
+  .resultWorkspaceBar:has(.resultWorkspaceEditPrimary) { grid-template-columns:34px minmax(0,1fr) auto auto auto; }
+
   .resultWorkspaceBack {
     width: 32px;
     height: 32px;
@@ -4911,10 +4940,20 @@ body .writeCopyOriginPage .instanceOriginSidebarCard .writeCopyChannelNav {
     padding: 0 10px;
   }
 
+  .resultWorkspaceEditPrimary { min-height:32px; padding:0 10px; }
+
   .resultWorkspaceDetails {
     min-height: 32px;
     padding: 0 9px;
   }
+}
+
+@media (max-width:520px) {
+  .resultWorkspaceBar:has(.resultWorkspaceEditPrimary) { grid-template-columns:34px minmax(0,1fr) auto auto; }
+  .resultWorkspaceBar:has(.resultWorkspaceEditPrimary) .resultWorkspaceDetails { display:none; }
+  .imageEditDialog { padding:18px; }
+  .imageEditDialog>footer { align-items:stretch; flex-direction:column; }
+  .imageEditDialog>footer div { display:grid; grid-template-columns:1fr 1.35fr; }
 }
 
 @media (max-width: 960px) {
