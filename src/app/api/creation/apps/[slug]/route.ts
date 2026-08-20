@@ -36,6 +36,7 @@ import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt, type
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildWechatSectionImagePrompts } from "@/lib/creation/wechat-article-images";
+import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 
 type FieldValue = CreationFieldValue;
 
@@ -125,7 +126,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const resolvedPrompt = app.resultType === "image" || app.resultType === "image-plan" ? imagePrompt : content;
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
-  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+  const needsAvatarPhoto = creationNeedsAvatarPhoto({ appSlug: app.slug, entry, values });
   if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     return Response.json({ error: "请选择数字分身形象照，或临时上传一张形象照。" }, { status: 400 });
   }

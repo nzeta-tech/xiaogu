@@ -47,6 +47,7 @@ import { normalizeImageCardStyles } from "@/lib/creation/image-card-styles";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 import { query } from "@/lib/db/client";
+import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 
 type FieldValue = CreationFieldValue;
 
@@ -120,7 +121,7 @@ export async function executeCreationAppRun(input: {
     throw new Error("请先确认已经核对日期、金额、币种和保单号。");
   }
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
-  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard || isXiaohongshuStudioAssetStep && app.slug === "wechat-cover") && values.avatar_visual_mode === "yes";
+  const needsAvatarPhoto = creationNeedsAvatarPhoto({ appSlug: app.slug, entry, values, isXiaohongshuStudioAssetStep });
   const isImageCardRemix = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix";
   if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     throw new Error("请选择数字分身形象照，或临时上传一张形象照。");
