@@ -7428,6 +7428,118 @@ body .writeCopyOriginPage .instanceOriginSidebarCard .writeCopyChannelNav {
 }
 
 /* Today inspiration: choose a topic on the left, then borrow a proven expression on the right. */
+.inspirationVerticalLayout {
+  display: grid;
+  gap: 18px;
+}
+
+.inspirationVerticalLayout .inspirationViralStrip,
+.inspirationVerticalLayout .inspirationTopicBoard {
+  margin: 0;
+  padding: 18px;
+  border: 1px solid #e1e8e4;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.inspirationViralStrip .viralExamplesList {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(190px, 1fr);
+  grid-template-columns: none;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.inspirationViralStrip .viralExampleCard {
+  min-width: 0;
+}
+
+.inspirationTopicBoard { display: grid; gap: 13px; }
+.inspirationTopicBoard .todayOpportunityHeader { margin: 0; }
+
+.inspirationTopicTabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.inspirationTopicTabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.inspirationTopicTabs button.active {
+  border-color: #8ed9ca;
+  background: #effcf9;
+  color: #0f766e;
+}
+
+.inspirationTopicTabs em {
+  min-width: 16px;
+  color: inherit;
+  font-size: 9px;
+  font-style: normal;
+  opacity: 0.72;
+}
+
+.inspirationTopicMasonry {
+  display: block;
+  column-count: 3;
+  column-gap: 10px;
+}
+
+.inspirationTopicMasonry .todayOpportunityRow {
+  display: grid;
+  width: 100%;
+  margin: 0 0 10px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  min-height: 0;
+  gap: 9px;
+  padding: 11px;
+  border-color: #e3ebef;
+  box-shadow: none;
+}
+
+.inspirationTopicMasonry .todayOpportunityRow.featured { background: linear-gradient(145deg, #fffdf7, #ffffff); }
+.inspirationTopicMasonry .todayOpportunityActions { grid-column: 2; justify-self: start; margin-top: 1px; }
+.inspirationTopicMasonry .todayOpportunityActions > a:first-child { min-height: auto; padding: 0; background: transparent; color: #356dff !important; }
+.inspirationTopicMasonry .todayOpportunitySelect strong { display: -webkit-box; overflow: hidden; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.inspirationTopicMasonry .todayOpportunitySelect > span { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
+.inspirationTopicSummary { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #718096; font-size: 11px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+@media (max-width: 900px) {
+  .inspirationTopicMasonry { column-count: 2; }
+}
+
+@media (max-width: 640px) {
+  .inspirationVerticalLayout .inspirationViralStrip,
+  .inspirationVerticalLayout .inspirationTopicBoard { padding: 14px; }
+  .inspirationViralStrip .viralExamplesList { grid-auto-columns: minmax(168px, 72vw); }
+  .inspirationTopicMasonry { column-count: 2; column-gap: 8px; }
+  .inspirationTopicMasonry .todayOpportunityRow { grid-template-columns: 25px minmax(0, 1fr); padding: 9px; }
+  .inspirationTopicMasonry .todayOpportunityRank { width: 24px; height: 24px; }
+  .inspirationTopicMasonry .todayOpportunitySelect strong { font-size: 12px; }
+  .inspirationTopicSummary { font-size: 10px; }
+}
+
 .inspirationSplitLayout {
   display: grid;
   grid-template-columns: minmax(360px, 2fr) minmax(0, 3fr);
@@ -10069,6 +10181,50 @@ body .linkRemixAppPage .creationStickyAction .submitButton:disabled {
   object-fit: contain;
 }
 
+/* Today is now a vertical feed.  Do not let the legacy split-pane viewport
+ * constraints collapse the first (viral) section or clip the bottom of topics. */
+.xiaoguLightTheme .inspirationVerticalLayout {
+  height: auto !important;
+  min-height: 0;
+  grid-template-rows: none !important;
+  overflow: visible !important;
+  padding-bottom: 28px !important;
+}
+
+.xiaoguLightTheme .main:has(.inspirationVerticalLayout) {
+  overflow: auto !important;
+}
+
+.inspirationVerticalLayout > :is(.inspirationViralStrip, .inspirationTopicBoard),
+.inspirationVerticalLayout .viralExamplesContent {
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+}
+
+/* Column layout intentionally lets cards of different heights fill upward,
+ * instead of the empty horizontal bands created by a regular CSS grid. */
+.inspirationVerticalLayout .inspirationTopicMasonry {
+  display: block;
+  column-count: 3;
+  column-gap: 12px;
+}
+
+.inspirationVerticalLayout .inspirationTopicMasonry .todayOpportunityRow {
+  width: 100%;
+  margin: 0 0 12px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@media (max-width: 900px) {
+  .inspirationVerticalLayout .inspirationTopicMasonry { column-count: 2; }
+}
+
+@media (max-width: 560px) {
+  .inspirationVerticalLayout .inspirationTopicMasonry { column-count: 1; }
+}
+
 /* PPT creation studio */
 
 .pptResultPage { max-width: 980px; }
@@ -10202,4 +10358,350 @@ body .linkRemixAppPage .creationStickyAction .submitButton:disabled {
 @media (max-width: 760px) {
   .xiaoguLightTheme .shellMainColumn { grid-template-rows: minmax(0, 1fr); }
   .xiaoguLightTheme .main::before { inset: 0; }
+}
+
+/* Today discovery is deliberately independent of the retired split-pane layout. */
+.xiaoguLightTheme .todayDiscoveryPage {
+  display: grid;
+  height: auto !important;
+  min-height: 0;
+  gap: 20px !important;
+  overflow: visible !important;
+  padding: 0 0 36px !important;
+}
+
+.xiaoguLightTheme .main:has(.todayDiscoveryPage) {
+  overflow: auto !important;
+}
+
+.todayDiscoveryPage .todayViralPanel,
+.todayDiscoveryPage .todayTopicsPanel {
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 20px;
+  border: 1px solid #dce9e5;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #ffffff 0%, #fcfefd 100%);
+  box-shadow: 0 14px 36px rgba(25, 74, 56, 0.055);
+}
+
+.todayDiscoveryPage .todayViralPanel {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding-top: 8px;
+  padding-bottom: 10px;
+}
+
+.todayDiscoveryPage .viralExamplesHeader,
+.todayDiscoveryPage .todayOpportunityHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+}
+
+.todayDiscoveryPage .viralExamplesHeader { min-height: 25px !important; margin-bottom: 0 !important; }
+
+.todayDiscoveryPage .todayViralHeaderControls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.todayDiscoveryPage .viralExamplesHeader > div,
+.todayDiscoveryPage .todayOpportunityHeader > div {
+  display: grid;
+  gap: 3px;
+}
+
+.todayDiscoveryPage .viralExamplesHeader span,
+.todayDiscoveryPage .todayOpportunityHeader > div > span {
+  color: #16836e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.todayDiscoveryPage .viralExamplesHeader h2,
+.todayDiscoveryPage .todayOpportunityHeader h2 {
+  margin: 0;
+  color: #172b25;
+  font-size: 23px;
+  line-height: 1.1;
+}
+
+.todayDiscoveryPage .viralExamplesHeader h2 { font-size: 20px; }
+
+.todayDiscoveryPage .todayOpportunityHeader time {
+  color: #718096;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.todayDiscoveryPage .viralPlatformTabs {
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.todayDiscoveryPage .viralPlatformTabs button,
+.todayDiscoveryPage .inspirationTopicTabs button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid #dce6e2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9px;
+  background: #fff;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.todayDiscoveryPage .viralPlatformTabs button.active,
+.todayDiscoveryPage .inspirationTopicTabs button.active {
+  border-color: #83d5c2;
+  background: linear-gradient(135deg, #effcf8, #e6f8f2);
+  color: #0f766e;
+  box-shadow: 0 4px 10px rgba(18, 134, 108, .11);
+}
+
+.todayDiscoveryPage .viralPlatformTabs button:hover,
+.todayDiscoveryPage .inspirationTopicTabs button:hover { border-color: #addbd0; color: #177d6b; }
+.todayDiscoveryPage .inspirationTopicTabs button em { display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border-radius: 99px; background: #f0f4f5; color: inherit; font-size: 10px; font-style: normal; }
+.todayDiscoveryPage .inspirationTopicTabs button.active em { background: #cfeee5; }
+
+.todayDiscoveryPage .viralExamplesContent { display: grid; gap: 8px; min-height: 0; }
+
+.todayDiscoveryPage .viralExamplesList {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  gap: 12px;
+  overflow: visible;
+  padding: 2px 1px 6px;
+  scrollbar-width: thin;
+}
+
+.todayDiscoveryPage .viralExampleCard {
+  display: grid;
+  position: relative;
+  height: auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 72px;
+  align-self: start;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #dce8e3;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.todayDiscoveryPage .viralExampleCover,
+.todayDiscoveryPage .viralExampleCard.is-video .viralExampleCover,
+.todayDiscoveryPage .viralExampleCard.is-graphic .viralExampleCover,
+.todayDiscoveryPage .viralExampleCard.is-article .viralExampleCover {
+  grid-column: 1 / -1;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  width: 100%;
+  /* 保持调整前的视频号视觉高度；图片只在固定画框内适配，不再由 16:9 宽度反推高度。 */
+  height: 180px;
+  aspect-ratio: auto;
+  align-self: start;
+  min-height: 0;
+  max-width: none;
+  border-radius: 9px 9px 0 0;
+}
+
+.todayDiscoveryPage .viralExampleCover .viralCoverImage { object-fit: cover; }
+/* 视频号通常返回横版封面，抖音下载链路则保留竖版原始封面。
+   统一展示框高度，竖版图以 contain 完整呈现，避免既裁切又撑高卡片。 */
+.todayDiscoveryPage .viralExampleCard.is-video .viralExampleCover { height: 180px; aspect-ratio: auto; background: #17241f; }
+.todayDiscoveryPage .viralExampleCard.is-video .viralExampleCover .viralCoverImage { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+/* 所有视频封面完整保留在框内。视频号素材的实际比例并不一致，强制 cover
+   会把标题和人物裁出边界；留白由组件背景承接，而不是截断原图。 */
+.todayDiscoveryPage .viralExampleCard.platform-channels .viralExampleCover .viralCoverImage { object-fit: contain; }
+/* 视频号不把竖版内容塞进整张横向卡片：高度始终 180px，封面框则按图片
+   真实宽高比收窄。这样左右不会留下“组件背景”，也不会裁掉封面文字。 */
+.todayDiscoveryPage .viralExampleCard.platform-channels .viralExampleCover {
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: var(--viral-cover-aspect, 3 / 4);
+  justify-self: center;
+}
+.todayDiscoveryPage .viralExampleCard.is-video .viralExampleCover.withoutThumbnail { min-height: 150px; }
+
+.todayDiscoveryPage .viralExampleMain {
+  /* 标题不再与操作按钮争抢同一列，始终占用封面下方的完整一行。 */
+  grid-column: 1 / -1;
+  grid-row: 2;
+  gap: 3px;
+  padding: 8px 9px 8px;
+}
+
+.todayDiscoveryPage .viralExampleMain h3 {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: #263b33;
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
+}
+
+.todayDiscoveryPage .viralExampleAuthor { gap: 4px; padding-right: 70px; }
+.todayDiscoveryPage .viralExampleAuthor > span { width: 16px; height: 16px; font-size: 9px; }
+.todayDiscoveryPage .viralExampleAuthor strong,
+.todayDiscoveryPage .viralExampleAuthor small { font-size: 10px; }
+.todayDiscoveryPage .viralExampleActions { position: absolute; right: 0; bottom: 0; z-index: 1; padding: 0 8px 8px 0; }
+.todayDiscoveryPage .viralExampleActions a.viralRemixButton { width: 62px; min-height: 24px; padding: 0 5px; border-radius: 5px; font-size: 9px; }
+.todayDiscoveryPage .viralExampleActions a.viralRemixButton span { display: none; }
+.todayDiscoveryPage .viralMoreActions { display: flex; min-height: 34px; justify-content: center; gap: 8px; margin: 0; }
+.todayDiscoveryPage .viralMoreButton,
+.todayDiscoveryPage .viralCollapseButton { min-height: 34px; padding: 0 13px; border: 1px solid #cfe2dc; border-radius: 18px; background: #f7fcfa; color: #177c69; font-size: 12px; font-weight: 750; cursor: pointer; }
+.todayDiscoveryPage .viralCollapseButton { border-color: #e1e7e9; background: #fff; color: #718096; }
+
+.todayDiscoveryPage .todayTopicsPanel { display: grid; gap: 8px; padding-top: 12px; padding-bottom: 14px; }
+.todayDiscoveryPage .inspirationTopicTabs { display: flex; gap: 7px; overflow-x: auto; }
+.todayDiscoveryPage .todayOpportunityHeader { align-items: center; min-height: 34px; }
+.todayDiscoveryPage .todayOpportunityHeader .todayTopicHeaderMain { display: flex; min-width: 0; align-items: center; gap: 16px; }
+.todayDiscoveryPage .todayOpportunityHeader .todayTopicHeaderMain h2 { flex: 0 0 auto; font-size: 22px; }
+.todayDiscoveryPage .todayOpportunityHeader .inspirationTopicTabs { min-width: 0; }
+.todayDiscoveryPage .financeTopicFilters { display: flex; gap: 7px; overflow-x: auto; margin-top: -5px; padding-bottom: 1px; }
+.todayDiscoveryPage .financeTopicFilters button { flex: 0 0 auto; min-height: 30px; padding: 0 11px; border: 1px solid #e0e9ed; border-radius: 999px; background: #fff; color: #718096; font-size: 12px; font-weight: 650; cursor: pointer; transition: all .18s ease; }
+.todayDiscoveryPage .financeTopicFilters button:hover { border-color: #b9ded4; color: #157965; }
+.todayDiscoveryPage .financeTopicFilters button.active { border-color: #9bdbc9; background: linear-gradient(135deg, #effcf8, #e2f8f0); color: #087c67; box-shadow: 0 3px 8px rgba(15, 122, 101, .1); }
+
+.todayDiscoveryPage .todayTopicsMasonry {
+  position: relative;
+  min-height: 1px;
+  transition: height 0.2s ease;
+}
+
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow {
+  position: relative;
+  display: block;
+  width: calc((100% - 28px) / 3);
+  min-height: 0;
+  align-self: start;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #e1eaed;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 7px 20px rgba(21, 56, 74, 0.045);
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow:hover { z-index: 1; border-color: #b8d8d0; box-shadow: 0 10px 24px rgba(25, 85, 72, .08); }
+
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRank {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  width: 35px;
+  height: 31px;
+  border-radius: 13px 0 11px 0;
+  background: #e9eef2;
+  color: #718096;
+  font-size: 11px;
+  line-height: 31px;
+  text-align: center;
+}
+
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow.featured .todayOpportunityRank { background: #f7ead4; color: #a56f18; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRowBody { display: block; min-width: 0; padding: 13px 13px 7px; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow.no-image .todayOpportunityRowBody { padding-left: 48px; }
+.todayDiscoveryPage .todayTopicsMasonry .todayTopicVisual { display: block; width: 100%; margin: 0; background: #f2f6f7; }
+.todayDiscoveryPage .todayTopicsMasonry .todayTopicVisual img { display: block; width: 100%; height: auto; max-height: 300px; object-fit: contain; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityActions { display: block; margin: 1px 13px 13px; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityActions > a:first-child,
+.todayDiscoveryPage .todayTopTopicBody > a { display: inline-flex; min-height: 27px; align-items: center; gap: 4px; padding: 0 9px; border: 1px solid #d8e8e4; border-radius: 7px; background: #f5fbf9; color: #21806f !important; font-size: 11px; font-weight: 750; line-height: 1; text-decoration: none; transition: border-color .18s ease, background .18s ease, color .18s ease; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityActions > a:first-child:hover,
+.todayDiscoveryPage .todayTopTopicBody > a:hover { border-color: #9fd3c7; background: #eaf8f4; color: #106e5f !important; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunitySelect { display: block; width: 100%; text-align: left; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunitySelect strong { display: -webkit-box; overflow: hidden; color: #1f2937; font-size: 15px; line-height: 1.45; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunitySelect > span { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
+.todayDiscoveryPage .todayTopicsMasonry .inspirationTopicSummary { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #718096; font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow.brief-summary .inspirationTopicSummary { -webkit-line-clamp: 2; }
+
+.todayDiscoveryPage .todayOpportunityMoreButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  justify-self: center;
+  min-width: 174px;
+  min-height: 42px;
+  margin: 8px auto 2px;
+  border: 1px solid #69cdb9;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #13a488, #0d8574);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 17px rgba(12, 133, 112, .2);
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.todayDiscoveryPage .todayOpportunityMoreButton:hover { background: linear-gradient(135deg, #11977f, #087466); box-shadow: 0 12px 22px rgba(12, 133, 112, .27); transform: translateY(-2px); }
+
+/* The first ten are a fast, scan-friendly heat ranking. Everything after it
+ * is placed by the shortest-column masonry algorithm above. */
+.todayDiscoveryPage .todayTopTopicsList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; overflow: hidden; border: 1px solid #e0e9ed; border-radius: 14px; background: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
+.todayDiscoveryPage .todayTopTopic { position: relative; display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; min-height: 104px; padding: 12px; border-bottom: 1px solid #edf1f2; }
+.todayDiscoveryPage .todayTopTopic:nth-child(odd) { border-right: 1px solid #edf1f2; }
+.todayDiscoveryPage .todayTopTopic:nth-last-child(-n + 2) { border-bottom: 0; }
+.todayDiscoveryPage .todayTopTopicVisual { align-self: stretch; width: 128px; height: 88px; margin: 0; overflow: hidden; border-radius: 10px; background: #f2f6f7; box-shadow: 0 4px 10px rgba(15, 48, 64, .08); }
+.todayDiscoveryPage .todayTopTopicVisual img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .3s ease; }
+.todayDiscoveryPage .todayTopTopic:hover .todayTopTopicVisual img { transform: scale(1.035); }
+.todayDiscoveryPage .todayTopTopicBody { min-width: 0; padding: 1px 4px; }
+.todayDiscoveryPage .todayTopTopicRank { position: absolute; z-index: 2; top: 12px; left: 12px; display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: #edf1f4; color: #718096; font-size: 11px; font-weight: 800; }
+.todayDiscoveryPage .todayTopTopic:nth-child(-n + 3) .todayTopTopicRank { background: #f7ead4; color: #a56f18; box-shadow: none; }
+.todayDiscoveryPage .todayTopTopic .todayOpportunitySelect { display: block; width: 100%; text-align: left; }
+.todayDiscoveryPage .todayTopTopic .todayOpportunitySelect strong { display: block; overflow: hidden; color: #1f2937; font-size: 16px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.todayDiscoveryPage .todayTopTopic .todayOpportunitySelect > span { display: block; margin-top: 4px; overflow: hidden; color: #718096; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.todayDiscoveryPage .todayTopTopicBody > p { display: -webkit-box; margin: 7px 0 5px; overflow: hidden; color: #68778d; font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.todayDiscoveryPage .todayTopTopic:not(:has(.todayTopTopicVisual)) { grid-template-columns: 1fr; min-height: 88px; }
+.todayDiscoveryPage .todayTopTopic:not(:has(.todayTopTopicVisual)) .todayTopTopicBody { padding: 1px 8px 1px 39px; }
+
+@media (max-width: 900px) {
+  .todayDiscoveryPage .viralExamplesList { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow { width: calc((100% - 14px) / 2); }
+}
+
+@media (max-width: 640px) {
+  .todayDiscoveryPage .todayViralPanel,
+  .todayDiscoveryPage .todayTopicsPanel { padding: 15px; border-radius: 13px; }
+  .todayDiscoveryPage .todayTopicsMasonry .todayOpportunityRow { width: 100%; }
+  .todayDiscoveryPage .todayTopTopicsList { grid-template-columns: 1fr; }
+  .todayDiscoveryPage .todayTopTopic { grid-template-columns: 105px minmax(0, 1fr); gap: 10px; padding: 10px; border-right: 0 !important; }
+  .todayDiscoveryPage .todayTopTopic:nth-last-child(-n + 2) { border-bottom: 1px solid #edf1f2; }
+  .todayDiscoveryPage .todayTopTopic:last-child { border-bottom: 0; }
+  .todayDiscoveryPage .todayTopTopicVisual { width: 105px; height: 80px; }
+  .todayDiscoveryPage .todayTopTopicBody { padding-left: 4px; }
+  .todayDiscoveryPage .todayTopTopic:not(:has(.todayTopTopicVisual)) .todayTopTopicBody { padding-left: 35px; }
+  .todayDiscoveryPage .todayTopTopic .todayOpportunitySelect strong { font-size: 14px; }
+  .todayDiscoveryPage .todayTopTopicBody > p { -webkit-line-clamp: 2; font-size: 11px; }
+  .todayDiscoveryPage .viralExamplesList { grid-template-columns: 1fr; grid-auto-rows: auto; }
+  .todayDiscoveryPage .viralExamplesHeader { align-items: flex-start; }
+  .todayDiscoveryPage .todayViralHeaderControls { align-items: flex-end; flex-direction: column; }
 }

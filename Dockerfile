@@ -1,21 +1,21 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
-ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
-RUN npm config set registry https://registry.npmmirror.com && \
+ENV COREPACK_NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry https://registry.npmjs.org && \
     corepack enable && \
     corepack prepare pnpm@11.2.2 --activate && \
-    pnpm config set registry https://registry.npmmirror.com
+    pnpm config set registry https://registry.npmjs.org
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --fetch-retries=5 --fetch-retry-factor=2 --fetch-timeout=600000
 RUN pnpm install pg
 
 FROM node:22-alpine AS builder
 WORKDIR /app
-ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
-RUN npm config set registry https://registry.npmmirror.com && \
+ENV COREPACK_NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry https://registry.npmjs.org && \
     corepack enable && \
     corepack prepare pnpm@11.2.2 --activate && \
-    pnpm config set registry https://registry.npmmirror.com
+    pnpm config set registry https://registry.npmjs.org
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_OUTPUT=standalone

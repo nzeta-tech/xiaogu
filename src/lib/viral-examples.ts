@@ -1,7 +1,10 @@
 import { inferHotTopicCategory } from "./topics/rules";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { tryListPublishedViralContents } from "./db/repositories";
 import { getLatestViralDataRun } from "./viral-data-repository";
 import { inspectDouyinPublicMetadata } from "./creation/douyin-download";
+import { parseTopHubDouyinRankingHtml, parseValuefocusDouyinPayload } from "./viral-douyin-ranking";
 import { inspectWechatChannelsWithContainerBrowser } from "./creation/wechat-channels-container";
 import { parseSogouAccountResults } from "./viral-creator-sources";
 import { getCachedLinkRemixSourceUrls, normalizeLinkRemixCacheUrl } from "./creation/link-remix-cache";
@@ -105,6 +108,9 @@ const defaultContentMaxAgeDays = 30;
 const defaultWechatChannelDiscoveryQueries = ["保险", "保险理赔", "健康告知", "养老规划"];
 const douyinHotSearchApiBase = "https://aweme.snssdk.com/aweme/v1/hot/search";
 const douyinHotTopicPattern = /保险|医保|医疗|养老|退休|健康|疾病|医院|社保|家庭|收入|裁员|台风|暴雨|事故|车祸|理赔|灾害/;
+const topHubDouyinVideoUrl = "https://tophub.today/n/2me3N3xdwj";
+const valuefocusDouyinTrendsApi = "https://base44.app/api/apps/6a297a9d7ba7cdb27a8bfef0/functions/douyinTrends";
+const execFileAsync = promisify(execFile);
 const scaledCreatorDiscoveryQueries = [
   "保险", "保险理赔", "健康告知", "医疗险", "重疾险", "寿险", "养老规划", "年金险",
   "家庭保障", "保险经纪人", "资产配置", "家庭理财", "基金投资", "个人理财", "退休规划", "财务规划",
@@ -145,7 +151,9 @@ const viralPlatformSearches: NativeSearchConfig[] = [
 
 export async function getViralExamples(options: { refresh?: boolean } = {}) {
   void options;
-  const rows = await tryListPublishedViralContents(24);
+  // 前端按“更多爆款”逐行展开，接口不能在全平台混排阶段提前截断，
+  // 否则视频号会占用总名额，导致抖音已发布内容（如 TopHub）看不到。
+  const rows = await tryListPublishedViralContents(100);
   const cachedUrls = await getCachedLinkRemixSourceUrls(rows.map((row) => row.source_url));
   const items = rows.map((item) => databaseRowToExample(item, cachedUrls));
   const latestSuccessfulRun = await getLatestViralDataRun("succeeded").catch(() => null);
@@ -619,7 +627,11 @@ export async function discoverPlatformViralData(options: { refresh?: boolean } =
     viralPlatformSearches.find((config) => config.platform === "公众号")?.queries ?? [],
     boundedInteger(process.env.VIRAL_WECHAT_PROVIDER_ARTICLE_LIMIT, 30, 3, 100),
   );
-  const candidates = (await Promise.all(viralPlatformSearches.flatMap((config) => config.queries.map(async (query, queryIndex) => {
+  // Keep the previous Douyin search warm as a safety net. Its results are only
+  // published when both preferred finance rankings return no usable entries.
+  const legacyDouyinFallbackEnabled = process.env.VIRAL_DOUYIN_LEGACY_FALLBACK_ENABLED !== "0";
+  const contentSearches = viralPlatformSearches.filter((config) => config.platform !== "抖音" || legacyDouyinFallbackEnabled);
+  const candidates = (await Promise.all(contentSearches.flatMap((config) => config.queries.map(async (query, queryIndex) => {
     try {
       const source = config.platform === "公众号"
         ? await fetchSogouArticleSearchPage(config.searchUrl(query), options.refresh)
@@ -717,14 +729,20 @@ export async function discoverPlatformViralData(options: { refresh?: boolean } =
       return counts;
     }, {}),
   });
-  const douyinHotItems = nativeItems.some((item) => item.platform === "抖音") ? [] : await discoverDouyinHotExamples();
+  const externalDouyinItems = await discoverExternalDouyinExamples();
+  const publishableNativeItems = externalDouyinItems.length > 0
+    ? nativeItems.filter((item) => item.platform !== "抖音")
+    : nativeItems;
+  const publishableSelected = externalDouyinItems.length > 0
+    ? selected.filter((item) => item.config.platform !== "抖音")
+    : selected;
   const providerArticles = await providerArticlePromise;
   const providerWechatItems = providerArticles.items.map(wechatProviderArticleToExample);
   const wechatChannelItems = await discoverAuthorizedWechatChannelExamples();
   const wechatChannelSearchItems = await discoverWechatChannelSearchExamples();
-  const directlyDiscoveredItems = [...nativeItems, ...providerWechatItems, ...douyinHotItems, ...wechatChannelItems, ...wechatChannelSearchItems];
+  const directlyDiscoveredItems = [...publishableNativeItems, ...externalDouyinItems, ...providerWechatItems, ...wechatChannelItems, ...wechatChannelSearchItems];
   const initialWorkCandidates = deduplicateWorkCandidates([
-    ...selected.map(({ config, query, result }) => ({
+    ...publishableSelected.map(({ config, query, result }) => ({
       platform: config.platform,
       sourceUrl: result.url,
       title: result.title,
@@ -741,6 +759,88 @@ export async function discoverPlatformViralData(options: { refresh?: boolean } =
   const items = deduplicateViralExamples([...directlyDiscoveredItems, ...creatorProfileItems]);
   const workCandidates = deduplicateWorkCandidates([...initialWorkCandidates, ...creatorProfileItems.map(viralExampleToCandidate)]);
   return { items, creators, candidates: workCandidates };
+}
+
+/** Preferred Douyin finance rankings. Each source can be disabled without a
+ * deployment; when both are empty, discoverPlatformViralData keeps the legacy
+ * platform search results as a fallback. */
+async function discoverExternalDouyinExamples(): Promise<ViralExample[]> {
+  const [valuefocus, topHub] = await Promise.all([
+    process.env.VIRAL_DOUYIN_VALUEFOCUS_ENABLED === "0" ? Promise.resolve([]) : discoverValuefocusDouyinExamples(),
+    process.env.VIRAL_DOUYIN_TOPHUB_ENABLED === "0" ? Promise.resolve([]) : discoverTopHubDouyinExamples(),
+  ]);
+  return deduplicateViralExamples([...valuefocus, ...topHub]).slice(0, 100);
+}
+
+async function discoverValuefocusDouyinExamples(): Promise<ViralExample[]> {
+  try {
+    return parseValuefocusDouyinPayload(await fetchValuefocusDouyinPayload());
+  } catch (error) {
+    console.warn("[viral-examples] Valuefocus Douyin source unavailable", error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+async function fetchValuefocusDouyinPayload(): Promise<unknown> {
+  try {
+    const response = await fetch(valuefocusDouyinTrendsApi, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  } catch (fetchError) {
+    // On some local Node runtimes Cloudflare's connection can time out while
+    // the system TLS client succeeds. Both requests read the same public API;
+    // use this fallback only for that transport failure.
+    try {
+      const { stdout } = await execFileAsync("curl", [
+        "--fail", "--silent", "--show-error", "--max-time", "25",
+        "-X", "POST", valuefocusDouyinTrendsApi,
+        "-H", "content-type: application/json", "--data", "{}",
+      ], { maxBuffer: 1_000_000 });
+      return JSON.parse(stdout) as unknown;
+    } catch {
+      throw fetchError;
+    }
+  }
+}
+
+async function discoverTopHubDouyinExamples(): Promise<ViralExample[]> {
+  try {
+    return parseTopHubDouyinRankingHtml(await fetchTopHubDouyinRankingHtml());
+  } catch (error) {
+    console.warn("[viral-examples] TopHub Douyin source unavailable", error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+async function fetchTopHubDouyinRankingHtml() {
+  // TopHub responds 503 to bot-like clients. A normal browser identity reads
+  // the same public page that creators see. Some local Node/Undici paths also
+  // intermittently time out at connection setup, so use curl as a transport
+  // fallback rather than treating the ranking as empty.
+  const headers = {
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/139 Safari/537.36",
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  };
+  try {
+    const response = await fetch(topHubDouyinVideoUrl, { headers, signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } catch (fetchError) {
+    try {
+      const { stdout } = await execFileAsync("curl", [
+        "--fail", "--silent", "--show-error", "--compressed", "--max-time", "25",
+        "-A", headers["user-agent"], "-H", `accept: ${headers.accept}`, topHubDouyinVideoUrl,
+      ], { maxBuffer: 2_000_000 });
+      return stdout;
+    } catch {
+      throw fetchError;
+    }
+  }
 }
 
 function wechatProviderArticleToExample(article: WechatProviderArticle, index: number): ViralExample {
