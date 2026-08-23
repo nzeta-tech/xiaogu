@@ -282,7 +282,9 @@ async function fetchRthkTopics(options: { refresh?: boolean }) {
   ];
   const settled = await Promise.allSettled(sources.map(async (source) => {
     const url = `https://news.rthk.hk/rthk/webpageCache/services/loadModNewsShowSp2List.php?lang=zh-TW&cat=${source.category}&newsCount=60&dayShiftMode=1&archive_date=`;
-    const html = await fetchSourceText(url, options, true);
+    // The production Web runtime intentionally has no curl package. Use the
+    // built-in HTTP client first and retain curl only as an optional fallback.
+    const html = await fetchSourceText(url, options);
     if (!html) return [];
     const items = [...html.matchAll(/<h4 class='ns2-title'><a href='([^']+)'>([\s\S]*?)<\/a><\/h4>[\s\S]*?<div class='ns2-created'>([^<]+)<\/div>/g)];
     return Promise.all(items.map(async (match, index): Promise<HotTopic> => {
