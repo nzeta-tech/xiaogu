@@ -6,6 +6,7 @@ import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRu
 import { enqueueLocalAgentTask, isDouyinDeepVerificationAvailable } from "@/lib/local-agent/repository";
 import { buildViralSourceIdentity, isInsuranceFinanceRelevant } from "@/lib/viral-scoring";
 import { buildViralCoverTask, viralPlatformPublishLimit } from "@/lib/viral-preparation-policy";
+import { storeGeneratedViralCover } from "@/lib/viral-cover-assets";
 
 const viralPreparationLockId = 2_023_072_600;
 const defaultIntervalMs = 6 * 60 * 60 * 1000;
@@ -80,6 +81,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
 
 async function queueViralCoverEnrichments(runId: string) {
   const candidates = await listViralCoverEnrichmentCandidates(runId, 30);
+  await Promise.all(candidates.map((candidate) => storeGeneratedViralCover({ contentId: candidate.id, title: candidate.title, platform: candidate.platform })));
   await Promise.all(candidates.map((candidate, index) => enqueueLocalAgentTask(buildViralCoverTask(candidate, index))));
   return candidates.length;
 }

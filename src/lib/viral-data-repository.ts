@@ -253,8 +253,8 @@ export async function listTopDouyinDeepVerificationCandidates(runId: string, lim
 }
 
 export async function listViralCoverEnrichmentCandidates(runId: string, limit: number) {
-  const result = await query<{ id: string; source_url: string; platform: string; thumbnail_url: string | null }>(
-    `select vc.id,vc.source_url,vc.platform,vc.thumbnail_url from viral_contents vc
+  const result = await query<{ id: string; source_url: string; platform: string; thumbnail_url: string | null; title: string }>(
+    `select vc.id,vc.source_url,vc.platform,vc.thumbnail_url,vc.title from viral_contents vc
        left join viral_content_cover_assets cover on cover.viral_content_id=vc.id
       where vc.data_run_id=$1 and vc.source_type='automatic' and vc.status='published'
         and (cover.viral_content_id is null or octet_length(cover.image_data)<1024)

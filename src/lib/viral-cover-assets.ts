@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { query } from "@/lib/db/client";
+import { wrapCoverTitle } from "@/lib/viral-preparation-policy";
 
 const MAX_VIRAL_COVER_BYTES = 10 * 1024 * 1024;
 const MIN_VIRAL_COVER_BYTES = 1024;
@@ -49,6 +50,15 @@ export async function storeUploadedViralCover(input: { contentId: string; conten
   return persistViralCover({ contentId: input.contentId, contentType, bytes: input.bytes, sourceUrl: input.sourceUrl ?? "uploaded://admin" });
 }
 
+export async function storeGeneratedViralCover(input: { contentId: string; title: string; platform: string }) {
+  const { default: sharp } = await import("sharp");
+  const lines = wrapCoverTitle(input.title, 18).slice(0, 3);
+  const text = lines.map((line, index) => `<text x="72" y="${245 + index * 82}" fill="#f8fafc" font-size="58" font-weight="700">${escapeXml(line)}</text>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#10243f"/><stop offset="1" stop-color="#1b6d73"/></linearGradient></defs><rect width="1200" height="675" fill="url(#g)"/><circle cx="1080" cy="90" r="190" fill="#ffffff" opacity=".06"/><text x="72" y="110" fill="#7dd3c7" font-size="34" font-weight="700">小谷 · ${escapeXml(input.platform)}热点</text>${text}<text x="72" y="610" fill="#cbd5e1" font-size="26">自然候选 · 发布前请核验来源</text></svg>`;
+  const bytes = await sharp(Buffer.from(svg)).png().toBuffer();
+  return persistViralCover({ contentId: input.contentId, contentType: "image/png", bytes, sourceUrl: "generated://viral-fallback" });
+}
+
 export async function deleteViralCover(contentId: string) {
   await query("delete from viral_content_cover_assets where viral_content_id=$1", [contentId]);
 }
@@ -80,6 +90,10 @@ function normalizeContentType(value: string | null) {
   const type = value?.split(";", 1)[0]?.trim().toLowerCase();
   if (type === "image/jpg") return "image/jpeg";
   return type && allowedContentTypes.has(type) ? type : null;
+}
+
+function escapeXml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 function toBuffer(value: StoredViralCover["image_data"]) {
