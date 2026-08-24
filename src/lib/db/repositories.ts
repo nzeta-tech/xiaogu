@@ -2975,13 +2975,16 @@ export async function tryListPublishedViralContents(limit = 24) {
               metric_label, metric_value, metric_unit, insight, creation_scenes, risk_note,
               status, is_pinned, is_featured, sort_order, publish_at, expire_at, updated_at,
               source_type, example_type, viral_score, fetched_at,
-              local_cover.viral_content_id is not null as has_local_cover,
-              local_cover.sha256 as cover_sha256
+              exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id) as has_local_cover,
+              (select cover.sha256 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id) as cover_sha256
        from viral_contents
-       left join viral_content_cover_assets local_cover on local_cover.viral_content_id=viral_contents.id
        where status = 'published'
          and platform not in ('公众号', '小红书')
-         and (source_type = 'manual' or local_cover.source_url<>'generated://viral-fallback')
+         and (source_type = 'manual' or exists(
+           select 1 from viral_content_cover_assets visible_cover
+            where visible_cover.viral_content_id=viral_contents.id
+              and visible_cover.source_url<>'generated://viral-fallback'
+         ))
          and (publish_at is null or publish_at <= now())
          and (expire_at is null or expire_at > now())
        order by is_pinned desc, is_featured desc,
