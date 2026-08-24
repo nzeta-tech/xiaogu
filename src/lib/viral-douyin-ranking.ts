@@ -1,5 +1,16 @@
 import type { ViralExample } from "./viral-examples";
 
+export function interleaveDouyinRankingSources(...sources: ViralExample[][]): ViralExample[] {
+  const items: ViralExample[] = [];
+  const maxLength = Math.max(0, ...sources.map((source) => source.length));
+  for (let index = 0; index < maxLength; index += 1) {
+    for (const source of sources) {
+      if (source[index]) items.push(source[index]);
+    }
+  }
+  return items;
+}
+
 export function parseValuefocusDouyinPayload(input: unknown): ViralExample[] {
   const payload = asRecord(input);
   const videos = Array.isArray(payload.videos) ? payload.videos : [];

@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseTopHubDouyinRankingHtml, parseValuefocusDouyinPayload } from "./viral-douyin-ranking.ts";
+import { interleaveDouyinRankingSources, parseTopHubDouyinRankingHtml, parseValuefocusDouyinPayload } from "./viral-douyin-ranking.ts";
+
+test("ranking sources are interleaved so a platform limit keeps both providers", () => {
+  const valuefocus = [{ id: "vf-1" }, { id: "vf-2" }];
+  const topHub = [{ id: "th-1" }, { id: "th-2" }];
+  assert.deepEqual(interleaveDouyinRankingSources(valuefocus, topHub).map((item) => item.id), ["vf-1", "th-1", "vf-2", "th-2"]);
+});
 
 test("Valuefocus parser keeps valid Douyin finance videos and rejects unrelated URLs", () => {
   const items = parseValuefocusDouyinPayload({

@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { tryListPublishedViralContents } from "./db/repositories";
 import { getLatestViralDataRun } from "./viral-data-repository";
 import { inspectDouyinPublicMetadata } from "./creation/douyin-download";
-import { parseTopHubDouyinRankingHtml, parseValuefocusDouyinPayload } from "./viral-douyin-ranking";
+import { interleaveDouyinRankingSources, parseTopHubDouyinRankingHtml, parseValuefocusDouyinPayload } from "./viral-douyin-ranking";
 import { inspectWechatChannelsWithContainerBrowser } from "./creation/wechat-channels-container";
 import { parseSogouAccountResults } from "./viral-creator-sources";
 import { getCachedLinkRemixSourceUrls, normalizeLinkRemixCacheUrl } from "./creation/link-remix-cache";
@@ -769,7 +769,7 @@ async function discoverExternalDouyinExamples(): Promise<ViralExample[]> {
     process.env.VIRAL_DOUYIN_VALUEFOCUS_ENABLED === "0" ? Promise.resolve([]) : discoverValuefocusDouyinExamples(),
     process.env.VIRAL_DOUYIN_TOPHUB_ENABLED === "0" ? Promise.resolve([]) : discoverTopHubDouyinExamples(),
   ]);
-  return deduplicateViralExamples([...valuefocus, ...topHub]).slice(0, 100);
+  return deduplicateViralExamples(interleaveDouyinRankingSources(valuefocus, topHub)).slice(0, 100);
 }
 
 async function discoverValuefocusDouyinExamples(): Promise<ViralExample[]> {
