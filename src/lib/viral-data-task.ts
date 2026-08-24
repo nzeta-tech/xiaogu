@@ -2,9 +2,10 @@ import type { PoolClient } from "pg";
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/db/client";
 import { canonicalizeViralSourceUrl, discoverPlatformViralData, discoverPlatformViralExamples } from "@/lib/viral-examples";
-import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRun, getLatestViralDataRun, listTopDouyinDeepVerificationCandidates, publishViralDataRun, recordViralDiscovery } from "@/lib/viral-data-repository";
+import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRun, getLatestViralDataRun, listTopDouyinDeepVerificationCandidates, listViralCoverEnrichmentCandidates, publishViralDataRun, recordViralDiscovery } from "@/lib/viral-data-repository";
 import { enqueueLocalAgentTask, isDouyinDeepVerificationAvailable } from "@/lib/local-agent/repository";
 import { buildViralSourceIdentity, isInsuranceFinanceRelevant } from "@/lib/viral-scoring";
+import { buildViralCoverTask, viralPlatformPublishLimit } from "@/lib/viral-preparation-policy";
 
 const viralPreparationLockId = 2_023_072_600;
 const defaultIntervalMs = 6 * 60 * 60 * 1000;
@@ -55,6 +56,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
     const evaluatedPlatforms = [...new Set(discovery.candidates.map((item) => item.platform))];
     const published = await publishViralDataRun(runId, prepared, evaluatedPlatforms, discovery.candidates.length);
     const deepVerificationQueued = await queueTopDouyinDeepVerifications(runId);
+    const coverEnrichmentQueued = await queueViralCoverEnrichments(runId);
     return {
       started: true as const,
       succeeded: true as const,
@@ -63,6 +65,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
       creatorDiscoveredCount: discovery.creators.length,
       eligibleCount: prepared.length,
       deepVerificationQueued,
+      coverEnrichmentQueued,
       ...published,
     };
   } catch (error) {
@@ -73,6 +76,12 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
     if (lockClient && locked) await lockClient.query("select pg_advisory_unlock($1)", [viralPreparationLockId]).catch(() => undefined);
     lockClient?.release();
   }
+}
+
+async function queueViralCoverEnrichments(runId: string) {
+  const candidates = await listViralCoverEnrichmentCandidates(runId, 30);
+  await Promise.all(candidates.map((candidate, index) => enqueueLocalAgentTask(buildViralCoverTask(candidate, index))));
+  return candidates.length;
 }
 
 async function queueTopDouyinDeepVerifications(runId: string) {
@@ -101,7 +110,8 @@ export function deduplicatePreparedItems(items: Awaited<ReturnType<typeof discov
     })
     .filter(({ item, identity }) => {
       const count = perPlatform.get(item.platform) ?? 0;
-      if (!identity || seen.has(identity) || count >= 3) return false;
+      const platformLimit = viralPlatformPublishLimit(item.platform);
+      if (!identity || seen.has(identity) || count >= platformLimit) return false;
       seen.add(identity);
       perPlatform.set(item.platform, count + 1);
       return true;

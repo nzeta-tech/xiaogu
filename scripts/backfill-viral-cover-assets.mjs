@@ -10,12 +10,12 @@ let refreshed = 0;
 let failed = 0;
 
 for (const item of pending.items ?? []) {
-  if (await cache(item.id, item.thumbnailUrl)) {
+  if (item.thumbnailUrl && await cache(item.id, item.thumbnailUrl, item.sourceUrl)) {
     cached += 1;
     continue;
   }
   const thumbnailUrl = await refreshThumbnail(item.sourceUrl);
-  if (thumbnailUrl && await cache(item.id, thumbnailUrl)) {
+  if (thumbnailUrl && await cache(item.id, thumbnailUrl, item.sourceUrl)) {
     refreshed += 1;
   } else {
     failed += 1;
@@ -33,17 +33,18 @@ async function refreshThumbnail(sourceUrl) {
       signal: AbortSignal.timeout(180_000),
     });
     const result = await response.json().catch(() => ({}));
-    return response.ok && typeof result.thumbnailUrl === "string" ? result.thumbnailUrl : "";
+    if (!response.ok || typeof result.thumbnailUrl !== "string" || !result.thumbnailUrl) return "";
+    return result.thumbnailUrl.startsWith("/") ? `${executorBase}${result.thumbnailUrl}` : result.thumbnailUrl;
   } catch {
     return "";
   }
 }
 
-async function cache(contentId, thumbnailUrl) {
+async function cache(contentId, thumbnailUrl, refererUrl) {
   try {
     const response = await remote("/api/internal/local-agent/viral-covers/cache", {
       method: "POST",
-      body: { contentId, thumbnailUrl },
+      body: { contentId, thumbnailUrl, refererUrl },
       acceptFailure: true,
     });
     return response.ok;

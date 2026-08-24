@@ -89,9 +89,29 @@ async function executeTask(task, leaseToken) {
   if (task.payload?.sourceType === "wechat_channels_media") return inspectWechatChannelMedia(task, leaseToken);
   const url = typeof task.payload?.url === "string" ? task.payload.url : "";
   const userId = typeof task.payload?.userId === "string" ? task.payload.userId : "";
+  const isViralCover = task.payload?.purpose === "viral_cover";
   const metadataOnly = task.payload?.purpose === "viral_content";
   if (!url) throw new Error("invalid task payload: url is required");
-  return inspectSource(task, leaseToken, url, userId, { metadataOnly });
+  if (isViralCover && stringValue(task.payload?.thumbnailUrl)) {
+    await cacheViralCover(task, { thumbnailUrl: stringValue(task.payload.thumbnailUrl) }, url);
+    return { thumbnailUrl: stringValue(task.payload.thumbnailUrl), coverCached: true };
+  }
+  const inspected = await inspectSource(task, leaseToken, url, userId, { metadataOnly });
+  if (isViralCover) await cacheViralCover(task, inspected, url);
+  return inspected;
+}
+
+async function cacheViralCover(task, inspected, sourceUrl) {
+  const contentId = stringValue(task.payload?.viralContentId);
+  const thumbnailUrl = stringValue(inspected.thumbnailUrl);
+  if (!contentId || !thumbnailUrl) throw new Error("viral cover enrichment returned no thumbnail");
+  const resolvedThumbnail = thumbnailUrl.startsWith("/") ? `${executorBase}${thumbnailUrl}` : thumbnailUrl;
+  const response = await remote("/api/internal/local-agent/viral-covers/cache", {
+    contentId,
+    thumbnailUrl: resolvedThumbnail,
+    refererUrl: sourceUrl,
+  });
+  if (!response?.ok) throw new Error(response?.error || "viral cover cache failed");
 }
 
 async function inspectWechatChannelMedia(task, leaseToken) {
