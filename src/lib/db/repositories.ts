@@ -2979,6 +2979,11 @@ export async function tryListPublishedViralContents(limit = 24) {
        from viral_contents
        where status = 'published'
          and platform not in ('公众号', '小红书')
+         and (source_type = 'manual' or exists(
+           select 1 from viral_content_cover_assets visible_cover
+            where visible_cover.viral_content_id=viral_contents.id
+              and visible_cover.source_url<>'generated://viral-fallback'
+         ))
          and (publish_at is null or publish_at <= now())
          and (expire_at is null or expire_at > now())
        order by is_pinned desc, is_featured desc,
