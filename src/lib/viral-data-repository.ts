@@ -256,9 +256,9 @@ export async function listViralCoverEnrichmentCandidates(runId: string, limit: n
   const result = await query<{ id: string; source_url: string; platform: string; thumbnail_url: string | null; title: string }>(
     `select vc.id,vc.source_url,vc.platform,vc.thumbnail_url,vc.title from viral_contents vc
        left join viral_content_cover_assets cover on cover.viral_content_id=vc.id
-      where vc.data_run_id=$1 and vc.source_type='automatic' and vc.status='published'
+      where vc.source_type='automatic' and vc.status='published'
         and (cover.viral_content_id is null or octet_length(cover.image_data)<1024)
-      order by vc.viral_score desc,vc.fetched_at desc limit $2`,
+      order by (vc.data_run_id=$1) desc,vc.viral_score desc,vc.fetched_at desc limit $2`,
     [runId, Math.min(Math.max(limit, 1), 50)],
   );
   return result.rows;
