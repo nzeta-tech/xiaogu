@@ -91,6 +91,7 @@ COPY docker/start-app.sh /xiaogu/start-app.sh
 COPY docker/local-agent-healthcheck.sh /xiaogu/local-agent-healthcheck.sh
 COPY docker/wechat-sogou/app.py /xiaogu/wechat_sogou_api.py
 COPY scripts/local-agent.mjs /xiaogu/scripts/local-agent.mjs
+COPY scripts/viral-cover-cache.mjs /xiaogu/scripts/viral-cover-cache.mjs
 # Next's standalone output preserves Sharp but can omit its optional
 # platform packages. Install those packages in a Debian temp prefix, then
 # copy them beside Sharp so Node resolves the matching linux-x64 runtime.
