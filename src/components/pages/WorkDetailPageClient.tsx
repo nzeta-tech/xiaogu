@@ -9,6 +9,12 @@ import { parseCreationOutput, type CreationOutputBatch, type CreationOutputItem,
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
 import { getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 import { saveCreationHandoff } from "@/lib/client/creation-handoff";
+import {
+  readGenerationProgress,
+  resolveGenerationProgress,
+  shouldPollWorkGeneration,
+  type GenerationProgressEvent,
+} from "@/lib/creation/work-generation-progress";
 
 type WorkDetail = {
   id: string;
@@ -48,6 +54,8 @@ type WorkDetail = {
 };
 type TrafficCopyCover = { workId: string; platform: string; style: string; sourceLabel?: string; sourceBatchId?: string; createdAt: string; images: GeneratedImage[] };
 type TrafficCopyWorkState = { covers?: TrafficCopyCover[] };
+type TrafficCopyHeadlineSet = { batchId: string; creatorStyleId: string; creatorStyleLabel: string; titles: string[] };
+type TrafficCopyArchitecture = { headlines?: TrafficCopyHeadlineSet[] };
 
 type WechatTheme = "default" | "warm" | "forest" | "editorial";
 type XhsFormat = "plain" | "image";
@@ -99,7 +107,6 @@ type WorkStreamState = {
   retryable: boolean;
   error: string;
 };
-
 export function WorkDetailPageClient({ workId }: { workId: string }) {
   const searchParams = useSearchParams();
   const [work, setWork] = useState<WorkDetail | null>(null);
@@ -131,6 +138,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const [retryingWork, setRetryingWork] = useState(false);
   const [previewField, setPreviewField] = useState<PreviewField | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  const [imageEditOpen, setImageEditOpen] = useState(false);
+  const [imageEditInstruction, setImageEditInstruction] = useState("");
+  const [imageEditError, setImageEditError] = useState("");
+  const [submittingImageEdit, setSubmittingImageEdit] = useState(false);
   const [streamState, setStreamState] = useState<WorkStreamState>({
     connected: false,
     content: "",
@@ -140,6 +151,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     error: "",
   });
   const [streamRetryKey, setStreamRetryKey] = useState(0);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgressEvent[]>([]);
+  const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0);
   const workFrom = searchParams.get("from");
   const pendingRemixTarget = searchParams.get("remix_target");
   const workReturnHref = workFrom === "admin" ? appPath("/admin?view=works#content") : workFrom === "dashboard" || workFrom === "today" ? appPath("/today") : appPath("/works");
@@ -154,6 +167,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const saveTimerRef = useRef<number | null>(null);
   const imageTimerRef = useRef<number | null>(null);
   const streamReaderAbortRef = useRef<AbortController | null>(null);
+  const lastGenerationProgressAtRef = useRef(0);
   const closePreviews = useEffectEvent(() => {
     setPreviewField(null);
     setPreviewImage(null);
@@ -165,6 +179,58 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const imageRemixConsistency = work?.app_run?.result_json?.imageRemixConsistency as ImageRemixConsistencyAudit | null | undefined;
   const isAdminPreview = searchParams.get("admin") === "1";
   const workApiHref = useMemo(() => apiPath(`/api/works/${workId}${isAdminPreview ? "?admin=1" : ""}`), [isAdminPreview, workId]);
+
+  useEffect(() => {
+    if (workStatus !== "running") return;
+    if (workPlatform !== "traffic-copy" && generationProgress.length === 0) return;
+    const startedAt = new Date(work?.app_run?.created_at ?? work?.created_at ?? Date.now()).getTime();
+    const updateElapsed = () => setGenerationElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [generationProgress.length, work?.app_run?.created_at, work?.created_at, workPlatform, workStatus]);
+
+  useEffect(() => {
+    if (streamState.connected && lastGenerationProgressAtRef.current === 0) {
+      lastGenerationProgressAtRef.current = Date.now();
+    }
+  }, [streamState.connected]);
+
+  async function submitImageEdit(image: GeneratedImage, sourceStyle?: string) {
+    const instruction = imageEditInstruction.trim();
+    if (!instruction || !work) {
+      setImageEditError("请先填写这次想修改的内容。");
+      return;
+    }
+
+    setSubmittingImageEdit(true);
+    setImageEditError("");
+    try {
+      const originalValues = work.app_run?.input_payload ?? {};
+      const response = await fetch(apiPath("/api/creation/apps/image-card/prepare"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          values: {
+            ...originalValues,
+            ...(sourceStyle ? { style: sourceStyle } : {}),
+            creation_mode: "image_remix",
+            reference_image: image.url,
+            remix_instruction: instruction,
+            app_entry: "image-card",
+            source_work_id: work.id,
+            source_image_id: image.id,
+          },
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; work?: { id?: string } };
+      if (!response.ok || !payload.work?.id) throw new Error(getCreationUserError(payload.error, CREATION_NETWORK_ERROR));
+      window.location.assign(appPath(`/works/${payload.work.id}?from=creation-works&entry=image-card`));
+    } catch (cause) {
+      setImageEditError(cause instanceof Error ? cause.message : CREATION_NETWORK_ERROR);
+      setSubmittingImageEdit(false);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -228,10 +294,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     if (workStatus && workStatus !== "running") return;
     if (workContent.trim() && workStatus !== "running") return;
 
-    const prefersStreaming = supportsWorkStreaming(workPlatform);
-    if (prefersStreaming && streamState.connected) return;
-
     const timer = window.setInterval(async () => {
+      if (!shouldPollWorkGeneration({
+        status: workStatus,
+        platform: workPlatform,
+        supportsStreaming: supportsWorkStreaming(workPlatform),
+        streamConnected: streamState.connected,
+        streamError: streamState.error,
+        lastProgressAt: lastGenerationProgressAtRef.current,
+        now: Date.now(),
+      })) return;
       const response = await fetch(workApiHref);
       const payload = (await response.json()) as { work?: WorkDetail };
       if (payload.work) {
@@ -312,7 +384,32 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               images?: GeneratedImage[];
               imageMode?: ImageGenerationMode | null;
               retryable?: boolean;
+              phase?: string;
+              status?: "active" | "completed";
+              label?: string;
+              detail?: string;
+              coachId?: string | null;
+              coachLabel?: string | null;
             };
+
+            if (payload.type === "progress" && payload.phase && payload.status && payload.label) {
+              const progressEvent: GenerationProgressEvent = {
+                phase: payload.phase,
+                status: payload.status,
+                label: payload.label,
+                detail: payload.detail ?? "",
+                coachId: payload.coachId,
+                coachLabel: payload.coachLabel,
+              };
+              lastGenerationProgressAtRef.current = Date.now();
+              setGenerationProgress((current) => {
+                const index = current.findIndex((item) => item.phase === progressEvent.phase);
+                if (index < 0) return [...current, progressEvent];
+                const next = [...current];
+                next[index] = progressEvent;
+                return next;
+              });
+            }
 
             if (payload.type === "delta" && typeof payload.content === "string") {
               setStreamState((current) => ({
@@ -352,6 +449,19 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               }));
             }
           }
+        }
+
+        // A development-server reload or a proxy can close an SSE response
+        // without delivering its final `done` event. Release the connected
+        // state and refresh once so the normal polling fallback can reveal a
+        // result that the background worker has already persisted.
+        setStreamState((current) => current.connected ? { ...current, connected: false } : current);
+        try {
+          const refreshed = await fetch(workApiHref, { signal: controller.signal });
+          const refreshedPayload = (await refreshed.json()) as { work?: WorkDetail };
+          if (refreshedPayload.work) setWork(refreshedPayload.work);
+        } catch {
+          // Polling resumes after `connected` is cleared.
         }
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
@@ -470,7 +580,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     }
 
     return chooseBatchSource([storedBatches, resultJsonBatches, parsedBatches]);
-  }, [expectedCopyBatches, resultJsonBatches, storedBatches, streamedBatches, work]);
+  }, [expectedCopyBatches, resultJsonBatches, storedBatches, streamState.content, streamedBatches, work]);
 
   const isMalformedLeadCopyResult = work?.platform === "lead-copy"
     && work.app_run?.status === "succeeded"
@@ -499,7 +609,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const payload = work?.app_run?.input_payload;
     if (!payload) return [];
     return Object.entries(payload).filter(([key, value]) => {
-      if (["app_entry", "creator_skill_version_id", "creator_skill_version_ids", "traffic_source_label", "traffic_source_batch_id"].includes(key)) return false;
+      if (["app_entry", "creator_skill_version_id", "creator_skill_version_ids", "content_skill_version_id", "coach_skill_version_id", "creative_coach_version_id", "creative_coach_version_ids", "traffic_source_label", "traffic_source_batch_id"].includes(key)) return false;
       if (Array.isArray(value)) return value.length > 0;
       return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
     });
@@ -534,6 +644,12 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const imageScale = isImageWork ? Math.max(90, Math.min(140, fontScale)) : fontScale;
   const isWriteCopyWork = work?.platform === "write-copy" || linkRemixView === "write-copy";
   const isTrafficCopyWork = work?.platform === "traffic-copy" || linkRemixView === "traffic-copy";
+  const displayedGenerationProgress = resolveGenerationProgress({
+    platform: workPlatform,
+    status: workStatus,
+    persisted: readGenerationProgress(work?.app_run?.result_json),
+    live: generationProgress,
+  });
   const isMarketingCopyWork = work?.platform === "marketing-copy";
   const isSimpleCopyWork = isTrafficCopyWork || isMarketingCopyWork;
   const creatorStyleBatches = isTrafficCopyWork ? batches.filter((batch) => batch.id.startsWith("creator-style-")) : [];
@@ -789,7 +905,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className="workDetailPage xiaohongshuStudioWorkDetailPage">
         <div className="page-content wechatStudioWorkDetailShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={noteTitle} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={noteTitle} primaryHref={appPath(`/apps/xiaohongshu-studio?from=creation-works&workId=${work.id}`)} primaryLabel="继续编辑" onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="wechatStudioWorkHero">
             <div>
               <span>小红书图文创作</span>
@@ -829,7 +945,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className="workDetailPage wechatStudioWorkDetailPage">
         <div className="page-content wechatStudioWorkDetailShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={articleTitle} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={articleTitle} primaryHref={appPath(`/apps/wechat-studio?from=creation-works&workId=${work.id}`)} primaryLabel="继续编辑" onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
           <section className="wechatStudioWorkHero">
             <div>
               <span>公众号文章创作</span>
@@ -858,6 +974,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const trafficState = work.content_json?.trafficCopyState;
     const covers = Array.isArray(trafficState?.covers) ? trafficState.covers : [];
     const activeTrafficContent = hasCreatorStyleResult ? activeBatch?.items[0]?.body ?? plainResultContent : plainResultContent;
+    const trafficArchitecture = work.app_run?.result_json?.trafficCopyArchitecture as TrafficCopyArchitecture | undefined;
+    const activeTrafficTitles = trafficArchitecture?.headlines?.find((set) => set.batchId === activeBatch?.id)?.titles ?? [];
     const hasContent = work.app_run?.status === "succeeded" && Boolean(activeTrafficContent.trim());
     return (
       <div className="workDetailPage trafficCopyStudioPage">
@@ -870,7 +988,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
               <p>从成稿到封面集中管理；这条内容及其封面会作为同一创作链路保留在历史作品中。</p>
             </div>
             <div className="trafficCopyStudioProgress" aria-label="创作进度">
-              <span className="done">1 文案成稿</span>
+              <span className={hasContent ? "done" : work.app_run?.status === "running" ? "active" : ""}>1 文案成稿</span>
               <i aria-hidden="true" />
               <span className={covers.length ? "done" : ""}>2 制作封面</span>
               <i aria-hidden="true" />
@@ -897,8 +1015,29 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                 </div>
               </header>
               <div className="trafficCopyDocumentBody" style={{ fontSize: `${fontScale}%` }}>
-                {work.app_run?.status === "running" ? <><span className="trafficCopyGenerating">正在持续生成文案…</span>{streamState.content ? <MarkdownContent content={streamState.content} /> : null}<i className="simpleCopyStreamCaret" aria-label="正在流式输出" /></> : <MarkdownContent content={activeTrafficContent} />}
+                {work.app_run?.status === "running" ? (
+                  <div className="trafficInlineGenerationProgress">
+                    <header>
+                      <div><span className="trafficGenerationPulse" aria-hidden="true" /><strong>任务正在正常进行</strong></div>
+                      <time>{formatGenerationElapsed(generationElapsedSeconds)}</time>
+                    </header>
+                    <ol>
+                      {displayedGenerationProgress.map((item) => (
+                        <li className={item.status} key={item.phase}>
+                          <i aria-hidden="true">{item.status === "completed" ? "✓" : ""}</i>
+                          <div><b>{item.label}</b>{item.detail ? <span>{item.detail}</span> : null}</div>
+                        </li>
+                      ))}
+                    </ol>
+                    <p>任务完成后，这里会自动替换为最终文案。</p>
+                    {streamState.content ? <div className="trafficInlineDraft"><MarkdownContent content={streamState.content} /></div> : null}
+                  </div>
+                ) : <MarkdownContent content={activeTrafficContent} />}
               </div>
+              {activeTrafficTitles.length ? <section className="trafficCopyTitleSuggestions" aria-label="标题推荐">
+                <span>标题推荐</span>
+                <div>{activeTrafficTitles.map((title, index) => <button key={`${index}-${title}`} onClick={() => void handleCopy(`traffic-title-${resolvedBatchId}-${index}`, title)} type="button">{title}{copied[`traffic-title-${resolvedBatchId}-${index}`] ? " ✓" : ""}</button>)}</div>
+              </section> : null}
             </section>
 
             <section className="trafficCoverAssetsCard">
@@ -960,6 +1099,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     const recommendedImageIndex = generatedCount > 0 ? 0 : -1;
     const selectedImageIndex = Math.max(0, imageResults.findIndex((image) => image.id === selectedImageId));
     const selectedImage = imageResults[selectedImageIndex] ?? imageResults[0] ?? null;
+    const generatedImageStyles = Array.isArray(work.app_run?.result_json?.imageStyles)
+      ? work.app_run.result_json.imageStyles.filter((style): style is string => typeof style === "string")
+      : [];
+    const selectedImageStyle = generatedImageStyles[selectedImageIndex];
     const generationNotice = formatImageGenerationNotice(imageMode);
     const showImagePlaceholders = imageResults.length === 0 && work.app_run?.status === "running";
     const imageFieldMissingHint = !imageMeta.hasPayload
@@ -980,7 +1123,22 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
     return (
       <div className={`workDetailPage imageInstancePage ${showResultDetails ? "" : "resultDetailsCollapsed"}`}>
         <div className="page-content imageInstanceShell">
-          <ResultWorkspaceBar detailsOpen={showResultDetails} onToggleDetails={() => setShowResultDetails((current) => !current)} returnHref={workReturnHref} returnLabel={workReturnLabel} work={work} title={imageMeta.title} onPrimaryAction={failedRetryAction} primaryBusy={retryingWork} />
+          <ResultWorkspaceBar
+            detailsOpen={showResultDetails}
+            onToggleDetails={() => setShowResultDetails((current) => !current)}
+            returnHref={workReturnHref}
+            returnLabel={workReturnLabel}
+            work={work}
+            title={imageMeta.title}
+            onPrimaryAction={failedRetryAction}
+            primaryBusy={retryingWork}
+            editLabel="修改这张"
+            editDisabled={!selectedImage || streamState.connected || work.app_run?.status === "running"}
+            onEditAction={() => {
+              setImageEditError("");
+              setImageEditOpen(true);
+            }}
+          />
           <section className="imageInstanceHero">
             <div className="imageInstanceHeroCopy">
               <div className="imageInstanceHeroTitleRow">
@@ -1207,7 +1365,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     </div>
 
                     <dl className="imageStudioMeta">
-                      <div><dt>视觉风格</dt><dd>{imageMeta.style}</dd></div>
+                      <div><dt>视觉风格</dt><dd>{selectedImageStyle ? formatImageStyleLabel(selectedImageStyle) : imageMeta.style}</dd></div>
                       <div><dt>{work.platform === "wechat-images" ? "配图类型" : "人物形象"}</dt><dd>{imageMeta.drawPortrait}</dd></div>
                       <div><dt>生成模式</dt><dd>{formatImageModeLabel(imageMode)}</dd></div>
                     </dl>
@@ -1368,6 +1526,24 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
         {previewField ? <PreviewFieldModal previewField={previewField} onClose={() => setPreviewField(null)} /> : null}
         {previewImage ? <PreviewImageModal previewImage={previewImage} onClose={() => setPreviewImage(null)} /> : null}
+        {imageEditOpen && selectedImage ? (
+          <ImageEditDialog
+            busy={submittingImageEdit}
+            error={imageEditError}
+            image={selectedImage}
+            instruction={imageEditInstruction}
+            onChange={(value) => {
+              setImageEditInstruction(value);
+              if (imageEditError) setImageEditError("");
+            }}
+            onClose={() => {
+              if (submittingImageEdit) return;
+              setImageEditOpen(false);
+              setImageEditError("");
+            }}
+            onSubmit={() => void submitImageEdit(selectedImage, selectedImageStyle)}
+          />
+        ) : null}
       </div>
     );
   }
@@ -2627,7 +2803,8 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                   )}
                 </div>
               ) : isSimpleCopyWork ? (
-                <article className="instanceResultBlock active simpleCopyResultBlock" aria-live="polite">
+                <>
+                  <article className="instanceResultBlock active simpleCopyResultBlock" aria-live="polite">
                   {hasCreatorStyleTabs ? <div className="creatorResultTabs">{creatorStyleBatches.map((batch) => <button className={resolvedBatchId === batch.id ? "active" : ""} key={batch.id} onClick={() => setActiveBatchId(batch.id)} type="button">{batch.label}</button>)}</div> : null}
                   <div className="instanceResultToolbar">
                     <div className="instanceResultToolbarTitle">
@@ -2659,10 +2836,31 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                     </div>
                   </div>
                   <div className={streamState.connected ? "instancePlainResult simpleCopyResultBody streaming" : "instancePlainResult simpleCopyResultBody"} style={{ fontSize: `${fontScale}%` }}>
-                    {hasCreatorStyleTabs ? activeBatch?.items[0]?.body || (work.app_run?.status === "running" ? "内容生成中，完成后可在这里切换两份作品..." : "本次生成暂未返回正文。") : streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
-                    {streamState.connected ? <i className="simpleCopyStreamCaret" aria-label="正在流式输出" /> : null}
+                    {isTrafficCopyWork && workStatus === "running" && !streamState.content.trim() && !work.content.trim() ? (
+                      <div className="trafficInlineGenerationProgress">
+                        <header>
+                          <div><span className="trafficGenerationPulse" aria-hidden="true" /><strong>任务正在正常进行</strong></div>
+                          <time>{formatGenerationElapsed(generationElapsedSeconds)}</time>
+                        </header>
+                        <ol>
+                          {displayedGenerationProgress.map((item) => (
+                            <li className={item.status} key={item.phase}>
+                              <i aria-hidden="true">{item.status === "completed" ? "✓" : ""}</i>
+                              <div><b>{item.label}</b>{item.detail ? <span>{item.detail}</span> : null}</div>
+                            </li>
+                          ))}
+                        </ol>
+                        <p>任务完成后，这里会自动替换为最终文案。</p>
+                      </div>
+                    ) : (
+                      <>
+                        {hasCreatorStyleTabs ? activeBatch?.items[0]?.body || (work.app_run?.status === "running" ? "内容生成中，完成后可在这里切换两份作品..." : "本次生成暂未返回正文。") : streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
+                        {streamState.connected ? <i className="simpleCopyStreamCaret" aria-label="正在流式输出" /> : null}
+                      </>
+                    )}
                   </div>
-                </article>
+                  </article>
+                </>
               ) : hasRenderableBatches ? (
                 <div className={isStructuredCopyWork ? "instanceBatchStack writeCopyBatchStack" : isPolishWork ? "instanceBatchStack polishBatchStack" : isLiveScriptWork ? "instanceBatchStack liveScriptBatchStack" : "instanceBatchStack"} style={{ fontSize: `${fontScale}%` }}>
                   {(isStructuredCopyWork || isPolishWork ? batches.filter((batch) => batch.id === resolvedBatchId) : batches).map((batch) => (
@@ -2988,6 +3186,9 @@ function ResultWorkspaceBar({
   onPrimaryAction,
   onPrimaryHrefClick,
   primaryBusy = false,
+  editLabel,
+  editDisabled = false,
+  onEditAction,
 }: {
   detailsOpen: boolean;
   onToggleDetails: () => void;
@@ -3000,7 +3201,12 @@ function ResultWorkspaceBar({
   onPrimaryAction?: (() => void) | undefined;
   onPrimaryHrefClick?: (() => void) | undefined;
   primaryBusy?: boolean;
+  editLabel?: string;
+  editDisabled?: boolean;
+  onEditAction?: (() => void) | undefined;
 }) {
+  const sourceEntry = typeof work.app_run?.input_payload?.app_entry === "string" ? work.app_run.input_payload.app_entry.trim() : "";
+  const recreateHref = primaryHref || appPath(`/apps/${work.platform}?from=result&source_work_id=${encodeURIComponent(work.id)}${sourceEntry ? `&entry=${encodeURIComponent(sourceEntry)}` : ""}`);
   return (
     <>
     <header className="resultWorkspaceBar">
@@ -3023,14 +3229,72 @@ function ResultWorkspaceBar({
           {primaryBusy ? "处理中..." : primaryLabel}
         </button>
       ) : (
-        <a className="resultWorkspacePrimary" href={primaryHref || appPath(`/apps/${work.platform}?from=result`)} onClick={onPrimaryHrefClick}>{primaryLabel}</a>
+        <a className="resultWorkspacePrimary" href={recreateHref} onClick={onPrimaryHrefClick}>{primaryLabel}</a>
       )}
+      {editLabel && onEditAction ? <button className="resultWorkspaceEditPrimary" disabled={editDisabled} onClick={onEditAction} type="button">{editLabel}</button> : null}
     </header>
     <div className="aiReviewNotice resultWorkspaceReviewNotice" role="note">
       提示：AI 创作，发布前请人工确认内容准确无误后再发布。
     </div>
     </>
   );
+}
+
+function ImageEditDialog({
+  image,
+  instruction,
+  error,
+  busy,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  image: GeneratedImage;
+  instruction: string;
+  error: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [busy, onClose]);
+
+  return <div className="imageEditOverlay" onClick={onClose} role="presentation">
+    <aside className="imageEditDialog" aria-labelledby="image-edit-title" aria-modal="true" onClick={(event) => event.stopPropagation()} role="dialog">
+      <header>
+        <div><span>二次修改</span><h2 id="image-edit-title">修改这张卡片</h2></div>
+        <button aria-label="关闭" disabled={busy} onClick={onClose} type="button">×</button>
+      </header>
+      <div className="imageEditPreview"><img alt="当前准备修改的知识卡片" src={image.url} /></div>
+      <label htmlFor="image-edit-instruction">修改要求</label>
+      <textarea
+        autoFocus
+        disabled={busy}
+        id="image-edit-instruction"
+        maxLength={1000}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="请描述想修改的地方，例如：标题再大一些，背景改成浅绿色，保留人物。"
+        value={instruction}
+      />
+      <div className="imageEditHint"><span>未特别说明的内容将尽量保持不变。</span><em>{instruction.length}/1000</em></div>
+      {error ? <p className="imageEditError" role="alert">{error}</p> : null}
+      <footer>
+        <small>预计消耗 5 积分</small>
+        <div><button disabled={busy} onClick={onClose} type="button">取消</button><button className="primary" disabled={busy || !instruction.trim()} onClick={onSubmit} type="button">{busy ? "正在修改…" : "生成修改版"}</button></div>
+      </footer>
+    </aside>
+  </div>;
 }
 
 function PreviewFieldModal({
@@ -4179,6 +4443,7 @@ function formatInputValue(key: string, value: unknown) {
   if (key === "focus" && typeof value === "string") return formatTopicFocusLabels([value]);
   if (key === "draw_portrait" && typeof value === "string") return value === "yes" ? "是，我已上传形象照" : "否，不要画人物形象";
   if (key === "ratio" && typeof value === "string") return formatRatioLabel(value);
+  if (key === "style" && Array.isArray(value)) return value.map((style) => formatImageStyleLabel(String(style))).join(" / ");
   if (key === "style" && typeof value === "string") return formatImageStyleLabel(value);
   if (key === "reference_image" && typeof value === "string") return value ? "已上传参考图" : "-";
   if (key === "privacy_mode" && typeof value === "string") return value === "full" ? "显示完整号码" : "自动脱敏";
@@ -4325,6 +4590,12 @@ function formatWechatLengthMode(value?: string) {
   if (value === "standard") return "常规 · 约 1200 字";
   if (value === "long") return "长文 · 约 1800 字";
   return "未记录";
+}
+
+function formatGenerationElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function formatWechatLayout(value?: string) {

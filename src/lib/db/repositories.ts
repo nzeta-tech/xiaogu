@@ -9,7 +9,8 @@ import {
   type QuestionnaireTemplate,
 } from "@/lib/thinking/questionnaire-template";
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
-import type { HotTopic } from "@/lib/topics/types";
+import type { HotTopic, HotTopicTab } from "@/lib/topics/types";
+import { HOT_TOPIC_TABS, topicDedupeKey } from "@/lib/topics/ingestion";
 import { defaultSystemSettings, systemSettingKeys, type SystemSettings } from "@/lib/system/settings";
 import { decryptSettingSecret, encryptSettingSecret } from "@/lib/security/secrets";
 import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
@@ -892,6 +893,90 @@ export async function trySaveTopicSnapshots(input: { userId: string | null; topi
     }
   } catch {
     // Topic snapshots are operational telemetry; avoid breaking discovery when persistence is down.
+  }
+}
+
+/** Writes one complete ingestion run so readers never mix half of two refreshes. */
+export async function trySaveTopicIngestionBatch(input: { topics: HotTopic[]; sourceSummary?: Record<string, number> }) {
+  if (input.topics.length === 0) return null;
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const run = await client.query<{ id: string }>(
+      `insert into topic_ingestion_runs(status, source_summary, topic_count)
+       values ('running', $1::jsonb, $2)
+       returning id`,
+      [JSON.stringify(input.sourceSummary ?? {}), input.topics.length],
+    );
+    const runId = run.rows[0]?.id;
+    if (!runId) throw new Error("topic_ingestion_run_create_failed");
+
+    for (const topic of input.topics) {
+      await client.query(
+        `insert into topic_snapshots(
+           user_id, source, title, summary, insurance_relevance, recommended_angle, risk_note,
+           raw_payload, ingestion_run_id, topic_tab, dedupe_key
+         ) values (null, $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)`,
+        [
+          topic.source,
+          topic.title,
+          topic.summary,
+          topic.insuranceRelevance,
+          topic.recommendedAngle,
+          topic.riskNote,
+          JSON.stringify(topic),
+          runId,
+          topic.tab ?? "热点",
+          topicDedupeKey(topic),
+        ],
+      );
+    }
+    await client.query(
+      "update topic_ingestion_runs set status = 'completed', completed_at = now() where id = $1",
+      [runId],
+    );
+    await client.query("commit");
+    return { id: runId, topicCount: input.topics.length };
+  } catch {
+    await client.query("rollback").catch(() => undefined);
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
+export async function tryListLatestTopicIngestionBatch(input: { perTabLimit?: number; maxAgeMinutes?: number; allowStale?: boolean } = {}) {
+  const perTabLimit = Math.min(Math.max(input.perTabLimit ?? 200, 1), 200);
+  const maxAgeMinutes = Math.min(Math.max(input.maxAgeMinutes ?? 20, 1), 1440);
+  try {
+    const runResult = await query<{ id: string; completed_at: string }>(
+      `select id, completed_at from topic_ingestion_runs
+       where status = 'completed' and ($2::boolean or completed_at >= now() - ($1::int * interval '1 minute'))
+       order by completed_at desc limit 1`,
+      [maxAgeMinutes, input.allowStale ?? false],
+    );
+    const run = runResult.rows[0];
+    if (!run) return { topics: [] as HotTopic[], refreshedAt: null, stale: false, tabCounts: {} as Partial<Record<HotTopicTab, number>> };
+    const rows = await query<{ raw_payload: HotTopic; topic_tab: HotTopicTab }>(
+      `select raw_payload, topic_tab from (
+         select raw_payload, topic_tab, row_number() over (partition by topic_tab order by created_at asc) as position
+         from topic_snapshots where ingestion_run_id = $1
+       ) ranked where position <= $2 order by topic_tab, position`,
+      [run.id, perTabLimit],
+    );
+    const topics = rows.rows.map((row) => ({ ...row.raw_payload, tab: row.topic_tab }));
+    const tabCounts = HOT_TOPIC_TABS.reduce<Partial<Record<HotTopicTab, number>>>((counts, tab) => {
+      counts[tab] = topics.filter((topic) => topic.tab === tab).length;
+      return counts;
+    }, {});
+    return {
+      topics,
+      refreshedAt: run.completed_at,
+      stale: Date.now() - new Date(run.completed_at).getTime() > maxAgeMinutes * 60_000,
+      tabCounts,
+    };
+  } catch {
+    return { topics: [] as HotTopic[], refreshedAt: null, stale: false, tabCounts: {} as Partial<Record<HotTopicTab, number>> };
   }
 }
 
@@ -1983,6 +2068,37 @@ export async function tryCompleteAppRun(input: {
   }
 }
 
+export async function trySaveAppRunProgress(input: {
+  runId: string | null;
+  progress: Array<{
+    type: "progress";
+    phase?: string;
+    status?: "active" | "completed";
+    label?: string;
+    detail?: string;
+    coachId?: string | null;
+    coachLabel?: string | null;
+  }>;
+}) {
+  if (!input.runId) return false;
+  try {
+    await query(
+      `update app_runs
+       set result_json = jsonb_set(
+         coalesce(result_json, '{}'::jsonb),
+         '{generationProgress}',
+         $2::jsonb,
+         true
+       )
+       where id = $1 and status = 'running'`,
+      [input.runId, JSON.stringify(input.progress)],
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function trySyncCreationCatalog() {
   try {
     const categoryMap = new Map<string, string>();
@@ -2891,20 +3007,32 @@ export async function tryListPublishedViralContents(limit = 24) {
       metric_unit: string; insight: string; creation_scenes: unknown; risk_note: string;
       status: string; is_pinned: boolean; is_featured: boolean; sort_order: number;
       publish_at: string | null; expire_at: string | null; updated_at: string;
-      source_type: string; example_type: string; viral_score: number; fetched_at: string | null; has_local_cover: boolean;
+      source_type: string; example_type: string; viral_score: number; fetched_at: string | null; has_local_cover: boolean; cover_updated_at: string | null;
     }>(
       `select id, title, platform, content_type, category, tags, source_url, source_title,
               source_author, thumbnail_url, media_url, embed_url, article_body, summary,
               metric_label, metric_value, metric_unit, insight, creation_scenes, risk_note,
               status, is_pinned, is_featured, sort_order, publish_at, expire_at, updated_at,
               source_type, example_type, viral_score, fetched_at,
-              exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id) as has_local_cover
+              exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id and octet_length(cover.image_data) >= 1024) as has_local_cover,
+              (select cover.updated_at from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id and octet_length(cover.image_data) >= 1024) as cover_updated_at
        from viral_contents
-       where source_type = 'manual'
-         and status = 'published'
+       where status = 'published'
+         and platform not in ('公众号', '小红书')
+         and exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id and octet_length(cover.image_data) >= 1024)
          and (publish_at is null or publish_at <= now())
          and (expire_at is null or expire_at > now())
-       order by sort_order asc, coalesce(publish_at, fetched_at, updated_at) desc
+       order by is_pinned desc, is_featured desc,
+                case when source_type = 'manual' then 0 else 1 end,
+                /* 抖音财经榜里混有荐股、短线交易内容。保留宏观/政策/银行保险等
+                   财经内容的原有排序，只将纯炒股话题沉到该平台队列后部。 */
+                case when platform = '抖音'
+                       and concat_ws(' ', title, summary, category, tags::text) ~*
+                           '(炒股|炒家|荐股|选股|股民|散户|a股|港股|美股|个股|牛市|熊市|涨停|跌停|k线|复盘|短线|打板|仓位|满仓|抄底|止损|操盘|交易员|开盘|收盘|大盘|行情|股价|股票代码)'
+                       and concat_ws(' ', title, summary, category, tags::text) !~*
+                           '(央行|利率|汇率|gdp|cpi|ppi|财政|货币政策|金融监管|银行|保险|债券|黄金|原油|就业|经济|税收|房贷|消费|企业|上市公司|财报)'
+                     then 1 else 0 end,
+                sort_order asc, coalesce(publish_at, fetched_at, updated_at) desc
        limit $1`,
       [Math.min(Math.max(limit, 1), 100)],
     );
@@ -2976,6 +3104,18 @@ export type AdminViralCreator = {
   discovered_work_count: number;
   work_count: number;
   latest_work_at: string | null;
+  creator_type: "personal" | "institution" | "unknown";
+  pool_status: "candidate" | "active" | "watchlist" | "rejected" | "archived";
+  tier: "S" | "A" | "potential" | null;
+  vertical_score: number;
+  professional_score: number;
+  activity_score: number;
+  commercial_score: number;
+  risk_level: "low" | "medium" | "high";
+  next_refresh_at: string | null;
+  last_content_at: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
 };
 
 export async function tryListAdminViralCreators() {
@@ -2985,11 +3125,15 @@ export async function tryListAdminViralCreators() {
               vc.relevance_score, vc.quality_score, vc.discovery_evidence_count, vc.follower_count,
               vc.platform_work_count, vc.is_verified, vc.source_kind, vc.discovery_query, vc.refresh_status,
               vc.last_discovered_at, vc.last_refreshed_at, vc.discovered_work_count,
+              vc.creator_type, vc.pool_status, vc.tier, vc.vertical_score, vc.professional_score,
+              vc.activity_score, vc.commercial_score, vc.risk_level, vc.next_refresh_at,
+              vc.last_content_at, vc.reviewed_at, vc.review_note,
               count(vw.id)::integer as work_count, max(coalesce(vw.published_at, vw.last_seen_at)) as latest_work_at
        from viral_creators vc
        left join viral_works vw on vw.creator_id = vc.id
        group by vc.id
-       order by case vc.status when 'active' then 0 when 'paused' then 1 else 2 end,
+       order by case vc.pool_status when 'active' then 0 when 'watchlist' then 1 when 'candidate' then 2 else 3 end,
+                case vc.status when 'active' then 0 when 'paused' then 1 else 2 end,
                 vc.relevance_score desc, vc.last_discovered_at desc`,
     );
     return result.rows;
@@ -3758,7 +3902,7 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
   if (!userId) return null;
 
   try {
-    const [balance, works, usage, orders, announcements, gifts, topicSnapshot] = await Promise.all([
+    const [balance, works, usage, orders, announcements, gifts, legacyTopicSnapshot, ingestionTopicSnapshot] = await Promise.all([
       tryGetLocalQuotaBalance(userId),
       tryListWorks(userId),
       tryListUsageLogs(userId),
@@ -3766,7 +3910,9 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
       tryListPublishedAnnouncements(5, "dashboard"),
       tryListGiftRecords(userId),
       tryListLatestTopicSnapshots({ limit: 10, maxAgeMinutes: 1440, allowStale: true }),
+      tryListLatestTopicIngestionBatch({ perTabLimit: 200, maxAgeMinutes: 1440, allowStale: true }),
     ]);
+    const topicSnapshot = ingestionTopicSnapshot.topics.length > 0 ? ingestionTopicSnapshot : legacyTopicSnapshot;
 
     const weekStart = startOfCurrentWeek();
     const weeklyWorks = works.filter((work) => new Date(work.updated_at).getTime() >= weekStart);
@@ -3788,6 +3934,7 @@ export async function tryGetWorkbenchOverview(userId: string | null) {
       topics: topicSnapshot.topics,
       topicsRefreshedAt: topicSnapshot.refreshedAt,
       topicsStale: topicSnapshot.stale,
+      topicsIngestionReady: ingestionTopicSnapshot.topics.length > 0,
     };
   } catch {
     return null;

@@ -77,6 +77,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         if (snapshot.content) {
           safeEnqueue(encodeEvent({ type: "delta", content: snapshot.content }));
         }
+        for (const progress of snapshot.progress) safeEnqueue(encodeEvent(progress));
         if (snapshot.images.length > 0 || snapshot.imageMode || snapshot.retryable) {
           safeEnqueue(encodeEvent({
             type: "images",
@@ -111,6 +112,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         }
         if (event.type === "delta" && event.content) {
           safeEnqueue(encodeEvent({ type: "delta", content: event.content }));
+          return;
+        }
+        if (event.type === "progress") {
+          safeEnqueue(encodeEvent(event));
           return;
         }
         if (event.type === "images") {

@@ -26,7 +26,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     typeof payload === "object" &&
     Object.keys(payload).length > 0
   ) {
-    const runPromise = ensureBackgroundWorkRun({
+    // Start or recover the worker synchronously, but do not wait for the long
+    // generation promise here. The detail page needs the running work
+    // immediately so it can connect to `/stream` and show user-facing stages.
+    void ensureBackgroundWorkRun({
       workId: normalizedWork.id,
       slug: normalizedWork.platform,
       userId: user.id,
@@ -34,22 +37,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       quotaCost: Number(normalizedWork.app_run?.quota_cost ?? 0),
       existingRunId: normalizedWork.app_run?.id ?? null,
     });
-
-    const shouldWaitForRecovery =
-      !normalizedWork.content.trim() ||
-      normalizedWork.title.includes("正在生成") ||
-      normalizedWork.app_run?.status === "running";
-
-    if (shouldWaitForRecovery) {
-      await Promise.race([
-        runPromise,
-        new Promise((resolve) => setTimeout(resolve, 12000)),
-      ]);
-      const refreshed = await tryGetWorkDetail({ userId: user.id, workId: id });
-      if (refreshed) {
-        return Response.json({ work: normalizeWorkDetail(refreshed), mode: "server" });
-      }
-    }
   }
 
   return Response.json({ work: normalizedWork, mode: "server" });

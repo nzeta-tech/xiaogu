@@ -68,6 +68,20 @@ export const creationCategories: CreationCategory[] = [
 
 export const creationApps: CreationApp[] = [
   {
+    id: "digital-human-video",
+    slug: "digital-human-video",
+    name: "数字人视频",
+    emoji: "🎭",
+    category: "content",
+    points: 12,
+    badge: "新",
+    featured: true,
+    description: "选择你在数字分身中创建或收藏的数字人，把口播文案生成可发布视频。",
+    promptHint: "小谷会自动匹配可用的形象、声音和生成能力，无需关心背后的技术服务。",
+    resultType: "text",
+    fields: [],
+  },
+  {
     id: "xiaohongshu-studio",
     slug: "xiaohongshu-studio",
     name: "小红书笔记创作",
@@ -525,22 +539,9 @@ export const creationApps: CreationApp[] = [
     points: 5,
     badge: "新",
     description: "把热点、事件或观点整理成开头抓人、逻辑清楚且事实边界明确的传播型内容。",
-    promptHint: "沿用口播文案（流量型）能力：用反常识钩子明确立场，以事实、迁移逻辑和普通人场景推进，最后给出可执行启发与互动动作。",
+    promptHint: "围绕真实素材与本题受众，形成一条可直接录制的获客型口播正文。",
     resultType: "text",
     fields: [
-      {
-        id: "tone",
-        label: "内容语气",
-        type: "radio",
-        required: true,
-        options: [
-          { label: "默认", value: "default" },
-          { label: "犀利观点", value: "sharp" },
-          { label: "共情提醒", value: "empathetic" },
-          { label: "理性拆解", value: "analytical" },
-        ],
-        helper: "只影响表达方式，不改变你提供的事实、观点与内容边界。",
-      },
       {
         id: "source",
         label: "热点素材和你的观点",
@@ -593,6 +594,24 @@ export const creationApps: CreationApp[] = [
         type: "textarea",
         required: true,
         placeholder: "粘贴需要制作封面的文案。系统会从中提炼封面标题和画面重点。",
+      },
+      {
+        id: "avatar_visual_mode",
+        label: "是否加入本人形象",
+        type: "radio",
+        required: true,
+        options: [
+          { label: "不使用人物形象", value: "no" },
+          { label: "选择或上传我的形象照", value: "yes" },
+        ],
+        helper: "开启后可从数字分身形象库选择，也可临时上传一张清晰照片。",
+      },
+      {
+        id: "reference_image",
+        label: "临时上传形象照（可选）",
+        type: "file",
+        accept: "image/jpeg,image/png,image/webp",
+        helper: "仅用于本次视频封面生成；如已从下方形象库选择照片，可不上传。",
       },
       {
         id: "ratio",

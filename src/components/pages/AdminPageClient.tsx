@@ -2,7 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
-import { ProfilePageClient } from "@/components/pages/ProfilePageClient";
+import { DigitalHumanChannelPanel } from "@/components/admin/DigitalHumanChannelPanel";
+import { CreativeCoachProductionPanel } from "@/components/admin/CreativeCoachProductionPanel";
 import { apiPath } from "@/lib/client/url";
 import { defaultSystemSettings, type SystemSettings } from "@/lib/system/settings";
 import {
@@ -318,7 +319,7 @@ type AffiliateRecord = {
 
 type AffiliateLedgerRecord = { id: string; action: string; credits: number; created_at: string; source_order_id: string | null; user_email: string; source_email: string | null };
 type AffiliateStats = { visits: number; invitees: number; payers: number; accruedCredits: number };
-type SettingsTab = "general" | "legal" | "features" | "security" | "defaults" | "services" | "runtime" | "payment" | "email" | "backup";
+type SettingsTab = "general" | "legal" | "features" | "security" | "defaults" | "services" | "runtime" | "digital-human" | "payment" | "email" | "backup";
 type ServiceHealth = { checks: Array<{ key: string; label: string; ok: boolean; required: boolean; latencyMs: number; error: string }>; lastStripeWebhook: { lastWebhookAt?: string; lastEventType?: string } | null; checkedAt: string };
 type ModelRuntimeStatus = { events: Array<{ id: string; provider: string; model: string; outcome: string; latency_ms: number; error_message: string; created_at: string }>; circuit: { failures: number; openUntil: number } };
 type BackupRecord = { id: string; filename: string; status: string; size_bytes: number; table_count: number; row_count: number; checksum: string; error_message: string | null; remote_key: string | null; remote_status: string; expires_at: string | null; trigger_type: string; created_at: string; completed_at: string | null; restored_at: string | null };
@@ -326,7 +327,7 @@ type PaymentProvider = { id: string; name: string; providerKey: "stripe" | "airw
 type PaymentProviderForm = { id: string; name: string; providerKey: PaymentProvider["providerKey"]; enabled: boolean; sortOrder: number; supportedMethods: string; secretKey: string; publishableKey: string; webhookSecret: string; currency: string; configJson?: string };
 
 const defaultSettings = structuredClone(defaultSystemSettings) as Settings;
-const settingsTabs: Array<[SettingsTab, string]> = [['general','通用设置'],['legal','登录条款'],['features','功能开关'],['security','安全认证'],['defaults','用户默认值'],['services','服务状态'],['runtime','模型运行'],['payment','支付设置'],['email','邮件设置'],['backup','数据备份']];
+const settingsTabs: Array<[SettingsTab, string]> = [['general','通用设置'],['legal','登录条款'],['features','功能开关'],['security','安全认证'],['defaults','用户默认值'],['services','服务状态'],['runtime','模型运行'],['digital-human','数字人渠道'],['payment','支付设置'],['email','邮件设置'],['backup','数据备份']];
 
 export function AdminPageClient() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -367,7 +368,6 @@ export function AdminPageClient() {
   const [feedbackReplies, setFeedbackReplies] = useState<Record<string, string>>({});
   const [loadedSections, setLoadedSections] = useState<Partial<Record<AdminSectionId, boolean>>>({});
   const [actionKey, setActionKey] = useState("");
-  const [avatarProductionView, setAvatarProductionView] = useState<"content" | "lead-coach">("content");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [toast, setToast] = useState<AdminToastMessage | null>(null);
   const [confirmConfig, setConfirmConfig] = useState<AdminConfirmConfig | null>(null);
@@ -1638,7 +1638,7 @@ export function AdminPageClient() {
         </div>
       ) : null}
 
-      {tab === "avatar-production" ? <section className="adminAvatarProduction"><div className="adminSectionTitle"><div><span>分身生产</span><h2>平台 Skill 训练与版本管理</h2><p>提交授权作品、查看训练进度与结果，并管理平台分身版本。</p></div></div><div className="adminSegmented avatarProductionTabs" role="tablist" aria-label="分身生产类型"><button aria-selected={avatarProductionView === "content"} className={avatarProductionView === "content" ? "active" : ""} onClick={() => setAvatarProductionView("content")} role="tab" type="button">内容创作分身</button><button aria-selected={avatarProductionView === "lead-coach"} className={avatarProductionView === "lead-coach" ? "active" : ""} onClick={() => setAvatarProductionView("lead-coach")} role="tab" type="button">获客教练分身</button></div><ProfilePageClient key={avatarProductionView} skillScope="platform" trainingOnly trainingPurpose={avatarProductionView} /></section> : null}
+      {tab === "avatar-production" ? <CreativeCoachProductionPanel /> : null}
 
       {tab === "commerce" ? (
         <div className="pageStack">
@@ -1872,6 +1872,7 @@ export function AdminPageClient() {
 
           <div aria-labelledby={`settings-tab-${settingsTab}`} id="settings-tabpanel" role="tabpanel">
           {settingsTab === "payment" ? <><PaymentSettingsSwitches settings={settings} setSettings={setSettings} /><PaymentCancellationPanel settings={settings} setSettings={setSettings} /><PaymentProviderPanel providers={paymentProviders} form={providerForm} setForm={setProviderForm} onSave={savePaymentProvider} onDelete={deletePaymentProvider} /></> : null}
+          {settingsTab === "digital-human" ? <DigitalHumanChannelPanel settings={settings} setSettings={setSettings} /> : null}
 
           {settingsTab === "general" ? <AdminPanel title="站点与维护">
             <div className="settingsFormGrid">

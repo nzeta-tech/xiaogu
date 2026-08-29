@@ -1,11 +1,14 @@
 import { executeCreationAppRun, RetryableCreationRunError } from "@/lib/creation/execute-app-run";
 import type { CreationFieldValue } from "@/lib/creation/output";
 import { getCreationUserError } from "@/lib/creation/errors";
+import { trySaveAppRunProgress } from "@/lib/db/repositories";
+import { TRAFFIC_COPY_INITIAL_PROGRESS } from "@/lib/creation/work-generation-progress";
 
 type FieldValue = CreationFieldValue;
 type StreamImage = { id: string; url: string };
 type WorkRunEvent =
   | { type: "meta"; runId?: string | null }
+  | { type: "progress"; phase?: string; status?: "active" | "completed"; label?: string; detail?: string; coachId?: string | null; coachLabel?: string | null }
   | { type: "delta"; content?: string }
   | { type: "images"; images?: StreamImage[]; imageMode?: string | null; retryable?: boolean }
   | { type: "done"; content?: string; images?: StreamImage[]; imageMode?: string | null; retryable?: boolean }
@@ -19,6 +22,7 @@ export type BackgroundWorkRunSnapshot = {
   imageMode: string | null;
   retryable: boolean;
   error: string;
+  progress: Extract<WorkRunEvent, { type: "progress" }>[];
 };
 
 type BackgroundWorkRunEntry = {
@@ -82,6 +86,9 @@ export function startBackgroundWorkRun(input: {
 
   const retryAttempt = input.retryAttempt ?? 0;
   const listeners = new Set<(event: WorkRunEvent) => void>();
+  const initialProgress: Extract<WorkRunEvent, { type: "progress" }>[] = input.slug === "traffic-copy"
+    ? [{ type: "progress", ...TRAFFIC_COPY_INITIAL_PROGRESS }]
+    : [];
   const snapshot: BackgroundWorkRunSnapshot = {
     status: "running",
     runId: input.existingRunId ?? null,
@@ -90,14 +97,21 @@ export function startBackgroundWorkRun(input: {
     imageMode: null,
     retryable: false,
     error: "",
+    progress: initialProgress,
   };
 
-  function emit(event: WorkRunEvent) {
+  async function emit(event: WorkRunEvent) {
     if (event.type === "meta") {
       snapshot.runId = event.runId ?? snapshot.runId;
     }
     if (event.type === "delta" && event.content) {
       snapshot.content += event.content;
+    }
+    if (event.type === "progress") {
+      const index = snapshot.progress.findIndex((item) => item.phase === event.phase);
+      if (index >= 0) snapshot.progress[index] = event;
+      else snapshot.progress.push(event);
+      await trySaveAppRunProgress({ runId: snapshot.runId, progress: snapshot.progress });
     }
     if (event.type === "images") {
       snapshot.images = event.images ?? [];
@@ -122,11 +136,15 @@ export function startBackgroundWorkRun(input: {
     }
   }
 
-  const task = runBackgroundWorkAttempt({
-    ...input,
-    retryAttempt,
-    onEvent: emit,
-  })
+  const persistInitialProgress = initialProgress.length
+    ? trySaveAppRunProgress({ runId: snapshot.runId, progress: initialProgress })
+    : Promise.resolve(false);
+  const task = persistInitialProgress
+    .then(() => runBackgroundWorkAttempt({
+      ...input,
+      retryAttempt,
+      onEvent: emit,
+    }))
     .then(() => undefined)
     .finally(() => {
       activeWorkRuns.delete(input.workId);

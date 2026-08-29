@@ -79,6 +79,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
               safeEnqueue(encodeEvent({ type: "delta", content: payload.content }));
               return;
             }
+            if (payload.type === "progress") {
+              safeEnqueue(encodeEvent(payload));
+              return;
+            }
             if (payload.type === "images") {
               safeEnqueue(encodeEvent({
                 type: "images",

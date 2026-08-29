@@ -1,4 +1,5 @@
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 import { generateImageSet } from "@/lib/agent/image-generator";
 import { auditImageRemixConsistency, extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
 import { getCreationAppBySlug, type CreationField } from "@/lib/apps/catalog";
@@ -35,6 +36,9 @@ import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt, type
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { getCreationUserError } from "@/lib/creation/errors";
 import { buildWechatSectionImagePrompts } from "@/lib/creation/wechat-article-images";
+import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
+import { executeCreationAppRun } from "@/lib/creation/execute-app-run";
+import { normalizeRemixCapability } from "@/lib/creation/capabilities";
 
 type FieldValue = CreationFieldValue;
 
@@ -100,6 +104,30 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const quota = await requireQuota(user, "write_script");
   if (!quota.ok) return quota.response;
 
+  const usesTrafficArchitecture = app.slug === "traffic-copy"
+    || app.slug === "link-remix" && normalizeRemixCapability(values.remix_target) === "traffic-copy";
+  if (usesTrafficArchitecture) {
+    try {
+      const executed = await executeCreationAppRun({
+        slug: app.slug,
+        userId: user.id,
+        values,
+        quotaCost: quota.quotaCost,
+      });
+      return Response.json({
+        ok: true,
+        app: { id: app.id, slug: app.slug, name: app.name, resultType: app.resultType },
+        draft: executed.work ? { id: executed.work.id, title: executed.title } : null,
+        work: executed.work,
+        result: executed.result,
+        images: [],
+        imageMode: null,
+      });
+    } catch (error) {
+      return Response.json({ error: getCreationUserError(error) }, { status: 500 });
+    }
+  }
+
   const caseContext = buildCreationPromptContext(app.slug);
 
   const content = app.slug === "wechat-studio"
@@ -124,7 +152,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const resolvedPrompt = app.resultType === "image" || app.resultType === "image-plan" ? imagePrompt : content;
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean).slice(0, isPolicyRenewalCard ? 1 : 4) : [];
   const entry = typeof values.app_entry === "string" ? values.app_entry.trim() : "";
-  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+  const needsAvatarPhoto = creationNeedsAvatarPhoto({ appSlug: app.slug, entry, values });
   if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     return Response.json({ error: "请选择数字分身形象照，或临时上传一张形象照。" }, { status: 400 });
   }
@@ -164,7 +192,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     inputPayload: values,
     resolvedPrompt,
     quotaCost: quota.quotaCost,
-    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : resolveConfiguredTextModel(),
   });
 
   let result = "";
@@ -261,7 +289,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     userId: user.id,
     actionType: "creation_app_run",
     quotaCost: quota.quotaCost,
-    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : process.env.MODEL_NAME ?? "configured-model",
+    model: isPolicyRenewalCard ? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1" : resolveConfiguredTextModel(),
     metadata: {
       appId: app.id,
       appSlug: app.slug,
@@ -624,11 +652,14 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
   ];
   const styleValue = stringifyValue(values.style);
   const isImageCardRemix = appName === "知识卡片制作（图片）" && stringifyValue(values.creation_mode) === "image_remix";
+  const isVideoCover = appName === "视频封面制作（图片）";
   for (const field of fields) {
     const value = values[field.id];
     if (isEmptyCreationFieldValue(value)) continue;
     if (field.id === "reference_image") {
-      lines.push(isImageCardRemix
+      lines.push(isVideoCover
+        ? `${field.label}：已上传临时形象照。画面必须保持参考图中同一个人的可识别脸部、发型、肤色、年龄与整体气质；可以按封面主题调整姿态、服装和背景。`
+        : isImageCardRemix
         ? `${field.label}：已上传 ${Array.isArray(value) ? value.length : 1} 张二创原图。按上传顺序综合理解，必须准确保留并重新排版其中可确认的知识文字、数字与层级，不得把原图的知识内容简化成无文字插画。`
         : `${field.label}：已上传参考图。请尽量贴近参考图的配色、材质、笔触、留白、主体关系与版式节奏，但不要照搬其中的文字内容。`);
       continue;

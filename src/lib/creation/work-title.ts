@@ -1,4 +1,4 @@
-import { stringifyCreationFieldValue, type CreationFieldValue } from "@/lib/creation/output";
+import { stringifyCreationFieldValue, type CreationFieldValue } from "./output.ts";
 
 const MAX_SUBJECT_LENGTH = 28;
 
@@ -128,7 +128,9 @@ export function buildWorkTitle(input: {
   values: Record<string, CreationFieldValue>;
   result?: string | null;
 }) {
-  const generatedTitle = extractGeneratedTitle(input.result ?? "");
+  const generatedTitle = input.appSlug === "traffic-copy"
+    ? extractTrafficCopyTitle(input.result ?? "")
+    : extractGeneratedTitle(input.result ?? "");
   const fieldTitle = extractFieldTitle(input.appSlug, input.values);
   // A completed topic remix should be named for the newly written article,
   // rather than its reference work, so works created from different angles are
@@ -136,7 +138,35 @@ export function buildWorkTitle(input: {
   const subject = input.appSlug === "link-remix"
     ? generatedTitle || fieldTitle || fallbackSubjects[input.appSlug] || defaultSubjectForApp(input.appSlug)
     : generatedTitle || fieldTitle || fallbackSubjects[input.appSlug] || defaultSubjectForApp(input.appSlug);
-  return `${input.appName}｜${truncateSubject(subject)}`;
+  return `${input.appName}｜${truncateSubject(stripRepeatedAppPrefix(subject, input.appName))}`;
+}
+
+function stripRepeatedAppPrefix(subject: string, appName: string) {
+  const normalized = subject.trim();
+  for (const separator of ["｜", "|", "：", ":"]) {
+    const prefix = `${appName}${separator}`;
+    if (normalized.startsWith(prefix)) return normalized.slice(prefix.length).trim();
+  }
+  return normalized;
+}
+
+function extractTrafficCopyTitle(result: string) {
+  if (!result.trim()) return "";
+
+  const lines = result.replace(/\r\n/g, "\n").split("\n").slice(0, 60);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const heading = normalizeSubject(line.replace(/^#{1,6}\s+/, ""));
+    if (/^(?:默认的我|小谷|.+教练)(?:版|\s*[·・]\s*V?\d+版?|\s*V?\d+版?)$/i.test(heading)) continue;
+    if (/^(?:默认的我|小谷|.+教练)(?:作品|版本)?$/i.test(heading)) continue;
+    if (/^#{1,6}\s+/.test(line)) continue;
+
+    const candidate = normalizeSubject(line);
+    if (candidate && !isStructuralHeading(candidate) && !isWeakSubject(candidate)) return candidate;
+  }
+  return "";
 }
 
 function extractFieldTitle(appSlug: string, values: Record<string, CreationFieldValue>) {

@@ -19,9 +19,10 @@ import { consumeCreationHandoff } from "@/lib/client/creation-handoff";
 import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getRemixCapabilityDefaults, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
 import { resolveTrafficCoverSource } from "@/lib/creation/traffic-cover-source";
+import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 
 type FieldValue = string | string[];
-type CreatorSkillOption = { id: string; name: string; version: number; skill_scope: "personal" | "platform"; identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string } };
+type CreativeCoachOption = { id: string; name: string; version: number; coach_scope: "personal" | "platform"; capabilities: string[]; identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string } };
 
 const IMAGE_CARD_STYLE_USAGE_KEY = "image-card:style-usage";
 const IMAGE_CARD_LEGACY_RECENT_STYLES_KEY = "image-card:recent-styles";
@@ -67,6 +68,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const isTopicPicker = appFamily === "topic-picker";
   const isWechatImages = appFamily === "wechat-images";
   const isPolicyRenewalCard = app.slug === "policy-renewal-card";
+  const isVideoCover = app.slug === "video-cover";
   const isXiaohongshuCheck = appFamily === "xiaohongshu-check";
   const isPolicyDiagnosis = app.slug === "policy-diagnosis";
   const isVideoScriptPolish = appFamily === "polish-video";
@@ -91,6 +93,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const leadCopyTargetOptions = isLeadCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const writeCopyTargetOptions = isWriteCopy ? (pageApp.fields.find((field) => field.id === "targets")?.options ?? []) : [];
   const incomingPrompt = searchParams.get("prompt")?.trim() ?? "";
+  const sourceWorkId = searchParams.get("source_work_id")?.trim() ?? "";
   const shouldConsumeHandoff = searchParams.get("handoff") === "1";
   const trafficParentWorkId = searchParams.get("parent_work_id")?.trim() ?? "";
   const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
@@ -113,9 +116,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       ...(app.slug === "video-cover" && sourceBatchId ? { traffic_source_batch_id: sourceBatchId } : {}),
     };
   });
+  const imageCardSelectedStyleCount = isImageCard
+    ? Array.isArray(values.style) ? values.style.length : typeof values.style === "string" && values.style ? 1 : 0
+    : 0;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [draftStatus, setDraftStatus] = useState<"restored" | "">("");
+  const [draftStatus, setDraftStatus] = useState<"restored" | "recreated" | "">("");
+  const [recreationPrefillStatus, setRecreationPrefillStatus] = useState<"loading" | "loaded" | "error" | "">(() => sourceWorkId ? "loading" : "");
   const [voiceFieldId, setVoiceFieldId] = useState<string | null>(null);
   const [voicePaused, setVoicePaused] = useState(false);
   const [voiceElapsed, setVoiceElapsed] = useState(0);
@@ -133,11 +140,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [imageCardStyleUsage, setImageCardStyleUsage] = useState<Record<string, number>>({});
   const [wechatImageStyleUsage, setWechatImageStyleUsage] = useState<Record<string, number>>({});
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
-  const [creatorSkillOptions, setCreatorSkillOptions] = useState<CreatorSkillOption[]>([]);
+  const [creativeCoachOptions, setCreativeCoachOptions] = useState<CreativeCoachOption[]>([]);
   const isRemixTraffic = isLinkRemix && values.remix_target === "traffic-copy";
   const usesTrafficWorkflow = app.slug === "traffic-copy" || isRemixTraffic;
   const [creatorSkillsLoading, setCreatorSkillsLoading] = useState(usesTrafficWorkflow);
-  const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard);
+  const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(isImageCard || isPersonalityCardEntry || isWechatImages || isPolicyRenewalCard || isVideoCover);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const valuesRef = useRef(values);
   const voiceSessionRef = useRef<{ fieldId: string; initialValue: FieldValue | undefined; segmentBaseValue: FieldValue | undefined } | null>(null);
@@ -166,8 +173,12 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const wechatStyleRecommendations = useMemo(() => recommendWechatImageStyles(wechatArticle), [wechatArticle]);
   const wechatStyleRecommendation = wechatStyleRecommendations[0] ?? { value: "", label: "", reason: "" };
   const wechatStyleOptions = pageApp.fields.find((field) => field.id === "style")?.options ?? [];
-  const selectedCreatorStyles = usesTrafficWorkflow
-    ? (Array.isArray(values.creator_skill_version_ids) && values.creator_skill_version_ids.length ? values.creator_skill_version_ids : ["default"])
+  const selectedCreativeCoachIds = usesTrafficWorkflow
+    ? (Array.isArray(values.creative_coach_version_ids)
+      ? values.creative_coach_version_ids.filter((value): value is string => typeof value === "string").slice(0, 2)
+      : typeof values.creative_coach_version_id === "string" && values.creative_coach_version_id !== "default"
+        ? [values.creative_coach_version_id]
+        : ["default"])
     : [];
   const remixTargetFields = isLinkRemix ? getRemixCapabilitySettings(values.remix_target) : [];
   const remixBaseFields = filteredFields;
@@ -183,6 +194,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     : formFields
   ).filter((field) => {
     if (isPolicyRenewalCard && values.avatar_visual_mode !== "yes" && ["reference_image", "portrait_treatment"].includes(field.id)) return false;
+    if (isVideoCover && values.avatar_visual_mode !== "yes" && field.id === "reference_image") return false;
     if (isImageCard && field.id === "remix_instruction") return false;
     if (isImageCard && field.id === "portrait_reference_image" && !(values.creation_mode === "image_remix" && values.draw_portrait === "yes")) return false;
     // The third interaction is the actual source: text for a new card, or an image for remix.
@@ -211,16 +223,48 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   useEffect(() => {
     if (!shouldConsumeHandoff) return;
     const handoff = consumeCreationHandoff(window.sessionStorage, app.slug);
-    const frame = window.requestAnimationFrame(() => {
-      setValues((current) => ({
-        ...current,
-        ...(handoff.prompt && promptFieldId ? { [promptFieldId]: handoff.prompt } : {}),
-        ...(app.slug === "video-cover" && handoff.source_style_label ? { traffic_source_label: handoff.source_style_label } : {}),
-        ...(app.slug === "video-cover" && handoff.source_batch_id ? { traffic_source_batch_id: handoff.source_batch_id } : {}),
-      }));
-    });
-    return () => window.cancelAnimationFrame(frame);
+    // Do this synchronously inside the effect. Deferring it to a frame means
+    // Strict Mode can consume the one-time handoff, cancel that frame, and
+    // leave the destination form empty on its second effect pass.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes an external one-time session handoff.
+    setValues((current) => ({
+      ...current,
+      ...(handoff.prompt && promptFieldId ? { [promptFieldId]: handoff.prompt } : {}),
+      ...(app.slug === "video-cover" && handoff.source_style_label ? { traffic_source_label: handoff.source_style_label } : {}),
+      ...(app.slug === "video-cover" && handoff.source_batch_id ? { traffic_source_batch_id: handoff.source_batch_id } : {}),
+    }));
   }, [app.slug, promptFieldId, shouldConsumeHandoff]);
+
+  useEffect(() => {
+    if (!sourceWorkId || creationFrom !== "result") return;
+    const controller = new AbortController();
+    void fetch(apiPath(`/api/works/${encodeURIComponent(sourceWorkId)}`), { cache: "no-store", signal: controller.signal })
+      .then(async (response): Promise<{ work?: { platform?: string; app_run?: { input_payload?: Record<string, unknown> | null } | null }; error?: string }> => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : "读取上次创作参数失败。");
+        return payload;
+      })
+      .then((payload) => {
+        if (!payload.work || payload.work.platform !== app.slug) throw new Error("原作品与当前创作工具不匹配。");
+        const savedValues = Object.fromEntries(Object.entries(payload.work.app_run?.input_payload ?? {}).filter((entry): entry is [string, FieldValue] => {
+          const value = entry[1];
+          return typeof value === "string" || Array.isArray(value) && value.every((item) => typeof item === "string");
+        }));
+        setValues((current) => ({
+          ...current,
+          ...savedValues,
+          ...(incomingPrompt && promptFieldId ? { [promptFieldId]: incomingPrompt } : {}),
+        }));
+        setDraftStatus("recreated");
+        setRecreationPrefillStatus("loaded");
+      })
+      .catch((cause) => {
+        if (cause instanceof Error && cause.name === "AbortError") return;
+        setRecreationPrefillStatus("error");
+        setError(cause instanceof Error ? cause.message : "读取上次创作参数失败，请返回结果页重试。");
+      });
+    return () => controller.abort();
+  }, [app.slug, creationFrom, incomingPrompt, promptFieldId, sourceWorkId]);
 
   useEffect(() => {
     if (app.slug !== "video-cover" || !trafficParentWorkId || !promptFieldId) return;
@@ -250,20 +294,19 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     if (!usesTrafficWorkflow) return;
     const controller = new AbortController();
     void fetch(apiPath("/api/avatar/creator-skills"), { signal: controller.signal, cache: "no-store" })
-      .then(async (response) => response.ok ? response.json() as Promise<{ skills?: CreatorSkillOption[] }> : { skills: [] })
+      .then(async (response) => response.ok ? response.json() as Promise<{ coaches?: CreativeCoachOption[] }> : { coaches: [] })
       .then((payload) => {
-        const options = payload.skills ?? [];
-        setCreatorSkillOptions(options);
-        const availableIds = new Set(options.map((skill) => skill.id));
+        const coaches = payload.coaches ?? [];
+        setCreativeCoachOptions(coaches);
         setValues((current) => {
-          const selected = Array.isArray(current.creator_skill_version_ids) ? current.creator_skill_version_ids : [];
-          const valid = [...new Set(selected.filter((id): id is string => typeof id === "string" && (id === "default" || availableIds.has(id))))].slice(0, 2);
-          const next = valid.length ? valid : ["default"];
-          if (selected.length === next.length && selected.every((id, index) => id === next[index])) return current;
-          return { ...current, creator_skill_version_ids: next };
+          const legacyCoach = typeof current.creative_coach_version_id === "string" ? current.creative_coach_version_id : "default";
+          const selected = Array.isArray(current.creative_coach_version_ids) ? current.creative_coach_version_ids : legacyCoach === "default" ? ["default"] : [legacyCoach];
+          const valid = [...new Set(selected.filter((id) => id === "default" || coaches.some((item) => item.id === id)))].slice(0, 2);
+          const validCreativeCoaches = valid.length ? valid : ["default"];
+          return JSON.stringify(current.creative_coach_version_ids) === JSON.stringify(validCreativeCoaches) ? current : { ...current, creative_coach_version_ids: validCreativeCoaches };
         });
       })
-      .catch((cause) => { if (!(cause instanceof DOMException && cause.name === "AbortError")) setCreatorSkillOptions([]); })
+      .catch(() => setCreativeCoachOptions([]))
       .finally(() => setCreatorSkillsLoading(false));
     return () => controller.abort();
   }, [usesTrafficWorkflow]);
@@ -341,7 +384,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }, [isWechatImages]);
 
   useEffect(() => {
-    if (!isImageCard && !isPersonalityCardEntry && !isWechatImages && !isPolicyRenewalCard) return;
+    if (!isImageCard && !isPersonalityCardEntry && !isWechatImages && !isPolicyRenewalCard && !isVideoCover) return;
     const controller = new AbortController();
     void fetch(apiPath("/api/avatar/photos"), { signal: controller.signal })
       .then(async (response) => response.ok ? response.json() as Promise<{ photos?: AvatarVisualAsset[] }> : { photos: [] })
@@ -359,7 +402,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       })
       .finally(() => { if (!controller.signal.aborted) setAvatarPhotosLoading(false); });
     return () => controller.abort();
-  }, [isImageCard, isPersonalityCardEntry, isWechatImages, isPolicyRenewalCard]);
+  }, [isImageCard, isPersonalityCardEntry, isWechatImages, isPolicyRenewalCard, isVideoCover]);
 
   useEffect(() => {
     const restored = readCreationDraft<Record<string, FieldValue>>(window.sessionStorage, draftKey, shouldRestoreDraft);
@@ -420,7 +463,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       return;
     }
     const selectedVisualIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids : [];
-    const needsAvatarPhoto = isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" || (isWechatImages || isPolicyRenewalCard) && values.avatar_visual_mode === "yes";
+    const needsAvatarPhoto = creationNeedsAvatarPhoto({ appSlug: app.slug, entry: workspaceEntry, values });
     const isImageCardRemix = isImageCard && values.creation_mode === "image_remix";
     if (needsAvatarPhoto && selectedVisualIds.length === 0 && (isImageCardRemix ? isEmpty(values.portrait_reference_image) : isEmpty(values.reference_image))) {
       trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "submit_blocked", errorCode: "missing_avatar_image" });
@@ -464,7 +507,10 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       return;
     }
 
-    if (isImageCard && typeof values.style === "string") recordImageCardStyleUsage(values.style);
+    if (isImageCard) {
+      const selectedStyles = Array.isArray(values.style) ? values.style : typeof values.style === "string" && values.style ? [values.style] : [];
+      selectedStyles.forEach(recordImageCardStyleUsage);
+    }
     if (isWechatImages && typeof values.style === "string") recordWechatImageStyleUsage(values.style);
     trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "prepare_finished", outcome: String(response.status) });
     trackCreationDiagnostic({ traceId, appSlug: app.slug, eventType: "navigation_started", detail: { visibility: document.visibilityState } });
@@ -490,40 +536,24 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     });
   }
 
-  function toggleCreatorStyle(styleId: string) {
-    const current = selectedCreatorStyles;
-    if (current.includes(styleId)) {
-      if (current.length === 1) return;
-      updateField("creator_skill_version_ids", current.filter((id) => id !== styleId));
-      return;
-    }
-    // Keep the base avatar selected when an additional creator style is chosen.
-    // The user can still explicitly remove it after another style is active.
-    const next = [...current, styleId];
-    if (next.length <= 2) updateField("creator_skill_version_ids", next);
-  }
-
   function renderCreatorStyleStep(stepNumber: number) {
-    const personalSkills = creatorSkillOptions.filter((skill) => skill.skill_scope === "personal");
-    const platformSkills = creatorSkillOptions.filter((skill) => skill.skill_scope === "platform");
-    const renderSkillCard = (skill: CreatorSkillOption) => {
-      const card = skill.identity_card ?? {};
-      const selected = selectedCreatorStyles.includes(skill.id);
-      return <button aria-pressed={selected} className={`creatorIdentityCard ${selected ? "active" : ""}`} disabled={!selected && selectedCreatorStyles.length >= 2} key={skill.id} onClick={() => toggleCreatorStyle(skill.id)} type="button"><span className="creatorIdentityCardHead"><strong>{skill.name}</strong><em>{skill.skill_scope === "platform" ? "平台分身" : "我的分身"}</em></span><b>{card.title || "个性化创作分身"}</b><small>{card.summary || "根据授权作品提炼的选题、叙事和表达方式。"}</small>{card.styleTags?.length ? <span className="creatorIdentityTags">{card.styleTags.slice(0, 3).map((tag) => <i key={tag}>{tag}</i>)}</span> : null}{card.scenarios?.length ? <span className="creatorIdentityScenarios">适合：{card.scenarios.slice(0, 3).join("、")}</span> : null}{selected ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>;
+    const toggleCreativeCoach = (id: string) => {
+      if (selectedCreativeCoachIds.includes(id)) {
+        const next = selectedCreativeCoachIds.filter((value) => value !== id);
+        updateField("creative_coach_version_ids", next.length ? next : ["default"]);
+        return;
+      }
+      if (selectedCreativeCoachIds.length < 2) updateField("creative_coach_version_ids", [...selectedCreativeCoachIds, id]);
     };
     return <section className="field-card creationField creatorStyleStep" id="creation-field-creator-style">
-      <div className="field-card-header fieldCardHeader">
-        <span className="step-indicator stepIndicator" aria-hidden="true"><span className="step-number">{stepNumber}</span></span>
-        <strong className="field-title">选择分身风格<em className="required-mark">*</em></strong>
-      </div>
+      <div className="field-card-header fieldCardHeader"><span className="step-indicator stepIndicator" aria-hidden="true"><span className="step-number">{stepNumber}</span></span><strong className="field-title">选择创作教练</strong></div>
       <div className="field-content">
-        <p className="field-help">至少选择一个、最多两个；选择两个会分别生成作品，并在结果页用 Tab 切换。</p>
-        <div className="creatorStyleChoices">
-          <div className="creatorIdentityGroup"><span>我的基础风格</span><div><button className={`creatorIdentityCard ${selectedCreatorStyles.includes("default") ? "active" : ""}`} disabled={creatorSkillsLoading} onClick={() => toggleCreatorStyle("default")} type="button"><span className="creatorIdentityCardHead"><strong>默认的我</strong><em>基础</em></span><b>使用我的数字分身创作</b><small>根据你的定位、专业经验和表达偏好创作，不额外套用其他创作者风格。</small><span className="creatorIdentityScenarios">个性化程度取决于数字分身资料的完整度</span>{selectedCreatorStyles.includes("default") ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button></div></div>
-          {personalSkills.length ? <div className="creatorIdentityGroup"><span>我的分身</span><div>{personalSkills.map(renderSkillCard)}</div></div> : null}
-          {platformSkills.length ? <div className="creatorIdentityGroup"><span>平台推荐</span><div>{platformSkills.map(renderSkillCard)}</div></div> : null}
-        </div>
-        <div className="creatorStyleStepFooter"><em>已选择 {selectedCreatorStyles.length}/2</em>{!creatorSkillsLoading && creatorSkillOptions.length === 0 ? <p>暂无可用分身，可先到<a href={appPath("/avatar?tab=lab")}>数字分身实验室</a>训练。</p> : null}</div>
+        <p className="field-help">每位创作教练都会独立完成 IP 定位、获客增长判断和内容创作；最多选两位，结果会分别展示。</p>
+        <div className="creatorStyleChoices"><div className="creatorIdentityGroup"><span>创作教练</span><div>
+          <button className={`creatorIdentityCard ${selectedCreativeCoachIds.includes("default") ? "active" : ""}`} disabled={creatorSkillsLoading || (!selectedCreativeCoachIds.includes("default") && selectedCreativeCoachIds.length >= 2)} onClick={() => toggleCreativeCoach("default")} type="button"><span className="creatorIdentityCardHead"><strong>小谷教练</strong><em>系统内置</em></span><b>保险自媒体基础创作教练 · V1</b><small>使用平台正式的 IP定位、内容创作与获客增长方法。</small>{selectedCreativeCoachIds.includes("default") ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>
+          {creativeCoachOptions.map((coach) => { const card=coach.identity_card ?? {}; const selected=selectedCreativeCoachIds.includes(coach.id); const disabled=!selected && selectedCreativeCoachIds.length>=2; return <button aria-pressed={selected} className={`creatorIdentityCard ${selected ? "active" : ""}`} disabled={disabled} key={coach.id} onClick={() => toggleCreativeCoach(coach.id)} type="button"><span className="creatorIdentityCardHead"><strong>{coach.name}</strong><em>{coach.coach_scope === "platform" ? "平台教练" : "我的教练"}</em></span><b>{card.title || "创作教练"}</b><small>{card.summary || "帮助完成 IP 定位、内容创作与获客增长判断。"}</small><span className="creatorIdentityTags">{coach.capabilities.map((item) => <i key={item}>{item}</i>)}</span>{selected ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>; })}
+        </div></div></div>
+        {!creatorSkillsLoading && creativeCoachOptions.length === 0 ? <div className="creatorStyleStepFooter"><p>暂无其他创作教练，仍可使用系统内置的小谷教练。</p></div> : null}
       </div>
     </section>;
   }
@@ -555,7 +585,17 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }
 
   function selectImageCardStyle(nextValue: string) {
-    updateField("style", nextValue);
+    const selected = Array.isArray(values.style) ? values.style : typeof values.style === "string" && values.style ? [values.style] : [];
+    if (selected.includes(nextValue)) {
+      updateField("style", selected.filter((value) => value !== nextValue));
+      return;
+    }
+    if (selected.length >= 3) {
+      setError("知识卡片最多同时选择 3 个视觉风格。");
+      return;
+    }
+    setError("");
+    updateField("style", [...selected, nextValue]);
   }
 
   function recordImageCardStyleUsage(styleValue: string) {
@@ -1452,9 +1492,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             const isTextCardSource = isImageCard && values.creation_mode !== "image_remix" && field.id === "source";
             const fieldLabel = isTextCardSource ? "填写卡片内容" : field.label;
             const fieldRequired = field.required || isImageRemixSource || isTextCardSource;
-            const displayField = usesTrafficWorkflow && field.id === "tone" && selectedCreatorStyles.some((id) => id !== "default")
-              ? { ...field, helper: "分身决定主要创作风格；内容语气只影响本次作品的表达倾向。" }
-              : field;
+            const displayField = field;
             const voicePanel = voiceFieldId === field.id ? (
               <VoiceInputPanel
                 elapsed={voiceElapsed}
@@ -1620,15 +1658,15 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             );
           })}
 
-          {(isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" && values.creation_mode !== "image_remix" || isWechatImages || isPolicyRenewalCard) ? (
+          {(isPersonalityCardEntry || isImageCard && values.draw_portrait === "yes" && values.creation_mode !== "image_remix" || isWechatImages || isPolicyRenewalCard || isVideoCover) ? (
             <AvatarVisualPicker
-              appScope={isPersonalityCardEntry ? "personality-card" : isWechatImages ? "wechat-images" : isPolicyRenewalCard ? "policy-renewal-card" : "image-card"}
+              appScope={isPersonalityCardEntry ? "personality-card" : isWechatImages ? "wechat-images" : isPolicyRenewalCard ? "policy-renewal-card" : isVideoCover ? "video-cover" : "image-card"}
               enabled={isPersonalityCardEntry || isImageCard ? true : values.avatar_visual_mode === "yes"}
               loading={avatarPhotosLoading}
               maxSelection={isPolicyRenewalCard ? 1 : 4}
               photos={avatarPhotos}
               selectedIds={Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids : []}
-              showEnableToggle={isWechatImages || isPolicyRenewalCard}
+              showEnableToggle={isWechatImages || isPolicyRenewalCard || isVideoCover}
               toggleTitle={isPolicyRenewalCard ? "卡片是否显示顾问形象" : "封面是否出现本人"}
               onEnabledChange={(enabled) => updateField("avatar_visual_mode", enabled ? "yes" : "no")}
               onSelectionChange={(ids) => updateField("avatar_visual_asset_ids", ids)}
@@ -1717,6 +1755,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           ) : null}
 
           {error ? <div className="formError submit-alert">{error}</div> : null}
+          {recreationPrefillStatus === "loaded" ? <div className="resultSavedHint submit-alert">已载入上次创作的输入内容，你可以调整后再次生成；本次提交会保存为新作品。</div> : null}
+          {recreationPrefillStatus === "loading" ? <div className="resultSavedHint submit-alert">正在载入上次创作参数…</div> : null}
           {pageApp.requiresThinking ? (
             <div className="resultSavedHint submit-alert">本应用会结合你的数字分身判断内容重点。<a href={appPath("/avatar")}>查看或完善数字分身</a></div>
           ) : null}
@@ -1736,13 +1776,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           <section className="submit-section submitSection creationStickyAction">
             <div className="creationSubmitSummary">
               <strong>{remixAutoParsingPending ? "正在自动解析素材" : missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
-              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : "输入内容不会在下次创作时自动带入"} · 本次消耗 ${app.points} 积分`}</span>
+              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : draftStatus === "recreated" ? "已回填上次创作内容" : "输入内容会随作品保存"} · 本次消耗 ${app.points} 积分`}</span>
               <i aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></i>
             </div>
-            <button className="primaryButton submit-button submitButton" disabled={loading || remixAutoParsingPending} onClick={() => void handleSubmit()} type="button">
+            <button className="primaryButton submit-button submitButton" disabled={loading || remixAutoParsingPending || recreationPrefillStatus === "loading"} onClick={() => void handleSubmit()} type="button">
               {loading
-                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
-                : remixAutoParsingPending ? "素材自动解析中..." : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isImageCard ? `正在生成 ${imageCardSelectedStyleCount || 1} 张知识卡片...` : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
+                : recreationPrefillStatus === "loading" ? "正在载入上次参数..." : remixAutoParsingPending ? "素材自动解析中..." : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isImageCard ? `生成 ${imageCardSelectedStyleCount || 1} 张知识卡片 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>
@@ -1767,13 +1807,12 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           options={pageApp.fields.find((field) => field.id === "style")?.options ?? []}
           recommendation={{ value: "", label: "", reason: "" }}
           eyebrow="全部风格"
-          title="按发布任务选择画面"
-          selectedValue={typeof values.style === "string" ? values.style : ""}
+          title="按发布任务选择画面（最多 3 个）"
+          selectedValue=""
+          selectedValues={Array.isArray(values.style) ? values.style : typeof values.style === "string" && values.style ? [values.style] : []}
+          maxSelection={3}
           onClose={() => setShowAllImageCardStyles(false)}
-          onSelect={(nextValue) => {
-            selectImageCardStyle(nextValue);
-            setShowAllImageCardStyles(false);
-          }}
+          onSelect={selectImageCardStyle}
         />
       ) : null}
 
@@ -1967,10 +2006,7 @@ function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
     };
   }
   if (app.slug === "traffic-copy") {
-    return {
-      ...base,
-      tone: "default",
-    };
+    return { ...base, creative_coach_version_ids: ["default"] };
   }
   if (app.slug === "video-cover") {
     return {
@@ -1978,6 +2014,8 @@ function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
       platform: "wechat_video",
       style: "video-bold-opinion",
       ratio: "9:16",
+      avatar_visual_mode: "no",
+      avatar_visual_asset_ids: [],
     };
   }
   if (app.slug === "write-copy") {
@@ -2090,6 +2128,8 @@ function WechatArticleAnalysis({ analysis }: { analysis: WechatArticleAnalysis }
 function WechatStyleLibrary({
   options,
   selectedValue,
+  selectedValues,
+  maxSelection,
   recommendation,
   eyebrow = "视觉风格库",
   title = "选择整篇文章的统一风格",
@@ -2099,6 +2139,8 @@ function WechatStyleLibrary({
 }: {
   options: NonNullable<CreationApp["fields"][number]["options"]>;
   selectedValue: string;
+  selectedValues?: string[];
+  maxSelection?: number;
   recommendation: WechatStyleRecommendation;
   eyebrow?: string;
   title?: string;
@@ -2106,11 +2148,13 @@ function WechatStyleLibrary({
   onSelect: (value: string) => void;
   onClose: () => void;
 }) {
+  const resolvedSelectedValues = selectedValues ?? (selectedValue ? [selectedValue] : []);
   const styleItem = (option: NonNullable<CreationApp["fields"][number]["options"]>[number]) => {
-    const active = selectedValue === option.value;
+    const active = resolvedSelectedValues.includes(option.value);
+    const selectionLimitReached = Boolean(maxSelection && resolvedSelectedValues.length >= maxSelection && !active);
     const recommended = recommendation.value === option.value;
     return (
-      <button className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => onSelect(option.value)} type="button">
+      <button aria-disabled={selectionLimitReached} className={active ? "wechatStyleLibraryItem active" : "wechatStyleLibraryItem"} key={option.value} onClick={() => { if (!selectionLimitReached) onSelect(option.value); }} type="button">
         {/* Preview assets come from configurable URLs; native img keeps them flexible here. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {option.previewUrl ? <img alt={option.label} src={option.previewUrl} /> : <span className="wechatStyleLibraryPlaceholder" />}
@@ -2123,7 +2167,7 @@ function WechatStyleLibrary({
 
   return (
     <div className="wechatStyleLibraryBackdrop">
-      <section aria-label="全部视觉风格" aria-modal="true" className="wechatStyleLibrary" role="dialog">
+      <section aria-label="全部视觉风格" aria-modal="true" className={maxSelection ? "wechatStyleLibrary multiSelect" : "wechatStyleLibrary"} role="dialog">
         <header>
           <div>
             <span>{eyebrow}</span>
@@ -2131,6 +2175,7 @@ function WechatStyleLibrary({
           </div>
           <button aria-label="关闭风格库" onClick={onClose} title="关闭" type="button">×</button>
         </header>
+        {maxSelection ? <div className="wechatStyleLibrarySelection"><span>已选择 {resolvedSelectedValues.length}/{maxSelection}</span><button onClick={onClose} type="button">完成</button></div> : null}
         {groups ? (
           <div className="wechatStyleLibraryGroups">
             {groups.map((group) => {
@@ -2538,14 +2583,18 @@ function renderField({
   if (field.type === "radio") {
     if ((isImageCard || field.id === "style") && field.id === "style") {
       const styleOptions = field.options ?? [];
-      const selectedStyle = styleOptions.find((option) => option.value === value);
+      const selectedStyleValues = isImageCard
+        ? Array.isArray(value) ? value : typeof value === "string" && value ? [value] : []
+        : typeof value === "string" && value ? [value] : [];
       const initialStyleOptions = typeof styleOptionLimit === "number" ? styleOptions.slice(0, styleOptionLimit) : styleOptions;
-      const visibleStyleOptions = styleOptionLimit && selectedStyle && !initialStyleOptions.some((option) => option.value === selectedStyle.value)
-        ? [...initialStyleOptions.slice(0, -1), selectedStyle]
+      const selectedOutsideInitial = styleOptions.filter((option) => selectedStyleValues.includes(option.value) && !initialStyleOptions.some((initial) => initial.value === option.value));
+      const visibleStyleOptions = styleOptionLimit && selectedOutsideInitial.length
+        ? [...initialStyleOptions.slice(0, Math.max(0, styleOptionLimit - selectedOutsideInitial.length)), ...selectedOutsideInitial]
         : initialStyleOptions;
       const mostUsedStyleOptions = mostUsedStyleValues?.map((styleValue) => styleOptions.find((option) => option.value === styleValue)).filter((option): option is NonNullable<typeof option> => Boolean(option)) ?? [];
       return (
         <div className="imageStylePicker">
+          {isImageCard ? <div className="imageStyleSelectionSummary"><strong>可同时选择 1–3 个风格</strong><span>已选择 {selectedStyleValues.length}/3，每个风格生成 1 张</span></div> : null}
           {styleRecommendation ? (
             <div className="wechatStyleRecommendation">
               <span>智能推荐</span>
@@ -2558,7 +2607,7 @@ function renderField({
               <span>本文适配</span>
               <div>
                 {styleRecommendations.map((recommendation) => (
-                  <button className={value === recommendation.value ? "active" : ""} key={recommendation.value} onClick={() => (onStyleSelect ?? onChange)(recommendation.value)} type="button">
+                  <button className={selectedStyleValues.includes(recommendation.value) ? "active" : ""} key={recommendation.value} onClick={() => (onStyleSelect ?? onChange)(recommendation.value)} type="button">
                     {recommendation.label}
                   </button>
                 ))}
@@ -2570,7 +2619,7 @@ function renderField({
               <span>最常使用</span>
               <div>
                 {mostUsedStyleOptions.map((option) => (
-                  <button className={value === option.value ? "imageStyleMostUsedItem active" : "imageStyleMostUsedItem"} key={option.value} onClick={() => (onStyleSelect ?? onChange)(option.value)} type="button">
+                  <button className={selectedStyleValues.includes(option.value) ? "imageStyleMostUsedItem active" : "imageStyleMostUsedItem"} key={option.value} onClick={() => (onStyleSelect ?? onChange)(option.value)} type="button">
                     <i aria-hidden="true" />
                     {option.label}
                   </button>
@@ -2580,7 +2629,7 @@ function renderField({
           ) : null}
           <div className="imageStyleGrid">
             {visibleStyleOptions.map((option) => {
-              const active = value === option.value;
+              const active = selectedStyleValues.includes(option.value);
               const recommended = styleRecommendation?.value === option.value;
               return (
                 <button

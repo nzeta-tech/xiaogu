@@ -13,6 +13,7 @@ import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
 import { validateCreationFieldLengths } from "@/lib/creation/input-validation";
 import { buildPendingRemixContentJson, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
+import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -61,6 +62,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const lengthError = validateCreationFieldLengths(effectiveApp.fields, values);
   if (lengthError) return Response.json({ error: lengthError, code: "INPUT_TOO_LONG" }, { status: 400 });
   const isImageCardRemix = app.slug === "image-card" && values.creation_mode === "image_remix";
+  if (app.slug === "image-card" && Array.isArray(values.style) && new Set(values.style.filter(Boolean)).size > 3) {
+    return Response.json({ error: "知识卡片最多同时选择 3 个视觉风格。" }, { status: 400 });
+  }
   const missingField = effectiveApp.fields.find((field) => {
     if (isImageCardRemix && field.id === "draw_portrait") return false;
     return field.required && isEmptyCreationFieldValue(values[field.id]);
@@ -84,7 +88,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: "二创模式需要先上传一张原图。" }, { status: 400 });
   }
   const visualAssetIds = Array.isArray(values.avatar_visual_asset_ids) ? values.avatar_visual_asset_ids.filter(Boolean) : [];
-  const needsAvatarPhoto = entry === "personality-card" || app.slug === "image-card" && values.draw_portrait === "yes" || (app.slug === "wechat-images" || app.slug === "policy-renewal-card") && values.avatar_visual_mode === "yes";
+  const needsAvatarPhoto = creationNeedsAvatarPhoto({ appSlug: app.slug, entry, values });
   if (needsAvatarPhoto && visualAssetIds.length === 0 && (isImageCardRemix ? isEmptyCreationFieldValue(values.portrait_reference_image) : isEmptyCreationFieldValue(values.reference_image))) {
     return Response.json({ error: "请选择数字分身形象照，或临时上传一张形象照。" }, { status: 400 });
   }

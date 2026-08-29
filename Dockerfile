@@ -1,21 +1,21 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
-ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
-RUN npm config set registry https://registry.npmmirror.com && \
+ENV COREPACK_NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry https://registry.npmjs.org && \
     corepack enable && \
     corepack prepare pnpm@11.2.2 --activate && \
-    pnpm config set registry https://registry.npmmirror.com
+    pnpm config set registry https://registry.npmjs.org
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --fetch-retries=5 --fetch-retry-factor=2 --fetch-timeout=600000
 RUN pnpm install pg
 
 FROM node:22-alpine AS builder
 WORKDIR /app
-ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
-RUN npm config set registry https://registry.npmmirror.com && \
+ENV COREPACK_NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry https://registry.npmjs.org && \
     corepack enable && \
     corepack prepare pnpm@11.2.2 --activate && \
-    pnpm config set registry https://registry.npmmirror.com
+    pnpm config set registry https://registry.npmjs.org
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_OUTPUT=standalone
@@ -34,12 +34,18 @@ ENV PORT=3000
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY scripts/retrain-creative-coach-progressive-skills.mjs ./scripts/retrain-creative-coach-progressive-skills.mjs
 EXPOSE 3000
 CMD ["node", "server.js"]
 
 FROM debian:bookworm-slim AS provider-sources
 ARG WERSS_REF=6ca61c19a2606c7e85b290f975ca70c77d4b9532
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+RUN sed -i \
+      -e 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
+      -e 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/werss \
     && curl -fsSL "https://github.com/rachelos/we-mp-rss/archive/${WERSS_REF}.tar.gz" \
@@ -91,6 +97,7 @@ COPY docker/start-app.sh /xiaogu/start-app.sh
 COPY docker/local-agent-healthcheck.sh /xiaogu/local-agent-healthcheck.sh
 COPY docker/wechat-sogou/app.py /xiaogu/wechat_sogou_api.py
 COPY scripts/local-agent.mjs /xiaogu/scripts/local-agent.mjs
+COPY scripts/retrain-creative-coach-progressive-skills.mjs /xiaogu/scripts/retrain-creative-coach-progressive-skills.mjs
 # Next's standalone output preserves Sharp but can omit its optional
 # platform packages. Install those packages in a Debian temp prefix, then
 # copy them beside Sharp so Node resolves the matching linux-x64 runtime.
