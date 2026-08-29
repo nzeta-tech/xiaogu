@@ -68,20 +68,6 @@ export const creationCategories: CreationCategory[] = [
 
 export const creationApps: CreationApp[] = [
   {
-    id: "digital-human-video",
-    slug: "digital-human-video",
-    name: "数字人视频",
-    emoji: "🎭",
-    category: "content",
-    points: 12,
-    badge: "新",
-    featured: true,
-    description: "选择你在数字分身中创建或收藏的数字人，把口播文案生成可发布视频。",
-    promptHint: "小谷会自动匹配可用的形象、声音和生成能力，无需关心背后的技术服务。",
-    resultType: "text",
-    fields: [],
-  },
-  {
     id: "xiaohongshu-studio",
     slug: "xiaohongshu-studio",
     name: "小红书笔记创作",

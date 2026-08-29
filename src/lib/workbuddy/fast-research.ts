@@ -1,6 +1,10 @@
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { searchVolcengineWeb, type VolcengineSearchResult } from "@/lib/search/volcengine-search";
-import type { WorkbuddyRuntimeEvent } from "./runtime";
+type WorkbuddyRuntimeEvent = {
+  type: string;
+  message?: string;
+  data?: Record<string, unknown>;
+};
 
 type FastResearchPlan = {
   queries: Array<{ query: string; purpose: string }>;
