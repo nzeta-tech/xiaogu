@@ -2,7 +2,8 @@ FROM golang:1.24-alpine AS builder
 
 ARG WX_CHANNEL_REF=3dd74f0e21f7d9f6bdc5bec9338e433c57cbe8d0
 WORKDIR /src
-RUN apk add --no-cache build-base git
+RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.aliyun.com/alpine|g' /etc/apk/repositories \
+  && apk add --no-cache build-base git
 COPY docker/wx-channel/guard-api-host.awk /tmp/guard-api-host.awk
 # utils.js and decrypt.js are injected into the same classic-script scope.
 # Upstream mixes let/const with duplicate var declarations, which aborts the
@@ -35,7 +36,8 @@ RUN CGO_ENABLED=1 CGO_LDFLAGS='-Wl,--allow-multiple-definition' \
 FROM alpine:3.21
 
 WORKDIR /data
-RUN apk add --no-cache ca-certificates libstdc++ libgcc
+RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.aliyun.com/alpine|g' /etc/apk/repositories \
+  && apk add --no-cache ca-certificates libstdc++ libgcc
 COPY --from=builder /out/wx_channel /usr/local/bin/wx_channel
 COPY docker/wx-channel/config.yaml /etc/wx-channel/config.yaml
 EXPOSE 2025 2026
