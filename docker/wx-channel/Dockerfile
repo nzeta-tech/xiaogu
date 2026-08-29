@@ -25,12 +25,17 @@ RUN mkdir -p pkg/sunnynet/Resource/nfapi/dll/win32 pkg/sunnynet/Resource/nfapi/d
   && : > pkg/sunnynet/Resource/nfapi/dll/x64/nfapi.dll
 # go-libutp v1.3.1 defines its own C++ `bool` typedef. GCC 14 treats bool as a
 # built-in type, so remove only that obsolete typedef before compilation.
-RUN go mod download \
+ENV GOPROXY=https://goproxy.io
+ENV GOSUMDB=off
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+  go mod download \
   && libutp_dir="$(go list -m -f '{{.Dir}}' github.com/anacrolix/go-libutp)" \
   && sed -i '/^[[:space:]]*typedef[[:space:]]\+uint8[[:space:]]\+bool;[[:space:]]*$/d' "${libutp_dir}/utp_types.h"
 # gopeed pulls a second bundled SQLite implementation through an indirect
 # dependency. wx_channel uses mattn/go-sqlite3; keep the first linked symbols.
-RUN CGO_ENABLED=1 CGO_LDFLAGS='-Wl,--allow-multiple-definition' \
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+  --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+  CGO_ENABLED=1 CGO_LDFLAGS='-Wl,--allow-multiple-definition' \
   go build -trimpath -ldflags='-s -w' -o /out/wx_channel .
 
 FROM alpine:3.21
