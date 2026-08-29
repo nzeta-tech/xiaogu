@@ -92,11 +92,13 @@ try {
   if (!examplesResponse.ok) throw new Error(`viral examples request failed (${examplesResponse.status})`);
   const sourceUrl = process.env.XIAOGU_REAL_SOURCE_URL?.trim() || supportedSource(examples.items ?? []);
   if (!sourceUrl) throw new Error("no supported public Douyin or Video Channels source is available for release validation");
+  const validationUrl = new URL(sourceUrl);
+  validationUrl.searchParams.set("xiaogu_release_validation", suffix);
 
   const { response: inspectResponse, payload: inspect } = await json("/api/creation/link-remix/inspect", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: sourceUrl }),
+    body: JSON.stringify({ url: validationUrl.toString() }),
   });
   if (inspectResponse.status !== 202 || !inspect.taskId) throw new Error(`source inspection did not queue a local Agent task (${inspectResponse.status})`);
 
