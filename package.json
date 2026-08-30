@@ -26,6 +26,9 @@
     "coach:snapshot:export": "node --env-file-if-exists=.env scripts/export-active-creative-coach-snapshot.mjs",
     "coach:snapshot:apply": "node --env-file-if-exists=.env scripts/apply-creative-coach-snapshot.mjs",
     "model:profile:apply": "node --env-file-if-exists=.env scripts/apply-model-runtime-profile.mjs",
+    "release:bundle:create": "node scripts/create-release-bundle-manifest.mjs --descriptor config/release/production.json --output .tmp/release-bundle.json",
+    "release:bundle:verify": "node scripts/create-release-bundle-manifest.mjs --descriptor config/release/production.json --verify .tmp/release-bundle.json",
+    "test:release-bundle": "node --test scripts/create-release-bundle-manifest.test.mjs",
     "model:check": "node --env-file-if-exists=.env scripts/check-model.mjs",
     "typecheck": "tsc --noEmit"
   },
