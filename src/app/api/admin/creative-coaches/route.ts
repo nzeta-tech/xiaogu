@@ -3,7 +3,7 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { reconcileAvatarTrainingRuns, startAvatarVideoTraining } from "@/lib/avatar/video-training";
 import { decodeWechatChannelTrainingTokens } from "@/lib/avatar/wechat-channel-tikhub";
 import { reconcileCreativeCoachTrainingJobs } from "@/lib/avatar/creative-coach-training-orchestrator";
-import { query } from "@/lib/db/client";
+import { getPool, query } from "@/lib/db/client";
 
 const submitSchema = z.object({
   coachId: z.string().uuid().optional(),
@@ -14,6 +14,10 @@ const submitSchema = z.object({
   authorized: z.literal(true),
 });
 
+const manageSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("restore-version"), coachId: z.string().uuid(), versionId: z.string().uuid() }),
+]);
+
 type CoachRow = {
   id: string;
   name: string;
@@ -21,7 +25,8 @@ type CoachRow = {
   coach_scope: "personal" | "platform";
   status: "active" | "archived";
   latest_version: number;
-  identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string };
+  identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string; sourceCreator?: string };
+  versions: Array<{ id:string; version:number; status:string; sampleCount:number; phase:string; qualityPassed:boolean; changeSummary:string; createdAt:string }>;
   version_id: string | null;
   sample_count: number;
   capabilities: string[];
@@ -47,6 +52,11 @@ export async function GET() {
   const result = await query<CoachRow>(
     `select coaches.id,coaches.name,coaches.creator_name,coaches.coach_scope,coaches.status,
             coaches.latest_version,coaches.identity_card,coaches.updated_at,versions.id version_id,
+            coalesce((select jsonb_agg(jsonb_build_object(
+              'id',history.id,'version',history.version,'status',history.status,'sampleCount',history.sample_count,
+              'phase',coalesce(history.training_manifest->>'phase',''),'qualityPassed',coalesce((history.training_manifest->'qualityGate'->>'passed')::boolean,false),
+              'changeSummary',history.change_summary,'createdAt',history.created_at
+            ) order by history.version desc) from creative_coach_versions history where history.coach_id=coaches.id),'[]'::jsonb) versions,
             coalesce(versions.sample_count,0) sample_count,coalesce(cardinality(versions.source_skill_ids),0) source_count,
             coalesce(versions.change_summary,'') change_summary,
             coalesce(versions.ip_positioning_prompt,'') ip_positioning_prompt,
@@ -99,6 +109,33 @@ export async function GET() {
       order by case when jobs.status in ('waiting_source','queued','training') then 0 else 1 end,jobs.updated_at desc limit 20`,
   ).catch(() => ({ rows: [] }));
   return Response.json({ coaches: result.rows, runs: runs.rows, jobs: jobs.rows }, { headers: { "cache-control": "private, no-store" } });
+}
+
+export async function PATCH(request: Request) {
+  const user = await requireSessionUser();
+  if (user instanceof Response) return user;
+  if (user.role !== "admin") return Response.json({ error: "无权管理教练版本" }, { status: 403 });
+  const parsed = manageSchema.safeParse(await request.json());
+  if (!parsed.success) return Response.json({ error: "版本操作内容不完整" }, { status: 400 });
+  const input = parsed.data;
+  const target = await query<{ version:number }>(
+    `select versions.version from creative_coach_versions versions join creative_coaches coaches on coaches.id=versions.coach_id
+      where versions.id=$1 and versions.coach_id=$2 and coaches.coach_scope='platform'
+        and versions.status in ('active','superseded','restored') and length(versions.content_creation_prompt)>0`,
+    [input.versionId,input.coachId],
+  );
+  if (!target.rows[0]) return Response.json({ error: "教练版本不存在" }, { status: 404 });
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    await client.query(`update creative_coach_versions set status=case when id=$2 then 'restored' else 'superseded' end where coach_id=$1 and (id=$2 or status in ('active','restored'))`,[input.coachId,input.versionId]);
+    await client.query(`update creative_coaches set latest_version=$2,status='active',updated_at=now() where id=$1`,[input.coachId,target.rows[0].version]);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
+  return Response.json({ ok:true,version:target.rows[0].version });
 }
 
 export async function POST(request: Request) {
