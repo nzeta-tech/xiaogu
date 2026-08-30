@@ -1,10 +1,13 @@
 import { stringifyCreationFieldValue, type CreationFieldValue } from "@/lib/creation/output";
+import { searchVolcengineWeb } from "@/lib/search/volcengine-search";
 
 type ResearchResult = {
   title?: string;
   url?: string;
   content?: string;
   score?: number;
+  published_date?: string;
+  provider?: "volcengine" | "tavily" | "exa";
 };
 
 const tavilyEndpoint = () => process.env.TAVILY_API_BASE ?? "https://api.tavily.com/search";
@@ -19,8 +22,7 @@ export async function buildLinkRemixResearchContext(values: Record<string, Creat
   const query = buildResearchQuery(values);
   if (!query) return "";
 
-  const tavilyResults = await searchTavily(query);
-  const results = tavilyResults.length > 0 ? tavilyResults : await searchExaInstant(query);
+  const results = await searchPreferredWeb(query);
   if (results.length === 0) return "";
 
   const evidence = results
@@ -38,6 +40,20 @@ export async function buildLinkRemixResearchContext(values: Record<string, Creat
     evidence,
     "使用规则：只引用资料中可明确支持的内容；不得把搜索摘要转写为收益、领取、理赔、核保或政策承诺。资料与原作冲突时，以可核验资料为准；资料不足时，保留具体问题和行动步骤，不编造数字或案例。",
   ].join("\n");
+}
+
+export async function searchPreferredWeb(query: string): Promise<ResearchResult[]> {
+  const volcanic = await searchVolcengineWeb(query, {
+    count: 5,
+    timeoutMs: Number(process.env.LINK_REMIX_SEARCH_TIMEOUT_MS ?? 8000),
+    requireContent: true,
+  });
+  if (volcanic.length > 0) return volcanic.map((item) => ({
+    title: item.title, url: item.url, content: item.content, score: item.score,
+    published_date: item.publishedDate, provider: "volcengine",
+  }));
+  const tavilyResults = await searchTavily(query);
+  return tavilyResults.length > 0 ? tavilyResults : searchExaInstant(query);
 }
 
 /** Best-effort public-source pack for idea-led Xiaohongshu creation. */
@@ -74,7 +90,7 @@ async function searchTavily(query: string): Promise<ResearchResult[]> {
     });
     if (!response.ok) return [];
     const payload = await response.json() as { results?: ResearchResult[] };
-    return payload.results ?? [];
+    return (payload.results ?? []).map((item) => ({ ...item, provider: "tavily" }));
   } catch {
     return [];
   }
@@ -98,7 +114,7 @@ async function searchExaInstant(query: string): Promise<ResearchResult[]> {
     });
     if (!response.ok) return [];
     const payload = await response.json() as { results?: ResearchResult[] };
-    return payload.results ?? [];
+    return (payload.results ?? []).map((item) => ({ ...item, provider: "exa" }));
   } catch {
     return [];
   }

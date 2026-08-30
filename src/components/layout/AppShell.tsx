@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
+import { clearCurrentUserCache, getCurrentUser } from "@/lib/client/current-user";
 
 const platformNavItems = [
   { id: "workbench", href: "/today", label: "今日灵感", shortLabel: "今日灵感", icon: "home" },
@@ -29,10 +30,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [siteConfig, setSiteConfig] = useState<{ siteName: string; siteSubtitle: string; supportContact: string; footerNote: string; logoUrl: string; helpUrl: string; homeContent: string; customNavItems: Array<{ id: string; label: string; url: string; visibility: "user" | "admin"; sortOrder: number }> }>({ siteName: "小谷", siteSubtitle: "保险内容增长助手", supportContact: "", footerNote: "", logoUrl: "/brand/xiaogu-icon.png", helpUrl: "/help", homeContent: "", customNavItems: [] });
   useEffect(() => {
     async function loadUser() {
-      const response = await fetch(apiPath("/api/auth/me"));
-      const payload = (await response.json()) as { user?: { name?: string; email?: string; role?: string } };
-      setRole(payload.user?.role ?? "broker");
-      setUserName(payload.user?.name || payload.user?.email || "创作者");
+      const user = await getCurrentUser();
+      setRole(user?.role ?? "broker");
+      setUserName(user?.name || user?.email || "创作者");
     }
 
     void loadUser();
@@ -216,6 +216,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           className="userMenuLogout"
           onClick={async () => {
             await fetch(apiPath("/api/auth/logout"), { method: "POST" });
+            clearCurrentUserCache();
             location.href = appPath("/login");
           }}
           role="menuitem"

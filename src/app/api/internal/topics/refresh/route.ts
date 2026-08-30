@@ -1,6 +1,8 @@
 import { refreshTopicCache } from "@/lib/topics/cache-refresh";
+import { configureTopicRefreshScheduler } from "@/lib/topics/topic-scheduler";
 
 export async function POST(request: Request) {
+  configureTopicRefreshScheduler();
   const secret = process.env.TOPIC_REFRESH_SECRET;
   if (!secret) {
     return Response.json({ error: "TOPIC_REFRESH_SECRET is not configured" }, { status: 503 });

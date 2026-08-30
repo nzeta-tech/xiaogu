@@ -465,15 +465,7 @@ export async function tryMergeXiaohongshuStudioAssets(input: {
   }
 }
 
-const CREATION_HISTORY_VISIBLE_WORK = `not exists (
-  select 1
-  from app_runs child_step
-  where child_step.id = w.app_run_id
-    and (
-      child_step.input_payload->>'studio_parent' in ('wechat-studio', 'xiaohongshu-studio')
-      or nullif(child_step.input_payload->>'traffic_parent_work_id', '') is not null
-    )
-)`;
+const CREATION_HISTORY_VISIBLE_WORK = "not w.is_history_child";
 
 export async function tryListWorks(userId: string | null) {
   if (!userId) return [];
@@ -3007,19 +2999,23 @@ export async function tryListPublishedViralContents(limit = 24) {
       metric_unit: string; insight: string; creation_scenes: unknown; risk_note: string;
       status: string; is_pinned: boolean; is_featured: boolean; sort_order: number;
       publish_at: string | null; expire_at: string | null; updated_at: string;
-      source_type: string; example_type: string; viral_score: number; fetched_at: string | null; has_local_cover: boolean; cover_updated_at: string | null;
+      source_type: string; example_type: string; viral_score: number; fetched_at: string | null; has_local_cover: boolean; cover_sha256: string | null;
     }>(
       `select id, title, platform, content_type, category, tags, source_url, source_title,
               source_author, thumbnail_url, media_url, embed_url, article_body, summary,
               metric_label, metric_value, metric_unit, insight, creation_scenes, risk_note,
               status, is_pinned, is_featured, sort_order, publish_at, expire_at, updated_at,
               source_type, example_type, viral_score, fetched_at,
-              exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id and octet_length(cover.image_data) >= 1024) as has_local_cover,
-              (select cover.updated_at from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id and octet_length(cover.image_data) >= 1024) as cover_updated_at
+              exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id) as has_local_cover,
+              (select cover.sha256 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id) as cover_sha256
        from viral_contents
        where status = 'published'
          and platform not in ('公众号', '小红书')
-         and exists(select 1 from viral_content_cover_assets cover where cover.viral_content_id=viral_contents.id and octet_length(cover.image_data) >= 1024)
+         and (source_type = 'manual' or exists(
+           select 1 from viral_content_cover_assets visible_cover
+            where visible_cover.viral_content_id=viral_contents.id
+              and visible_cover.source_url<>'generated://viral-fallback'
+         ))
          and (publish_at is null or publish_at <= now())
          and (expire_at is null or expire_at > now())
        order by is_pinned desc, is_featured desc,
@@ -3104,18 +3100,6 @@ export type AdminViralCreator = {
   discovered_work_count: number;
   work_count: number;
   latest_work_at: string | null;
-  creator_type: "personal" | "institution" | "unknown";
-  pool_status: "candidate" | "active" | "watchlist" | "rejected" | "archived";
-  tier: "S" | "A" | "potential" | null;
-  vertical_score: number;
-  professional_score: number;
-  activity_score: number;
-  commercial_score: number;
-  risk_level: "low" | "medium" | "high";
-  next_refresh_at: string | null;
-  last_content_at: string | null;
-  reviewed_at: string | null;
-  review_note: string | null;
 };
 
 export async function tryListAdminViralCreators() {
@@ -3125,15 +3109,11 @@ export async function tryListAdminViralCreators() {
               vc.relevance_score, vc.quality_score, vc.discovery_evidence_count, vc.follower_count,
               vc.platform_work_count, vc.is_verified, vc.source_kind, vc.discovery_query, vc.refresh_status,
               vc.last_discovered_at, vc.last_refreshed_at, vc.discovered_work_count,
-              vc.creator_type, vc.pool_status, vc.tier, vc.vertical_score, vc.professional_score,
-              vc.activity_score, vc.commercial_score, vc.risk_level, vc.next_refresh_at,
-              vc.last_content_at, vc.reviewed_at, vc.review_note,
               count(vw.id)::integer as work_count, max(coalesce(vw.published_at, vw.last_seen_at)) as latest_work_at
        from viral_creators vc
        left join viral_works vw on vw.creator_id = vc.id
        group by vc.id
-       order by case vc.pool_status when 'active' then 0 when 'watchlist' then 1 when 'candidate' then 2 else 3 end,
-                case vc.status when 'active' then 0 when 'paused' then 1 else 2 end,
+       order by case vc.status when 'active' then 0 when 'paused' then 1 else 2 end,
                 vc.relevance_score desc, vc.last_discovered_at desc`,
     );
     return result.rows;
@@ -4036,7 +4016,7 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
     const limitParameter = `$${values.length - 1}`;
     const offsetParameter = `$${values.length}`;
 
-    const worksResult = await query<{
+    const worksQuery = query<{
       id: string;
       title: string;
       status: string;
@@ -4075,7 +4055,8 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
       values,
     );
 
-    const [totalsResult, platformsResult, activityResult] = await Promise.all([
+    const [worksResult, totalsResult, platformsResult, activityResult] = await Promise.all([
+      worksQuery,
       query<{ all_count: string; favorite_count: string; noted_count: string; avatar_count: string }>(
         `select count(*) as all_count,
                 count(*) filter (where is_favorite) as favorite_count,

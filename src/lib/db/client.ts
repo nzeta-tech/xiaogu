@@ -31,7 +31,21 @@ export function getPool() {
 }
 
 export async function query<T extends QueryResultRow>(text: string, values: unknown[] = []) {
-  return getPool().query<T>(text, values);
+  try {
+    return await getPool().query<T>(text, values);
+  } catch (error) {
+    // node-postgres raises this only while acquiring a new connection, before
+    // the SQL is sent. One bounded retry absorbs short RDS/network handshakes
+    // without risking duplicate writes.
+    if (!isConnectionEstablishmentTimeout(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return getPool().query<T>(text, values);
+  }
+}
+
+export function isConnectionEstablishmentTimeout(error: unknown) {
+  return error instanceof Error
+    && error.message.toLowerCase().includes("connection terminated due to connection timeout");
 }
 
 export function isDatabaseConfigured() {

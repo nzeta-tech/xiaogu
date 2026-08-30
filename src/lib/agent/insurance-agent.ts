@@ -4,6 +4,8 @@ import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt } from "@/lib/thinking/profile-snapshot";
 import { getHotTopics } from "@/lib/topics/hot-topics";
 import { getModelRuntime, isTimeoutError, modelTimeoutSignal, recordModelRuntime } from "@/lib/agent/model-runtime";
+import { resolveModelRequestTimeout } from "@/lib/agent/model-runtime-policy";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 
 export type AgentMessage = {
   role: "user" | "assistant";
@@ -17,6 +19,7 @@ export async function runInsuranceContentAgent(
   messages: AgentMessage[],
   userId?: string | null,
   styleMode: WritingStyleMode = "general",
+  options?: { timeoutSeconds?: number },
 ) {
   const latest = messages.at(-1)?.content ?? "";
   const [profile, thinkingSnapshot, avatarMemories] = userId
@@ -24,7 +27,7 @@ export async function runInsuranceContentAgent(
     : [null, null, []];
 
   if (hasModelConfig()) {
-    const output = await callModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode);
+    const output = await callModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode, options);
     await tryLogAvatarUsage({ userId: userId ?? null, memoryIds: avatarMemories.map((item) => item.id), contextType: "agent" });
     return output;
   }
@@ -70,20 +73,12 @@ function buildSystemPrompt(
     styleMode === "traffic"
       ? [
           "当前任务模式：口播文案（流量型）。",
-          "任务：把用户输入的事件/观点改写成高传播、高代入、可直接发布的社媒文案。",
-          "必须按四段结构输出：1）【开头论点】2）【主体论据】3）【结尾总结】4）【标题建议（3个）】。",
-          "目标风格：不是新闻摘要，不是讲义，不是空泛鸡汤；要有观点和普通人可执行启发。素材是具体产品、规则或数据时，优先写成事实清楚的产品解读，不要强行改成趋势泛谈。",
-          "默认总长度：520-680字（除非用户明确要求短版或长版）。当用户素材包含多项产品规则、数字、年龄、地区或服务权益时，可为保留关键信息扩展至 800 字以内。",
-          "保真优先：必须保留支撑用户结论的具体事实及其条件；不得删除所有数字和规则后改写成“有的产品/这类产品”的泛化内容，也不得把明确推荐稿改写成相反立场的劝退稿。",
-          "成稿不得出现“素材”“原文”“用户提供”“根据输入”等内部处理过程；直接把已核实事实自然写入正文，并只选取支撑结论的关键数据节点。",
-          "每段至少包含1个推进动作（反问/反转/结论句/代入句），禁止连续2句纯解释句。",
-          "开头写法：第一句必须反常识或冲突钩子（如“你以为A，其实B”“谁能想到...竟然...”）；必须点名用户输入中的核心实体，不得抽象开场；开头2-3句完成钩子与立场。",
-          "主体写法：先事实再逻辑，用“旧路径受限 -> 需求不消失 -> 新承接方式出现 -> 决策变化”的迁移链推进。",
-          "主体至少包含：1句“为什么”反问；1句“说白了/本质上”结论；1句普通人代入场景。",
-          "结尾写法：从事件回到家庭风险与现金流安全感（医疗、重疾、养老、负债、收入中断），最后必须有明确互动动作（评论区提问或私信关键词）。",
-          "标题规则：必须给3个；每个23-30字；每个至少包含一个冲突词或结果词（真相、变天、代价、底牌、避风港、机会、警醒）。",
-          "表达可以有情绪张力，但不得编造事实，不得把猜测写成确定结论，不得承诺收益或理赔。",
-          "避免套话：不要写成“我们要关注/值得思考/需要重视”这类空泛总结。",
+          "本模式由当前用户消息定义具体任务、输出形式和创作要求；不要自行附加固定长度、钩子、段落结构、CTA、标题或结尾模板。",
+          "若消息中提供创作教练：其内容创作能力是正文的最高编辑依据；IP定位与获客增长能力只指导策略与研究，不得覆盖内容创作的语言、结构或收束。",
+          "编辑简报与补充素材仅提供本题信息，不预设固定结构。动态用户画像只用于选择真实相关的视角，不要机械堆叠身份，也不要虚构客户问题或亲历。",
+          "保真不等于复刻：保留经确认的公共事实、必要逻辑和条件，但不要照搬参考材料独特的结构、证据组合、比喻、案例或CTA。",
+          "成稿不得出现“素材”“原文”“用户提供”“任务卡”等内部处理过程。输入已提供但没有明确来源的热点事实可以降低确定性后保留，缺少来源本身不能导致二创失败；不得新增输入中没有的时效性事实，不得篡改数字、虚构来源、作确定预测或收益承诺。",
+          "表达是否需要判断、机制、场景、行动启发或情绪张力，均由本题和创作教练决定；不得编造事实、把猜测写成确定结论，或承诺收益、理赔。",
         ].join("\n")
       : styleMode === "marketing"
         ? [
@@ -138,26 +133,28 @@ async function callModel(
   thinkingSnapshot: Awaited<ReturnType<typeof tryGetLatestThinkingProfileSnapshot>>,
   avatarMemories: Awaited<ReturnType<typeof tryListActiveAvatarMemories>>,
   styleMode: WritingStyleMode,
+  options?: { timeoutSeconds?: number },
 ) {
   const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
   const normalized = normalizeOpenAICompatibleMessages(messages);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
   const runtime = await getModelRuntime();
+  const timeoutSeconds = resolveModelRequestTimeout(runtime.settings.requestTimeoutSeconds, styleMode, options?.timeoutSeconds);
   const started = Date.now();
-  if (!runtime.circuitOpen) {
+  if (!runtime.circuitOpen || !runtime.fallback) {
     try {
       const output = provider === "google"
-        ? await callGoogleGemini(system, normalized, runtime.settings.requestTimeoutSeconds)
-        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, runtime.settings.requestTimeoutSeconds);
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
+        ? await callGoogleGemini(system, normalized, timeoutSeconds)
+        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, timeoutSeconds);
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return output;
     } catch (error) {
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
       if (!runtime.fallback) throw error;
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
-  const output = await callOpenAICompatible(system, normalized, runtime.fallback, undefined, runtime.settings.requestTimeoutSeconds);
+  const output = await callOpenAICompatible(system, normalized, runtime.fallback, undefined, timeoutSeconds);
   await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
   return output;
 }
@@ -173,28 +170,29 @@ async function* streamModel(
   const provider = process.env.MODEL_PROVIDER ?? "openai";
   const runtime = await getModelRuntime();
   const normalized = normalizeOpenAICompatibleMessages(messages);
+  const timeoutSeconds = resolveModelRequestTimeout(runtime.settings.requestTimeoutSeconds, styleMode);
   const started = Date.now();
   let yielded = false;
-  if (!runtime.circuitOpen) {
+  if (!runtime.circuitOpen || !runtime.fallback) {
     try {
       const stream = provider === "google"
-        ? streamGoogleGemini(system, messages, runtime.settings.requestTimeoutSeconds)
-        : streamOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), runtime.settings.requestTimeoutSeconds);
+        ? streamGoogleGemini(system, messages, timeoutSeconds)
+        : streamOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), timeoutSeconds);
       for await (const chunk of stream) { yielded = true; yield chunk; }
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return;
     } catch (error) {
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
       if (yielded || !runtime.fallback) throw error;
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
-  for await (const chunk of streamOpenAICompatible(system, normalized, runtime.fallback, runtime.settings.requestTimeoutSeconds)) yield chunk;
+  for await (const chunk of streamOpenAICompatible(system, normalized, runtime.fallback, timeoutSeconds)) yield chunk;
   await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
 }
 
 function primaryOpenAIConfig() {
-  return { baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1", apiKey: process.env.MODEL_API_KEY, model: process.env.MODEL_NAME ?? "gpt-4o-mini" };
+  return { baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1", apiKey: process.env.MODEL_API_KEY, model: resolveConfiguredTextModel() };
 }
 
 function normalizeOpenAICompatibleMessages(messages: AgentMessage[]) {
@@ -268,7 +266,7 @@ function getGroqConfig() {
   return {
     baseUrl: process.env.MODEL_API_BASE ?? "https://api.groq.com/openai/v1",
     apiKey: process.env.GROQ_API_KEY ?? process.env.MODEL_API_KEY,
-    model: process.env.MODEL_NAME ?? "llama-3.3-70b-versatile",
+    model: resolveConfiguredTextModel("llama-3.3-70b-versatile"),
   };
 }
 
@@ -368,7 +366,7 @@ async function callGoogleGemini(system: string, messages: AgentMessage[], timeou
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Google Gemini API key 未配置");
 
-  const model = process.env.MODEL_NAME ?? "gemini-2.5-flash";
+  const model = resolveConfiguredTextModel("gemini-2.5-flash");
   const baseUrl = process.env.MODEL_API_BASE ?? "https://generativelanguage.googleapis.com/v1beta";
   const request = {
     method: "POST",
@@ -412,7 +410,7 @@ async function* streamGoogleGemini(system: string, messages: AgentMessage[], tim
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Google Gemini API key 未配置");
 
-  const model = process.env.MODEL_NAME ?? "gemini-2.5-flash";
+  const model = resolveConfiguredTextModel("gemini-2.5-flash");
   const baseUrl = process.env.MODEL_API_BASE ?? "https://generativelanguage.googleapis.com/v1beta";
   const url = `${baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(url, {

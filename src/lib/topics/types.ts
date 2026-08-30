@@ -1,3 +1,5 @@
+export type HotTopicTab = "热点" | "财经" | "香港" | "国际";
+
 export type HotTopic = {
   id: string;
   title: string;
@@ -9,10 +11,13 @@ export type HotTopic = {
   recommendedAngle: string;
   riskNote: string;
   sourceUrl?: string;
+  /** Source-provided cover image. Missing images deliberately render as compact text cards. */
+  imageUrl?: string;
   sourceTitle?: string;
   sourcePublishedAt?: string;
   evidence?: string;
   verification?: HotTopicVerification;
+  tab?: HotTopicTab;
 };
 
 export type HotTopicVerification = { status: "ready" | "needs-review"; note: string };

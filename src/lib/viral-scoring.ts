@@ -21,7 +21,10 @@ export type ViralScoreBreakdown = {
 const insuranceFinancePattern = /保险|理赔|投保|保单|核保|健康告知|重疾(?:险)?|医疗险|寿险|年金险|车险|意外险|养老金|养老规划|退休金|资产配置|家庭保障|财务规划|社保|医保/;
 
 export function isInsuranceFinanceRelevant(input: { title: string; category?: string; tags?: string[] }) {
-  return insuranceFinancePattern.test(`${input.title} ${input.category ?? ""} ${(input.tags ?? []).join(" ")}`);
+  const tags = input.tags ?? [];
+  const trustedFinanceRanking = tags.includes("财经爆款")
+    && (tags.includes("TopHub") || tags.includes("Valuefocus"));
+  return trustedFinanceRanking || insuranceFinancePattern.test(`${input.title} ${input.category ?? ""} ${tags.join(" ")}`);
 }
 
 export function calculateCreatorQuality(input: {

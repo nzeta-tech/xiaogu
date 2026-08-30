@@ -69,6 +69,7 @@ import {
   type TrafficSourceBlueprint,
 } from "@/lib/creation/traffic-copy-architecture";
 import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
+import { normalizeImageCardStyles } from "@/lib/creation/image-card-styles";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 
@@ -200,9 +201,7 @@ export async function executeCreationAppRun(input: {
   const referenceKnowledge = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix"
     ? await extractKnowledgeFromReferenceImage(values.reference_image)
     : "";
-  const imageCardStyles = app.slug === "image-card"
-    ? [...new Set((Array.isArray(values.style) ? values.style : [stringifyCreationFieldValue(values.style)]).filter(Boolean))].slice(0, 3)
-    : [];
+  const imageCardStyles = app.slug === "image-card" ? normalizeImageCardStyles(values.style) : [];
   const buildImageCardStylePrompt = (style: string) => buildImagePrompt(
     effectiveApp.name,
     effectiveApp.fields,

@@ -209,9 +209,9 @@ async function main() {
 
   const personaMaterial=deep.rows.flatMap((row)=>Array.isArray(row.persona_signals)?row.persona_signals.map((signal)=>({...signal,workFingerprint:row.work_fingerprint})):[]);
   const {text:personaRaw}=await complete([
-    "从证据中提炼创作者Persona，只保存身份、服务对象、稳定立场、风险态度、声纹和不会采用的表达。不得写方法、固定结构、具体事实或课程。只有跨多个作品稳定出现才能进入。",
+    "从证据中提炼创作者Persona，只保存身份、服务对象、稳定立场、风险态度、声纹和不会采用的表达。不得写方法、固定结构、具体事实或课程。只有跨多个作品稳定出现才能进入。另提炼2到3个signatureTags，用于教练选择卡，必须概括这位教练真正擅长解决的问题、服务对象或判断领域；不得使用IP定位、内容创作、获客增长等标准能力名，也不得只写直接、温暖、专业等通用语气词。每项不超过8个汉字。",
     `创作者名称统一使用“${creatorName}”。自动转写中与名称近音的称呼属于噪声，不得据此发明其他自称或人格名称。`,
-    "严格JSON：{identity,audience:string[],stablePositions:string[],riskAttitude:string[],voiceTraits:string[],adaptiveVoice:[{taskProfile,guidance}],avoid:string[],evidence:[{workFingerprint,signal}]}。",
+    "严格JSON：{identity,audience:string[],stablePositions:string[],riskAttitude:string[],voiceTraits:string[],signatureTags:string[],adaptiveVoice:[{taskProfile,guidance}],avoid:string[],evidence:[{workFingerprint,signal}]}。",
     compact(JSON.stringify(personaMaterial),50000),
   ].join("\n\n"),4500);
   const persona=parseJson(personaRaw,{});
@@ -274,7 +274,11 @@ async function main() {
       await client.query("begin");
       await client.query(`update creative_coach_versions set status='superseded' where coach_id=$1 and id<>$2 and status in ('active','restored')`, [coachId,versionId]);
       await client.query(`update creative_coach_versions set status='active',training_manifest=training_manifest||$2::jsonb,change_summary=change_summary||'；标准质量门通过并自动上架' where id=$1`, [versionId,JSON.stringify({phase:"active",activatedAt:new Date().toISOString()})]);
-      await client.query(`update creative_coaches set status='active',latest_version=$2,identity_card=$3::jsonb,updated_at=now() where id=$1`, [coachId,version.rows[0].version,JSON.stringify({title:persona.identity||`${creatorName}创作教练`,summary:(persona.stablePositions||[]).slice(0,2).join("；"),styleTags:(persona.voiceTraits||[]).slice(0,3),bestFor:(persona.audience||[]).slice(0,3).join("、")})]);
+      const signatureTags = (Array.isArray(persona.signatureTags) ? persona.signatureTags : [])
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .slice(0,3);
+      await client.query(`update creative_coaches set status='active',latest_version=$2,identity_card=$3::jsonb,updated_at=now() where id=$1`, [coachId,version.rows[0].version,JSON.stringify({title:persona.identity||`${creatorName}创作教练`,summary:(persona.stablePositions||[]).slice(0,2).join("；"),scenarios:signatureTags,styleTags:signatureTags,bestFor:(persona.audience||[]).slice(0,3).join("、")})]);
       await client.query("commit");
     } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
   }
