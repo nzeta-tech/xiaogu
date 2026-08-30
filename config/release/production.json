@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "releaseProfileId": "xiaogu-production-web-v1",
+  "creativeCoachSnapshot": "snapshots/creative-coaches/production-active-2026-08-30.json",
+  "modelRuntimeProfile": "config/model-runtime/production.json"
+}
