@@ -4,6 +4,7 @@ import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt } from "@/lib/thinking/profile-snapshot";
 import { getHotTopics } from "@/lib/topics/hot-topics";
 import { getModelRuntime, isTimeoutError, modelTimeoutSignal, recordModelRuntime } from "@/lib/agent/model-runtime";
+import { resolveModelRequestTimeout } from "@/lib/agent/model-runtime-policy";
 import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 
 export type AgentMessage = {
@@ -18,6 +19,7 @@ export async function runInsuranceContentAgent(
   messages: AgentMessage[],
   userId?: string | null,
   styleMode: WritingStyleMode = "general",
+  options?: { timeoutSeconds?: number },
 ) {
   const latest = messages.at(-1)?.content ?? "";
   const [profile, thinkingSnapshot, avatarMemories] = userId
@@ -25,7 +27,7 @@ export async function runInsuranceContentAgent(
     : [null, null, []];
 
   if (hasModelConfig()) {
-    const output = await callModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode);
+    const output = await callModel(messages, profile, thinkingSnapshot, avatarMemories, styleMode, options);
     await tryLogAvatarUsage({ userId: userId ?? null, memoryIds: avatarMemories.map((item) => item.id), contextType: "agent" });
     return output;
   }
@@ -131,17 +133,19 @@ async function callModel(
   thinkingSnapshot: Awaited<ReturnType<typeof tryGetLatestThinkingProfileSnapshot>>,
   avatarMemories: Awaited<ReturnType<typeof tryListActiveAvatarMemories>>,
   styleMode: WritingStyleMode,
+  options?: { timeoutSeconds?: number },
 ) {
   const system = buildSystemPrompt(profile, thinkingSnapshot, avatarMemories, styleMode);
   const normalized = normalizeOpenAICompatibleMessages(messages);
   const provider = process.env.MODEL_PROVIDER ?? "openai";
   const runtime = await getModelRuntime();
+  const timeoutSeconds = resolveModelRequestTimeout(runtime.settings.requestTimeoutSeconds, styleMode, options?.timeoutSeconds);
   const started = Date.now();
-  if (!runtime.circuitOpen) {
+  if (!runtime.circuitOpen || !runtime.fallback) {
     try {
       const output = provider === "google"
-        ? await callGoogleGemini(system, normalized, runtime.settings.requestTimeoutSeconds)
-        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, runtime.settings.requestTimeoutSeconds);
+        ? await callGoogleGemini(system, normalized, timeoutSeconds)
+        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, timeoutSeconds);
       await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return output;
     } catch (error) {
@@ -150,7 +154,7 @@ async function callModel(
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
-  const output = await callOpenAICompatible(system, normalized, runtime.fallback, undefined, runtime.settings.requestTimeoutSeconds);
+  const output = await callOpenAICompatible(system, normalized, runtime.fallback, undefined, timeoutSeconds);
   await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
   return output;
 }
@@ -166,13 +170,14 @@ async function* streamModel(
   const provider = process.env.MODEL_PROVIDER ?? "openai";
   const runtime = await getModelRuntime();
   const normalized = normalizeOpenAICompatibleMessages(messages);
+  const timeoutSeconds = resolveModelRequestTimeout(runtime.settings.requestTimeoutSeconds, styleMode);
   const started = Date.now();
   let yielded = false;
-  if (!runtime.circuitOpen) {
+  if (!runtime.circuitOpen || !runtime.fallback) {
     try {
       const stream = provider === "google"
-        ? streamGoogleGemini(system, messages, runtime.settings.requestTimeoutSeconds)
-        : streamOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), runtime.settings.requestTimeoutSeconds);
+        ? streamGoogleGemini(system, messages, timeoutSeconds)
+        : streamOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), timeoutSeconds);
       for await (const chunk of stream) { yielded = true; yield chunk; }
       await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return;
@@ -182,7 +187,7 @@ async function* streamModel(
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
-  for await (const chunk of streamOpenAICompatible(system, normalized, runtime.fallback, runtime.settings.requestTimeoutSeconds)) yield chunk;
+  for await (const chunk of streamOpenAICompatible(system, normalized, runtime.fallback, timeoutSeconds)) yield chunk;
   await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
 }
 

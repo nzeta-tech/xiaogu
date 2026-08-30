@@ -23,6 +23,9 @@
     "db:backfill-thinking-snapshots": "node scripts/backfill-thinking-snapshots.mjs",
     "avatar:backfill-guyu": "node --env-file=.env scripts/backfill-guyu-avatar.mjs",
     "avatar:train-progressive-coach": "node --env-file=.env scripts/retrain-creative-coach-progressive-skills.mjs",
+    "coach:snapshot:export": "node --env-file-if-exists=.env scripts/export-active-creative-coach-snapshot.mjs",
+    "coach:snapshot:apply": "node --env-file-if-exists=.env scripts/apply-creative-coach-snapshot.mjs",
+    "model:profile:apply": "node --env-file-if-exists=.env scripts/apply-model-runtime-profile.mjs",
     "model:check": "node --env-file-if-exists=.env scripts/check-model.mjs",
     "typecheck": "tsc --noEmit"
   },
