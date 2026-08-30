@@ -12,6 +12,13 @@ import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import type { AvatarVisualAsset } from "@/lib/avatar/types";
 import { CREATION_NETWORK_ERROR, getCreationUserError } from "@/lib/creation/errors";
+import {
+  COACHES_PER_ROW,
+  getNextVisibleCoachCount,
+  getVisibleCoachCountForSelection,
+  readCoachFeatureTags,
+  type CreativeCoachIdentityCard,
+} from "@/lib/creation/creative-coach-card";
 import { articleDocx } from "@/lib/client/docx";
 import { browserErrorDetail, createCreationTraceId, rejectionErrorDetail, trackCreationDiagnostic } from "@/lib/client/creation-diagnostics";
 import { readCreationDraft } from "@/lib/client/creation-draft-state";
@@ -22,7 +29,7 @@ import { resolveTrafficCoverSource } from "@/lib/creation/traffic-cover-source";
 import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 
 type FieldValue = string | string[];
-type CreativeCoachOption = { id: string; name: string; version: number; coach_scope: "personal" | "platform"; capabilities: string[]; identity_card: { title?: string; summary?: string; scenarios?: string[]; styleTags?: string[]; bestFor?: string } };
+type CreativeCoachOption = { id: string; name: string; version: number; coach_scope: "personal" | "platform"; capabilities: string[]; identity_card: CreativeCoachIdentityCard };
 
 const IMAGE_CARD_STYLE_USAGE_KEY = "image-card:style-usage";
 const IMAGE_CARD_LEGACY_RECENT_STYLES_KEY = "image-card:recent-styles";
@@ -141,6 +148,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const [wechatImageStyleUsage, setWechatImageStyleUsage] = useState<Record<string, number>>({});
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [creativeCoachOptions, setCreativeCoachOptions] = useState<CreativeCoachOption[]>([]);
+  const [visibleCoachCount, setVisibleCoachCount] = useState(COACHES_PER_ROW);
   const isRemixTraffic = isLinkRemix && values.remix_target === "traffic-copy";
   const usesTrafficWorkflow = app.slug === "traffic-copy" || isRemixTraffic;
   const [creatorSkillsLoading, setCreatorSkillsLoading] = useState(usesTrafficWorkflow);
@@ -537,6 +545,14 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   }
 
   function renderCreatorStyleStep(stepNumber: number) {
+    const totalCoachCount = creativeCoachOptions.length + 1;
+    const effectiveVisibleCoachCount = Math.min(totalCoachCount, getVisibleCoachCountForSelection(
+      visibleCoachCount,
+      selectedCreativeCoachIds,
+      creativeCoachOptions.map((coach) => coach.id),
+    ));
+    const visibleCreativeCoachOptions = creativeCoachOptions.slice(0, Math.max(0, effectiveVisibleCoachCount - 1));
+    const hiddenCoachCount = Math.max(0, totalCoachCount - effectiveVisibleCoachCount);
     const toggleCreativeCoach = (id: string) => {
       if (selectedCreativeCoachIds.includes(id)) {
         const next = selectedCreativeCoachIds.filter((value) => value !== id);
@@ -549,10 +565,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       <div className="field-card-header fieldCardHeader"><span className="step-indicator stepIndicator" aria-hidden="true"><span className="step-number">{stepNumber}</span></span><strong className="field-title">选择创作教练</strong></div>
       <div className="field-content">
         <p className="field-help">每位创作教练都会独立完成 IP 定位、获客增长判断和内容创作；最多选两位，结果会分别展示。</p>
-        <div className="creatorStyleChoices"><div className="creatorIdentityGroup"><span>创作教练</span><div>
+        <div className="creatorStyleChoices"><div className="creatorIdentityGroup"><span>创作教练</span><div className="creatorIdentityGrid">
           <button className={`creatorIdentityCard ${selectedCreativeCoachIds.includes("default") ? "active" : ""}`} disabled={creatorSkillsLoading || (!selectedCreativeCoachIds.includes("default") && selectedCreativeCoachIds.length >= 2)} onClick={() => toggleCreativeCoach("default")} type="button"><span className="creatorIdentityCardHead"><strong>小谷教练</strong><em>系统内置</em></span><b>保险自媒体基础创作教练 · V1</b><small>使用平台正式的 IP定位、内容创作与获客增长方法。</small>{selectedCreativeCoachIds.includes("default") ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>
-          {creativeCoachOptions.map((coach) => { const card=coach.identity_card ?? {}; const selected=selectedCreativeCoachIds.includes(coach.id); const disabled=!selected && selectedCreativeCoachIds.length>=2; return <button aria-pressed={selected} className={`creatorIdentityCard ${selected ? "active" : ""}`} disabled={disabled} key={coach.id} onClick={() => toggleCreativeCoach(coach.id)} type="button"><span className="creatorIdentityCardHead"><strong>{coach.name}</strong><em>{coach.coach_scope === "platform" ? "平台教练" : "我的教练"}</em></span><b>{card.title || "创作教练"}</b><small>{card.summary || "帮助完成 IP 定位、内容创作与获客增长判断。"}</small><span className="creatorIdentityTags">{coach.capabilities.map((item) => <i key={item}>{item}</i>)}</span>{selected ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>; })}
+          {visibleCreativeCoachOptions.map((coach) => { const card=coach.identity_card ?? {}; const featureTags=readCoachFeatureTags(card); const selected=selectedCreativeCoachIds.includes(coach.id); const disabled=!selected && selectedCreativeCoachIds.length>=2; return <button aria-pressed={selected} className={`creatorIdentityCard ${selected ? "active" : ""}`} disabled={disabled} key={coach.id} onClick={() => toggleCreativeCoach(coach.id)} type="button"><span className="creatorIdentityCardHead"><strong>{coach.name}</strong><em>{coach.coach_scope === "platform" ? "平台教练" : "我的教练"}</em></span><b>{card.title || "创作教练"}</b><small>{card.summary || "帮助完成 IP 定位、内容创作与获客增长判断。"}</small>{featureTags.length ? <span className="creatorIdentityTags">{featureTags.map((item) => <i key={item}>{item}</i>)}</span> : null}{selected ? <span className="creatorIdentitySelected">✓ 已选择</span> : null}</button>; })}
         </div></div></div>
+        {totalCoachCount > COACHES_PER_ROW ? <div className="creatorCoachExpandControls">{hiddenCoachCount > 0 ? <button onClick={() => setVisibleCoachCount(getNextVisibleCoachCount(effectiveVisibleCoachCount, totalCoachCount))} type="button">展开更多教练（还有 {hiddenCoachCount} 位）</button> : null}{effectiveVisibleCoachCount > COACHES_PER_ROW ? <button onClick={() => setVisibleCoachCount(COACHES_PER_ROW)} type="button">收起</button> : null}</div> : null}
         {!creatorSkillsLoading && creativeCoachOptions.length === 0 ? <div className="creatorStyleStepFooter"><p>暂无其他创作教练，仍可使用系统内置的小谷教练。</p></div> : null}
       </div>
     </section>;

@@ -57,5 +57,23 @@ test("polling is only a disconnected or stale streaming fallback", () => {
   assert.equal(shouldPollWorkGeneration({ ...base, streamConnected: false }), true);
   assert.equal(shouldPollWorkGeneration({ ...base, platform: "write-copy" }), false);
   assert.equal(shouldPollWorkGeneration({ ...base, supportsStreaming: false }), true);
-  assert.equal(shouldPollWorkGeneration({ ...base, status: "succeeded" }), false);
+  assert.equal(shouldPollWorkGeneration({ ...base, status: "succeeded", hasResult: true }), false);
+});
+
+test("a completed work briefly polls again when its persisted result has not arrived", () => {
+  const base = {
+    status: "succeeded",
+    platform: "traffic-copy",
+    supportsStreaming: true,
+    streamConnected: false,
+    streamError: "",
+    lastProgressAt: 0,
+    now: 20_000,
+    hasResult: false,
+    completedRecoveryAttempts: 0,
+  };
+  assert.equal(shouldPollWorkGeneration(base), true);
+  assert.equal(shouldPollWorkGeneration({ ...base, hasResult: true }), false);
+  assert.equal(shouldPollWorkGeneration({ ...base, completedRecoveryAttempts: 5 }), false);
+  assert.equal(shouldPollWorkGeneration({ ...base, status: "failed" }), false);
 });

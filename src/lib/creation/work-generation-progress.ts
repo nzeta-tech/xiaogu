@@ -71,8 +71,15 @@ export function shouldPollWorkGeneration(input: {
   streamError: string;
   lastProgressAt: number;
   now: number;
+  hasResult?: boolean;
+  completedRecoveryAttempts?: number;
+  maxCompletedRecoveryAttempts?: number;
   staleAfterMs?: number;
 }) {
+  if (input.status === "succeeded") {
+    const maxAttempts = input.maxCompletedRecoveryAttempts ?? 5;
+    return !input.hasResult && (input.completedRecoveryAttempts ?? 0) < maxAttempts;
+  }
   if (input.status !== "running") return false;
   if (!input.supportsStreaming) return true;
   if (!input.streamConnected || Boolean(input.streamError)) return true;
