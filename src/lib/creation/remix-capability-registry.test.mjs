@@ -13,7 +13,7 @@ import {
 import { buildRemixStudioSource } from "./remix-studio-source.ts";
 
 const cases = [
-  ["traffic-copy", "traffic-copy", ["tone"]],
+  ["traffic-copy", "traffic-copy", []],
   ["wechat-studio", "wechat-studio", ["audience", "tone", "lengthMode"]],
   ["xiaohongshu-studio", "xiaohongshu-studio", ["length_mode"]],
   ["moments", "write-copy", ["tone"]],
@@ -33,7 +33,6 @@ test("every remix target reuses fields from its formal creation app", () => {
 
 test("capability defaults and locked values match the formal app contract", () => {
   assert.deepEqual(getRemixCapabilityDefaults("traffic-copy"), {
-    tone: "default",
     creator_skill_version_ids: ["default"],
   });
   assert.deepEqual(getRemixCapabilityDefaults("wechat-studio"), {

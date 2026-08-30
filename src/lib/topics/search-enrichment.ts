@@ -1,5 +1,6 @@
 import type { HotTopic } from "./types";
 import { ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, validateHotTopic } from "./rules";
+import { searchVolcengineWeb } from "@/lib/search/volcengine-search";
 
 type TavilyResult = {
   title?: string;
@@ -7,6 +8,7 @@ type TavilyResult = {
   content?: string;
   published_date?: string;
   score?: number;
+  provider?: "volcengine" | "tavily";
 };
 
 type TavilyPayload = {
@@ -17,7 +19,7 @@ const searchEndpoint = () => process.env.TAVILY_API_BASE ?? process.env.SEARCH_A
 
 export async function enrichTopicsWithSearch(topics: HotTopic[], options: { refresh?: boolean } = {}) {
   const tavilyKey = process.env.TAVILY_API_KEY ?? process.env.SEARCH_API_KEY;
-  if (!tavilyKey || topics.length === 0) return topics;
+  if ((!process.env.VOLCENGINE_SEARCH_API_KEY && !tavilyKey) || topics.length === 0) return topics;
 
   const limit = Number(process.env.TOPIC_SEARCH_ENRICH_LIMIT ?? 8);
   const selected = topics.slice(0, limit);
@@ -31,7 +33,7 @@ export async function enrichTopicsWithSearch(topics: HotTopic[], options: { refr
 
 export async function discoverTopicsWithSearch(options: { refresh?: boolean } = {}) {
   const tavilyKey = process.env.TAVILY_API_KEY ?? process.env.SEARCH_API_KEY;
-  if (!tavilyKey) return [];
+  if (!process.env.VOLCENGINE_SEARCH_API_KEY && !tavilyKey) return [];
 
   const queries = [
     "今天 热搜 普通人 家庭 风险 涨价 裁员 医疗 养老 最新事件",
@@ -70,7 +72,7 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
       id: `search-${encodeURIComponent(title).slice(0, 48)}`,
       title,
       summary: evidence || result.content || "来自实时搜索结果，建议发布前再次核验来源。",
-      source: "实时搜索 · Tavily/Jina",
+      source: result.provider === "volcengine" ? "实时搜索 · 火山引擎" : "实时搜索 · Tavily/Jina",
       heat: index < 3 ? "高" : "中",
       category: inferHotTopicCategory(title),
       insuranceRelevance: inferHotTopicRelevance(title),
@@ -80,12 +82,12 @@ export async function discoverTopicsWithSearch(options: { refresh?: boolean } = 
       sourceTitle: result.title,
       sourcePublishedAt: result.published_date,
       evidence,
-      verification: validateHotTopic({ title, source: "实时搜索 · Tavily/Jina", sourceUrl: result.url, sourcePublishedAt: result.published_date, evidence }),
+      verification: validateHotTopic({ title, source: result.provider === "volcengine" ? "实时搜索 · 火山引擎" : "实时搜索 · Tavily/Jina", sourceUrl: result.url, sourcePublishedAt: result.published_date, evidence }),
     };
   })).then((topics) => ensureInternationalFinanceCoverage(topics, 12));
 }
 
-async function enrichTopic(topic: HotTopic, tavilyKey: string, options: { refresh?: boolean }) {
+async function enrichTopic(topic: HotTopic, tavilyKey: string | undefined, options: { refresh?: boolean }) {
   try {
     const result = await searchTopic(topic, tavilyKey, options);
     if (!result?.url) return topic;
@@ -110,14 +112,28 @@ async function enrichTopic(topic: HotTopic, tavilyKey: string, options: { refres
   }
 }
 
-async function searchTopic(topic: HotTopic, tavilyKey: string, options: { refresh?: boolean }) {
+async function searchTopic(topic: HotTopic, tavilyKey: string | undefined, options: { refresh?: boolean }) {
   const results = await tavilySearch(`${topic.title} 最新 背景 影响 家庭 风险`, tavilyKey, options, 3);
   return results
     .filter((item) => item.url && item.title)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
 }
 
-async function tavilySearch(query: string, tavilyKey: string, options: { refresh?: boolean }, maxResults: number) {
+async function tavilySearch(query: string, tavilyKey: string | undefined, options: { refresh?: boolean }, maxResults: number): Promise<TavilyResult[]> {
+  const volcanic = await searchVolcengineWeb(query, {
+    count: maxResults,
+    timeoutMs: Number(process.env.TOPIC_SEARCH_TIMEOUT_MS ?? 8000),
+    requireContent: true,
+  });
+  if (volcanic.length > 0) return volcanic.map((item): TavilyResult => ({
+    title: item.title,
+    url: item.url,
+    content: item.content,
+    published_date: item.publishedDate,
+    score: item.score,
+    provider: "volcengine",
+  }));
+  if (!tavilyKey) return [];
   const response = await fetch(searchEndpoint(), {
     method: "POST",
     cache: options.refresh ? "no-store" : undefined,
@@ -139,7 +155,7 @@ async function tavilySearch(query: string, tavilyKey: string, options: { refresh
 
   if (!response.ok) return [];
   const payload = (await response.json()) as TavilyPayload;
-  return payload.results ?? [];
+  return (payload.results ?? []).map((item): TavilyResult => ({ ...item, provider: "tavily" }));
 }
 
 async function readUrl(url: string) {

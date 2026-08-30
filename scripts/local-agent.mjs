@@ -3,6 +3,7 @@ import path from "node:path";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { resolveAndCacheViralCover } from "./viral-cover-cache.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,9 +90,82 @@ async function executeTask(task, leaseToken) {
   if (task.payload?.sourceType === "wechat_channels_media") return inspectWechatChannelMedia(task, leaseToken);
   const url = typeof task.payload?.url === "string" ? task.payload.url : "";
   const userId = typeof task.payload?.userId === "string" ? task.payload.userId : "";
+  const isViralCover = task.payload?.purpose === "viral_cover";
   const metadataOnly = task.payload?.purpose === "viral_content";
   if (!url) throw new Error("invalid task payload: url is required");
-  return inspectSource(task, leaseToken, url, userId, { metadataOnly });
+  if (isViralCover) {
+    const coverSource = await resolveAndCacheViralCover({
+      providedThumbnail: stringValue(task.payload?.thumbnailUrl),
+      cache: (thumbnailUrl) => cacheViralCover(task, thumbnailUrl, url),
+      inspect: () => inspectViralCover(task, leaseToken, url, userId),
+      onProviderRejected: (error) => console.warn(`[local-agent] provider cover rejected for ${task.id}; inspecting the original work: ${messageOf(error)}`),
+    });
+    return { coverCached: true, coverSource };
+  }
+  const inspected = await inspectSource(task, leaseToken, url, userId, { metadataOnly });
+  return inspected;
+}
+
+async function inspectViralCover(task, leaseToken, sourceUrl, userId) {
+  await publishTaskEvent(task, leaseToken, "status", { message: "榜单封面不可用，正在解析真实作品封面..." });
+  const response = await fetch(`${executorBase}/api/creation/link-remix/inspect`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ url: sourceUrl, agentUserId: userId, deferTranscription: true, metadataOnly: false }),
+    signal: AbortSignal.timeout(boundedNumber("LOCAL_AGENT_TASK_TIMEOUT_MS", 1_200_000, 60000, 1800000)),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `local executor HTTP ${response.status}`);
+  const thumbnailUrl = stringValue(result.thumbnailUrl);
+  if (!thumbnailUrl) throw new Error("viral cover enrichment returned no thumbnail");
+  return thumbnailUrl;
+}
+
+async function cacheViralCover(task, thumbnailUrl, sourceUrl) {
+  const contentId = stringValue(task.payload?.viralContentId);
+  if (!contentId || !thumbnailUrl) throw new Error("viral cover enrichment returned no thumbnail");
+  const resolvedThumbnail = thumbnailUrl.startsWith("/") ? `${executorBase}${thumbnailUrl}` : thumbnailUrl;
+  if (isExecutorMediaUrl(resolvedThumbnail)) {
+    const media = await fetch(resolvedThumbnail, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(60_000),
+    });
+    const contentType = normalizeCoverContentType(media.headers.get("content-type"));
+    const declaredLength = Number(media.headers.get("content-length") || 0);
+    if (!media.ok || !contentType || declaredLength > 10 * 1024 * 1024) throw new Error("local executor returned an invalid cover");
+    const bytes = Buffer.from(await media.arrayBuffer());
+    if (bytes.length < 1024 || bytes.length > 10 * 1024 * 1024) throw new Error("local executor returned an invalid cover");
+    const uploaded = await remote("/api/internal/local-agent/viral-covers/cache", {
+      contentId,
+      imageBase64: bytes.toString("base64"),
+      contentType,
+      sourceUrl,
+    });
+    if (!uploaded?.ok) throw new Error(uploaded?.error || "viral cover upload failed");
+    return;
+  }
+  const response = await remote("/api/internal/local-agent/viral-covers/cache", {
+    contentId,
+    thumbnailUrl: resolvedThumbnail,
+    refererUrl: sourceUrl,
+  });
+  if (!response?.ok) throw new Error(response?.error || "viral cover cache failed");
+}
+
+function isExecutorMediaUrl(value) {
+  try {
+    const url = new URL(value);
+    const executor = new URL(executorBase);
+    return url.origin === executor.origin && url.pathname === "/api/creation/link-remix/media";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeCoverContentType(value) {
+  const type = value?.split(";", 1)[0]?.trim().toLowerCase();
+  if (type === "image/jpg") return "image/jpeg";
+  return ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(type) ? type : "";
 }
 
 async function inspectWechatChannelMedia(task, leaseToken) {

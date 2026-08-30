@@ -17,8 +17,8 @@ const definitions: Record<RemixCapabilityId, RemixCapabilityDefinition> = {
   "traffic-copy": {
     id: "traffic-copy",
     appSlug: "traffic-copy",
-    settingFieldIds: ["tone"],
-    defaults: { tone: "default", creator_skill_version_ids: ["default"] },
+    settingFieldIds: [],
+    defaults: { creator_skill_version_ids: ["default"] },
     lockedValues: {},
     sourceField: "source",
     result: { id: "remix-video", label: "口播文案", viewMode: "plain", view: "traffic-copy" },

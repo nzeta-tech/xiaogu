@@ -16334,6 +16334,21 @@ a {
   gap: 14px;
 }
 
+.imageCardAppPage .imageStyleSelectionSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ccfbf1;
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: #0f766e;
+  font-size: 12px;
+}
+
+.imageCardAppPage .imageStyleSelectionSummary strong { font-size: 13px; }
+
 .imageCardAppPage .imageStyleMostUsed,
 .wechatImagesAppPage .imageStyleMostUsed {
   display: grid;
@@ -22080,6 +22095,32 @@ body .xhsStyleGallery button>img { display:none !important; }.xhsStyleGallery bu
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
 }
 
+.wechatStyleLibrary.multiSelect {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.wechatStyleLibrarySelection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid #e7ebf1;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wechatStyleLibrarySelection button {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 1px solid #0f766e;
+  border-radius: 7px;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 700;
+}
+
 .wechatStyleLibrary > header {
   display: flex;
   align-items: center;
@@ -22181,6 +22222,11 @@ body .xhsStyleGallery button>img { display:none !important; }.xhsStyleGallery bu
 .wechatStyleLibraryItem.active {
   border-color: #156d57;
   box-shadow: 0 0 0 2px rgba(21, 109, 87, 0.12);
+}
+
+.wechatStyleLibraryItem[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .wechatStyleLibraryItem img,

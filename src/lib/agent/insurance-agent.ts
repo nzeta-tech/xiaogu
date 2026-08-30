@@ -4,6 +4,7 @@ import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/
 import { buildThinkingProfileBrief, formatThinkingProfileSnapshotForPrompt } from "@/lib/thinking/profile-snapshot";
 import { getHotTopics } from "@/lib/topics/hot-topics";
 import { getModelRuntime, isTimeoutError, modelTimeoutSignal, recordModelRuntime } from "@/lib/agent/model-runtime";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 
 export type AgentMessage = {
   role: "user" | "assistant";
@@ -149,10 +150,10 @@ async function callModel(
       const output = provider === "google"
         ? await callGoogleGemini(system, normalized, runtime.settings.requestTimeoutSeconds)
         : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, runtime.settings.requestTimeoutSeconds);
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return output;
     } catch (error) {
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
       if (!runtime.fallback) throw error;
     }
   }
@@ -181,10 +182,10 @@ async function* streamModel(
         ? streamGoogleGemini(system, messages, runtime.settings.requestTimeoutSeconds)
         : streamOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), runtime.settings.requestTimeoutSeconds);
       for await (const chunk of stream) { yielded = true; yield chunk; }
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return;
     } catch (error) {
-      await recordModelRuntime({ provider, model: process.env.MODEL_NAME ?? "default", outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
+      await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
       if (yielded || !runtime.fallback) throw error;
     }
   }
@@ -194,7 +195,7 @@ async function* streamModel(
 }
 
 function primaryOpenAIConfig() {
-  return { baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1", apiKey: process.env.MODEL_API_KEY, model: process.env.MODEL_NAME ?? "gpt-4o-mini" };
+  return { baseUrl: process.env.MODEL_API_BASE ?? "https://api.openai.com/v1", apiKey: process.env.MODEL_API_KEY, model: resolveConfiguredTextModel() };
 }
 
 function normalizeOpenAICompatibleMessages(messages: AgentMessage[]) {
@@ -268,7 +269,7 @@ function getGroqConfig() {
   return {
     baseUrl: process.env.MODEL_API_BASE ?? "https://api.groq.com/openai/v1",
     apiKey: process.env.GROQ_API_KEY ?? process.env.MODEL_API_KEY,
-    model: process.env.MODEL_NAME ?? "llama-3.3-70b-versatile",
+    model: resolveConfiguredTextModel("llama-3.3-70b-versatile"),
   };
 }
 
@@ -368,7 +369,7 @@ async function callGoogleGemini(system: string, messages: AgentMessage[], timeou
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Google Gemini API key 未配置");
 
-  const model = process.env.MODEL_NAME ?? "gemini-2.5-flash";
+  const model = resolveConfiguredTextModel("gemini-2.5-flash");
   const baseUrl = process.env.MODEL_API_BASE ?? "https://generativelanguage.googleapis.com/v1beta";
   const request = {
     method: "POST",
@@ -412,7 +413,7 @@ async function* streamGoogleGemini(system: string, messages: AgentMessage[], tim
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Google Gemini API key 未配置");
 
-  const model = process.env.MODEL_NAME ?? "gemini-2.5-flash";
+  const model = resolveConfiguredTextModel("gemini-2.5-flash");
   const baseUrl = process.env.MODEL_API_BASE ?? "https://generativelanguage.googleapis.com/v1beta";
   const url = `${baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(url, {

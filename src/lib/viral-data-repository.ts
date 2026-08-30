@@ -197,13 +197,19 @@ export async function publishViralDataRun(runId: string, preparedItems: Prepared
     }
 
     if (refreshedPlatforms.length > 0) {
-      await client.query(
-        `update viral_contents
-         set status = 'offline', updated_at = now()
-         where source_type = 'automatic'
-           and platform = any($1::text[])
-           and data_run_id is distinct from $2::uuid`,
-        [refreshedPlatforms, runId],
+      const douyinSourceTags = [...new Set(preparedItems
+        .filter(({ item }) => item.platform === "抖音")
+        .flatMap(({ item }) => item.tags.filter((tag) => tag === "TopHub" || tag === "Valuefocus")))];
+      const otherPlatforms = refreshedPlatforms.filter((platform) => platform !== "抖音");
+      if (otherPlatforms.length > 0) await client.query(
+        `update viral_contents set status='offline',updated_at=now()
+          where source_type='automatic' and platform=any($1::text[]) and data_run_id is distinct from $2::uuid`,
+        [otherPlatforms, runId],
+      );
+      if (refreshedPlatforms.includes("抖音") && douyinSourceTags.length > 0) await client.query(
+        `update viral_contents set status='offline',updated_at=now()
+          where source_type='automatic' and platform='抖音' and tags ?| $1::text[] and data_run_id is distinct from $2::uuid`,
+        [douyinSourceTags, runId],
       );
     }
 
@@ -242,6 +248,19 @@ export async function listTopDouyinDeepVerificationCandidates(runId: string, lim
      order by vc.viral_score desc,vc.fetched_at desc
      limit $2`,
     [runId, Math.min(Math.max(limit, 1), 10)],
+  );
+  return result.rows;
+}
+
+export async function listViralCoverEnrichmentCandidates(runId: string, limit: number) {
+  const result = await query<{ id: string; source_url: string; platform: string; thumbnail_url: string | null; title: string }>(
+    `select vc.id,vc.source_url,vc.platform,vc.thumbnail_url,vc.title from viral_contents vc
+       left join viral_content_cover_assets cover on cover.viral_content_id=vc.id
+      where vc.source_type='automatic' and vc.status='published'
+        and (cover.viral_content_id is null or octet_length(cover.image_data)<1024
+          or cover.source_url='generated://viral-fallback')
+      order by (vc.data_run_id=$1) desc,vc.viral_score desc,vc.fetched_at desc limit $2`,
+    [runId, Math.min(Math.max(limit, 1), 50)],
   );
   return result.rows;
 }
