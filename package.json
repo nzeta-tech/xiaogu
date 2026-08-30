@@ -12,7 +12,7 @@
     "test:avatar-skills": "node --env-file=.env scripts/regression-avatar-skills.mjs",
     "test:wechat-avatar-discovery": "node --experimental-strip-types --test src/lib/avatar/wechat-channel-tikhub.test.mjs",
     "test:workbuddy-agent": "node --experimental-strip-types --test src/lib/workbuddy/catalog.test.mjs src/lib/workbuddy/agent-runtime.test.mjs src/lib/workbuddy/app-conversation.test.mjs src/lib/workbuddy/presentation-content.test.mjs src/lib/creation/creator-style-result.test.mjs",
-    "test:traffic-copy": "node --experimental-strip-types --test src/lib/creation/work-generation-progress.test.mjs src/lib/creation/work-title.test.mjs src/lib/avatar/creative-coach-runtime.test.mjs src/lib/avatar/creative-coach-training-orchestrator.test.mjs src/lib/creation/traffic-copy-architecture.test.mjs src/lib/creation/traffic-copy-evidence.test.mjs src/lib/creation/creator-style-result.test.mjs",
+    "test:traffic-copy": "node --experimental-strip-types --test src/lib/creation/errors.test.mjs src/lib/creation/work-generation-progress.test.mjs src/lib/creation/work-title.test.mjs src/lib/avatar/creative-coach-runtime.test.mjs src/lib/avatar/creative-coach-training-orchestrator.test.mjs src/lib/creation/traffic-copy-architecture.test.mjs src/lib/creation/traffic-copy-evidence.test.mjs src/lib/creation/creator-style-result.test.mjs",
     "viral:worker": "node scripts/viral-data-worker.mjs",
     "viral:creator-worker": "node scripts/viral-creator-worker.mjs",
     "local-agent": "node scripts/local-agent.mjs",
