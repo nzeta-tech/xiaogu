@@ -4016,7 +4016,7 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
     const limitParameter = `$${values.length - 1}`;
     const offsetParameter = `$${values.length}`;
 
-    const worksResult = await query<{
+    const worksQuery = query<{
       id: string;
       title: string;
       status: string;
@@ -4055,7 +4055,8 @@ export async function tryGetCreationWorksView(userId: string | null, input: Crea
       values,
     );
 
-    const [totalsResult, platformsResult, activityResult] = await Promise.all([
+    const [worksResult, totalsResult, platformsResult, activityResult] = await Promise.all([
+      worksQuery,
       query<{ all_count: string; favorite_count: string; noted_count: string; avatar_count: string }>(
         `select count(*) as all_count,
                 count(*) filter (where is_favorite) as favorite_count,

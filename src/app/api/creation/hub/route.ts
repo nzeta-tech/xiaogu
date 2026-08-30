@@ -1,5 +1,5 @@
 import { requireSessionUser } from "@/lib/auth/session";
-import { tryGetCreationHubData, tryGetCreationWorksView, tryListCreationCatalog, tryListCreationTasks, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { tryGetCreationHubData, tryGetCreationWorksView, tryListCreationCatalog, tryListCreationTasks } from "@/lib/db/repositories";
 import { getLinkRemixAvailability, getPptAvailability } from "@/lib/local-agent/repository";
 
 export async function GET(request: Request) {
@@ -42,14 +42,14 @@ export async function GET(request: Request) {
     return Response.json({ works, mode: "server" });
   }
 
-  // The work-history view does not use the catalog. Keeping this write-heavy
-  // synchronization out of its request path prevents every history refresh
-  // from issuing dozens of catalog upserts.
-  await trySyncCreationCatalog();
-
-  const hub = await tryGetCreationHubData(user.id);
-  const catalog = await tryListCreationCatalog();
-  const [linkRemix, pptMaker] = await Promise.all([getLinkRemixAvailability(), getPptAvailability()]);
+  // Catalog synchronization belongs to migrations/admin operations. A normal
+  // page view must stay read-only and must not issue hundreds of serial upserts.
+  const [hub, catalog, linkRemix, pptMaker] = await Promise.all([
+    tryGetCreationHubData(user.id),
+    tryListCreationCatalog(),
+    getLinkRemixAvailability(),
+    getPptAvailability(),
+  ]);
   if (!hub) {
     return Response.json({ error: "广场数据暂不可用" }, { status: 503 });
   }
