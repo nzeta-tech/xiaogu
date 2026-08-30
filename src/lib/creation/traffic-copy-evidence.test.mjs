@@ -176,3 +176,25 @@ test("editor selects source chunks by index instead of rewriting them into asser
   assert.match(formatted, /【素材#1】官方走势材料/);
   assert.match(formatted, /原始摘要：人民币汇率近期变化及形成原因/);
 });
+
+test("broad hotspot queries must resolve to a concrete researched angle", () => {
+  const prompt = buildTrafficMaterialBriefPrompt("梅艳芳今天很火，帮我找一个角度写", "【素材#1】梅艳芳遗产信托\n原始摘要：信托按月向母亲支付生活费。 ");
+  assert.match(prompt, /当前讨论最集中/);
+  assert.match(prompt, /禁止退回.*家庭责任/);
+  assert.match(prompt, /事实可信度与选题可用性分开判断/);
+  const brief = parseTrafficMaterialBrief(JSON.stringify({
+    selectedMaterialIndexes:[1],
+    creativeDirection:"围绕遗产信托如何约束资金使用展开",
+    centralTension:"留下钱和安排钱怎么使用不是一回事",
+    requiredTopicAnchors:["遗产信托","按规则使用"],
+    safeFacts:["媒体报道再次引发对遗产安排的讨论"],
+    attributedFacts:["据庭审报道，她担心母亲不善管理整笔资金"],
+    doNotClaim:["未经核验的具体金额"],
+  }));
+  const formatted = formatTrafficMaterialBrief(brief, [{ title:"梅艳芳遗产信托",url:"https://example.com",snippet:"报道摘要",provider:"volcengine",authorityTier:"other",authorityScore:30 }]);
+  assert.match(formatted, /核心矛盾：留下钱和安排钱怎么使用不是一回事/);
+  assert.match(formatted, /必须实质解释的主题锚点：遗产信托、按规则使用/);
+  assert.match(formatted, /不得写成确定事实/);
+  assert.match(formatted, /可归因表达的报道事实/);
+  assert.match(formatted, /担心母亲不善管理/);
+});

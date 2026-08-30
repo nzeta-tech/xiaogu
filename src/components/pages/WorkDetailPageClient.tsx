@@ -168,6 +168,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const imageTimerRef = useRef<number | null>(null);
   const streamReaderAbortRef = useRef<AbortController | null>(null);
   const lastGenerationProgressAtRef = useRef(0);
+  const completedRecoveryAttemptsRef = useRef(0);
   const closePreviews = useEffectEvent(() => {
     setPreviewField(null);
     setPreviewImage(null);
@@ -176,6 +177,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const workContent = work?.content ?? "";
   const workPlatform = work?.platform ?? "";
   const workAppRunId = work?.app_run?.id ?? "";
+  const workResultText = work?.app_run?.result_text ?? "";
   const imageRemixConsistency = work?.app_run?.result_json?.imageRemixConsistency as ImageRemixConsistencyAudit | null | undefined;
   const isAdminPreview = searchParams.get("admin") === "1";
   const workApiHref = useMemo(() => apiPath(`/api/works/${workId}${isAdminPreview ? "?admin=1" : ""}`), [isAdminPreview, workId]);
@@ -195,6 +197,10 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
       lastGenerationProgressAtRef.current = Date.now();
     }
   }, [streamState.connected]);
+
+  useEffect(() => {
+    completedRecoveryAttemptsRef.current = 0;
+  }, [workId]);
 
   async function submitImageEdit(image: GeneratedImage, sourceStyle?: string) {
     const instruction = imageEditInstruction.trim();
@@ -291,8 +297,18 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
 
   useEffect(() => {
     if (!work) return;
-    if (workStatus && workStatus !== "running") return;
-    if (workContent.trim() && workStatus !== "running") return;
+    const hasResult = Boolean(workContent.trim() || workResultText.trim());
+    if (!shouldPollWorkGeneration({
+      status: workStatus,
+      platform: workPlatform,
+      supportsStreaming: supportsWorkStreaming(workPlatform),
+      streamConnected: streamState.connected,
+      streamError: streamState.error,
+      lastProgressAt: lastGenerationProgressAtRef.current,
+      now: Date.now(),
+      hasResult,
+      completedRecoveryAttempts: completedRecoveryAttemptsRef.current,
+    })) return;
 
     const timer = window.setInterval(async () => {
       if (!shouldPollWorkGeneration({
@@ -303,19 +319,32 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
         streamError: streamState.error,
         lastProgressAt: lastGenerationProgressAtRef.current,
         now: Date.now(),
+        hasResult: Boolean(workContent.trim() || workResultText.trim()),
+        completedRecoveryAttempts: completedRecoveryAttemptsRef.current,
       })) return;
-      const response = await fetch(workApiHref);
-      const payload = (await response.json()) as { work?: WorkDetail };
-      if (payload.work) {
-        setWork(payload.work);
-        if (payload.work.app_run?.status && payload.work.app_run.status !== "running") {
-          window.clearInterval(timer);
+      try {
+        const response = await fetch(workApiHref);
+        if (!response.ok) return;
+        const payload = (await response.json()) as { work?: WorkDetail };
+        if (payload.work) {
+          setWork(payload.work);
+          const nextStatus = payload.work.app_run?.status ?? "";
+          const nextHasResult = Boolean(payload.work.content?.trim() || payload.work.app_run?.result_text?.trim());
+          if (nextStatus === "succeeded" && !nextHasResult) {
+            completedRecoveryAttemptsRef.current += 1;
+          }
+          if (nextStatus === "failed" || (nextStatus === "succeeded" && nextHasResult)) {
+            window.clearInterval(timer);
+          }
         }
+      } catch {
+        // A transient API/database timeout must not strand a background result.
+        // The next interval gets another chance to recover the persisted work.
       }
     }, 3000);
 
     return () => window.clearInterval(timer);
-  }, [streamState.connected, streamState.error, work, workApiHref, workContent, workPlatform, workStatus]);
+  }, [streamState.connected, streamState.error, work, workApiHref, workContent, workPlatform, workResultText, workStatus]);
 
   useEffect(() => {
     streamReaderAbortRef.current?.abort();
@@ -686,8 +715,15 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const resolvedBatchId = activeBatch?.id ?? "";
   const hasRenderableBatches = batches.some(hasRenderableBatch);
   const plainResultContent = streamState.content || work?.content || work?.app_run?.result_text || (
-    work?.app_run?.status === "running" ? "内容生成中，结果会在这里持续回填。" : "本次生成暂未返回正文。"
+    work?.app_run?.status === "running"
+      ? "内容生成中，结果会在这里持续回填。"
+      : work?.app_run?.status === "failed"
+        ? getCreationUserError(work.app_run.error_message)
+        : "本次生成暂未返回正文。"
   );
+  const simpleCopyContent = hasCreatorStyleTabs
+    ? activeBatch?.items[0]?.body || plainResultContent
+    : plainResultContent;
   const coverSourceBatchId = hasCreatorStyleResult ? activeBatch?.id ?? "default" : "default";
   const coverSourceStyleLabel = hasCreatorStyleResult ? activeBatch?.label ?? "默认的我" : "默认的我";
   const videoCoverHref = isTrafficCopyWork
@@ -2819,16 +2855,16 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       ) : null}
                       <button
                         className="instanceActionButton"
-                        disabled={!(hasCreatorStyleTabs ? activeBatch?.items[0]?.body : streamState.content || work.content)?.trim()}
-                        onClick={() => void handleCopy("simple-copy", hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? "" : streamState.content || work.content)}
+                        disabled={!simpleCopyContent.trim()}
+                        onClick={() => void handleCopy("simple-copy", simpleCopyContent)}
                         type="button"
                       >
                         {copied["simple-copy"] ? "已复制" : "复制"}
                       </button>
                       <button
                         className="instanceActionButton"
-                        disabled={!(hasCreatorStyleTabs ? activeBatch?.items[0]?.body : streamState.content || work.content)?.trim()}
-                        onClick={() => handleExport(formatWorkTitle(work), hasCreatorStyleTabs ? activeBatch?.items[0]?.body ?? "" : streamState.content || work.content)}
+                        disabled={!simpleCopyContent.trim()}
+                        onClick={() => handleExport(formatWorkTitle(work), simpleCopyContent)}
                         type="button"
                       >
                         导出Word
@@ -2854,7 +2890,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
                       </div>
                     ) : (
                       <>
-                        {hasCreatorStyleTabs ? activeBatch?.items[0]?.body || (work.app_run?.status === "running" ? "内容生成中，完成后可在这里切换两份作品..." : "本次生成暂未返回正文。") : streamState.content || work.content || (work.app_run?.status === "running" ? "内容生成中..." : "本次生成暂未返回正文。")}
+                        {simpleCopyContent}
                         {streamState.connected ? <i className="simpleCopyStreamCaret" aria-label="正在流式输出" /> : null}
                       </>
                     )}

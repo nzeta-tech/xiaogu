@@ -39,7 +39,7 @@ import {
 import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
 import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { buildCreativeCoachSkillRoutePrompt, parseCreativeCoachSkillRoute, renderCreativeCoachPersona, renderCreativeCoachSkill, renderProgressivelyLoadedCreativeCoachSkills, renderSelectedCreativeCoachMethods, resolveCreativeCoachRuntime, type CreativeCoachRuntime } from "@/lib/avatar/creative-coach-runtime";
-import { getCreationUserError } from "@/lib/creation/errors";
+import { getCreationUserError, isRetryableCreationError } from "@/lib/creation/errors";
 import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
 import { buildTrafficEvidencePackFromFastResearch, buildTrafficMaterialBriefPrompt, formatTrafficEvidencePack, formatTrafficMaterialBrief, parseTrafficMaterialBrief, type TrafficEvidencePack } from "@/lib/creation/traffic-copy-evidence";
@@ -410,6 +410,20 @@ export async function executeCreationAppRun(input: {
           } catch {
             // The structured evidence pack remains usable if material editing fails.
           }
+          // Broad topic requests only become a stable content blueprint after
+          // research has selected one concrete angle. Rebuild the blueprint so
+          // the selected mechanism is a required asset, not optional context.
+          try {
+            const researchedBlueprint = await runInsuranceContentAgent(
+              [{ role: "user", content: buildTrafficSourceBlueprintPrompt(source, sharedTrafficResearch) }],
+              input.userId,
+              "traffic",
+            );
+            trafficSourceBlueprint = parseTrafficSourceBlueprint(researchedBlueprint, source);
+            trafficAuthority = authorityForTrafficTask(trafficSourceBlueprint.taskMode);
+          } catch {
+            // Keep the source-only blueprint if the researched rebuild fails.
+          }
         } catch {
           // Search is supplemental. Creation can continue from the source blueprint.
           await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料准备完成",detail:"公开检索暂未补充有效材料，将严格依据现有素材继续创作。" });
@@ -618,6 +632,7 @@ export async function executeCreationAppRun(input: {
     }
   } catch (error) {
     const userError = getCreationUserError(error);
+    const retryable = isTrafficRequested && isRetryableCreationError(error);
     await tryCompleteAppRun({
       runId: run?.id ?? null,
       status: "failed",
@@ -625,8 +640,10 @@ export async function executeCreationAppRun(input: {
       resultJson,
       errorMessage: error instanceof Error ? error.message : userError,
     });
-    await input.onEvent?.({ type: "error", content: userError });
-    throw error;
+    // The background runner owns retries. Do not close the SSE stream with an
+    // error before it has exhausted transient network/model recovery attempts.
+    if (!retryable) await input.onEvent?.({ type: "error", content: userError });
+    throw retryable ? new RetryableCreationRunError(userError) : error;
   }
 
   if (!result.trim()) {

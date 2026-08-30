@@ -11,6 +11,7 @@ import {
   detectTrafficNarrativeIdentityLeaks,
   estimateTrafficSpeakingRate,
   fallbackTrafficCopyCreativeBrief,
+  fallbackTrafficSourceBlueprint,
   measureTrafficExpressionSimilarity,
   normalizeTrafficBriefForSource,
   parseTrafficCopyAudit,
@@ -37,6 +38,20 @@ test("structured hotspot envelope cannot be mistaken for a source transcript", (
   const blueprint = parseTrafficSourceBlueprint(JSON.stringify({ taskMode:"source_adaptation", originalThesis:"【正式回归｜F09】", authorPosition:"回归标记" }), source);
   assert.equal(blueprint.taskMode, "topic_creation");
   assert.equal(blueprint.originalThesis, "某款量产车下线");
+});
+
+test("topic creation binds the thesis to the concrete researched discussion", () => {
+  const blueprintPrompt = buildTrafficSourceBlueprintPrompt("梅艳芳今天很火，帮我找一个角度写", "创作方向：围绕遗产信托安排展开\n必须实质解释的主题锚点：遗产信托、按规则使用");
+  assert.match(blueprintPrompt, /拥有本轮立题权/);
+  assert.match(blueprintPrompt, /不得用家庭责任.*替换具体事件/);
+  const prompt = buildTrafficCopyCreativeBriefPrompt({
+    source: "梅艳芳今天很火，帮我找一个角度写",
+    context: ["创作方向：围绕遗产信托按月支付养老费用展开"],
+    blueprint: parseTrafficSourceBlueprint(JSON.stringify({ taskMode: "topic_creation", originalThesis: "梅艳芳热点" }), "梅艳芳今天很火，帮我找一个角度写"),
+    authority: authorityForTrafficTask("topic_creation"),
+  });
+  assert.match(prompt, /workingThesis必须点明该具体议题/);
+  assert.match(prompt, /不得绕开它退回通用家庭责任/);
 });
 
 test("coach independently re-plans expression and flexible duration", () => {
@@ -117,6 +132,15 @@ test("identity and automatic length guards request one minimal revision", () => 
   assert.ok(guarded.reductionPlan.length > 0);
 });
 
+test("automatic length guard blocks materially incomplete short drafts", () => {
+  const cleanAudit = parseTrafficCopyAudit(JSON.stringify({ status:"pass",issues:[],semanticCoverage:1,expressionSimilarity:.1 }));
+  const brief = normalizeTrafficBriefForSource(fallbackTrafficCopyCreativeBrief("资".repeat(400)), "资".repeat(400));
+  const guarded = applyTrafficDeterministicAuditChecks(cleanAudit, "观点很重要，但正文没有解释具体机制。", { brief });
+  assert.equal(guarded.status, "revise");
+  assert.equal(guarded.hardBlocking, true);
+  assert.ok(guarded.issues.some((item) => item.type === "automatic_length_underrun"));
+});
+
 test("missing publication-contract evidence is deterministically blocking", () => {
   const audit = parseTrafficCopyAudit(JSON.stringify({ status:"pass",issues:[],missingEvidenceIds:["e-required","e-other"],missingAssetIds:["a-required"],semanticCoverage:.8,expressionSimilarity:.1 }));
   const brief = { ...fallbackTrafficCopyCreativeBrief("主题"),mustKeepEvidenceIds:["e-required"] };
@@ -136,6 +160,25 @@ test("public event context is blocked when named subjects disappear from the ope
   const guarded = applyTrafficDeterministicAuditChecks(cleanAudit,"一方提出了申请。另一方提出管辖权异议。这件事真正提醒我们要管理风险。",{blueprint});
   assert.equal(guarded.status,"revise");
   assert.ok(guarded.issues.some((item)=>item.type==="subject_context_missing"));
+});
+
+test("why questions stay as required causal work across planning, writing and audit", () => {
+  const blueprintPrompt = buildTrafficSourceBlueprintPrompt("梅艳芳为什么这样安排信托？", "据庭审报道，她希望持续照顾母亲但不一次性交付整笔遗产。");
+  assert.match(blueprintPrompt, /具体因果答案列为required reasoning资产/);
+
+  const briefPrompt = buildTrafficCopyCreativeBriefPrompt({
+    source:"梅艳芳为什么这样安排信托？",
+    blueprint:fallbackTrafficSourceBlueprint("梅艳芳为什么这样安排信托？"),
+    context:["可归因表达的报道事实：据庭审报道，她担心母亲不善管理整笔资金。"],
+  });
+  assert.match(briefPrompt, /仅解释一般机制.*视为未解决/);
+
+  const brief = fallbackTrafficCopyCreativeBrief("梅艳芳为什么这样安排信托？");
+  const writingPrompt = buildTrafficCopyWritingPrompt({ source:"梅艳芳为什么这样安排信托？",brief,context:[] });
+  assert.match(writingPrompt, /必须在前半段给出.*具体因果链/);
+
+  const auditPrompt = buildTrafficCopyAuditPrompt({ source:"梅艳芳为什么这样安排信托？",draft:"信托可以持续照顾家人。",blueprint:fallbackTrafficSourceBlueprint("梅艳芳为什么这样安排信托？"),authority:authorityForTrafficTask("topic_creation"),brief,context:[] });
+  assert.match(auditPrompt, /core_question_unanswered/);
 });
 
 test("a suspense first sentence passes when the public event lands inside the opening window", () => {
@@ -166,6 +209,7 @@ test("dual audit detects hard omissions and expression overlap without punishing
   assert.equal(reduction.hardBlocking, false);
   const prompt = buildTrafficCopyAuditPrompt({ source:"原稿原稿原稿", draft:"新表达", blueprint:parseTrafficSourceBlueprint("{}","主题"), authority:authorityForTrafficTask("topic_creation"), brief:fallbackTrafficCopyCreativeBrief("主题"), context:[] });
   assert.match(prompt, /双向检查器/);
+  assert.match(prompt, /generic_topic_fallback/);
   assert.match(prompt, /最多一次最小修订/);
 });
 

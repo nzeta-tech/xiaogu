@@ -193,17 +193,20 @@ export function authorityForTrafficTask(mode: TrafficTaskMode): TrafficAuthority
   };
 }
 
-export function buildTrafficSourceBlueprintPrompt(source: string) {
+export function buildTrafficSourceBlueprintPrompt(source: string, researchDecision = "") {
   return [
     "你是内容资产提取器，只理解语义，不创作、不润色、不复刻句子。判断输入主要是原稿、主题材料，还是事实加用户立场；该判断只用于内部权威分配。",
     "把原稿拆成思想与信息资产，而不是保存原句和原段落：核心判断、必要推理、关键证据、案例功能、条件边界、希望受众发生的认知变化。自动转写错字和断句只按语义理解。",
     "contentAssets 每项只写可迁移的语义，不摘抄长句；required 表示删除后核心判断不成立，supporting 表示可替换为等价证据，optional 表示可舍弃。mayReframe 表示可改变呈现角度或顺序，但不得反转原立场。",
     "原稿中的数字、案例和产品机制先标为source；只有明显属于时效预测、外部排名或无法从原稿确认的断言才标needs_verification。不得因为需要改写就删除具体信息。",
     "如果输入是新闻、人物事件或具体案例，事件核心主体名称和最小事件背景属于required资产：必须提取主体是谁、发生了什么以及当前事实边界，不能只保留抽象道理。同时填写standaloneContext。公开事件用public_named，并只把理解事件不可缺少的公开主体放入requiredSubjects；隐私案例用anonymized，并用anonymousRoles保存可公开的角色关系；普通观点用none。eventAnchors填写2至6个表达最小事件背景所必需、允许原样出现的短关键词，不放同义替换困难的完整句子。openingSentenceWindow默认3，允许首句悬念，但必须在窗口内落地主体和事件。",
+    "识别受众真正等待回答的核心问题。尤其是‘为什么、为何、怎么会、为什么这样安排’类题目，必须把针对该人物、事件或决策的具体因果答案列为required reasoning资产；不能把一般工具作用或泛化启发冒充个案答案。证据只能支持归因表达时保留原因及来源边界；完全无法确认私人动机时，也要把‘可确认的安排目的’与‘不可确认的内心动机’列成必要边界。",
     "同时识别当前内容任务画像。按沟通目标、材料形态、必要深度、证据负荷、受众当前认知和决策复杂度判断；不得用账号名或素材库名代替任务类型。",
+    researchDecision ? "这是宽泛选题经过研究后的编辑决议。其‘创作方向、核心矛盾、主题锚点’拥有本轮立题权：必须把它们转成required的thesis/reasoning/evidence资产。可以抽象升华，但不得用家庭责任、风险意识、保障规划或现金流等上位概念替换具体事件、机制或矛盾。证据不足只限制具体断言，不得删除整个议题。" : "",
     "严格JSON：{taskMode:'source_adaptation'|'topic_creation'|'mixed_creation',originalThesis:string,userPositions:string[],attentionReason:string,entryMode:string,entryContent:string,reasoningChain:[{id,content,purpose}],mustKeepEvidence:[{id,content,purpose,status:'source'|'needs_verification'}],contentAssets:[{id,kind:'thesis'|'reasoning'|'evidence'|'case'|'boundary'|'audience_shift',meaning,function,importance:'required'|'supporting'|'optional',sourceStatus:'source'|'needs_verification',mayReframe:boolean}],intendedMindShift:string,authorPosition:string,tensionLevel:'low'|'medium'|'strong',voiceTraits:string[],uncertainClaims:string[],standaloneContext:{mode:'none'|'public_named'|'anonymized',requiredSubjects:string[],anonymousRoles:string[],eventSummary:string,eventAnchors:string[],openingSentenceWindow:number},taskProfile:{communicationGoal:string,materialShape:string[],requiredDepth:'light'|'medium'|'deep',evidenceLoad:'low'|'medium'|'high',audienceState:string,decisionComplexity:'low'|'medium'|'high'}}。数量由内容复杂度决定，不能为了简短漏掉必要资产。",
     "【输入素材】",
     source,
+    researchDecision ? `【研究后的选题决议】\n${researchDecision}` : "",
   ].join("\n\n");
 }
 
@@ -301,9 +304,10 @@ export function buildTrafficCopyCreativeBriefPrompt(input: PromptInput) {
   return [
     "你是所选创作教练，只重新立题和编排，不写正文。内容资产规定思想所有权，不规定原句、原钩子或原顺序。",
     "你的任务不是缩写原稿，也不是套方法卡。选择本次真正需要的资产，重新决定受众入口、论证顺序和结尾；required资产原则上必须覆盖，但可以换角度、换顺序、换案例讲法。supporting资产可用等价证据替换。",
-    "先根据taskProfile和内容资产列出真正未解决的contentGaps。方法是局部工具，可选0个或多个；每个候选方法必须绑定一个gap，并写清uniqueContribution和removalTest。删除方法后若核心判断、必要因果、关键顾虑、证据解释或认知变化都不受损，则necessary=false，绝对不能交给写作器。不得用‘更丰富、更专业、更有吸引力’证明必要性。",
+    "先根据taskProfile和内容资产列出真正未解决的contentGaps。若受众核心问题是‘为什么某人这样做/为什么事件这样发展’，contentGaps、workingThesis和reasoningPlan必须明确回答该个案因果；仅解释一般机制、泛化意义或普通家庭启发，视为未解决。可归因报道事实应保留来源边界后使用，不得仅因不能无条件直述就整段删除。方法是局部工具，可选0个或多个；每个候选方法必须绑定一个gap，并写清uniqueContribution和removalTest。删除方法后若核心判断、必要因果、关键顾虑、证据解释或认知变化都不受损，则necessary=false，绝对不能交给写作器。不得用‘更丰富、更专业、更有吸引力’证明必要性。",
     "只保留最小充分方法集。多个方法解决同一gap时只留贡献最直接的一项；原稿资产本身已完成该功能时不得再选方法。不得强制制造矛盾，不得把鲜明判断改成通用风险清单。",
     "必须设计独立表达：默认不用原稿钩子、不沿用完整段落顺序、不复制专属句子。至少从受众场景、问题入口、论证顺序、案例呈现、结尾落点中自然改变两项，但不能为了不同而牺牲语义。",
+    "当taskMode=topic_creation且原始输入只是人物名、热点名或宽泛找角度请求时，搜索编辑说明中的‘创作方向’和已选素材就是本轮立题依据。workingThesis必须点明该具体议题，正文不得绕开它退回通用家庭责任、保障意识或现金流教育。没有足够搜索依据时应明确内容缺口，而不是假装完成一个泛化选题。",
     "时长不先定单点。根据实际选择的核心判断、推理、证据和边界给出弹性区间；复杂内容可以自然达到3—6分钟。区间用于控制重复，不得用于删除必要资产。",
     `【任务权威】\n${JSON.stringify(authority)}`,
     `【内容资产包】\n${JSON.stringify(blueprint)}`,
@@ -449,9 +453,10 @@ export function buildTrafficCopyWritingPrompt(input: PromptInput & { brief: Traf
   const contract = compileTrafficPublicationContract(blueprint, input.brief);
   return [
     "你是口播写作者，不是第二个教练。只执行内容资产、权威和教练决策；不得重新选择立场，也不得把具体内容自动改成通用风险教育。",
-    "你正在替创作者本人生成可直接录制的口播。以创作者本人身份直接表达，不得在正文提及原稿、材料、输入、素材、内容资产、转写、提示词、任务或内部核验流程。作者观点直接说；外部事实只有在契约给出namedAttribution时才点名真实机构；conditional-or-omit只能条件化表达或省略，不能退回‘材料提到’。",
+    "你正在替创作者本人生成可直接录制的口播。以创作者本人身份直接表达，不得在正文提及原稿、材料、输入、素材、内容资产、转写、提示词、任务或内部核验流程。作者观点直接说；研究上下文标为‘可安全使用’的事实可直接表达，标为‘可归因表达’的事实必须自然保留‘据公开报道/据庭审报道/公开资料显示’等来源边界以及人物的‘担心、认为、希望’，不得升级成作者无条件定论。契约中的conditional-or-omit只能条件化表达或省略，不能退回‘材料提到’。",
+    "如果本题核心问题是‘为什么’，正文必须在前半段给出针对该人物、事件或决策的具体因果链，再解释一般机制和普通人的启发。不得只说工具有什么作用、安排有什么意义，让观众自己猜个案为什么这样做。若私人内心动机无法确认，要明确说‘能确认的是……；不能确认的是……’，但仍回答公开安排所体现的直接目的。",
     "你看不到完整原稿和权限账本，这是有意的：保留思想和证据功能，但必须独立完成句子、钩子、段落顺序和案例讲法。不得虚构创作者经历，不得照抄专属句子。",
-    "durationRange由系统按本题信息量自动计算，不是手动时长档位。先完整覆盖required资产、必要推理和边界，再遵守stoppingRule；preferredCharacters上限是停止边界，除非required资产确实无法容纳，否则不得超过。每个段落必须新增推理、证据、顾虑、边界或认知推进；不得展示未入选方法，不得重复完成同一contentGap。",
+    "durationRange由系统按本题信息量自动计算，不是手动时长档位。先完整覆盖required资产、必要推理和边界，再遵守stoppingRule；正文应落在preferredCharacters区间内。低于下限通常意味着具体议题、机制解释或必要推理尚未完成；高于上限则应压缩重复。每个段落必须新增推理、证据、顾虑、边界或认知推进；不得展示未入选方法，不得重复完成同一contentGap。",
     "Persona、创作者身份、服务对象和内容定位只用于控制立场与声纹，不是可写进正文的素材。不得自我介绍、复述身份画像或说‘作为某类创作者/顾问’；直接进入本题观点。",
     "如果成稿契约的standaloneContext不是none，必须在指定的openingSentenceWindow内让观众知道核心主体或匿名角色关系以及最小事件背景。允许第一句制造悬念，不要求机械地把所有名字塞进第一句；不得通篇只写‘这件事、这起争议、一方、另一方’而让受众不知道在讲谁。点名只用于识别已公开事件，不得借点名作未经证实的定性。",
     `【成稿契约】\n${JSON.stringify(contract)}`,
@@ -522,7 +527,11 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
   let reductionNeeded = audit.reductionNeeded;
   let reductionPlan = [...audit.reductionPlan];
   const maximumCharacters = options?.brief?.durationRange.preferredCharacters[1];
+  const minimumCharacters = options?.brief?.durationRange.preferredCharacters[0];
   const actualCharacters = Array.from(draft.replace(/\s/g, "")).length;
+  if (minimumCharacters && actualCharacters < Math.round(minimumCharacters * 0.85)) {
+    issues.push({ severity:"blocking",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:`低于本题信息量下限${minimumCharacters}字，通常表示具体议题、机制解释或必要推理没有展开完整。`,allowedFix:`只补足required资产、核心机制和缺失推理，使正文达到至少${minimumCharacters}字；不得用重复观点或空泛口号凑字数。` });
+  }
   if (maximumCharacters && actualCharacters > Math.round(maximumCharacters * 1.1)) {
     reductionNeeded = true;
     reductionPlan = [...reductionPlan, `在不删除required资产、必要证据和边界的前提下，将重复解释和同功能段落压缩到${maximumCharacters}字左右。`];
@@ -560,7 +569,7 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
 export function buildTrafficCopyAuditPrompt(input: { source: string; draft: string; blueprint: TrafficSourceBlueprint; authority: TrafficAuthority; brief: TrafficCopyCreativeBrief; context: string[] }) {
   const deterministicSimilarity = measureTrafficExpressionSimilarity(input.source, input.draft);
   return [
-    "你是双向检查器，不负责润色，也不能把鲜明观点改成中性模板。必须同时检查：A语义是否遗漏或越权；B表达是否过度接近原稿。",
+    "你是双向检查器，不负责润色，也不能把鲜明观点改成中性模板。必须同时检查：A语义是否遗漏或越权；B表达是否过度接近原稿；C研究选定的具体事件、机制和核心矛盾是否被保留并解释。若正文只是提到主题名，随后退回可套用于任何热点的家庭责任、风险意识、保障规划或现金流教育，必须以generic_topic_fallback阻断。若题目核心好奇是‘为什么某人这样做/为何这样安排’，正文只解释一般工具机制、没有给出该个案的具体因果链，必须以core_question_unanswered阻断；可归因事实已经提供却因过度保守被全部省略，也属于该问题。",
     "语义侧只硬阻断：required资产遗漏、核心立场改变、事实无支持、未授权财富迁移/CTA、无条件收益保证、结构残缺。needs_verification未写入不算遗漏。",
     "减负侧检查但不得改观点：逐段标注功能；若多个方法解决同一gap、段落没有新增推理/证据/顾虑/边界/认知推进、或超出structureBudget的单元没有必要语义资产，则reductionNeeded=true。长不等于过载，围绕同一主题但功能不同不算重复。必须给出可直接删除或合并的最小reductionPlan。",
     "表达侧检查：是否复用原钩子、连续专属句、基本相同的完整段落顺序。共同术语、产品名、数字和不可替代事实不算抄袭。只有明显复制表达实现时blocking。",

@@ -1,6 +1,6 @@
 import { executeCreationAppRun, RetryableCreationRunError } from "@/lib/creation/execute-app-run";
 import type { CreationFieldValue } from "@/lib/creation/output";
-import { getCreationUserError } from "@/lib/creation/errors";
+import { getCreationUserError, shouldRetryCreationError } from "@/lib/creation/errors";
 import { trySaveAppRunProgress } from "@/lib/db/repositories";
 import { TRAFFIC_COPY_INITIAL_PROGRESS } from "@/lib/creation/work-generation-progress";
 
@@ -205,10 +205,10 @@ async function runBackgroundWorkAttempt(input: {
   } catch (error) {
     const shouldRetry =
       error instanceof RetryableCreationRunError &&
-      input.retryAttempt < MAX_BACKGROUND_RETRIES;
+      shouldRetryCreationError(error, input.retryAttempt, MAX_BACKGROUND_RETRIES);
 
     if (shouldRetry) {
-      console.warn("background work run retrying once after retryable image failure", {
+      console.warn("background work run retrying after retryable generation failure", {
         workId: input.workId,
         slug: input.slug,
         userId: input.userId,
@@ -220,6 +220,11 @@ async function runBackgroundWorkAttempt(input: {
         retryAttempt: input.retryAttempt + 1,
       });
     }
+
+    // Retryable failures intentionally stay silent while recovery is still in
+    // progress. Once attempts are exhausted, make the failure visible to the
+    // current stream instead of leaving an empty completed-looking page.
+    await input.onEvent({ type: "error", content: getCreationUserError(error) });
 
     console.error("background work run failed", {
       workId: input.workId,

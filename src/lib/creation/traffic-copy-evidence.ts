@@ -42,6 +42,11 @@ export type TrafficMaterialBrief = {
   corrections: string[];
   selectedMaterialIndexes: number[];
   creativeDirection: string;
+  centralTension: string;
+  requiredTopicAnchors: string[];
+  safeFacts: string[];
+  attributedFacts: string[];
+  doNotClaim: string[];
 };
 
 type EvidenceSearchResult = {
@@ -336,12 +341,20 @@ export function buildTrafficMaterialBriefPrompt(source: string, searchMaterials:
     "你是同一个内容创作Agent的编辑判断阶段。阅读原稿和搜索返回的补充素材，为下一阶段创作者做一份简短编辑说明；不写口播成稿。",
     "你需要自主判断：原稿哪些核心逻辑值得保留；搜索结果与原稿是否存在明确事实冲突；哪些搜索素材真正能让内容更准确或更有分析力；最后给出一个创作方向。",
     "只有搜索结果与原稿在同一事实、时间、数字或口径上明确矛盾时，才写入corrections。搜索没有覆盖或不够充分，不等于原稿错误；不要为了安全删空原稿逻辑。素材不改写、不概括成新断言：从候选【素材#N】中最多选择3个编号，让下游创作者直接阅读其原始摘要和边界。",
+    "如果原稿只是人物名、热点名或‘很火/找角度/怎么写’这类宽泛请求，搜索不是可选装饰。必须从搜索结果中识别当前讨论最集中、与该人物或事件直接相关的唯一具体议题；selectedMaterialIndexes 至少选择1个直接相关素材，creativeDirection 必须写出该具体议题及内容切口，centralTension写清本题独有矛盾，requiredTopicAnchors列出正文必须实质解释的2—5个短概念。禁止退回‘家庭责任、风险意识、长期规划、现金流’等可以套在任何热点上的泛化方向。",
+    "事实可信度与选题可用性分开判断。官方文件、判决、当事人原话或高可信来源支持的事实放入safeFacts，可直接表达。两个以上相互独立来源一致报道，或媒体明确转述庭审、判决、文件、证人证言的关键原因，即使来源等级不高，也不要一律禁写：放入attributedFacts，写成‘据公开报道/据庭审报道/公开资料显示’，保留‘担心、认为、希望’等动机归属，不把报道推断升级成作者定论。只有单一匿名说法、来源互相转载而非独立印证、相互冲突、摘要本身含猜测或高风险法律结论，才放入doNotClaim。",
+    "若核心好奇是‘为什么这样做/为何如此安排/背后原因是什么’，编辑说明必须给出具体因果答案。证据只能支持归因表达时，就用attributedFacts回答；确实不足时，creativeDirection必须要求正文区分‘可确认的安排目的’和‘不能确认的私人动机’。不得用通用机制科普替代核心因果，也不得通过删除整个具体议题来规避局部事实风险。",
     "只返回JSON，不要Markdown：",
     JSON.stringify({
       keepFromSource: ["原稿中应保留的核心问题或洞察"],
       corrections: ["只有明确冲突时才填写；没有则为空数组"],
       selectedMaterialIndexes: [1, 2],
       creativeDirection: "用一句话说明如何把原稿与素材组织为独立口播",
+      centralTension: "本题独有、不能被通用保险话术替代的矛盾",
+      requiredTopicAnchors: ["必须解释的具体事件或机制"],
+      safeFacts: ["可以公开使用的最小事实或带归因表述"],
+      attributedFacts: ["多来源或庭审报道支撑、必须带来源边界使用的事实或人物动机"],
+      doNotClaim: ["证据不足、不得写成确定事实的细节"],
     }),
     "【原稿】",
     source,
@@ -364,9 +377,14 @@ export function parseTrafficMaterialBrief(raw: string): TrafficMaterialBrief {
       corrections: list(value.corrections, 4),
       selectedMaterialIndexes,
       creativeDirection: typeof value.creativeDirection === "string" ? value.creativeDirection.trim().slice(0, 400) : "围绕原稿的核心矛盾，结合真正有用的补充素材重新组织口播。",
+      centralTension: typeof value.centralTension === "string" ? value.centralTension.trim().slice(0, 400) : "",
+      requiredTopicAnchors: list(value.requiredTopicAnchors, 5),
+      safeFacts: list(value.safeFacts, 6),
+      attributedFacts: list(value.attributedFacts, 6),
+      doNotClaim: list(value.doNotClaim, 6),
     };
   } catch {
-    return { keepFromSource: [], corrections: [], selectedMaterialIndexes: [], creativeDirection: "围绕原稿的核心矛盾重新组织口播。" };
+    return { keepFromSource: [], corrections: [], selectedMaterialIndexes: [], creativeDirection: "围绕原稿的核心矛盾重新组织口播。", centralTension: "", requiredTopicAnchors: [], safeFacts: [], attributedFacts: [], doNotClaim: [] };
   }
 }
 
@@ -386,6 +404,11 @@ export function formatTrafficMaterialBrief(brief: TrafficMaterialBrief, candidat
       `使用边界：${source.materialReason || "仅在能增强本题判断时使用，不推导摘要未支持的结论。"}`,
     ].join("\n"))] : []),
     `创作方向：${brief.creativeDirection}`,
+    ...(brief.centralTension ? [`核心矛盾：${brief.centralTension}`] : []),
+    ...(brief.requiredTopicAnchors.length ? [`必须实质解释的主题锚点：${brief.requiredTopicAnchors.join("、")}`] : []),
+    ...(brief.safeFacts.length ? ["可安全使用的最小事实：", ...brief.safeFacts.map((item) => `- ${item}`)] : []),
+    ...(brief.attributedFacts.length ? ["可归因表达的报道事实（必须保留‘据公开报道/据庭审报道/公开资料显示’等来源边界）：", ...brief.attributedFacts.map((item) => `- ${item}`)] : []),
+    ...(brief.doNotClaim.length ? ["不得写成确定事实：", ...brief.doNotClaim.map((item) => `- ${item}`)] : []),
     "请把原稿与以上素材自然融合。素材 Chunk 是供判断和表达使用的原始片段，不要逐条复述、不要展示来源或这份说明，也不要把摘要未支持的推断写成事实。",
   ].join("\n");
 }

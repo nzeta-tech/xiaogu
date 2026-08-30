@@ -19,6 +19,9 @@ export function getCreationUserError(error: unknown, fallback = DEFAULT_CREATION
   if (/429|rate.?limit|请求过多|繁忙/.test(normalized)) {
     return "当前生成服务请求较多，暂时没有完成这次创作。请稍等片刻后重试，输入内容不会丢失。";
   }
+  if (/fetch failed|failed to fetch|network|econnreset|econnrefused|enotfound|socket|connection reset|连接中断|网络/.test(normalized)) {
+    return "生成服务连接中断，因此这次创作没有完成。系统会自动重试临时故障；如果仍然失败，请稍后再试。";
+  }
   if (/大模型服务调用失败|gemini 调用失败|status\s*5\d\d|服务不可用/.test(normalized)) {
     return "生成服务暂时没有正常响应，因此这次创作没有完成。请稍后重试；如果仍然失败，请联系管理员检查模型服务状态。";
   }
@@ -30,6 +33,16 @@ export function getCreationUserError(error: unknown, fallback = DEFAULT_CREATION
   }
   if (/图片生成失败/.test(message)) return message;
   return message === "内容生成失败" || message === "创建作品失败" ? fallback : message;
+}
+
+/** Whether retrying the same generation can reasonably recover without user changes. */
+export function isRetryableCreationError(error: unknown) {
+  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error ?? "");
+  return /fetch failed|failed to fetch|network|econnreset|econnrefused|enotfound|socket|connection reset|abort|timeout|timed out|429|rate.?limit|status\s*5\d\d|服务不可用|繁忙|超时|连接中断/i.test(message);
+}
+
+export function shouldRetryCreationError(error: unknown, attempt: number, maximumRetries = 2) {
+  return Number.isInteger(attempt) && attempt >= 0 && attempt < maximumRetries && isRetryableCreationError(error);
 }
 
 export const CREATION_NETWORK_ERROR = "没有收到创作服务的回应，可能是网络中断或服务暂时不可用。请检查网络后重试，已填写内容会保留。";
