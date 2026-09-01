@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
 import { safeAuthRedirect } from "@/lib/auth/redirect";
+import { confirmAuthSession } from "@/lib/client/auth-session-confirmation";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import ReactMarkdown from "react-markdown";
 
@@ -88,6 +89,13 @@ export function AuthForm({
       if (response.ok) {
         if (payload.requiresEmailVerification) {
           setError(payload.emailSent === false ? "账号已创建，但验证邮件发送失败，请联系管理员或稍后重发。" : "验证邮件已发送，请完成邮箱验证后登录。");
+          return;
+        }
+        const sessionConfirmation = await confirmAuthSession(apiPath("/api/auth/session-check"));
+        if (sessionConfirmation !== "confirmed") {
+          setError(sessionConfirmation === "unavailable"
+            ? "登录已验证，但暂时无法确认登录状态，请检查网络后重试。"
+            : "登录已验证，但当前浏览器未能保存登录状态。请重试；如仍反复返回登录页，请复制链接到 Safari 或 Chrome 打开。");
           return;
         }
         const destination = safeAuthRedirect(nextPath);
