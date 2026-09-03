@@ -1,7 +1,7 @@
 export type TrafficTaskMode = "source_adaptation" | "topic_creation" | "mixed_creation";
 
 export type TrafficAuthority = {
-  factAuthority: "source-and-verified-search";
+  factAuthority: "material-and-coach";
   contentAuthority: "source" | "user" | "coach";
   positionOwner: "source" | "user" | "coach";
   voiceOwner: "coach";
@@ -131,6 +131,7 @@ export type TrafficCopyAudit = {
   repeatedFunctions: string[];
   excessStructureUnits: string[];
   reductionPlan: string[];
+  topicFulfillment: { score: number; coreQuestion: number; humanTension: number; titlePromise: number; thesis: number; audience: number; mechanism: number };
 };
 
 export type TrafficPublicationContract = {
@@ -140,7 +141,7 @@ export type TrafficPublicationContract = {
   standaloneContext: TrafficSourceBlueprint["standaloneContext"];
   requiredUnits: Array<{ meaning: string; function: string }>;
   optionalUnits: Array<{ meaning: string; function: string }>;
-  allowedClaims: Array<{ statement: string; purpose: string; expressionMode: "direct" | "conditional-or-omit"; namedAttribution: string | null }>;
+  allowedClaims: Array<{ statement: string; purpose: string; expressionMode: "direct" | "attributed" | "conditional" | "blocked"; namedAttribution: string | null }>;
   methodDirectives: Array<{ method: string; targetGap: string; uniqueContribution: string }>;
   expressionPlan: TrafficCopyCreativeBrief["expressionPlan"];
   voicePlan: TrafficCopyCreativeBrief["voicePlan"];
@@ -185,25 +186,65 @@ const sourceFocus = (source: string) => source.match(/(?:^|\n)标题[：:]\s*([^
   || "输入主题";
 
 export function authorityForTrafficTask(mode: TrafficTaskMode): TrafficAuthority {
+  void mode;
   return {
-    factAuthority: "source-and-verified-search",
-    contentAuthority: mode === "topic_creation" ? "coach" : mode === "mixed_creation" ? "user" : "source",
-    positionOwner: mode === "topic_creation" ? "coach" : mode === "mixed_creation" ? "user" : "source",
+    factAuthority: "material-and-coach",
+    contentAuthority: "coach",
+    positionOwner: "coach",
     voiceOwner: "coach",
+  };
+}
+
+function mergeUniqueByMeaning<T extends { id: string }>(first: T[], second: T[], meaning: (item: T) => string, limit: number) {
+  const output: T[] = [];
+  const seen = new Set<string>();
+  for (const item of [...first, ...second]) {
+    const key = meaning(item).replace(/\s+/g, "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(output.some((candidate) => candidate.id === item.id) ? { ...item, id: `${item.id}-${output.length + 1}` } : item);
+    if (output.length >= limit) break;
+  }
+  return output;
+}
+
+/** Research may enrich a blueprint, but it must never erase source/user-owned required assets. */
+export function mergeTrafficSourceBlueprint(base: TrafficSourceBlueprint, researched: TrafficSourceBlueprint): TrafficSourceBlueprint {
+  const standalone = base.standaloneContext.mode !== "none" || researched.standaloneContext.mode === "none"
+    ? {
+        ...researched.standaloneContext,
+        mode: base.standaloneContext.mode,
+        requiredSubjects: [...new Set([...base.standaloneContext.requiredSubjects, ...researched.standaloneContext.requiredSubjects])].slice(0, 8),
+        anonymousRoles: [...new Set([...base.standaloneContext.anonymousRoles, ...researched.standaloneContext.anonymousRoles])].slice(0, 8),
+        eventSummary: [base.standaloneContext.eventSummary, researched.standaloneContext.eventSummary].filter(Boolean).join("；").slice(0, 600),
+        eventAnchors: [...new Set([...base.standaloneContext.eventAnchors, ...researched.standaloneContext.eventAnchors])].slice(0, 6),
+        openingSentenceWindow: Math.max(base.standaloneContext.openingSentenceWindow, researched.standaloneContext.openingSentenceWindow),
+      }
+    : researched.standaloneContext;
+  return {
+    ...researched,
+    taskMode: base.taskMode === "topic_creation" ? researched.taskMode : base.taskMode,
+    originalThesis: base.originalThesis || researched.originalThesis,
+    userPositions: [...new Set([...base.userPositions, ...researched.userPositions])].slice(0, 10),
+    authorPosition: base.authorPosition || researched.authorPosition,
+    reasoningChain: mergeUniqueByMeaning(base.reasoningChain, researched.reasoningChain, (item) => item.content, 16),
+    mustKeepEvidence: mergeUniqueByMeaning(base.mustKeepEvidence, researched.mustKeepEvidence, (item) => item.content, 24),
+    contentAssets: mergeUniqueByMeaning(base.contentAssets, researched.contentAssets, (item) => item.meaning, 30),
+    uncertainClaims: [...new Set([...base.uncertainClaims, ...researched.uncertainClaims])].slice(0, 16),
+    standaloneContext: standalone,
   };
 }
 
 export function buildTrafficSourceBlueprintPrompt(source: string, researchDecision = "") {
   return [
     "你是内容资产提取器，只理解语义，不创作、不润色、不复刻句子。判断输入主要是原稿、主题材料，还是事实加用户立场；该判断只用于内部权威分配。",
-    "把原稿拆成思想与信息资产，而不是保存原句和原段落：核心判断、必要推理、关键证据、案例功能、条件边界、希望受众发生的认知变化。自动转写错字和断句只按语义理解。",
-    "contentAssets 每项只写可迁移的语义，不摘抄长句；required 表示删除后核心判断不成立，supporting 表示可替换为等价证据，optional 表示可舍弃。mayReframe 表示可改变呈现角度或顺序，但不得反转原立场。",
-    "原稿中的数字、案例和产品机制先标为source；只有明显属于时效预测、外部排名或无法从原稿确认的断言才标needs_verification。不得因为需要改写就删除具体信息。",
-    "如果输入是新闻、人物事件或具体案例，事件核心主体名称和最小事件背景属于required资产：必须提取主体是谁、发生了什么以及当前事实边界，不能只保留抽象道理。同时填写standaloneContext。公开事件用public_named，并只把理解事件不可缺少的公开主体放入requiredSubjects；隐私案例用anonymized，并用anonymousRoles保存可公开的角色关系；普通观点用none。eventAnchors填写2至6个表达最小事件背景所必需、允许原样出现的短关键词，不放同义替换困难的完整句子。openingSentenceWindow默认3，允许首句悬念，但必须在窗口内落地主体和事件。",
-    "识别受众真正等待回答的核心问题。尤其是‘为什么、为何、怎么会、为什么这样安排’类题目，必须把针对该人物、事件或决策的具体因果答案列为required reasoning资产；不能把一般工具作用或泛化启发冒充个案答案。证据只能支持归因表达时保留原因及来源边界；完全无法确认私人动机时，也要把‘可确认的安排目的’与‘不可确认的内心动机’列成必要边界。",
+    "把原稿拆成思想与信息资产，而不是保存原句和原段落：核心判断、推理、事件节点、人物关系、争议、案例功能和希望受众发生的认知变化。自动转写错字和断句只按语义理解。",
+    "contentAssets只记录可能激发创作的判断、故事、事实、冲突和洞察；importance只是内容价值参考，不是正文必须逐项覆盖的清单。mayReframe表示教练可以自由改变呈现角度或顺序。",
+    "新闻、人物事件或案例要提取真正有传播价值的人物、事件、关系、反差和争议，供教练选择使用。standaloneContext只提供背景参考，不规定必须在第几句出现。",
+    "识别受众真正等待回答的核心问题。尤其是‘为什么’类题目，要提供素材能够激发的因果、人性和决策解释，不强制使用固定的归因句式或边界声明。",
     "同时识别当前内容任务画像。按沟通目标、材料形态、必要深度、证据负荷、受众当前认知和决策复杂度判断；不得用账号名或素材库名代替任务类型。",
-    researchDecision ? "这是宽泛选题经过研究后的编辑决议。其‘创作方向、核心矛盾、主题锚点’拥有本轮立题权：必须把它们转成required的thesis/reasoning/evidence资产。可以抽象升华，但不得用家庭责任、风险意识、保障规划或现金流等上位概念替换具体事件、机制或矛盾。证据不足只限制具体断言，不得删除整个议题。" : "",
-    "严格JSON：{taskMode:'source_adaptation'|'topic_creation'|'mixed_creation',originalThesis:string,userPositions:string[],attentionReason:string,entryMode:string,entryContent:string,reasoningChain:[{id,content,purpose}],mustKeepEvidence:[{id,content,purpose,status:'source'|'needs_verification'}],contentAssets:[{id,kind:'thesis'|'reasoning'|'evidence'|'case'|'boundary'|'audience_shift',meaning,function,importance:'required'|'supporting'|'optional',sourceStatus:'source'|'needs_verification',mayReframe:boolean}],intendedMindShift:string,authorPosition:string,tensionLevel:'low'|'medium'|'strong',voiceTraits:string[],uncertainClaims:string[],standaloneContext:{mode:'none'|'public_named'|'anonymized',requiredSubjects:string[],anonymousRoles:string[],eventSummary:string,eventAnchors:string[],openingSentenceWindow:number},taskProfile:{communicationGoal:string,materialShape:string[],requiredDepth:'light'|'medium'|'deep',evidenceLoad:'low'|'medium'|'high',audienceState:string,decisionComplexity:'low'|'medium'|'high'}}。数量由内容复杂度决定，不能为了简短漏掉必要资产。",
+    researchDecision ? "研究后的编辑材料是创作参考。提取其中最有价值的事件、矛盾、人物关系和观点，让教练自行决定保留、重组、放大或舍弃。" : "",
+    "不要生成核验意见、风险边界、禁止表达、待确认事项或免责声明。严格JSON：{taskMode:'source_adaptation'|'topic_creation'|'mixed_creation',originalThesis:string,userPositions:string[],attentionReason:string,entryMode:string,entryContent:string,reasoningChain:[{id,content,purpose}],contentAssets:[{id,kind:'thesis'|'reasoning'|'evidence'|'case'|'audience_shift',meaning,function,importance:'required'|'supporting'|'optional',mayReframe:boolean}],intendedMindShift:string,authorPosition:string,tensionLevel:'low'|'medium'|'strong',voiceTraits:string[],standaloneContext:{mode:'none'|'public_named'|'anonymized',requiredSubjects:string[],anonymousRoles:string[],eventSummary:string,eventAnchors:string[],openingSentenceWindow:number},taskProfile:{communicationGoal:string,materialShape:string[],requiredDepth:'light'|'medium'|'deep',evidenceLoad:'low'|'medium'|'high',audienceState:string,decisionComplexity:'low'|'medium'|'high'}}。",
     "【输入素材】",
     source,
     researchDecision ? `【研究后的选题决议】\n${researchDecision}` : "",
@@ -218,7 +259,7 @@ export function parseTrafficSourceBlueprint(raw: string, source: string): Traffi
       : source.length > 500 ? "source_adaptation" : "topic_creation";
     const taskMode = isStructuredTopicInput(source) ? "topic_creation" : modelMode;
     const focus = sourceFocus(source);
-    const contentAssets = objectList(value.contentAssets).map((item, index): TrafficContentAsset => ({
+    const contentAssets = objectList(value.contentAssets).filter((item) => item.kind !== "boundary").map((item, index): TrafficContentAsset => ({
       id: cleanText(item.id, 40) || `a${index + 1}`,
       kind: assetKinds.includes(item.kind as typeof assetKinds[number]) ? item.kind as TrafficContentAsset["kind"] : "reasoning",
       meaning: cleanText(item.meaning, 1200),
@@ -239,13 +280,13 @@ export function parseTrafficSourceBlueprint(raw: string, source: string): Traffi
       entryMode: entryModes.includes(value.entryMode as typeof entryModes[number]) ? value.entryMode as TrafficSourceBlueprint["entryMode"] : "观点",
       entryContent: cleanText(value.entryContent, 700) || focus,
       reasoningChain: objectList(value.reasoningChain).map((item, index) => ({ id: cleanText(item.id, 40) || `r${index + 1}`, content: cleanText(item.content, 1000), purpose: cleanText(item.purpose, 400) })).filter((item) => item.content).slice(0, 16),
-      mustKeepEvidence: objectList(value.mustKeepEvidence).map((item, index): SourceBlueprintEvidence => ({ id: cleanText(item.id, 40) || `s${index + 1}`, content: cleanText(item.content, 1000), purpose: cleanText(item.purpose, 400), status: item.status === "needs_verification" ? "needs_verification" : "source" })).filter((item) => item.content).slice(0, 24),
+      mustKeepEvidence: [],
       contentAssets,
       intendedMindShift: cleanText(value.intendedMindShift, 800),
       authorPosition: taskMode === "topic_creation" ? "" : cleanText(value.authorPosition, 1000) || originalThesis,
       tensionLevel: ["low", "medium", "strong"].includes(String(value.tensionLevel)) ? value.tensionLevel as TrafficSourceBlueprint["tensionLevel"] : "medium",
       voiceTraits: stringList(value.voiceTraits, 12),
-      uncertainClaims: stringList(value.uncertainClaims, 16),
+      uncertainClaims: [],
       standaloneContext: parseStandaloneContext(value.standaloneContext),
       taskProfile: parseTaskProfile(value.taskProfile),
     };
@@ -302,20 +343,17 @@ export function buildTrafficCopyCreativeBriefPrompt(input: PromptInput) {
   const blueprint = input.blueprint ?? fallbackTrafficSourceBlueprint(input.source);
   const authority = input.authority ?? authorityForTrafficTask(blueprint.taskMode);
   return [
-    "你是所选创作教练，只重新立题和编排，不写正文。内容资产规定思想所有权，不规定原句、原钩子或原顺序。",
-    "你的任务不是缩写原稿，也不是套方法卡。选择本次真正需要的资产，重新决定受众入口、论证顺序和结尾；required资产原则上必须覆盖，但可以换角度、换顺序、换案例讲法。supporting资产可用等价证据替换。",
-    "先根据taskProfile和内容资产列出真正未解决的contentGaps。若受众核心问题是‘为什么某人这样做/为什么事件这样发展’，contentGaps、workingThesis和reasoningPlan必须明确回答该个案因果；仅解释一般机制、泛化意义或普通家庭启发，视为未解决。可归因报道事实应保留来源边界后使用，不得仅因不能无条件直述就整段删除。方法是局部工具，可选0个或多个；每个候选方法必须绑定一个gap，并写清uniqueContribution和removalTest。删除方法后若核心判断、必要因果、关键顾虑、证据解释或认知变化都不受损，则necessary=false，绝对不能交给写作器。不得用‘更丰富、更专业、更有吸引力’证明必要性。",
-    "只保留最小充分方法集。多个方法解决同一gap时只留贡献最直接的一项；原稿资产本身已完成该功能时不得再选方法。不得强制制造矛盾，不得把鲜明判断改成通用风险清单。",
-    "必须设计独立表达：默认不用原稿钩子、不沿用完整段落顺序、不复制专属句子。至少从受众场景、问题入口、论证顺序、案例呈现、结尾落点中自然改变两项，但不能为了不同而牺牲语义。",
-    "当taskMode=topic_creation且原始输入只是人物名、热点名或宽泛找角度请求时，搜索编辑说明中的‘创作方向’和已选素材就是本轮立题依据。workingThesis必须点明该具体议题，正文不得绕开它退回通用家庭责任、保障意识或现金流教育。没有足够搜索依据时应明确内容缺口，而不是假装完成一个泛化选题。",
-    "时长不先定单点。根据实际选择的核心判断、推理、证据和边界给出弹性区间；复杂内容可以自然达到3—6分钟。区间用于控制重复，不得用于删除必要资产。",
+    "你就是所选创作教练。基于用户素材、搜索参考和你的Skill，自由决定这篇口播真正值得讲什么、对谁讲、从哪里切入、怎样推进以及停在哪里。",
+    "内容资产、任务画像和候选方法都只是灵感材料，不是检查清单。你可以选择、组合、改写或舍弃，也可以形成素材中隐含但没有直接写出的判断。",
+    "优先追求人性洞察、传播欲、鲜明判断和自然口语。不要主动生成免责声明、核验说明、风险清单或四平八稳的正反两面，除非这正是你认为最有力量的表达。",
+    "根据内容需要自然决定篇幅、结构和节奏，不受固定开头、段落顺序、CTA、时长或停止规则限制。",
     `【任务权威】\n${JSON.stringify(authority)}`,
     `【内容资产包】\n${JSON.stringify(blueprint)}`,
     input.context?.length ? `【搜索与补充材料】\n${input.context.join("\n")}` : "",
     input.promptHint ? `【应用目标】\n${input.promptHint}` : "",
     input.creatorSkill ? `【教练能力与方法目录】\n${input.creatorSkill}` : "【默认教练】使用基础创作判断。",
     input.coachSkill ? `【定位与增长边界】\n${input.coachSkill}` : "",
-    "严格JSON：{worthCreating,topicRelation:'strong'|'weak'|'none',wealthMigration,audience,attentionReason,entryMode,entryContent,workingThesis,preserveOriginalThesis,contentGaps:[{id,description,consequenceIfUnresolved}],reasoningPlan:[{id,purpose,evidenceIds}],selectedAssetIds:string[],mustKeepEvidenceIds:string[],selectedMethods:[{methodId,purpose,appliesTo,targetGap,uniqueContribution,removalTest,necessary:boolean}],stoppingRule:string,structureBudget:{requiredUnits:number,allowedFunctions:string[]},durationRange:{preferredSeconds:[min,max],preferredCharacters:[min,max]},durationBasis:{coreClaims,reasoningSteps,evidenceUnits,boundaryUnits},durationRationale,endingMode:'观点停留'|'行动提醒'|'资料承接'|'不承接',endingRationale,voicePlan:{tension,rhythm,stance},expressionPlan:{newEntry,newOrder:string[],changedDimensions:string[],avoidSourcePhrases:string[]},forbiddenMoves:string[]}。",
+    "不要生成内容缺口、核验意见、停止规则、禁止表达或应回避的原句。严格JSON：{worthCreating,topicRelation:'strong'|'weak'|'none',wealthMigration,audience,attentionReason,entryMode,entryContent,workingThesis,preserveOriginalThesis,reasoningPlan:[{id,purpose,evidenceIds}],selectedAssetIds:string[],selectedMethods:[{methodId,purpose,appliesTo,targetGap,uniqueContribution,removalTest,necessary:boolean}],durationRange:{preferredSeconds:[min,max],preferredCharacters:[min,max]},durationBasis:{coreClaims,reasoningSteps,evidenceUnits,boundaryUnits},durationRationale,endingMode:'观点停留'|'行动提醒'|'资料承接'|'不承接',endingRationale,voicePlan:{tension,rhythm,stance},expressionPlan:{newEntry,newOrder:string[],changedDimensions:string[]}}。",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -330,7 +368,7 @@ export function parseTrafficCopyCreativeBrief(raw: string): TrafficCopyCreativeB
     const preferredCharacters = numericRange(durationRangeValue.preferredCharacters, [300, 700], 120, 3000);
     const reasoningPlan = objectList(value.reasoningPlan).map((item, index) => ({ id: cleanText(item.id, 40) || `p${index + 1}`, purpose: cleanText(item.purpose, 600), evidenceIds: stringList(item.evidenceIds, 24) })).filter((item) => item.purpose).slice(0, 20);
     const selectedMethods = objectList(value.selectedMethods).map((item) => ({ methodId: cleanText(item.methodId, 120), purpose: cleanText(item.purpose, 400), appliesTo: cleanText(item.appliesTo, 160), targetGap: cleanText(item.targetGap, 120), uniqueContribution: cleanText(item.uniqueContribution, 500), removalTest: cleanText(item.removalTest, 500), necessary: item.necessary === true })).filter((item) => item.methodId && item.necessary && item.targetGap && item.uniqueContribution && item.removalTest).slice(0, 8);
-    const contentGaps = objectList(value.contentGaps).map((item, index) => ({ id: cleanText(item.id, 40) || `g${index + 1}`, description: cleanText(item.description, 500), consequenceIfUnresolved: cleanText(item.consequenceIfUnresolved, 500) })).filter((item) => item.description).slice(0, 12);
+    const contentGaps: TrafficCopyCreativeBrief["contentGaps"] = [];
     const structureBudgetValue = value.structureBudget && typeof value.structureBudget === "object" && !Array.isArray(value.structureBudget) ? value.structureBudget as Record<string, unknown> : {};
     const workingThesis = cleanText(value.workingThesis, 1000) || cleanText(value.coreClaim, 1000) || "围绕内容资产形成具体判断";
     const relation = ["strong", "weak", "none"].includes(String(value.topicRelation)) ? value.topicRelation as TrafficCopyCreativeBrief["topicRelation"] : "weak";
@@ -349,7 +387,7 @@ export function parseTrafficCopyCreativeBrief(raw: string): TrafficCopyCreativeB
       secondaryMethod: selectedMethods[1]?.methodId ?? null,
       structure: reasoningPlan.map((item) => item.purpose),
       endingMode,
-      forbiddenMoves: stringList(value.forbiddenMoves, 16),
+      forbiddenMoves: [],
       voice: { openingMode: cleanText(value.entryMode), reasoningTone: cleanText(voicePlan.stance), sentenceRhythm: cleanText(voicePlan.rhythm), endingTone: cleanText(value.endingRationale), avoid: [] },
       targetSeconds,
       targetCharacters,
@@ -360,7 +398,7 @@ export function parseTrafficCopyCreativeBrief(raw: string): TrafficCopyCreativeB
       preserveOriginalThesis: value.preserveOriginalThesis !== false,
       reasoningPlan,
       selectedAssetIds: stringList(value.selectedAssetIds, 30),
-      mustKeepEvidenceIds: stringList(value.mustKeepEvidenceIds, 24),
+      mustKeepEvidenceIds: [],
       selectedMethods,
       durationRange: { preferredSeconds, preferredCharacters },
       durationBasis: {
@@ -376,10 +414,10 @@ export function parseTrafficCopyCreativeBrief(raw: string): TrafficCopyCreativeB
         newEntry: cleanText(expressionPlan.newEntry, 600),
         newOrder: stringList(expressionPlan.newOrder, 16),
         changedDimensions: stringList(expressionPlan.changedDimensions, 8),
-        avoidSourcePhrases: stringList(expressionPlan.avoidSourcePhrases, 12),
+        avoidSourcePhrases: [],
       },
       contentGaps,
-      stoppingRule: cleanText(value.stoppingRule, 600) || "核心判断、必要推理、证据和边界完成后停止",
+      stoppingRule: "",
       structureBudget: { requiredUnits: Math.max(1, Math.round(Number(structureBudgetValue.requiredUnits) || reasoningPlan.length || 1)), allowedFunctions: stringList(structureBudgetValue.allowedFunctions, 20) },
     };
   } catch {
@@ -388,12 +426,15 @@ export function parseTrafficCopyCreativeBrief(raw: string): TrafficCopyCreativeB
 }
 
 export function normalizeTrafficBriefForSource(brief: TrafficCopyCreativeBrief, source: string, allowedMethodIds?: Iterable<string>) {
-  const sourceCharacters = Array.from(source.replace(/\s/g, "")).length;
-  // Automatic length is derived from the material actually worth carrying,
-  // not from a fixed 60/180-second mode and not from an unconstrained model guess.
-  const maximumCharacters = Math.min(1800, Math.max(900, Math.round(sourceCharacters * 1.35)));
-  const minimumCharacters = Math.min(maximumCharacters, Math.max(520, Math.round(maximumCharacters * 0.68)));
+  void source;
+  // Research and topic metadata can be much longer than the publishable idea.
+  // Preserve the editor's content-form judgment while keeping a spoken-video
+  // brief from expanding merely because the shared evidence pack is large.
   const speakingRate = brief.durationBasis.reasoningSteps >= 4 || brief.durationBasis.evidenceUnits >= 4 ? 225 : 250;
+  const minimumSeconds = Math.max(45, Math.min(180, brief.durationRange.preferredSeconds[0]));
+  const maximumSeconds = Math.max(minimumSeconds, Math.min(240, brief.durationRange.preferredSeconds[1]));
+  const minimumCharacters = Math.round(minimumSeconds * speakingRate / 60);
+  const maximumCharacters = Math.round(maximumSeconds * speakingRate / 60);
   const allowed = allowedMethodIds ? new Set(allowedMethodIds) : null;
   const selectedMethods = allowed
     ? brief.selectedMethods.filter((item) => allowed.has(item.methodId))
@@ -405,11 +446,11 @@ export function normalizeTrafficBriefForSource(brief: TrafficCopyCreativeBrief, 
     secondaryMethod: selectedMethods[1]?.methodId ?? null,
     durationRange: {
       preferredCharacters: [minimumCharacters, maximumCharacters] as [number, number],
-      preferredSeconds: [Math.round(minimumCharacters / speakingRate * 60), Math.round(maximumCharacters / speakingRate * 60)] as [number, number],
+      preferredSeconds: [minimumSeconds, maximumSeconds] as [number, number],
     },
     targetCharacters: Math.round((minimumCharacters + maximumCharacters) / 2),
     targetSeconds: Math.round((minimumCharacters + maximumCharacters) / 2 / speakingRate * 60),
-    durationRationale: `根据原始信息量自动确定 ${minimumCharacters}-${maximumCharacters} 字；完整覆盖后停止，不按预设时长档位扩写。`,
+    durationRationale: `根据内容任务确定 ${minimumSeconds}-${maximumSeconds} 秒（约 ${minimumCharacters}-${maximumCharacters} 字）；搜索材料不自动扩大篇幅，完成核心问题后停止。`,
   };
 }
 
@@ -417,14 +458,14 @@ export function fallbackTrafficCopyCreativeBrief(source: string): TrafficCopyCre
   const focus = sourceFocus(source);
   return {
     content: focus, worthCreating: true, topicRelation: "weak", wealthMigration: false, audience: "与本题直接相关的人", coreClaim: focus,
-    primaryMethod: "", secondaryMethod: null, structure: ["解释输入核心"], endingMode: "观点停留", forbiddenMoves: ["不新增事实", "不强制CTA"],
+    primaryMethod: "", secondaryMethod: null, structure: ["解释输入核心"], endingMode: "观点停留", forbiddenMoves: [],
     voice: { openingMode: "观点", reasoningTone: "克制直接", sentenceRhythm: "自然口语", endingTone: "停在判断", avoid: [] },
     targetSeconds: 105, targetCharacters: 500, attentionReason: focus, entryMode: "观点", entryContent: focus, workingThesis: focus,
     preserveOriginalThesis: true, reasoningPlan: [{ id: "p1", purpose: "解释输入核心", evidenceIds: [] }], selectedAssetIds: ["a-thesis"], mustKeepEvidenceIds: [], selectedMethods: [],
     durationRange: { preferredSeconds: [75, 135], preferredCharacters: [320, 680] }, durationBasis: { coreClaims: 1, reasoningSteps: 1, evidenceUnits: 0, boundaryUnits: 0 },
     durationRationale: "根据一个核心判断形成弹性区间", endingRationale: "停在核心判断", voicePlan: { tension: "medium", rhythm: "自然推进", stance: "明确克制" },
     expressionPlan: { newEntry: "重新选择自然入口", newOrder: ["解释输入核心"], changedDimensions: ["问题入口", "表达顺序"], avoidSourcePhrases: [] },
-    contentGaps: [], stoppingRule: "核心判断解释完成后停止", structureBudget: { requiredUnits: 1, allowedFunctions: ["解释核心判断"] },
+    contentGaps: [], stoppingRule: "", structureBudget: { requiredUnits: 0, allowedFunctions: [] },
   };
 }
 
@@ -435,16 +476,16 @@ export function compileTrafficPublicationContract(blueprint: TrafficSourceBluepr
     narrativeIdentity: "creator-direct",
     position: blueprint.authorPosition || brief.workingThesis,
     intendedMindShift: blueprint.intendedMindShift,
-    standaloneContext: blueprint.standaloneContext,
-    requiredUnits: units.filter((item) => item.importance === "required").map((item) => ({ meaning:item.meaning,function:item.function })),
-    optionalUnits: units.filter((item) => item.importance !== "required").map((item) => ({ meaning:item.meaning,function:item.function })),
-    allowedClaims: blueprint.mustKeepEvidence.filter((item) => !selected.size || selected.has(item.id)).map((item) => ({ statement:item.content,purpose:item.purpose,expressionMode:item.status === "source" ? "direct" : "conditional-or-omit",namedAttribution:null })),
+    standaloneContext: { mode:"none",requiredSubjects:[],anonymousRoles:[],eventSummary:blueprint.standaloneContext.eventSummary,eventAnchors:[],openingSentenceWindow:5 },
+    requiredUnits: [],
+    optionalUnits: units.map((item) => ({ meaning:item.meaning,function:item.function })),
+    allowedClaims: blueprint.mustKeepEvidence.map((item) => ({ statement:item.content,purpose:item.purpose,expressionMode:"direct" as const,namedAttribution:null })),
     methodDirectives: brief.selectedMethods.map((item) => ({ method:item.methodId,targetGap:item.targetGap,uniqueContribution:item.uniqueContribution })),
     expressionPlan: brief.expressionPlan,
     voicePlan: brief.voicePlan,
-    stoppingRule: brief.stoppingRule,
-    structureBudget: brief.structureBudget,
-    forbiddenMoves: brief.forbiddenMoves,
+    stoppingRule: "",
+    structureBudget: { requiredUnits:0,allowedFunctions:[] },
+    forbiddenMoves: [],
   };
 }
 
@@ -452,14 +493,11 @@ export function buildTrafficCopyWritingPrompt(input: PromptInput & { brief: Traf
   const blueprint = input.blueprint ?? fallbackTrafficSourceBlueprint(input.source);
   const contract = compileTrafficPublicationContract(blueprint, input.brief);
   return [
-    "你是口播写作者，不是第二个教练。只执行内容资产、权威和教练决策；不得重新选择立场，也不得把具体内容自动改成通用风险教育。",
-    "你正在替创作者本人生成可直接录制的口播。以创作者本人身份直接表达，不得在正文提及原稿、材料、输入、素材、内容资产、转写、提示词、任务或内部核验流程。作者观点直接说；研究上下文标为‘可安全使用’的事实可直接表达，标为‘可归因表达’的事实必须自然保留‘据公开报道/据庭审报道/公开资料显示’等来源边界以及人物的‘担心、认为、希望’，不得升级成作者无条件定论。契约中的conditional-or-omit只能条件化表达或省略，不能退回‘材料提到’。",
-    "如果本题核心问题是‘为什么’，正文必须在前半段给出针对该人物、事件或决策的具体因果链，再解释一般机制和普通人的启发。不得只说工具有什么作用、安排有什么意义，让观众自己猜个案为什么这样做。若私人内心动机无法确认，要明确说‘能确认的是……；不能确认的是……’，但仍回答公开安排所体现的直接目的。",
-    "你看不到完整原稿和权限账本，这是有意的：保留思想和证据功能，但必须独立完成句子、钩子、段落顺序和案例讲法。不得虚构创作者经历，不得照抄专属句子。",
-    "durationRange由系统按本题信息量自动计算，不是手动时长档位。先完整覆盖required资产、必要推理和边界，再遵守stoppingRule；正文应落在preferredCharacters区间内。低于下限通常意味着具体议题、机制解释或必要推理尚未完成；高于上限则应压缩重复。每个段落必须新增推理、证据、顾虑、边界或认知推进；不得展示未入选方法，不得重复完成同一contentGap。",
-    "Persona、创作者身份、服务对象和内容定位只用于控制立场与声纹，不是可写进正文的素材。不得自我介绍、复述身份画像或说‘作为某类创作者/顾问’；直接进入本题观点。",
-    "如果成稿契约的standaloneContext不是none，必须在指定的openingSentenceWindow内让观众知道核心主体或匿名角色关系以及最小事件背景。允许第一句制造悬念，不要求机械地把所有名字塞进第一句；不得通篇只写‘这件事、这起争议、一方、另一方’而让受众不知道在讲谁。点名只用于识别已公开事件，不得借点名作未经证实的定性。",
+    "你是所选教练的口播写作者。充分吸收教练决策、用户素材和搜索参考，然后像一个有经验、有个性、有判断的真实创作者一样自由表达。",
+    "事实、报道、争议、推测、人物动机和专业机制都可以成为表达材料；根据语境自行选择直接判断、讲故事、设问、推演、归因或情绪表达，不需要主动解释核验过程。",
+    "开头、结构、篇幅、节奏、称谓、案例组织、观点强度和结尾全部由教练声纹与本题内容决定。允许大胆判断、合理推演和有争议的观点，不写成研究报告或合规说明。",
     `【成稿契约】\n${JSON.stringify(contract)}`,
+    input.context?.length ? `【搜索与创作素材】\n${input.context.join("\n\n")}` : "",
     input.creatorSkill ? `【教练写作声纹与获准方法】\n${input.creatorSkill}` : "【写作方式】使用基础创作方式。",
     "只输出完整可录制的口播正文，不输出标题、JSON、分析或说明。",
   ].filter(Boolean).join("\n\n");
@@ -513,7 +551,7 @@ export function sanitizeTrafficNarrativeIdentity(draft: string) {
     .trim();
 }
 
-export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, draft: string, options?: { brief?: TrafficCopyCreativeBrief; blueprint?: TrafficSourceBlueprint; creatorName?: string }) {
+export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, draft: string, options?: { brief?: TrafficCopyCreativeBrief; blueprint?: TrafficSourceBlueprint; creatorName?: string; enforceTopicFulfillment?: boolean }) {
   const leaks = detectTrafficNarrativeIdentityLeaks(draft);
   const issues = [...audit.issues];
   if (leaks.length) issues.push({ severity:"blocking" as const,type:"narrative_identity_leak",location:leaks.join("、"),reason:"正文泄漏了内部素材或任务容器身份，创作者没有以本人身份直接表达。",allowedFix:"仅删除来源容器和元叙述，直接表达其中的观点或事实；真实外部机构出处仍可保留。" });
@@ -530,7 +568,7 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
   const minimumCharacters = options?.brief?.durationRange.preferredCharacters[0];
   const actualCharacters = Array.from(draft.replace(/\s/g, "")).length;
   if (minimumCharacters && actualCharacters < Math.round(minimumCharacters * 0.85)) {
-    issues.push({ severity:"blocking",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:`低于本题信息量下限${minimumCharacters}字，通常表示具体议题、机制解释或必要推理没有展开完整。`,allowedFix:`只补足required资产、核心机制和缺失推理，使正文达到至少${minimumCharacters}字；不得用重复观点或空泛口号凑字数。` });
+    issues.push({ severity:"warning",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:`低于参考区间${minimumCharacters}字，但字数本身不能证明事实或推理缺失。`,allowedFix:"仅在确有required资产、核心机制或必要推理缺失时补充；不得为达到字数而添加重复观点或空泛口号。" });
   }
   if (maximumCharacters && actualCharacters > Math.round(maximumCharacters * 1.1)) {
     reductionNeeded = true;
@@ -544,19 +582,30 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
   if (missingRequiredEvidence.length || missingRequiredAssets.length) {
     issues.push({ severity:"blocking",type:"required_semantic_omission",location:[...missingRequiredEvidence,...missingRequiredAssets].join("、"),reason:"确定性发布契约中的 required 论据或资产未被覆盖。",allowedFix:"只补回列出的 required 语义及其必要解释；可以换句子和顺序，不得扩写其他内容。" });
   }
+  if (options?.enforceTopicFulfillment && audit.topicFulfillment.score < 80) {
+    issues.push({ severity:"blocking",type:"topic_fulfillment_below_gate",location:"全文",reason:`选题兑现得分${audit.topicFulfillment.score}，低于80分发布门槛。`,allowedFix:"只补强核心问题、人性矛盾、标题承诺、目标人群或必要专业机制中得分不足的部分，不得另选主题或重写无关段落。" });
+  }
   const standalone = options?.blueprint?.standaloneContext;
   if (standalone && standalone.mode !== "none") {
     const opening = draft.split(/(?<=[。！？!?])|\n+/u).map((item) => item.trim()).filter(Boolean).slice(0, standalone.openingSentenceWindow).join("");
     const normalizedOpening = opening.replace(/\s+/g, "").toLowerCase();
     const requiredIdentities = standalone.mode === "public_named" ? standalone.requiredSubjects : standalone.anonymousRoles;
     const missingIdentities = requiredIdentities.filter((item) => !normalizedOpening.includes(item.replace(/\s+/g, "").toLowerCase()));
-    const hasEventAnchor = standalone.eventAnchors.length === 0 || standalone.eventAnchors.some((item) => normalizedOpening.includes(item.replace(/\s+/g, "").toLowerCase()));
-    if (missingIdentities.length || !hasEventAnchor) {
+    const includesEventUnit = (item: string) => {
+      const normalized = item.replace(/\s+/g, "").toLowerCase();
+      if (normalizedOpening.includes(normalized)) return true;
+      const date = normalized.match(/(?:\d{4}年)?(\d{1,2})月(\d{1,2})日/);
+      if (date && normalizedOpening.includes(`${date[1]}月${date[2]}日`)) return true;
+      const synonymGroups = [["去世","离世","逝世","身故"],["再次受到关注","重回讨论","再次引发关注","重新成为热点"]];
+      return synonymGroups.some((group) => group.some((word) => normalized.includes(word)) && group.some((word) => normalizedOpening.includes(word)));
+    };
+    const missingEventAnchors = standalone.eventAnchors.filter((item) => !includesEventUnit(item));
+    if (missingIdentities.length || missingEventAnchors.length) {
       issues.push({
         severity:"blocking",
         type:"subject_context_missing",
         location:`开头前${standalone.openingSentenceWindow}句`,
-        reason:[missingIdentities.length ? `缺少必要${standalone.mode === "public_named" ? "主体" : "匿名角色"}：${missingIdentities.join("、")}` : "",!hasEventAnchor ? "没有交代可识别的最小事件背景" : ""].filter(Boolean).join("；"),
+        reason:[missingIdentities.length ? `缺少必要${standalone.mode === "public_named" ? "主体" : "匿名角色"}：${missingIdentities.join("、")}` : "",missingEventAnchors.length ? `缺少必要事件单元：${missingEventAnchors.join("、")}` : ""].filter(Boolean).join("；"),
         allowedFix:`允许保留首句悬念；只在前${standalone.openingSentenceWindow}句内补入${standalone.mode === "public_named" ? "已公开主体" : "匿名角色关系"}和最小事件背景，不得新增事实或未经证实的定性。`,
       });
     }
@@ -569,13 +618,11 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
 export function buildTrafficCopyAuditPrompt(input: { source: string; draft: string; blueprint: TrafficSourceBlueprint; authority: TrafficAuthority; brief: TrafficCopyCreativeBrief; context: string[] }) {
   const deterministicSimilarity = measureTrafficExpressionSimilarity(input.source, input.draft);
   return [
-    "你是双向检查器，不负责润色，也不能把鲜明观点改成中性模板。必须同时检查：A语义是否遗漏或越权；B表达是否过度接近原稿；C研究选定的具体事件、机制和核心矛盾是否被保留并解释。若正文只是提到主题名，随后退回可套用于任何热点的家庭责任、风险意识、保障规划或现金流教育，必须以generic_topic_fallback阻断。若题目核心好奇是‘为什么某人这样做/为何这样安排’，正文只解释一般工具机制、没有给出该个案的具体因果链，必须以core_question_unanswered阻断；可归因事实已经提供却因过度保守被全部省略，也属于该问题。",
-    "语义侧只硬阻断：required资产遗漏、核心立场改变、事实无支持、未授权财富迁移/CTA、无条件收益保证、结构残缺。needs_verification未写入不算遗漏。",
-    "减负侧检查但不得改观点：逐段标注功能；若多个方法解决同一gap、段落没有新增推理/证据/顾虑/边界/认知推进、或超出structureBudget的单元没有必要语义资产，则reductionNeeded=true。长不等于过载，围绕同一主题但功能不同不算重复。必须给出可直接删除或合并的最小reductionPlan。",
-    "表达侧检查：是否复用原钩子、连续专属句、基本相同的完整段落顺序。共同术语、产品名、数字和不可替代事实不算抄袭。只有明显复制表达实现时blocking。",
-    "身份侧硬检查：正文必须是创作者本人直接口播。出现‘原稿提到、材料显示、根据输入、上述素材、内容资产、这份转写、提示词’等内部容器叙述时，标记narrative_identity_leak并只做局部改写。真实外部机构名称不属于泄漏。",
-    "主题自洽硬检查：若原稿是新闻、人物事件或具体案例，正文开头必须让脱离对话上下文的观众知道核心主体是谁、发生了什么；若仅用‘这起争议、一方、另一方’代替公开事件主体，标记subject_context_missing为blocking。只补足已核验的主体名称和最小背景，不得新增定性。",
-    "目标长度只是参考。低于区间不等于遗漏，高于区间不等于冗余；必须结合资产覆盖判断。仅warning必须pass。只有blocking才能revise或human_review，且最多一次最小修订。",
+    "你是独立成稿编辑，不负责把文案改得更安全、更中性或更像模板。尊重教练的观点、语气、冲突和叙事选择，只判断这是不是一条聚焦、值得发布、能独立录制的口播。",
+    "只检查六件事：一是否兑现所选标题与核心问题；二是否聚焦一个命题而写成热点百科；三专业机制是否真正增加解释、有没有生硬转保险或产品；四是否体现为什么适合这位创作者讲；五是否存在重复背景、重复结论、清单膨胀或明显超过教练自己选择的自然时长；六是否违反本批次分工、重复了明确要求留给其他篇的内容。",
+    "只有这些问题实际破坏内容时才标blocking并要求revise：核心问题未回答、标题承诺落空、整篇退回通用套话、专业硬转、关键创作者定位被虚构、严重重复导致口播低效、与同批次另一篇实质相同。一般措辞偏好、合理推演、鲜明判断、篇幅略有浮动只记warning或不记录。",
+    "需要修改时给最小reductionPlan或局部allowedFix，不得要求重写成四平八稳的正反分析，不得主动增加免责声明、风险清单和核验过程。每篇最多一次局部修改。",
+    "选题兑现分用于解释判断，不机械决定发布：核心问题25、人性矛盾20、标题承诺20、核心判断15、目标人群10、专业机制10。",
     `【确定性字符重叠参考】${JSON.stringify(deterministicSimilarity)}`,
     `【权威】${JSON.stringify(input.authority)}`,
     `【完整原稿，仅供检查】${input.source}`,
@@ -583,7 +630,7 @@ export function buildTrafficCopyAuditPrompt(input: { source: string; draft: stri
     `【教练决策】${JSON.stringify(input.brief)}`,
     input.context.join("\n"),
     `【待检查正文】\n${input.draft}`,
-    "严格JSON：{status:'pass'|'revise'|'human_review',issues:[{severity:'blocking'|'warning',type,location,reason,allowedFix}],missingEvidenceIds:string[],missingAssetIds:string[],changedPosition:boolean,unsupportedGuarantee:boolean,semanticCoverage:0到1,expressionSimilarity:0到1,copiedPhrases:string[],orderTooSimilar:boolean,preserve:string[],reductionNeeded:boolean,redundantMethodIds:string[],repeatedFunctions:string[],excessStructureUnits:string[],reductionPlan:string[]}。",
+    "严格JSON：{status:'pass'|'revise'|'human_review',issues:[{severity:'blocking'|'warning',type,location,reason,allowedFix}],missingEvidenceIds:string[],missingAssetIds:string[],changedPosition:boolean,unsupportedGuarantee:boolean,semanticCoverage:0到1,expressionSimilarity:0到1,copiedPhrases:string[],orderTooSimilar:boolean,preserve:string[],reductionNeeded:boolean,redundantMethodIds:string[],repeatedFunctions:string[],excessStructureUnits:string[],reductionPlan:string[],topicFulfillment:{score:0到100,coreQuestion:0到25,humanTension:0到20,titlePromise:0到20,thesis:0到15,audience:0到10,mechanism:0到10}}。",
   ].join("\n\n");
 }
 
@@ -601,6 +648,11 @@ export function parseTrafficCopyAudit(raw: string): TrafficCopyAudit {
     const orderTooSimilar = value.orderTooSimilar === true;
     const expressionSimilarity = Math.min(1, Math.max(0, Number(value.expressionSimilarity) || 0));
     const semanticCoverage = Math.min(1, Math.max(0, Number(value.semanticCoverage) || 0));
+    const fulfillmentValue = value.topicFulfillment && typeof value.topicFulfillment === "object" && !Array.isArray(value.topicFulfillment) ? value.topicFulfillment as Record<string, unknown> : {};
+    const bounded = (key:string,max:number) => Math.max(0,Math.min(max,Number(fulfillmentValue[key]) || 0));
+    const dimensions = { coreQuestion:bounded("coreQuestion",25),humanTension:bounded("humanTension",20),titlePromise:bounded("titlePromise",20),thesis:bounded("thesis",15),audience:bounded("audience",10),mechanism:bounded("mechanism",10) };
+    const calculatedFulfillment = Object.values(dimensions).reduce((sum,item)=>sum+item,0);
+    const topicFulfillment = { score:Math.max(0,Math.min(100,Number(fulfillmentValue.score) || calculatedFulfillment)),...dimensions };
     // The checker may list optional/supporting omissions for diagnostics. IDs
     // alone are not a publication veto: the corresponding issue must explain
     // why the omission is blocking. This keeps machine status consistent with
@@ -613,10 +665,10 @@ export function parseTrafficCopyAudit(raw: string): TrafficCopyAudit {
       status: hardBlocking ? requested === "pass" ? "revise" : requested : reductionNeeded ? "revise" : "pass",
       issues, missingEvidenceIds, missingAssetIds, changedPosition, unsupportedGuarantee, semanticCoverage, expressionSimilarity,
       copiedPhrases: stringList(value.copiedPhrases, 12), orderTooSimilar, preserve: stringList(value.preserve, 16),
-      hardBlocking, reductionNeeded, redundantMethodIds: stringList(value.redundantMethodIds, 12), repeatedFunctions: stringList(value.repeatedFunctions, 16), excessStructureUnits: stringList(value.excessStructureUnits, 16), reductionPlan,
+      hardBlocking, reductionNeeded, redundantMethodIds: stringList(value.redundantMethodIds, 12), repeatedFunctions: stringList(value.repeatedFunctions, 16), excessStructureUnits: stringList(value.excessStructureUnits, 16), reductionPlan, topicFulfillment,
     };
   } catch {
-    return { status: "human_review", issues: [{ severity: "blocking", type: "audit_parse", location: "全文", reason: "检查结果无法解析", allowedFix: "保留草稿并转人工确认" }], missingEvidenceIds: [], missingAssetIds: [], changedPosition: false, unsupportedGuarantee: false, semanticCoverage: 0, expressionSimilarity: 0, copiedPhrases: [], orderTooSimilar: false, preserve: [], hardBlocking: true, reductionNeeded: false, redundantMethodIds: [], repeatedFunctions: [], excessStructureUnits: [], reductionPlan: [] };
+    return { status: "human_review", issues: [{ severity: "blocking", type: "audit_parse", location: "全文", reason: "检查结果无法解析", allowedFix: "保留草稿并转人工确认" }], missingEvidenceIds: [], missingAssetIds: [], changedPosition: false, unsupportedGuarantee: false, semanticCoverage: 0, expressionSimilarity: 0, copiedPhrases: [], orderTooSimilar: false, preserve: [], hardBlocking: true, reductionNeeded: false, redundantMethodIds: [], repeatedFunctions: [], excessStructureUnits: [], reductionPlan: [], topicFulfillment:{score:0,coreQuestion:0,humanTension:0,titlePromise:0,thesis:0,audience:0,mechanism:0} };
   }
 }
 

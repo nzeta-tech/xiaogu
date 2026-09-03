@@ -25,6 +25,21 @@ test("Fast Research adapter excludes creation instructions from factual claims",
   assert.doesNotMatch(pack.claims[0].claim, /生成|不得/);
 });
 
+test("instruction-shaped topic keeps its factual subject instead of being dropped", async () => {
+  const pack = await buildTrafficEvidencePackFromFastResearch("围绕梅艳芳母亲去世生成一版流量口播", {
+    trace:{queries:[{query:"梅艳芳母亲去世",purpose:"核验当前事件"}]},
+    queryResults:[{query:"梅艳芳母亲去世",purpose:"核验当前事件",results:[]}],
+  });
+  assert.match(pack.claims.map((item)=>item.claim).join(" "),/梅艳芳母亲去世/);
+  assert.doesNotMatch(pack.claims.map((item)=>item.claim).join(" "),/生成一版流量口播/);
+  assert.equal(pack.researchStatus,"empty");
+});
+
+test("topic-only materials count as a used provider", async () => {
+  const pack = await buildTrafficEvidencePack("最近人民币汇率明显变化。", async () => [{title:"相关背景",url:"https://example.com/rate",content:"家庭换汇成本发生变化。",provider:"volcengine"}]);
+  assert.deepEqual(pack.providersUsed,["volcengine"]);
+});
+
 test("extracts numeric and time-sensitive claims before generic commentary", () => {
   const claims = extractTrafficClaims("大家都很关心这个问题。最近人民币从7.3到了6.7。2025年贸易顺差接近1.19万亿美元。普通家庭应该先看自己的需求。", 2);
   assert.equal(claims.length, 2);
@@ -36,6 +51,38 @@ test("ranks official and major media sources above generic sites", () => {
   assert.deepEqual(scoreSourceAuthority("https://www.safe.gov.cn/example"), { tier: "official", score: 100 });
   assert.deepEqual(scoreSourceAuthority("https://www.reuters.com/example"), { tier: "major_media", score: 80 });
   assert.deepEqual(scoreSourceAuthority("https://example.com/post"), { tier: "other", score: 30 });
+  assert.deepEqual(scoreSourceAuthority("https://www.chinanews.com.cn/sh/2026/09-01/example.shtml"), { tier: "major_media", score: 80 });
+});
+
+test("critical event materials remain creative context regardless of source count", async () => {
+  const research = {
+    trace: { queries: [{ query:"梅艳芳母亲去世 信托后续",purpose:"核验去世事件和信托执行状态" }] },
+    queryResults: [{ query:"梅艳芳母亲去世 信托后续",purpose:"核验去世事件和信托执行状态",results:[{
+      title:"梅艳芳母亲离世",url:"https://news.sina.com.cn/repost",content:"报道提到梅艳芳母亲离世，遗产安排引发讨论。",publishedDate:"2026-08-31",provider:"volcengine",
+    }] }],
+  };
+  const single = await buildTrafficEvidencePackFromFastResearch("梅艳芳母亲去世后信托如何执行", research);
+  assert.equal(single.topicMaterials[0].usage, "context_only");
+  assert.equal(single.topicMaterials[0].independentSourceCount, 1);
+
+  research.queryResults[0].results.push({
+    title:"梅艳芳母亲离世及遗产安排",url:"https://www.hk01.com/article",content:"梅艳芳母亲离世，遗产安排进入后续程序。",publishedDate:"2026-08-30",provider:"volcengine",
+  });
+  const corroborated = await buildTrafficEvidencePackFromFastResearch("梅艳芳母亲去世后信托如何执行", research);
+  assert.ok(corroborated.topicMaterials.every((item) => item.usage === "context_only"));
+  assert.ok(corroborated.topicMaterials.every((item) => item.independentSourceCount === 2));
+});
+
+test("two URLs from the same publisher do not count as independent corroboration", async () => {
+  const pack = await buildTrafficEvidencePackFromFastResearch("某人的遗嘱信托终止", {
+    trace:{queries:[{query:"某人 遗嘱信托终止",purpose:"核验信托终止状态"}]},
+    queryResults:[{query:"某人 遗嘱信托终止",purpose:"核验信托终止状态",results:[
+      {title:"报道一",url:"https://news.example.com/a",content:"遗嘱信托终止。",provider:"volcengine"},
+      {title:"报道二",url:"https://finance.example.com/b",content:"遗嘱信托终止。",provider:"volcengine"},
+    ]}],
+  });
+  assert.ok(pack.topicMaterials.every((item) => item.independentSourceCount === 1));
+  assert.ok(pack.topicMaterials.every((item) => item.usage === "context_only"));
 });
 
 test("flags numeric disagreement from an official source for comparison", async () => {
@@ -105,14 +152,14 @@ test("collects useful materials from every query without adding search calls", a
   assert.ok(pack.topicMaterials.every((item) => item.materialReason));
 });
 
-test("deduplicates and caps the shared material pool at five", async () => {
+test("deduplicates and keeps a broader shared material pool", async () => {
   const pack = await buildTrafficEvidencePack("最近人民币汇率明显上涨。", async () => Array.from({ length: 8 }, (_, index) => ({
     title: `人民币汇率影响材料${index}`,
     url: `https://www.safe.gov.cn/rate-${index}`,
     content: "人民币汇率变化影响家庭换汇成本和美元支出。",
     provider: "volcengine",
   })));
-  assert.equal(pack.topicMaterials.length, 5);
+  assert.equal(pack.topicMaterials.length, 8);
 });
 
 test("builds diversified high-value queries for the RMB source instead of malformed fragments", () => {
@@ -170,18 +217,18 @@ test("editor selects source chunks by index instead of rewriting them into asser
   }]);
   const planner = buildTrafficMaterialBriefPrompt("最近人民币汇率明显上涨。", "【素材#1】官方走势材料\n原始摘要：人民币汇率近期变化及形成原因。");
   assert.match(planner, /selectedMaterialIndexes/);
-  assert.match(planner, /素材不改写/);
+  assert.match(planner, /最有内容价值/);
   const brief = parseTrafficMaterialBrief(JSON.stringify({ selectedMaterialIndexes: [1], creativeDirection: "用当前走势解释家庭换汇判断。" }));
   const formatted = formatTrafficMaterialBrief(brief, pack.topicMaterials);
   assert.match(formatted, /【素材#1】官方走势材料/);
   assert.match(formatted, /原始摘要：人民币汇率近期变化及形成原因/);
 });
 
-test("broad hotspot queries must resolve to a concrete researched angle", () => {
+test("broad hotspot research provides angles without evidence gates", () => {
   const prompt = buildTrafficMaterialBriefPrompt("梅艳芳今天很火，帮我找一个角度写", "【素材#1】梅艳芳遗产信托\n原始摘要：信托按月向母亲支付生活费。 ");
-  assert.match(prompt, /当前讨论最集中/);
-  assert.match(prompt, /禁止退回.*家庭责任/);
-  assert.match(prompt, /事实可信度与选题可用性分开判断/);
+  assert.match(prompt, /几个可能的具体议题、人性矛盾和内容切口/);
+  assert.match(prompt, /交给教练自由选择/);
+  assert.match(prompt, /corrections、safeFacts、attributedFacts和doNotClaim全部返回空数组/);
   const brief = parseTrafficMaterialBrief(JSON.stringify({
     selectedMaterialIndexes:[1],
     creativeDirection:"围绕遗产信托如何约束资金使用展开",
@@ -193,8 +240,18 @@ test("broad hotspot queries must resolve to a concrete researched angle", () => 
   }));
   const formatted = formatTrafficMaterialBrief(brief, [{ title:"梅艳芳遗产信托",url:"https://example.com",snippet:"报道摘要",provider:"volcengine",authorityTier:"other",authorityScore:30 }]);
   assert.match(formatted, /核心矛盾：留下钱和安排钱怎么使用不是一回事/);
-  assert.match(formatted, /必须实质解释的主题锚点：遗产信托、按规则使用/);
-  assert.match(formatted, /不得写成确定事实/);
-  assert.match(formatted, /可归因表达的报道事实/);
-  assert.match(formatted, /担心母亲不善管理/);
+  assert.match(formatted, /可用主题锚点：遗产信托、按规则使用/);
+  assert.doesNotMatch(formatted, /未经核验|来源等级|使用边界/);
+});
+
+test("hot event brief carries the complete why-now trigger into writer context", () => {
+  const brief = parseTrafficMaterialBrief(JSON.stringify({
+    contentType:"hot_event",
+    requiredContentUnits:["最新事件","发生时间","为何今天讲","后续状态","核心拆解"],
+    currentEventTrigger:{subject:"梅艳芳母亲覃美金",event:"离世",occurredAt:"2026年8月30日",whyNow:"信托进入关键节点",consequence:"遗产安排再次受到关注"},
+  }));
+  const formatted = formatTrafficMaterialBrief(brief);
+  assert.match(formatted,/当前事件参考/);
+  assert.match(formatted,/为什么今天讲：信托进入关键节点/);
+  assert.match(formatted,/发生时间：2026年8月30日/);
 });

@@ -1,4 +1,5 @@
 import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
+import { getCreationAppBySlug } from "@/lib/apps/catalog";
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
 import { startBackgroundWorkRun, waitForBackgroundWorkRunStart } from "@/lib/creation/background-run-registry";
@@ -8,7 +9,7 @@ import { query } from "@/lib/db/client";
 import { isEmptyCreationFieldValue } from "@/lib/creation/output";
 import { isSupportedLinkRemixUrl, isWechatArticleUrl } from "@/lib/creation/link-remix-source";
 import { creationRequestId, normalizeCreationTraceId, trySaveCreationDiagnostic } from "@/lib/creation/diagnostics";
-import { tryCreateCreationTask, tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { tryCreateCreationTask, tryCreateWork, tryGetCreationAppBySlug, tryGetLatestThinkingProfileSnapshot, tryGetSystemSettings, tryGetWorkDetail } from "@/lib/db/repositories";
 import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getLinkRemixAvailability } from "@/lib/local-agent/repository";
 import { validateCreationFieldLengths } from "@/lib/creation/input-validation";
@@ -22,8 +23,11 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const user = await requireSessionUser();
   if (user instanceof Response) return user;
   if (traceId) await trySaveCreationDiagnostic({ userId: user.id, userEmail: user.email, traceId, requestId, appSlug: slug, eventType: "prepare_received", outcome: "arrived" });
-  await trySyncCreationCatalog();
-  const app = await tryGetCreationAppBySlug(slug);
+  // Catalog reconciliation is a deployment/startup concern. Running the full
+  // multi-table sync here blocks work creation behind hundreds of serial DB
+  // writes and can exceed the client's prepare timeout before it receives the
+  // newly created work id.
+  const app = (await tryGetCreationAppBySlug(slug)) ?? getCreationAppBySlug(slug);
   if (!app) {
     return Response.json({ error: "应用不存在" }, { status: 404 });
   }
@@ -126,7 +130,17 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: "二创任务没有成功保存，请稍后重试。" }, { status: 500 });
   }
 
-  const work = await tryCreateWork({
+  const existingTopicWorkId = app.slug === "traffic-copy" && values.traffic_topic_only !== "yes" && typeof values.traffic_existing_work_id === "string"
+    ? values.traffic_existing_work_id.trim()
+    : "";
+  const existingTopicWork = existingTopicWorkId
+    ? await tryGetWorkDetail({ userId: user.id, workId: existingTopicWorkId })
+    : null;
+  if (existingTopicWorkId && (existingTopicWork?.platform !== "traffic-copy" || existingTopicWork.app_run?.input_payload?.traffic_topic_only !== "yes")) {
+    return Response.json({ error: "原选题作品不存在或已进入正文生成，请返回作品后重试。" }, { status: 409 });
+  }
+
+  const work = existingTopicWork ?? await tryCreateWork({
     userId: user.id,
     appCode: app.slug,
     title: pendingTitle,
@@ -156,7 +170,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     slug: app.slug,
     userId: user.id,
     values,
-    quotaCost: quota.quotaCost,
+    quotaCost: values.traffic_topic_only === "yes" ? 0 : quota.quotaCost,
   });
   // Persist the app run before the request returns. Otherwise a serverless-like
   // runtime can discard the detached task before the work page reconnects.

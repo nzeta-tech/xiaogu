@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   readGenerationProgress,
@@ -31,6 +32,35 @@ test("persisted progress survives refresh and live progress wins by phase", () =
   assert.equal(resolved.length, 2);
   assert.equal(resolved[1].status, "completed");
   assert.equal(resolved[1].label, "素材理解完成");
+});
+
+test("research follow-up stages stay visible while material and angle model calls run", () => {
+  const resolved = resolveGenerationProgress({
+    platform: "traffic-copy",
+    status: "running",
+    persisted: [
+      { phase: "fast_research", status: "completed", label: "资料核验完成", detail: "已核验" },
+    ],
+    live: [
+      { phase: "material_synthesis", status: "completed", label: "创作材料整理完成", detail: "已整理" },
+      { phase: "angle_refinement", status: "active", label: "正在确定核心切入角度", detail: "正在确认主线" },
+    ],
+  });
+
+  assert.deepEqual(resolved.map((item) => [item.phase, item.status]), [
+    ["fast_research", "completed"],
+    ["material_synthesis", "completed"],
+    ["angle_refinement", "active"],
+  ]);
+});
+
+test("creation prepare and background startup never reconcile the full catalog", () => {
+  const prepareSource = readFileSync(new URL("../../app/api/creation/apps/[slug]/prepare/route.ts", import.meta.url), "utf8");
+  const executionSource = readFileSync(new URL("./execute-app-run.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(prepareSource, /trySyncCreationCatalog/);
+  assert.doesNotMatch(executionSource, /trySyncCreationCatalog/);
+  assert.match(prepareSource, /tryCreateWork/);
+  assert.match(prepareSource, /waitForBackgroundWorkRunStart/);
 });
 
 test("completed work no longer shows a synthetic generation stage", () => {

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildCreativeCoachSkillRoutePrompt,
   parseCreativeCoachSkillRoute,
+  relaxCoachSkill,
   renderCreativeCoachSkillIndex,
   renderProgressivelyLoadedCreativeCoachSkills,
 } from "./creative-coach-runtime.ts";
@@ -29,6 +30,14 @@ test("progressive skill routing exposes a light index before full cards", () => 
   const prompt = buildCreativeCoachSkillRoutePrompt(runtime, { communicationGoal:"纠正只看资产总额" });
   assert.match(prompt, /全量轻量Skill目录/);
   assert.match(prompt, /最多6个/);
+});
+
+test("traffic coach rendering removes restrictive training language but keeps creative guidance", () => {
+  const relaxed = relaxCoachSkill("从家庭冲突切入，先给鲜明判断。不得补造事实。语言要有张力。信息不足时明确风险边界。用反问推进。");
+  assert.match(relaxed, /从家庭冲突切入/);
+  assert.match(relaxed, /语言要有张力/);
+  assert.match(relaxed, /用反问推进/);
+  assert.doesNotMatch(relaxed, /不得|信息不足|风险边界/);
 });
 
 test("route parser rejects unknown ids and full cards load only after selection", () => {

@@ -2,8 +2,9 @@ import { seedTopics } from "./seeds";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HotTopic } from "./types";
-import { ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, normalizeSourcePublishedAt, validateHotTopic } from "./rules";
+import { enrichHotTopicDomains, ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, normalizeSourcePublishedAt, validateHotTopic } from "./rules";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
+import type { VolcengineSearchResult } from "@/lib/search/volcengine-search";
 
 const platformMap: Record<string, string> = {
   weibo: "微博",
@@ -104,22 +105,68 @@ export async function collectHotTopicCandidates(options: { refresh?: boolean } =
   const remoteTopics = settled
     .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
     .filter((topic) => topic.title !== "未命名热点")
-    .sort((a, b) => relevanceRank(b.insuranceRelevance) - relevanceRank(a.insuranceRelevance));
+    .map(enrichHotTopicDomains)
+    .sort((a, b) => (b.contentValue ?? 0) - (a.contentValue ?? 0));
 
   return dedupeTopics([
     ...baiduRealtimeTopics,
     ...freejkTopics,
     ...rebangTopics,
     ...rthkTopics,
-    ...remoteTopics.filter((topic) => topic.insuranceRelevance !== "低"),
+    ...remoteTopics,
   ]);
+}
+
+export function searchResultsToHotTopics(results: VolcengineSearchResult[]): HotTopic[] {
+  const now = Date.now();
+  return results.map((item, index): HotTopic | null => {
+    const publishedAt = normalizeSourcePublishedAt(item.publishedDate);
+    const publishedTime = publishedAt ? new Date(publishedAt).getTime() : NaN;
+    if (Number.isFinite(publishedTime) && now - publishedTime > 72 * 60 * 60 * 1000) return null;
+    const title = cleanSearchTitle(item.title);
+    if (!title || !isTopicCandidate(title) || isSearchIndexPage(title, item.url)) return null;
+    const summary = cleanCandidateSummary(item.content);
+    return {
+      id: `search-${index}-${encodeURIComponent(title).slice(0, 24)}`,
+      title,
+      summary: summary || "实时搜索发现的热点候选，需打开原始来源了解完整背景。",
+      source: "实时搜索补充",
+      heat: index < 4 ? "高" : "中",
+      category: inferHotTopicCategory(title),
+      insuranceRelevance: scoreInsuranceRelevance(title),
+      recommendedAngle: buildInsuranceAngle(title),
+      riskNote: "搜索结果用于补充热点候选，不代表事件细节已经完成事实核验。",
+      sourceUrl: item.url,
+      sourceTitle: item.title,
+      sourcePublishedAt: publishedAt,
+      verification: validateHotTopic({ title, source: "实时搜索补充", sourceUrl: item.url, sourcePublishedAt: publishedAt }),
+      tab: "热点",
+      discoverySource: "search",
+    };
+  }).filter((topic): topic is HotTopic => Boolean(topic));
+}
+
+function cleanSearchTitle(value: string) {
+  return value.replace(/\s*[-_|｜].{0,24}(?:新闻|资讯|网|平台|频道)\s*$/i, "").trim().slice(0, 120);
+}
+
+function cleanCandidateSummary(value: string) {
+  return value.replace(/适合结合最新公开信息核验后转化为保险内容选题[。.]?/g, "").replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function isSearchIndexPage(title: string, url: string) {
+  return /热搜榜|热榜首页|热点榜单|今日热点汇总|新闻首页/.test(title) || /(?:\/search|\/so\?|[?&](?:q|query|keyword)=)/i.test(url);
 }
 
 export async function getHotTopics(options: { refresh?: boolean; topicPreference?: string } = {}): Promise<HotTopic[]> {
   const candidates = await collectHotTopicCandidates(options);
-  if (candidates.length > 0) return rankAndDiversifyTopics(candidates, options.topicPreference);
+  if (candidates.length > 0) return rankHotTopicCandidates(candidates, options.topicPreference);
   if (isDemoModeEnabled()) return seedTopics;
   throw new Error("话题来源暂不可用，请检查热榜或搜索服务配置");
+}
+
+export function rankHotTopicCandidates(candidates: HotTopic[], topicPreference = "") {
+  return rankAndDiversifyTopics(dedupeTopics(candidates).map(enrichHotTopicDomains), topicPreference);
 }
 
 async function fetchRebangTopics(options: { refresh?: boolean }) {
@@ -369,7 +416,7 @@ async function fetchSourceText(url: string, options: { refresh?: boolean }, pref
 function isTopicCandidate(title: string) {
   if (/彩票|明星八卦|恋情|离婚|游戏皮肤|综艺|影视剧|演唱会|饭圈|抽奖|穿搭|妆容|写真/.test(title)) return false;
   return (
-    scoreInsuranceRelevance(title) !== "低" ||
+    isFinanceTopicCandidate(title) ||
     /涨价|降价|罢工|停产|裁员|倒闭|破产|事故|暴雷|危机|处罚|召回|缺货|延迟|改革|新规|调整|补贴|补偿|赔偿|工资|房贷|利率|物价|生育|教育|家庭|父母|孩子|老人|年轻人|打工人|普通人|中年|医院|学校|企业|航空|车企|实体店|价格倒挂|汛情|灾情|禁令|禁止/.test(
       title,
     )
@@ -413,7 +460,10 @@ function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "") {
     if (!selected.some((item) => item.title === topic.title)) selected.push(topic);
   }
 
-  return ensureInternationalFinanceCoverage([...selected, ...ranked], 12);
+  const result = [...selected, ...ranked].slice(0, 12);
+  return /财经|金融|市场|股票|利率|汇率|黄金|美股|港股/.test(topicPreference)
+    ? ensureInternationalFinanceCoverage(result, 12)
+    : result;
 }
 
 function scoreInsuranceRelevance(title: string): HotTopic["insuranceRelevance"] {
@@ -421,7 +471,8 @@ function scoreInsuranceRelevance(title: string): HotTopic["insuranceRelevance"] 
 }
 
 function topicScore(topic: HotTopic, topicPreference = "") {
-  let score = relevanceRank(topic.insuranceRelevance) * 20;
+  const domainPeak = topic.domainScores ? Math.max(...Object.values(topic.domainScores)) : relevanceRank(topic.insuranceRelevance) * 20;
+  let score = domainPeak * 0.6 + (topic.contentValue ?? 0) * 0.4;
   if (topic.heat === "高") score += 10;
   if (/谁能想到|首次|突然|暴涨|暴跌|崩了|没了|罕见|冲上热搜|全网|紧急|官宣|新规|调整|回应|通报|热议/.test(topic.title)) score += 14;
   if (/涨价|降价|裁员|倒闭|破产|停产|罢工|事故|赔偿|补偿|医保|养老金|退休|医院|药|癌|暴雨|台风|地震|火灾|车祸|生育|教育|房贷|物价|暴雷|危机/.test(topic.title)) score += 14;
@@ -431,7 +482,20 @@ function topicScore(topic: HotTopic, topicPreference = "") {
   if (/报告|研究|白皮书|论文|指数|论坛|会议/.test(topic.title)) score -= 14;
   if (matchesPreference(topic, topicPreference)) score += 18;
   if (topic.evidence || topic.sourceUrl) score += 4;
+  score += freshnessScore(topic.sourcePublishedAt);
+  if (topic.discoverySource === "search") score += 3;
   return score;
+}
+
+function freshnessScore(value?: string) {
+  if (!value) return -4;
+  const ageHours = (Date.now() - new Date(value).getTime()) / 3_600_000;
+  if (!Number.isFinite(ageHours)) return -4;
+  if (ageHours <= 6) return 18;
+  if (ageHours <= 24) return 12;
+  if (ageHours <= 48) return 3;
+  if (ageHours <= 72) return -8;
+  return -30;
 }
 
 function matchesPreference(topic: HotTopic, topicPreference: string) {

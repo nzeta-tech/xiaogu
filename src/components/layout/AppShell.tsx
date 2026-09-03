@@ -11,6 +11,7 @@ const platformNavItems = [
   { id: "creation", href: "/create", label: "创作广场", shortLabel: "创作广场", icon: "edit" },
   { id: "assets", href: "/works", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
   { id: "crm", href: "/avatar", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
+  { id: "workbuddy", href: "/workbuddy", label: "Workbuddy", shortLabel: "AI 工作团队", icon: "workbuddy" },
   { id: "invite", href: "/rewards#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
   { id: "billing", href: "/billing", label: "充值中心", shortLabel: "充值与订单", icon: "wallet" },
   { id: "growth", href: "/account", label: "用户中心", shortLabel: "权益与账户", icon: "sprout" },
@@ -26,8 +27,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [userName, setUserName] = useState("创作者");
   const [quotaBalance, setQuotaBalance] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("xiaogu:sidebar-collapsed") === "1");
   const [adminSection, setAdminSection] = useState<AdminSectionId>("overview");
-  const [siteConfig, setSiteConfig] = useState<{ siteName: string; siteSubtitle: string; supportContact: string; footerNote: string; logoUrl: string; helpUrl: string; homeContent: string; customNavItems: Array<{ id: string; label: string; url: string; visibility: "user" | "admin"; sortOrder: number }> }>({ siteName: "小谷", siteSubtitle: "保险内容增长助手", supportContact: "", footerNote: "", logoUrl: "/brand/xiaogu-icon.png", helpUrl: "/help", homeContent: "", customNavItems: [] });
+  const [siteConfig, setSiteConfig] = useState<{ siteName: string; siteSubtitle: string; supportContact: string; footerNote: string; logoUrl: string; helpUrl: string; homeContent: string; customNavItems: Array<{ id: string; label: string; url: string; visibility: "user" | "admin"; sortOrder: number }> }>({ siteName: "小谷", siteSubtitle: "财富、保险与财经内容助手", supportContact: "", footerNote: "", logoUrl: "/brand/xiaogu-icon.png", helpUrl: "/help", homeContent: "", customNavItems: [] });
   useEffect(() => {
     async function loadUser() {
       const user = await getCurrentUser();
@@ -47,9 +49,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function loadBalance() {
-      const response = await fetch(apiPath("/api/billing/balance"));
-      const payload = (await response.json()) as { balance?: number };
-      setQuotaBalance(payload.balance ?? null);
+      try {
+        const response = await fetch(apiPath("/api/billing/balance"));
+        if (!response.ok) return;
+        const payload = await response.json().catch(() => null) as { balance?: number } | null;
+        if (payload) setQuotaBalance(payload.balance ?? null);
+      } catch {
+        // A transient shell request must never prevent the creation page from rendering.
+      }
     }
 
     void loadBalance();
@@ -83,6 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname === "/create" ||
     pathname === "/works" ||
     pathname === "/avatar" ||
+    pathname === "/workbuddy" ||
     pathname === "/questionnaire" ||
     pathname === "/feedback" ||
     pathname === "/rewards" ||
@@ -97,22 +105,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, ...customUserNavItems, adminNavItem] : [...platformNavItems, ...customUserNavItems];
   const mobileNavItems = role === "admin" ? [...platformNavItems, adminNavItem] : platformNavItems;
   return (
-    <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""}`}>
+    <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""} ${sidebarCollapsed ? "sidebarCollapsed" : ""}`}>
       <aside className="appSidebar">
         <div className="appSidebarInner">
-          <a className="brand brandLink" href={appPath("/create")}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="brandMark" src={resolvePublicUrl(siteConfig.logoUrl)} alt="小谷" />
-            <div className="brandCopy creationBrandCopy">
-              <strong>{creationBrandName}</strong>
-              <span>保险人的智能工作伙伴</span>
-            </div>
-          </a>
+          <div className="sidebarBrandRow">
+            <a className="brand brandLink" href={appPath("/create")} title={sidebarCollapsed ? creationBrandName : undefined}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="brandMark" src={resolvePublicUrl(siteConfig.logoUrl)} alt="小谷" />
+              <div className="brandCopy creationBrandCopy">
+                <strong>{creationBrandName}</strong>
+                <span>专业服务者的智能工作伙伴</span>
+              </div>
+            </a>
+            <button aria-label={sidebarCollapsed ? "展开导航栏" : "收起导航栏"} className="sidebarCollapseButton" onClick={() => setSidebarCollapsed((current) => { const next = !current; window.localStorage.setItem("xiaogu:sidebar-collapsed", next ? "1" : "0"); return next; })} title={sidebarCollapsed ? "展开导航栏" : "收起导航栏"} type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d={sidebarCollapsed ? "m13 9 3 3-3 3" : "m16 9-3 3 3 3"}/></svg>
+            </button>
+          </div>
 
           <nav className="appSidebarNav" aria-label="主导航">
             <span className="appSidebarLabel">{pathname === "/admin" ? "运营管理" : "工作空间"}</span>
             {(pathname === "/admin" ? [adminNavItem] : visiblePlatformNavItems).map((item) => (
-              <a className={isNavItemActive(pathname, item.id, navigationSource) ? "active" : ""} href={resolvePublicUrl(item.href)} key={`${item.href}-${item.label}`}>
+              <a className={isNavItemActive(pathname, item.id, navigationSource) ? "active" : ""} href={resolvePublicUrl(item.href)} key={`${item.href}-${item.label}`} title={sidebarCollapsed ? item.label : undefined}>
                 <span className="appSidebarIcon" aria-hidden="true"><NavIcon name={item.icon} /></span>
                 <span>{item.label}</span>
               </a>
@@ -142,11 +155,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="appSidebarFooter">
-            <a className="sidebarSupportLink" href={resolvePublicUrl(siteConfig.helpUrl)}>
+            <a className="sidebarSupportLink" href={resolvePublicUrl(siteConfig.helpUrl)} title="使用帮助">
               <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="help" /></span>
               <span>使用帮助</span>
             </a>
-            <a className="sidebarSupportLink" href={appPath("/feedback")}>
+            <a className="sidebarSupportLink" href={appPath("/feedback")} title="反馈支持">
               <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="support" /></span>
               <span>反馈支持</span>
             </a>
@@ -252,6 +265,16 @@ function NavIcon({ name }: { name: string }) {
     return (
       <svg viewBox="0 0 24 24" fill="currentColor">
         <path d="M7.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm9 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2.5 20a5.5 5.5 0 0 1 11 0H2.5Zm10.7 0a5.8 5.8 0 0 1 3.1-4.4A4.8 4.8 0 0 1 21.5 20h-8.3Z" />
+      </svg>
+    );
+  }
+
+  if (name === "workbuddy") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3v3M5.6 5.6l2.1 2.1M18.4 5.6l-2.1 2.1" />
+        <rect x="4" y="8" width="16" height="12" rx="3" />
+        <path d="M8 13h.01M16 13h.01M9 17h6" />
       </svg>
     );
   }
@@ -373,6 +396,10 @@ function isNavItemActive(pathname: string, itemId?: string, navigationSource?: s
 
   if (itemId === "crm") {
     return pathname === "/avatar" || pathname === "/questionnaire";
+  }
+
+  if (itemId === "workbuddy") {
+    return pathname === "/workbuddy";
   }
 
   if (itemId === "growth") {

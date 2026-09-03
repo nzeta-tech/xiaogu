@@ -13,6 +13,13 @@ export type CreationFieldOption = {
   badge?: string;
 };
 
+export type CreationFieldCondition = {
+  fieldId: string;
+  equals?: string;
+  oneOf?: string[];
+  hasValue?: boolean;
+};
+
 export type CreationField = {
   id: string;
   label: string;
@@ -25,6 +32,15 @@ export type CreationField = {
   uploadLabel?: string;
   uploadHint?: string;
   multiple?: boolean;
+  /** Maximum number of files accepted by every UI surface. */
+  maxFiles?: number;
+  /** Progressive-disclosure rules shared by the app page and WorkBuddy. */
+  visibleWhen?: CreationFieldCondition[];
+  visibleWhenAny?: CreationFieldCondition[];
+  revealAfter?: string[];
+  /** Data fields are populated by parsers or dedicated controls, not rendered as ordinary inputs. */
+  presentation?: "field" | "data";
+  step?: number;
   maxLength?: number;
 };
 
@@ -210,17 +226,18 @@ export const creationApps: CreationApp[] = [
         required: true,
         placeholder: "粘贴抖音、微信视频号或公众号文章链接",
         maxLength: 2000,
+        step: 1,
       },
-      { id: "source_title", label: "原作品标题或文案开头", type: "text", placeholder: "从作品详情页复制，不要只填搜索结果标题", maxLength: 240 },
-      { id: "source_author", label: "作者或账号", type: "text", placeholder: "例如：账号名称 / 作者名称", maxLength: 120 },
-      { id: "source_published_at", label: "作品发布时间", type: "text", placeholder: "例如：2026-07-20 14:30；无法核验就填写“待核验”", maxLength: 40 },
-      { id: "source_like_count", label: "详情页可核验的点赞数", type: "text", placeholder: "例如：12.4万；必须来自作品详情页的点赞指标", helper: "不把播放、评论、收藏、分享或搜索结果数字当作点赞数。", maxLength: 40 },
-      { id: "source_content_type", label: "来源内容形态", type: "text", placeholder: "例如：视频、小红书纯图文、公众号正文", maxLength: 40 },
-      { id: "source_topic", label: "自动归类主题", type: "text", placeholder: "自动识别", maxLength: 80 },
-      { id: "source_tags", label: "自动提取标签", type: "text", placeholder: "自动提取", maxLength: 240 },
-      { id: "source_evidence", label: "作品中的事实证据摘要", type: "textarea", placeholder: "选填。记录作品中明确提到的案例、数据、时间范围、组织、流程或失败边界；没有就填“无”或留空。", maxLength: 1000 },
-      { id: "source_text", label: "补充原作品文字", type: "textarea", placeholder: "解析不完整时，可粘贴标题、正文或关键段落；不填也能继续。", maxLength: 12000 },
-      { id: "source_transcript", label: "补充视频口播稿", type: "textarea", placeholder: "解析不完整时，可粘贴口播稿或关键内容；不填也能继续。", maxLength: 12000 },
+      { id: "source_title", label: "原作品标题或文案开头", type: "text", placeholder: "从作品详情页复制，不要只填搜索结果标题", maxLength: 240, presentation: "data" },
+      { id: "source_author", label: "作者或账号", type: "text", placeholder: "例如：账号名称 / 作者名称", maxLength: 120, presentation: "data" },
+      { id: "source_published_at", label: "作品发布时间", type: "text", placeholder: "例如：2026-07-20 14:30；无法核验就填写“待核验”", maxLength: 40, presentation: "data" },
+      { id: "source_like_count", label: "详情页可核验的点赞数", type: "text", placeholder: "例如：12.4万；必须来自作品详情页的点赞指标", helper: "不把播放、评论、收藏、分享或搜索结果数字当作点赞数。", maxLength: 40, presentation: "data" },
+      { id: "source_content_type", label: "来源内容形态", type: "text", placeholder: "例如：视频、小红书纯图文、公众号正文", maxLength: 40, presentation: "data" },
+      { id: "source_topic", label: "自动归类主题", type: "text", placeholder: "自动识别", maxLength: 80, presentation: "data" },
+      { id: "source_tags", label: "自动提取标签", type: "text", placeholder: "自动提取", maxLength: 240, presentation: "data" },
+      { id: "source_evidence", label: "作品中的事实证据摘要", type: "textarea", placeholder: "选填。记录作品中明确提到的案例、数据、时间范围、组织、流程或失败边界；没有就填“无”或留空。", maxLength: 1000, presentation: "data" },
+      { id: "source_text", label: "补充原作品文字", type: "textarea", placeholder: "解析不完整时，可粘贴标题、正文或关键段落；不填也能继续。", maxLength: 12000, presentation: "data" },
+      { id: "source_transcript", label: "补充视频口播稿", type: "textarea", placeholder: "解析不完整时，可粘贴口播稿或关键内容；不填也能继续。", maxLength: 12000, presentation: "data" },
       {
         id: "remix_target",
         label: "想创作成什么",
@@ -228,6 +245,8 @@ export const creationApps: CreationApp[] = [
         required: true,
         helper: "这里直接使用对应的正式创作能力；对应能力的规则更新后，二创会同步生效。",
         options: remixCapabilityOptions,
+        revealAfter: ["source_url"],
+        step: 2,
       },
       {
         id: "remix_angle",
@@ -236,6 +255,8 @@ export const creationApps: CreationApp[] = [
         placeholder: "选填。例如：更偏向30岁已婚女性的家庭保障提醒；语气专业但不制造焦虑；加入我亲身经历过的客户沟通场景。",
         helper: "这会叠加到二创方向中；不填写时会结合你的内容画像和账号特点完成创作。",
         maxLength: 1500,
+        revealAfter: ["remix_target"],
+        step: 3,
       },
     ],
   },
@@ -285,6 +306,8 @@ export const creationApps: CreationApp[] = [
           { label: "自定义画面说明", value: "custom" },
         ],
         helper: "选择最接近你账号现有视觉的一种风格。",
+        revealAfter: ["creation_mode"],
+        step: 2,
       },
       {
         id: "creation_mode",
@@ -296,12 +319,15 @@ export const creationApps: CreationApp[] = [
           { label: "上传图片进行二创", value: "image_remix" },
         ],
         helper: "二创会以你上传的图片为基础，按所选风格和改造要求重新生成。",
+        step: 1,
       },
       {
         id: "source",
         label: "卡片文字内容（可选）",
         type: "textarea",
         placeholder: "粘贴文章、口播稿或要做成卡片的核心观点。二创时可留空，模型会以原图信息为基础处理。",
+        visibleWhen: [{ fieldId: "creation_mode", equals: "text_to_card" }],
+        step: 3,
       },
       {
         id: "signature",
@@ -309,6 +335,8 @@ export const creationApps: CreationApp[] = [
         type: "textarea",
         placeholder: "例如：林顾问、安心家庭说",
         helper: "最多 6 个字；不需要署名可以留空。",
+        revealAfter: ["creation_mode"],
+        step: 4,
       },
       {
         id: "draw_portrait",
@@ -319,6 +347,8 @@ export const creationApps: CreationApp[] = [
           { label: "不需要人物", value: "no" },
           { label: "使用我上传的形象照", value: "yes" },
         ],
+        revealAfter: ["creation_mode"],
+        step: 5,
       },
       {
         id: "reference_image",
@@ -326,6 +356,10 @@ export const creationApps: CreationApp[] = [
         type: "file",
         accept: "image/*",
         helper: "二创模式可上传 1–3 张原图，每张大小上限为 10MB；文字制卡时可作为风格或人物参考图。",
+        multiple: true,
+        maxFiles: 3,
+        visibleWhenAny: [{ fieldId: "creation_mode", equals: "image_remix" }, { fieldId: "draw_portrait", equals: "yes" }],
+        step: 3,
       },
       {
         id: "remix_instruction",
@@ -334,6 +368,8 @@ export const creationApps: CreationApp[] = [
         placeholder: "例如：保留人物和配色，去除原图文字，改成 3 个保障重点的知识卡；或保留构图，将画面改成更专业的保险科普风。",
         helper: "说清哪些元素要保留、替换或删除；未说明时会尽量保留原图的核心主体和构图。",
         maxLength: 1000,
+        visibleWhen: [{ fieldId: "creation_mode", equals: "image_remix" }],
+        step: 4,
       },
       {
         id: "portrait_reference_image",
@@ -341,6 +377,10 @@ export const creationApps: CreationApp[] = [
         type: "file",
         accept: "image/jpeg,image/png,image/webp",
         helper: "可从下方数字分身库选择，也可临时上传一张清晰形象照；仅用于本次二创的人物形象。",
+        visibleWhen: [{ fieldId: "creation_mode", equals: "image_remix" }, { fieldId: "draw_portrait", equals: "yes" }],
+        multiple: true,
+        maxFiles: 4,
+        step: 6,
       },
       {
         id: "ratio",
@@ -359,6 +399,8 @@ export const creationApps: CreationApp[] = [
           { label: "3:2 横版", value: "3:2" },
         ],
         helper: "小红书常用 3:4 或 4:5，朋友圈常用 1:1，视频封面常用 9:16。",
+        revealAfter: ["creation_mode"],
+        step: 7,
       },
     ],
   },
@@ -385,6 +427,7 @@ export const creationApps: CreationApp[] = [
           { label: "简洁商务版", value: "renewal-business", previewUrl: "/examples/policy-renewal-styles/renewal-business.webp" },
         ],
         helper: "图片模型会按所选风格直接生成一张图文融合成品。",
+        step: 1,
       },
       {
         id: "policy_document",
@@ -392,10 +435,11 @@ export const creationApps: CreationApp[] = [
         type: "file",
         accept: ".txt,.md,.docx,.pdf",
         helper: "可上传保单 PDF、Word、TXT 或 Markdown。系统会自动识别客户称呼、保司、产品、保单号、续费日期和保费，缺失项再手动补充。",
+        step: 1,
       },
-      { id: "customer_salutation", label: "客户称呼", type: "text", required: true, maxLength: 24 },
-      { id: "insurer", label: "保险公司", type: "text", required: true, maxLength: 30 },
-      { id: "product_name", label: "产品名称", type: "text", required: true, maxLength: 34 },
+      { id: "customer_salutation", label: "客户称呼", type: "text", required: true, maxLength: 24, step: 2 },
+      { id: "insurer", label: "保险公司", type: "text", required: true, maxLength: 30, step: 2 },
+      { id: "product_name", label: "产品名称", type: "text", required: true, maxLength: 34, step: 2 },
       {
         id: "policy_number",
         label: "保单号",
@@ -403,9 +447,10 @@ export const creationApps: CreationApp[] = [
         required: true,
         maxLength: 30,
         helper: "默认仅在图片中展示脱敏号码。",
+        step: 2,
       },
-      { id: "renewal_date", label: "续费日期", type: "text", required: true, maxLength: 28 },
-      { id: "premium_amount", label: "本期保费", type: "text", required: true, maxLength: 20 },
+      { id: "renewal_date", label: "续费日期", type: "text", required: true, maxLength: 28, step: 2 },
+      { id: "premium_amount", label: "本期保费", type: "text", required: true, maxLength: 20, step: 2 },
       {
         id: "currency",
         label: "币种",
@@ -417,6 +462,7 @@ export const creationApps: CreationApp[] = [
           { label: "港币", value: "港币" },
           { label: "新加坡元", value: "新加坡元" },
         ],
+        step: 2,
       },
       {
         id: "privacy_mode",
@@ -427,14 +473,16 @@ export const creationApps: CreationApp[] = [
           { label: "自动脱敏（推荐）", value: "masked" },
           { label: "显示完整号码", value: "full" },
         ],
+        step: 2,
       },
-      { id: "advisor_name", label: "顾问姓名", type: "text", required: true, maxLength: 18 },
-      { id: "advisor_company", label: "公司或团队（可选）", type: "text", maxLength: 28 },
+      { id: "advisor_name", label: "顾问姓名", type: "text", required: true, maxLength: 18, step: 3 },
+      { id: "advisor_company", label: "公司或团队（可选）", type: "text", maxLength: 28, step: 3 },
       {
         id: "contact_text",
         label: "联系提示",
         type: "textarea",
         maxLength: 80,
+        step: 3,
       },
       {
         id: "reference_image",
@@ -442,6 +490,8 @@ export const creationApps: CreationApp[] = [
         type: "file",
         accept: "image/jpeg,image/png,image/webp",
         helper: "优先使用数字分身形象库；临时照片仅用于本次本地合成，客户与保单信息不会发送给图片模型。",
+        visibleWhen: [{ fieldId: "avatar_visual_mode", equals: "yes" }],
+        step: 3,
       },
       {
         id: "portrait_treatment",
@@ -452,6 +502,8 @@ export const creationApps: CreationApp[] = [
           { label: "柔和手绘感", value: "soft-illustration" },
           { label: "保留清晰原照", value: "original" },
         ],
+        visibleWhen: [{ fieldId: "avatar_visual_mode", equals: "yes" }],
+        step: 3,
       },
       {
         id: "ratio",
@@ -462,6 +514,7 @@ export const creationApps: CreationApp[] = [
           { label: "3:4 竖版", value: "3:4" },
           { label: "1:1 方形", value: "1:1" },
         ],
+        step: 4,
       },
       {
         id: "confirmation",
@@ -469,6 +522,7 @@ export const creationApps: CreationApp[] = [
         type: "radio",
         required: true,
         options: [{ label: "我已核对日期、金额、币种和保单号", value: "confirmed" }],
+        step: 4,
       },
     ],
   },
@@ -524,7 +578,7 @@ export const creationApps: CreationApp[] = [
     category: "content",
     points: 5,
     badge: "新",
-    description: "把热点、事件或观点整理成开头抓人、逻辑清楚且事实边界明确的传播型内容。",
+    description: "把热点、事件或观点整理成开头抓人、判断鲜明、逻辑清楚的传播型内容。",
     promptHint: "围绕真实素材与本题受众，形成一条可直接录制的获客型口播正文。",
     resultType: "text",
     fields: [
@@ -558,6 +612,7 @@ export const creationApps: CreationApp[] = [
           { label: "微信视频号", value: "wechat_video" },
           { label: "抖音", value: "douyin" },
         ],
+        step: 1,
       },
       {
         id: "style",
@@ -573,6 +628,7 @@ export const creationApps: CreationApp[] = [
           { label: "克制高级", value: "video-premium-minimal", previewUrl: "/examples/video-cover-styles/premium-minimal.png" },
         ],
         helper: "视频号更适合可信、克制的表达；抖音更适合标题突出、观点鲜明的表达。",
+        step: 1,
       },
       {
         id: "source",
@@ -580,6 +636,7 @@ export const creationApps: CreationApp[] = [
         type: "textarea",
         required: true,
         placeholder: "粘贴需要制作封面的文案。系统会从中提炼封面标题和画面重点。",
+        step: 1,
       },
       {
         id: "avatar_visual_mode",
@@ -591,6 +648,7 @@ export const creationApps: CreationApp[] = [
           { label: "选择或上传我的形象照", value: "yes" },
         ],
         helper: "开启后可从数字分身形象库选择，也可临时上传一张清晰照片。",
+        step: 2,
       },
       {
         id: "reference_image",
@@ -598,6 +656,8 @@ export const creationApps: CreationApp[] = [
         type: "file",
         accept: "image/jpeg,image/png,image/webp",
         helper: "仅用于本次视频封面生成；如已从下方形象库选择照片，可不上传。",
+        visibleWhen: [{ fieldId: "avatar_visual_mode", equals: "yes" }],
+        step: 2,
       },
       {
         id: "ratio",
@@ -606,6 +666,7 @@ export const creationApps: CreationApp[] = [
         required: true,
         options: [{ label: "9:16 竖版", value: "9:16" }],
         helper: "已按视频号和抖音竖版视频封面优化。",
+        step: 3,
       },
     ],
   },

@@ -3,6 +3,7 @@ import { extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-
 import { runInsuranceContentAgent, streamInsuranceContentAgent } from "@/lib/agent/insurance-agent";
 import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 import { type CreationField } from "@/lib/apps/catalog";
+import { getCreationAppBySlug } from "@/lib/apps/catalog";
 import { getEntryAdjustedApp } from "@/lib/apps/entry-app";
 import { reportUsage } from "@/lib/billing/openmeter";
 import { checkCompliance } from "@/lib/compliance/check";
@@ -33,7 +34,6 @@ import {
   tryMergeWechatStudioAssets,
   tryMergeXiaohongshuStudioAssets,
   trySaveUsageLog,
-  trySyncCreationCatalog,
   tryUpdateWorkContent,
 } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
@@ -48,7 +48,6 @@ import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
 import { buildPersistedCreatorStyleText, type CreatorStyleResult } from "@/lib/creation/creator-style-result";
 import {
   authorityForTrafficTask,
-  applyTrafficDeterministicAuditChecks,
   buildTrafficCopyAuditPrompt,
   buildTrafficCopyCreativeBriefPrompt,
   buildTrafficCopyRevisionPrompt,
@@ -63,6 +62,7 @@ import {
   measureTrafficExpressionSimilarity,
   normalizeTrafficBriefForSource,
   sanitizeTrafficNarrativeIdentity,
+  mergeTrafficSourceBlueprint,
   type TrafficAuthority,
   type TrafficCopyAudit,
   type TrafficCopyCreativeBrief,
@@ -72,6 +72,9 @@ import { buildRemixStudioSource } from "@/lib/creation/remix-studio-source";
 import { normalizeImageCardStyles } from "@/lib/creation/image-card-styles";
 import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
+import { parseSelectedTrafficTopics, trafficTopicGenerationContext, type TrafficTopicCandidate } from "@/lib/creation/traffic-topic-arena";
+import { runTrafficTopicAnalysis } from "@/lib/creation/traffic-topic-analysis";
+import { applyPortfolioDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, type TrafficPortfolioPlan } from "@/lib/creation/traffic-copy-portfolio";
 
 type FieldValue = CreationFieldValue;
 
@@ -107,8 +110,10 @@ export async function executeCreationAppRun(input: {
     coachLabel?: string | null;
   }) => void | Promise<void>;
 }) {
-  await trySyncCreationCatalog();
-  const app = await tryGetCreationAppBySlug(input.slug);
+  // The request has already resolved the catalog entry. Do not reconcile the
+  // entire catalog again before emitting the app-run id and first progress
+  // event; that turns background startup into a long synchronous DB migration.
+  const app = (await tryGetCreationAppBySlug(input.slug)) ?? getCreationAppBySlug(input.slug);
   if (!app) {
     throw new Error("应用不存在");
   }
@@ -180,8 +185,9 @@ export async function executeCreationAppRun(input: {
           ].filter(Boolean).join("\n\n")
         : `${effectiveApp.name}\n${caseContext.join("\n")}${caseContext.length > 0 ? "\n" : ""}${effectiveApp.promptHint}\n${effectiveApp.fields.map((field) => `${field.label}：${stringifyCreationFieldValue(values[field.id])}`).join("\n")}`;
   const isTrafficRequested = app.slug === "traffic-copy" || app.slug === "link-remix" && normalizeRemixCapability(values.remix_target) === "traffic-copy";
+  const isTrafficTopicOnly = isTrafficRequested && stringifyCreationFieldValue(values.traffic_topic_only) === "yes";
   const selectedCreativeCoachIds = isTrafficRequested
-    ? [...new Set((Array.isArray(values.creative_coach_version_ids) ? values.creative_coach_version_ids : [stringifyCreationFieldValue(values.creative_coach_version_id)]).filter((id): id is string => typeof id === "string" && Boolean(id)))].slice(0, 2)
+    ? [...new Set((Array.isArray(values.creative_coach_version_ids) ? values.creative_coach_version_ids : [stringifyCreationFieldValue(values.creative_coach_version_id)]).filter((id): id is string => typeof id === "string" && Boolean(id)))].slice(0, 3)
     : [];
   const requestedCreativeCoachIds = selectedCreativeCoachIds.filter((id) => id !== "default");
   const creativeCoachRuntimes = await Promise.all(requestedCreativeCoachIds.map((id) => resolveCreativeCoachRuntime(input.userId, id)));
@@ -191,11 +197,13 @@ export async function executeCreationAppRun(input: {
     ? selectedCreativeCoachIds.flatMap<SelectedCreativeCoachStyle>((id) => {
         if (id === "default") return [{ id: "default", label: "小谷教练", researchSkill: "", briefSkill: "", writingSkill: "", runtime: null }];
         const runtime = runtimeById.get(id);
-        return runtime ? [{ id: runtime.id, label: runtime.label, researchSkill: renderCreativeCoachSkill(runtime, "research"), briefSkill: renderCreativeCoachSkill(runtime, "brief"), writingSkill: [renderCreativeCoachSkill(runtime, "writing"),renderCreativeCoachPersona(runtime) ? `【内部 Persona｜只控制稳定立场与声纹，严禁在正文复述、介绍或暗示这份身份画像】\n${renderCreativeCoachPersona(runtime)}` : "",`【唯一创作者称谓】${runtime.skillModules.persona?.identity || runtime.label.replace(/教练.*$/u, "")}。仅在自然需要自称时使用；原始转写里的近音人名、错别字或其他自称不得覆盖它。不得在正文描述创作者身份、服务对象或内容定位。`].filter(Boolean).join("\n\n"), runtime }] : [];
+        return runtime ? [{ id: runtime.id, label: runtime.label, researchSkill: renderCreativeCoachSkill(runtime, "research"), briefSkill: renderCreativeCoachSkill(runtime, "brief"), writingSkill: [renderCreativeCoachSkill(runtime, "writing"),renderCreativeCoachPersona(runtime) ? `【Persona参考】\n${renderCreativeCoachPersona(runtime)}` : "",`【创作者称谓参考】${runtime.skillModules.persona?.identity || runtime.label.replace(/教练.*$/u, "")}`].filter(Boolean).join("\n\n"), runtime }] : [];
       })
     : [{ id: "default", label: "小谷教练", researchSkill: "", briefSkill: "", writingSkill: "", runtime: null }];
   const buildCreatorStylePrompt = (style: { writingSkill: string }) => style.writingSkill
-    ? `${basePrompt}\n\n【本次选用的创作教练】\n${style.writingSkill}\n\n【执行优先级】\n1. 事实准确性、素材边界与合规要求最高。\n2. 教练的内容创作能力决定主要创作结构、句式、节奏和表达气质。\n不得照抄训练作品中的具体句子、案例或事实。`
+    ? isTrafficRequested
+      ? `${basePrompt}\n\n【本次选用的创作教练】\n${style.writingSkill}\n\n由教练结合搜索素材自然决定切口、结构、判断和表达。`
+      : `${basePrompt}\n\n【本次选用的创作教练】\n${style.writingSkill}\n\n【执行优先级】\n1. 事实准确性、素材边界与合规要求最高。\n2. 教练的内容创作能力决定主要创作结构、句式、节奏和表达气质。\n不得照抄训练作品中的具体句子、案例或事实。`
     : basePrompt;
   const prompt = buildCreatorStylePrompt(creatorStyles[0]);
   const referenceKnowledge = app.slug === "image-card" && stringifyCreationFieldValue(values.creation_mode) === "image_remix"
@@ -227,7 +235,10 @@ export async function executeCreationAppRun(input: {
     ? buildWechatSectionImagePrompts(stringifyCreationFieldValue(values.article), imagePrompt ?? "", 5)
     : null;
   const resolvedPrompt = imagePrompt ?? prompt;
-  const pendingTitle = buildWorkTitle({
+  const topicSourceTitle = stringifyCreationFieldValue(values.source).replace(/\s+/g, " ").trim().slice(0, 32) || "新素材";
+  const pendingTitle = isTrafficTopicOnly
+    ? `选题分析｜${topicSourceTitle}`
+    : buildWorkTitle({
     appName: effectiveApp.name,
     appSlug: app.slug,
     values,
@@ -292,7 +303,20 @@ export async function executeCreationAppRun(input: {
   let resultJson: Record<string, unknown> | undefined;
 
   try {
-    if (effectiveApp.resultType === "image" || effectiveApp.resultType === "image-plan") {
+    if (isTrafficTopicOnly) {
+      const analysis = await runTrafficTopicAnalysis({
+        slug: app.slug,
+        userId: input.userId,
+        values,
+        onProgress: (event) => input.onEvent?.({ type:"progress",...event }),
+      });
+      result = ["选题分析完成",...analysis.topics.map((topic,index)=>`${index+1}. ${topic.title}`)].join("\n\n");
+      resultJson = {
+        trafficTopicArena: analysis,
+        contentJson: { plainText:result,batches:[] },
+      };
+      await input.onEvent?.({type:"delta",content:result});
+    } else if (effectiveApp.resultType === "image" || effectiveApp.resultType === "image-plan") {
       const visualReferences = await resolveAvatarVisualReferences({
         userId: input.userId,
         assetIds: visualAssetIds,
@@ -361,6 +385,20 @@ export async function executeCreationAppRun(input: {
       const trafficSkillRoutes: Array<ReturnType<typeof parseCreativeCoachSkillRoute> | null> = [];
       const trafficAudits: Array<{ first: TrafficCopyAudit; final: TrafficCopyAudit; revised: boolean }> = [];
       const trafficExecutions: Array<Record<string, unknown>> = [];
+      const selectedTrafficTopics = isTrafficExecution ? parseSelectedTrafficTopics(values.traffic_selected_topics) : [];
+      const precomputedTrafficResearch = isTrafficExecution
+        ? stringifyCreationFieldValue(values.traffic_shared_research).trim().slice(0, 60_000)
+        : "";
+      const precomputedTrafficEvidencePack = isTrafficExecution
+        ? parseSharedTrafficEvidencePack(stringifyCreationFieldValue(values.traffic_shared_evidence_pack))
+        : null;
+      const precomputedTrafficTopicProcess = isTrafficExecution
+        ? parseTrafficTopicProcess(stringifyCreationFieldValue(values.traffic_topic_process))
+        : null;
+      let trafficPortfolioPlan: TrafficPortfolioPlan | null = null;
+      const trafficBlueprints: TrafficSourceBlueprint[] = [];
+      const trafficPromptStyles: typeof creatorStyles = [];
+      const trafficPromptTopics: Array<TrafficTopicCandidate | null> = [];
       let trafficSourceBlueprint: TrafficSourceBlueprint | null = null;
       let trafficAuthority: TrafficAuthority | null = null;
       let prompts: string[];
@@ -373,13 +411,14 @@ export async function executeCreationAppRun(input: {
         if (app.slug === "traffic-copy") {
           await input.onEvent?.({ type:"progress",phase:"task_started",status:"completed",label:"任务准备完成",detail:"素材和所选教练已经就绪。" });
         }
-        await input.onEvent?.({ type:"progress",phase:"source_understanding",status:"active",label:"正在理解素材",detail:"识别主题、核心判断和不能省略的事实边界。" });
+        await input.onEvent?.({ type:"progress",phase:"source_understanding",status:"active",label:"正在理解素材",detail:"识别主题、人物、事件、矛盾和可展开的内容方向。" });
         trafficSourceBlueprint = fallbackTrafficSourceBlueprint(source);
         try {
           const rawBlueprint = await runInsuranceContentAgent(
             [{ role: "user", content: buildTrafficSourceBlueprintPrompt(source) }],
             input.userId,
             "traffic",
+            { creatorContextMode:"none" },
           );
           trafficSourceBlueprint = parseTrafficSourceBlueprint(rawBlueprint, source);
         } catch {
@@ -389,97 +428,137 @@ export async function executeCreationAppRun(input: {
         await input.onEvent?.({ type:"progress",phase:"source_understanding",status:"completed",label:"素材理解完成",detail:"已经整理核心观点、必要论据和发布边界。" });
         let sharedTrafficResearch = "";
         try {
-          await input.onEvent?.({ type:"progress",phase:"fast_research",status:"active",label:"正在快速核验资料",detail:"只核验会影响事实准确和创作判断的信息。" });
-          const fastResearch = await runFastResearch({
-            objective: `为口播创作核验并补充最小必要公开事实：${trafficSourceBlueprint.originalThesis || source.slice(0, 180)}`,
-            context: [
-              `【来源内容蓝图】\n${JSON.stringify(trafficSourceBlueprint)}`,
-              `【原始素材】\n${source}`,
-              "只研究会影响事实准确、事件背景或创作判断的信息，不扩展成专题报告。",
-            ].join("\n\n"),
-            userId: input.userId,
-          });
-          sharedTrafficEvidencePack = await buildTrafficEvidencePackFromFastResearch(source, fastResearch);
-          await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料核验完成",detail:`已完成 ${fastResearch.trace.queries.length} 个证据问题，整理出可追溯的事实边界。` });
-          const rawSearchMaterials = formatTrafficEvidencePack(sharedTrafficEvidencePack);
+          let rawSearchMaterials = precomputedTrafficResearch;
+          if (rawSearchMaterials) {
+            sharedTrafficEvidencePack = precomputedTrafficEvidencePack;
+            await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"选题资料已复用",detail:"正在复用选题阶段集中搜索形成的素材池，不再重复联网检索。" });
+          } else {
+            await input.onEvent?.({ type:"progress",phase:"fast_research",status:"active",label:"正在集中搜索资料",detail:"本次没有选题研究包，将执行一次最多 6 个问题的兜底搜索。" });
+            const fastResearch = await runFastResearch({
+              objective: `为口播创作补充公开事实、争议和创作判断：${trafficSourceBlueprint.originalThesis || source.slice(0, 180)}`,
+              context: [
+                `【来源内容蓝图】\n${JSON.stringify(trafficSourceBlueprint)}`,
+                `【原始素材】\n${source}`,
+                "按相关性覆盖当前事件、历史背景、具体安排、人物说法或动机、争议观点、结果影响；不要重复搜索。",
+              ].join("\n\n"),
+              userId: input.userId,
+              maxQueries: 6,
+            });
+            sharedTrafficEvidencePack = await buildTrafficEvidencePackFromFastResearch(source, fastResearch);
+            rawSearchMaterials = formatTrafficEvidencePack(sharedTrafficEvidencePack);
+            await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料搜索完成",detail:`已完成 ${fastResearch.trace.queries.length} 个检索问题，形成统一创作素材池。` });
+          }
           sharedTrafficResearch = rawSearchMaterials;
+          await input.onEvent?.({ type:"progress",phase:"material_synthesis",status:"active",label:"正在整理创作材料",detail:"把核验结果压缩成可用于写作的事实、背景和边界。" });
           try {
-            const rawBrief = await runInsuranceContentAgent([{ role: "user", content: buildTrafficMaterialBriefPrompt(source, rawSearchMaterials) }], input.userId, "traffic");
-            sharedTrafficResearch = formatTrafficMaterialBrief(parseTrafficMaterialBrief(rawBrief), sharedTrafficEvidencePack.topicMaterials);
+            const rawBrief = await runInsuranceContentAgent([{ role: "user", content: buildTrafficMaterialBriefPrompt(source, rawSearchMaterials) }], input.userId, "traffic", { creatorContextMode:"none" });
+            sharedTrafficResearch = formatTrafficMaterialBrief(parseTrafficMaterialBrief(rawBrief), sharedTrafficEvidencePack?.topicMaterials ?? []);
           } catch {
             // The structured evidence pack remains usable if material editing fails.
           }
+          await input.onEvent?.({ type:"progress",phase:"material_synthesis",status:"completed",label:"创作材料整理完成",detail:"已整理事件背景、人物关系、争议、细节和可展开方向。" });
           // Broad topic requests only become a stable content blueprint after
           // research has selected one concrete angle. Rebuild the blueprint so
           // the selected mechanism is a required asset, not optional context.
+          await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"active",label:"正在确定核心切入角度",detail:"结合最新材料确认这篇内容必须回答的问题和叙事主线。" });
           try {
             const researchedBlueprint = await runInsuranceContentAgent(
               [{ role: "user", content: buildTrafficSourceBlueprintPrompt(source, sharedTrafficResearch) }],
               input.userId,
               "traffic",
+              { creatorContextMode:"none" },
             );
-            trafficSourceBlueprint = parseTrafficSourceBlueprint(researchedBlueprint, source);
+            trafficSourceBlueprint = mergeTrafficSourceBlueprint(trafficSourceBlueprint, parseTrafficSourceBlueprint(researchedBlueprint, source));
             trafficAuthority = authorityForTrafficTask(trafficSourceBlueprint.taskMode);
           } catch {
             // Keep the source-only blueprint if the researched rebuild fails.
           }
+          await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"completed",label:"核心切入角度已确定",detail:"事件背景、核心问题和创作主线已经就绪。" });
         } catch {
           // Search is supplemental. Creation can continue from the source blueprint.
-          await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料准备完成",detail:"公开检索暂未补充有效材料，将严格依据现有素材继续创作。" });
+          await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料准备完成",detail:"公开搜索暂未返回补充材料，将根据现有素材继续创作。" });
+        }
+        if (selectedTrafficTopics.length > 1) {
+          await input.onEvent?.({type:"progress",phase:"portfolio_planning",status:"active",label:"正在规划多选题分工",detail:"为每篇确定独家任务、内容形式和自然时长，避免重复讲同一套背景。"});
+          try {
+            const rawPlan=await runInsuranceContentAgent([{role:"user",content:buildTrafficPortfolioPlanPrompt(selectedTrafficTopics)}],input.userId,"traffic",{creatorContextMode:"positioning"});
+            trafficPortfolioPlan=parseTrafficPortfolioPlan(rawPlan,selectedTrafficTopics);
+          } catch {
+            trafficPortfolioPlan=parseTrafficPortfolioPlan("",selectedTrafficTopics);
+          }
+          await input.onEvent?.({type:"progress",phase:"portfolio_planning",status:"completed",label:"多选题分工完成",detail:trafficPortfolioPlan.overlapWarnings.length?`发现 ${trafficPortfolioPlan.overlapWarnings.length} 处潜在重复，已写入各篇分工。`:"每篇已经获得不同的内容任务。"});
         }
         prompts = [];
-        for (const style of creatorStyles) {
+        const topicUnits: Array<TrafficTopicCandidate | null> = selectedTrafficTopics.length ? selectedTrafficTopics : [null];
+        for (const topic of topicUnits) for (const style of topic?.assignedCoachId ? creatorStyles.filter((candidate)=>candidate.id===topic.assignedCoachId) : creatorStyles) {
+          const topicContext = topic ? [trafficTopicGenerationContext(topic),portfolioUnitContext(trafficPortfolioPlan,topic.id)].filter(Boolean).join("\n\n") : "";
+          const unitSource = topic ? `${source}\n\n${topicContext}` : source;
+          const unitBlueprint = topic ? parseTrafficSourceBlueprint(JSON.stringify({
+            ...trafficSourceBlueprint,
+            originalThesis: topic.workingThesis,
+            attentionReason: topic.humanTension,
+            entryMode: "反差",
+            entryContent: topic.hookPromise,
+            intendedMindShift: topic.workingThesis,
+            contentAssets: [
+              { id: `selected-${topic.id}`, kind: "thesis", meaning: topic.workingThesis, function: `回答：${topic.coreQuestion}`, importance: "required", sourceStatus: "source", mayReframe: false },
+              ...trafficSourceBlueprint.contentAssets.filter((item) => item.kind !== "thesis"),
+            ],
+          }), unitSource) : trafficSourceBlueprint;
           await input.onEvent?.({ type:"progress",phase:`coach_decision:${style.id}`,status:"active",label:`${style.label}正在确定表达方向`,detail:"判断受众入口、核心观点和本题真正需要的方法。",coachId:style.id,coachLabel:style.label });
           const trafficContext = [
             ...(remixDefinition ? remixTargetContext : caseContext),
             app.slug === "link-remix" ? linkRemixResearch : "",
             sharedTrafficResearch,
+            topicContext,
           ].filter(Boolean);
           trafficContexts.push(trafficContext);
+          trafficBlueprints.push(unitBlueprint);
+          trafficPromptStyles.push(style);
+          trafficPromptTopics.push(topic);
           let progressivelyLoadedSkills = "";
           let skillRoute: ReturnType<typeof parseCreativeCoachSkillRoute> | null = null;
           if (style.runtime) {
             try {
-              const rawRoute = await runInsuranceContentAgent([{ role: "user", content: buildCreativeCoachSkillRoutePrompt(style.runtime, trafficSourceBlueprint.taskProfile) }], input.userId, "traffic");
+              const rawRoute = await runInsuranceContentAgent([{ role: "user", content: buildCreativeCoachSkillRoutePrompt(style.runtime, unitBlueprint.taskProfile) }], input.userId, "traffic", { creatorContextMode:"none" });
               skillRoute = parseCreativeCoachSkillRoute(rawRoute, style.runtime);
               progressivelyLoadedSkills = renderProgressivelyLoadedCreativeCoachSkills(style.runtime, skillRoute);
             } catch { /* Zero-method fallback is valid and safer than loading the entire library. */ }
           }
           trafficSkillRoutes.push(skillRoute);
           const briefPrompt = buildTrafficCopyCreativeBriefPrompt({
-            source,
+            source: unitSource,
             creatorSkill: [style.briefSkill, progressivelyLoadedSkills ? `【渐进加载的候选Skill｜候选不等于必须使用】\n${progressivelyLoadedSkills}` : "【渐进加载结果】本题没有需要展开的方法卡，允许零方法完成。"].filter(Boolean).join("\n\n"),
             context: trafficContext,
             promptHint: remixTargetApp?.promptHint ?? effectiveApp.promptHint,
-            blueprint: trafficSourceBlueprint,
+            blueprint: unitBlueprint,
             authority: trafficAuthority,
           });
           let creativeBrief: TrafficCopyCreativeBrief;
           try {
-            const rawBrief = await runInsuranceContentAgent([{ role: "user", content: briefPrompt }], input.userId, "traffic");
+            const rawBrief = await runInsuranceContentAgent([{ role: "user", content: briefPrompt }], input.userId, "traffic", { creatorContextMode:"writing" });
             creativeBrief = parseTrafficCopyCreativeBrief(rawBrief);
           } catch {
-            creativeBrief = fallbackTrafficCopyCreativeBrief(source);
+            creativeBrief = fallbackTrafficCopyCreativeBrief(unitSource);
           }
-          const unverifiedSourceIds = new Set(trafficSourceBlueprint.mustKeepEvidence.filter((item) => item.status === "needs_verification").map((item) => item.id));
-          creativeBrief.mustKeepEvidenceIds = creativeBrief.mustKeepEvidenceIds.filter((id) => !unverifiedSourceIds.has(id));
           const routedIds = skillRoute && style.runtime
             ? new Set([...skillRoute.strategySkillIds,...skillRoute.candidateMethodIds].flatMap((id) => {
                 const method = style.runtime?.skillModules.discoveredMethods?.find((item) => item.key === id);
                 return [id,method?.name ?? ""].filter(Boolean);
               }))
             : new Set<string>();
-          creativeBrief = normalizeTrafficBriefForSource(creativeBrief, source, routedIds);
+          creativeBrief = normalizeTrafficBriefForSource(creativeBrief, unitSource, routedIds);
+          creativeBrief = applyPortfolioDuration(creativeBrief, topic ? trafficPortfolioPlan?.units.find((item)=>item.topicId===topic.id) : undefined);
           await input.onEvent?.({ type:"progress",phase:`coach_decision:${style.id}`,status:"completed",label:`${style.label}已确定创作方向`,detail:creativeBrief.workingThesis ? `核心方向：${creativeBrief.workingThesis.slice(0, 80)}` : "已确定内容入口、论证顺序和收束方式。",coachId:style.id,coachLabel:style.label });
           trafficCreativeBriefs.push(creativeBrief);
           const selectedMethodCards = style.runtime ? renderSelectedCreativeCoachMethods(style.runtime, creativeBrief.selectedMethods.map((item) => item.methodId)) : "";
           prompts.push(buildTrafficCopyWritingPrompt({
-            source,
+            source: unitSource,
             creatorSkill: [style.writingSkill, selectedMethodCards ? `【本题获准使用的方法卡】\n${selectedMethodCards}` : ""].filter(Boolean).join("\n\n"),
             context: trafficContext,
             promptHint: remixTargetApp?.promptHint ?? effectiveApp.promptHint,
             brief: creativeBrief,
-            blueprint: trafficSourceBlueprint,
+            blueprint: unitBlueprint,
             authority: trafficAuthority,
           }));
         }
@@ -490,45 +569,39 @@ export async function executeCreationAppRun(input: {
       for (const [promptIndex, channelPrompt] of prompts.entries()) {
         let currentOutput = "";
         if (isTrafficExecution) {
-          const source = app.slug === "link-remix" ? buildRemixStudioSource(values) : stringifyCreationFieldValue(values.source);
-          const blueprint = trafficSourceBlueprint ?? fallbackTrafficSourceBlueprint(source);
-          const authority = trafficAuthority ?? authorityForTrafficTask(blueprint.taskMode);
+          const baseSource = app.slug === "link-remix" ? buildRemixStudioSource(values) : stringifyCreationFieldValue(values.source);
+          const topic = trafficPromptTopics[promptIndex];
+          const source = topic ? `${baseSource}\n\n${trafficTopicGenerationContext(topic)}` : baseSource;
+          const blueprint = trafficBlueprints[promptIndex] ?? trafficSourceBlueprint ?? fallbackTrafficSourceBlueprint(source);
           const brief = trafficCreativeBriefs[promptIndex] ?? fallbackTrafficCopyCreativeBrief(source);
-          const context = trafficContexts[promptIndex] ?? [];
-          const style = creatorStyles[promptIndex];
+          const auditAuthority = trafficAuthority ?? authorityForTrafficTask(blueprint.taskMode);
+          const style = trafficPromptStyles[promptIndex] ?? creatorStyles[promptIndex];
           await input.onEvent?.({ type:"progress",phase:`writing:${style?.id ?? promptIndex}`,status:"active",label:`${style?.label ?? "教练"}正在生成正文`,detail:"正在把创作决策写成完整、可独立录制的口播。",coachId:style?.id,coachLabel:style?.label });
-          const auditDraft = async (draft: string) => {
-            let audit = parseTrafficCopyAudit("");
-            for (let auditAttempt = 0; auditAttempt < 2; auditAttempt += 1) {
-              try {
-                audit = applyTrafficDeterministicAuditChecks(parseTrafficCopyAudit(await runInsuranceContentAgent([{ role: "user", content: buildTrafficCopyAuditPrompt({ source, draft, blueprint, authority, brief, context }) }], input.userId, "traffic")), draft, { brief, blueprint, creatorName: style?.runtime?.skillModules.persona?.identity || style?.label.replace(/教练.*$/u, "") });
-                if (!audit.issues.some((item) => item.type === "audit_parse")) return audit;
-              } catch { /* Retry one malformed or failed audit before escalating to human review. */ }
-            }
-            return audit;
-          };
-          const draftV1 = sanitizeTrafficNarrativeIdentity((await runInsuranceContentAgent([{ role: "user", content: channelPrompt }], input.userId, "traffic")).trim());
-          await input.onEvent?.({ type:"progress",phase:`writing:${style?.id ?? promptIndex}`,status:"completed",label:`${style?.label ?? "教练"}正文已完成`,detail:"正在检查主体背景、事实边界和表达完整性。",coachId:style?.id,coachLabel:style?.label });
-          await input.onEvent?.({ type:"progress",phase:`audit:${style?.id ?? promptIndex}`,status:"active",label:`正在检查${style?.label ?? "教练"}版本`,detail:"检查是否说清主题、保留必要观点，并避免不支持的结论。",coachId:style?.id,coachLabel:style?.label });
+          const draftV1 = sanitizeTrafficNarrativeIdentity((await runInsuranceContentAgent([{ role: "user", content: channelPrompt }], input.userId, "traffic", { creatorContextMode:"writing" })).trim());
+          await input.onEvent?.({ type:"progress",phase:`writing:${style?.id ?? promptIndex}`,status:"completed",label:`${style?.label ?? "教练"}正文已完成`,detail:"正在整理成稿和展示结果。",coachId:style?.id,coachLabel:style?.label });
           let finalDraft = draftV1;
-          const firstAudit = await auditDraft(draftV1);
+          let firstAudit: TrafficCopyAudit;
+          try {
+            const rawAudit=await runInsuranceContentAgent([{role:"user",content:buildTrafficCopyAuditPrompt({source,draft:draftV1,blueprint,authority:auditAuthority,brief,context:trafficContexts[promptIndex]??[]})}],input.userId,"traffic",{creatorContextMode:"none"});
+            firstAudit=parseTrafficCopyAudit(rawAudit);
+          } catch {
+            firstAudit=parseTrafficCopyAudit(JSON.stringify({status:"pass",issues:[{severity:"warning",type:"editorial_review_unavailable",location:"全文",reason:"本次独立成稿复审暂未返回",allowedFix:"保留教练原稿供创作者判断"}],semanticCoverage:0,expressionSimilarity:0,topicFulfillment:{score:0}}));
+          }
           let finalAudit = firstAudit;
           let revised = false;
           const revisionDrafts: string[] = [];
-          for (let revisionAttempt = 0; revisionAttempt < 2 && finalAudit.status === "revise"; revisionAttempt += 1) {
-            revised = true;
-            const repaired = sanitizeTrafficNarrativeIdentity((await runInsuranceContentAgent([{ role: "user", content: buildTrafficCopyRevisionPrompt({ source, draft: finalDraft, blueprint, authority, brief, audit: finalAudit, context, creatorSkill: style?.writingSkill }) }], input.userId, "traffic")).trim());
-            if (repaired) finalDraft = repaired;
-            revisionDrafts.push(finalDraft);
-            finalAudit = await auditDraft(finalDraft);
+          if(firstAudit.status==="revise"){
+            try{
+              finalDraft=sanitizeTrafficNarrativeIdentity((await runInsuranceContentAgent([{role:"user",content:buildTrafficCopyRevisionPrompt({source,draft:draftV1,blueprint,authority:auditAuthority,brief,audit:firstAudit,context:trafficContexts[promptIndex]??[],creatorSkill:style?.writingSkill})}],input.userId,"traffic",{creatorContextMode:"writing"})).trim());
+              revisionDrafts.push(finalDraft);revised=true;
+              const rawFinalAudit=await runInsuranceContentAgent([{role:"user",content:buildTrafficCopyAuditPrompt({source,draft:finalDraft,blueprint,authority:auditAuthority,brief,context:trafficContexts[promptIndex]??[]})}],input.userId,"traffic",{creatorContextMode:"none"});
+              finalAudit=parseTrafficCopyAudit(rawFinalAudit);
+            }catch{finalDraft=draftV1;revised=false;revisionDrafts.length=0;finalAudit=firstAudit;}
           }
-          if (finalAudit.status !== "pass") finalAudit = finalAudit.hardBlocking
-            ? { ...finalAudit, status: "human_review" }
-            : { ...finalAudit, status: "pass" };
-          await input.onEvent?.({ type:"progress",phase:`audit:${style?.id ?? promptIndex}`,status:"completed",label:`${style?.label ?? "教练"}版本检查完成`,detail:revised ? "已完成必要的局部修正，版本可以进入结果整理。" : "首次检查通过，版本可以进入结果整理。",coachId:style?.id,coachLabel:style?.label });
+          await input.onEvent?.({ type:"progress",phase:`audit:${style?.id ?? promptIndex}`,status:"completed",label:`${style?.label ?? "教练"}版本完成`,detail:revised?"独立编辑已完成一次局部精简或增强。":"独立编辑已完成选题兑现、专业增量和口播效率复审。",coachId:style?.id,coachLabel:style?.label });
           currentOutput = finalDraft;
           result += currentOutput;
-          if (creatorStyles.length > 1) await input.onEvent?.({ type: "delta", content: `## ${style?.label ?? `版本${promptIndex + 1}`}版\n\n` });
+          if (prompts.length > 1) await input.onEvent?.({ type: "delta", content: `## ${topic ? `${topic.title} · ` : ""}${style?.label ?? `版本${promptIndex + 1}`}版\n\n` });
           await input.onEvent?.({ type: "delta", content: currentOutput });
           trafficAudits.push({ first: firstAudit, final: finalAudit, revised });
           const actualCharacters = currentOutput.replace(/\s/g, "").length;
@@ -542,8 +615,9 @@ export async function executeCreationAppRun(input: {
           }
         }
         if (isTrafficExecution) {
-          const style = creatorStyles[promptIndex];
-          creatorStyleResults.push({ id: style.id, label: style.label, content: currentOutput.trim() });
+          const style = trafficPromptStyles[promptIndex] ?? creatorStyles[promptIndex];
+          const topic = trafficPromptTopics[promptIndex];
+          creatorStyleResults.push({ id: `${style.id}:${topic?.id ?? "single"}`, label: topic ? `${topic.title} · ${style.label}` : style.label, content: currentOutput.trim() });
         }
         if (result.trim() && !result.endsWith("\n")) {
           result += "\n\n";
@@ -569,15 +643,22 @@ export async function executeCreationAppRun(input: {
       // result from the generated bodies before persistence and the done
       // event so app_runs, works and plainText never retain those notices.
       if (isTrafficExecution && creatorStyleResults.length > 0) {
+        const originalStyleIndexes = new Map(creatorStyleResults.map((style, index) => [style.id, index]));
+        const publishableResults = creatorStyleResults.filter((_, index) => trafficAudits[index]?.final.status === "pass");
+        if (publishableResults.length === 0) {
+          const reasons = [...new Set(trafficAudits.flatMap((item) => item.final.issues.filter((issue) => issue.severity === "blocking").map((issue) => issue.reason)).filter(Boolean))].slice(0, 3);
+          throw new Error(`成稿检查未通过，待人工复核草稿未发布${reasons.length ? `：${reasons.join("；")}` : "。请补充更具体的事实来源或核心问题后重试。"}`);
+        }
+        creatorStyleResults.splice(0, creatorStyleResults.length, ...publishableResults);
         await input.onEvent?.({ type:"progress",phase:"result_packaging",status:"active",label:"正在整理最终结果",detail:"整理教练版本和可用标题，马上完成。" });
-        const titleSets = await Promise.all(creatorStyleResults.map(async (style, index) => ({
+        const titleSets = await Promise.all(creatorStyleResults.map(async (style) => ({
           id: style.id,
-          titles: await buildTrafficCopyTitles(style.content, trafficCreativeBriefs[index]?.content ?? "", input.userId),
+          titles: await buildTrafficCopyTitles(style.content, trafficCreativeBriefs[originalStyleIndexes.get(style.id) ?? 0]?.content ?? "", input.userId),
         })));
         const titlesByStyleId = new Map(titleSets.map((item) => [item.id, item.titles]));
         creatorStyleResults.forEach((style) => { style.titles = titlesByStyleId.get(style.id) ?? []; });
         result = buildPersistedCreatorStyleText(creatorStyleResults);
-        await input.onEvent?.({ type:"progress",phase:"result_packaging",status:"completed",label:"结果整理完成",detail:"所有教练版本已经生成完成。" });
+        await input.onEvent?.({ type:"progress",phase:"result_packaging",status:"completed",label:"结果整理完成",detail:publishableResults.length === trafficAudits.length ? "所有教练版本已经生成并通过检查。" : `已发布 ${publishableResults.length} 个通过检查的版本；未通过事实或核心问题检查的草稿未发布。` });
       }
 
       if (app.slug === "xiaohongshu-studio" || remixDefinition?.id === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
@@ -585,7 +666,11 @@ export async function executeCreationAppRun(input: {
       resultJson = {
         ...(isTrafficExecution ? { trafficCopyArchitecture: {
           version: 8,
-          sourceBlueprint: trafficSourceBlueprint,
+          topicProcess: precomputedTrafficTopicProcess,
+          portfolioPlan: trafficPortfolioPlan,
+          sourceBlueprint: trafficBlueprints[0] ?? trafficSourceBlueprint,
+          sourceBlueprints: trafficBlueprints,
+          selectedTopics: selectedTrafficTopics,
           authority: trafficAuthority,
           // Keep the singular field for existing readers; every selected
           // coach now owns its own research pack and creative brief.
@@ -594,16 +679,17 @@ export async function executeCreationAppRun(input: {
           audits: trafficAudits,
           executions: trafficExecutions,
           briefs: trafficCreativeBriefs.map((brief, index) => ({
-            creatorStyleId: creatorStyles[index]?.id ?? "default",
-            creatorStyleLabel: creatorStyles[index]?.label ?? "默认的我",
+            creatorStyleId: trafficPromptStyles[index]?.id ?? creatorStyles[index]?.id ?? "default",
+            creatorStyleLabel: trafficPromptStyles[index]?.label ?? creatorStyles[index]?.label ?? "默认的我",
+            selectedTopic: trafficPromptTopics[index],
             creativeBrief: brief,
-            coachSkillId: creatorStyles[index]?.id === "default" ? null : creatorStyles[index]?.id ?? null,
-            coachSkillLabel: creatorStyles[index]?.id === "default" ? null : creatorStyles[index]?.label ?? null,
+            coachSkillId: (trafficPromptStyles[index] ?? creatorStyles[index])?.id === "default" ? null : (trafficPromptStyles[index] ?? creatorStyles[index])?.id ?? null,
+            coachSkillLabel: (trafficPromptStyles[index] ?? creatorStyles[index])?.id === "default" ? null : (trafficPromptStyles[index] ?? creatorStyles[index])?.label ?? null,
             selectedMaterialContext: trafficContexts[index] ?? [],
             writerContext: {
               source: app.slug === "link-remix" ? buildRemixStudioSource(values) : stringifyCreationFieldValue(values.source),
-              creatorRuntimeSkill: creatorStyles[index]?.writingSkill ?? "",
-              coachRuntimeSkill: creatorStyles[index]?.researchSkill ?? "",
+              creatorRuntimeSkill: (trafficPromptStyles[index] ?? creatorStyles[index])?.writingSkill ?? "",
+              coachRuntimeSkill: (trafficPromptStyles[index] ?? creatorStyles[index])?.researchSkill ?? "",
               creativeBrief: brief.content,
               selectedMaterials: trafficContexts[index] ?? [],
             },
@@ -656,7 +742,9 @@ export async function executeCreationAppRun(input: {
     throw new Error("本次生成没有返回有效内容，请稍后重试。");
   }
 
-  const title = buildWorkTitle({
+  const title = isTrafficTopicOnly
+    ? `选题分析｜${topicSourceTitle}`
+    : buildWorkTitle({
     appName: effectiveApp.name,
     appSlug: app.slug,
     values,
@@ -801,7 +889,7 @@ async function buildTrafficCopyTitles(body: string, brief: string, userId: strin
         brief ? `【编辑简报】\n${brief}` : "",
         `【最终正文】\n${body}`,
       ].filter(Boolean).join("\n\n"),
-    }], userId, "traffic");
+    }], userId, "traffic", { creatorContextMode:"writing" });
     const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}") as { titles?: unknown };
     const titles = Array.isArray(parsed.titles)
       ? parsed.titles.filter((title): title is string => typeof title === "string").map((title) => title.replace(/\s+/g, " ").trim()).filter(Boolean)
@@ -880,12 +968,12 @@ function buildTopicPickerPrompt(
 
   return [
     "你现在在执行小谷应用：找选题。",
-    "这是小谷的保险内容选题规划任务。请按下述输出契约生成，不复写任何示例内容。",
+    "这是小谷的多领域专业内容选题规划任务。保持用户指定的财经、财富、保险或通用领域，不复写任何示例内容。",
     ...caseContext,
     `应用提示：${promptHint}`,
     brief
       ? `长期人物底盘：人设底色=${brief.persona || "未提供"}；核心客群=${brief.targetAudience || "未提供"}；擅长主题=${brief.specialty || "未提供"}；表达偏好=${brief.topicPreference || "未提供"}。`
-      : "长期人设底盘：用户未提供完整人设画像，请用资深保险内容顾问视角生成。",
+      : "长期人设底盘：用户未提供完整人设画像，请保持专业、理性和领域中立，不主动迁移到保险。",
     `特殊要求：${specialRequirements || "用户未填写，请根据个人定位和风格自动生成。"}`,
     "输出必须严格包含以下 4 个一级模块，标题必须完全一致：",
     "1)【一、人设提炼】",
@@ -943,7 +1031,7 @@ function buildLiveScriptPrompt(
 
   return [
     "你现在在执行小谷应用：写直播稿。",
-    "你是一位擅长保险经纪人直播间内容设计的直播策划顾问。",
+    "你是一位服务财经、财富、保险及其他专业创作者的直播策划顾问；先识别用户原题领域。",
     "这是一篇可以直接阅读、复制和继续编辑的直播内容稿，不是问卷分析，也不是把提示词逐条回答的执行清单。",
     ...caseContext,
     `应用提示：${promptHint}`,
@@ -952,11 +1040,11 @@ function buildLiveScriptPrompt(
     "1. 先提炼用户观点的核心矛盾、受众痛点和一句话主张，再展开直播内容。",
     "2. 语言像真人主播：短句、口语、自然停顿，有承接和互动，不写成论文或营销长文。",
     "3. 观点不明确的地方可以做合理结构化，但不得替用户编造产品、案例、数据、身份或承诺。",
-    "4. 保险表达必须合规：不承诺收益、承保或理赔，不制造恐慌，不夸大产品；缺少事实时标注“待核实”。",
+    "4. 所有领域不得虚构事实；任务涉及保险时，不承诺收益、承保或理赔，不制造恐慌、不夸大产品；缺少事实时标注“待核实”。",
     "5. 转化要轻，以评论关键词、私信咨询、预约梳理和领取清单为主，不做强逼单。",
     "",
     "请只输出一篇完整内容，使用 Markdown 标题层级，不要使用【】作为章节标题，不要使用 Markdown 表格，不要输出“以下是”“好的”等前言：",
-    "# 保险直播稿",
+    "# 专业主题直播稿",
     "## 重要提醒",
     "用一段简短提醒说明：涉及产品、数据、案例、收益或理赔的内容须由主播在开播前核实；不要写泛泛的免责声明。",
     "## 直播主题",
@@ -991,7 +1079,7 @@ function buildWechatStudioPrompt(values: Record<string, FieldValue>, caseContext
     ...caseContext,
     `第一行仅输出 Markdown 一级标题。随后以一个具体问题、场景或判断开篇。${lengthBrief}每段 2-4 句，字数允许上下浮动约 10%，不要为了凑字数重复观点。`,
     "语言自然、完整、有阅读节奏。禁止‘家人们’‘你知道吗’等口播表达，禁止表情、强推销、焦虑营销和编号清单堆砌。",
-    "不得编造数据、案例、产品规则或经历；保险内容不承诺收益、承保或理赔。结尾给温和自然的行动建议。只输出可直接发布的文章，不解释过程或附配图建议。",
+    "不得编造数据、案例、产品规则或经历；任务涉及保险时不承诺收益、承保或理赔。结尾给温和自然的行动建议。只输出可直接发布的文章，不解释过程或附配图建议。",
     `目标读者：${stringifyCreationFieldValue(values.audience) || "普通读者"}。`,
     `文章气质：${stringifyCreationFieldValue(values.tone) || "专业但易懂"}。`,
     "真实素材与要求：",
@@ -1339,16 +1427,16 @@ async function tryAttachTrafficCoverToParent(input: {
 function buildTrafficCopyPrompt(values: Record<string, FieldValue>, caseContext: string[], promptHint: string) {
   const tone = stringifyCreationFieldValue(values.tone) || "default";
   const toneGuidance: Record<string, string> = {
-    default: "保持理性、有温度、适合保险内容传播的表达。",
-    sharp: "观点明确、有适度反差，但不攻击、不夸张、不制造焦虑。",
+    default: "保持理性、有温度，并忠于用户原题所属领域。",
+    sharp: "观点明确、有反差、有冲突感，保持自然口语。",
     empathetic: "从真实生活处境切入，表达温和，先理解读者情绪再给出判断。",
-    analytical: "按事实、原因、影响和建议推进，表达清晰、克制、专业。",
+    analytical: "按事件、原因、影响和判断推进，表达清晰、自然、专业。",
   };
   return [
     ...caseContext,
     promptHint,
     `本次内容语气：${toneGuidance[tone] ?? toneGuidance.default}`,
-    "请严格围绕用户原始素材创作，区分事实与个人判断；不得编造新闻细节、数据、案例、政策或产品规则，不制造焦虑，也不得使用收益、承保或理赔承诺。",
+    "结合用户素材、搜索结果和教练判断自然创作，可使用事件、说法、争议、推测、人性洞察和专业机制，不输出后台核验或风险说明。",
     "只输出可直接发布的完整口播文案（流量型），不解释创作过程。",
     "用户素材：",
     stringifyCreationFieldValue(values.source),
@@ -1482,4 +1570,25 @@ function extractReferenceImages(values: Record<string, FieldValue>) {
   }
 
   return references;
+}
+
+function parseSharedTrafficEvidencePack(raw: string): TrafficEvidencePack | null {
+  if (!raw.trim()) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<TrafficEvidencePack>;
+    if (value.version !== 2 || !Array.isArray(value.claims) || !Array.isArray(value.topicMaterials) || !value.searchPlan) return null;
+    return value as TrafficEvidencePack;
+  } catch {
+    return null;
+  }
+}
+
+function parseTrafficTopicProcess(raw: string): Record<string, unknown> | null {
+  if (!raw.trim()) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }

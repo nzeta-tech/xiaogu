@@ -7,6 +7,8 @@ export type TrafficEvidenceSource = {
   provider: "volcengine" | "tavily" | "exa";
   authorityTier: "official" | "major_media" | "professional" | "other";
   authorityScore: number;
+  publisherKey?: string;
+  independentSourceCount?: number;
   relevanceScore?: number;
   materialReason?: string;
   purpose?: "fact_check" | "explanation" | "enrichment" | "comparison" | "background";
@@ -33,6 +35,7 @@ export type TrafficEvidencePack = {
   claims: TrafficEvidenceClaim[];
   topicMaterials: TrafficEvidenceSource[];
   providersUsed: string[];
+  researchStatus: "skipped" | "success" | "empty" | "partial" | "failed";
   unresolvedCount: number;
   potentialConflictCount: number;
 };
@@ -47,6 +50,9 @@ export type TrafficMaterialBrief = {
   safeFacts: string[];
   attributedFacts: string[];
   doNotClaim: string[];
+  contentType: "hot_event" | "person_story" | "case" | "timeline" | "mechanism" | "opinion" | "general";
+  requiredContentUnits: string[];
+  currentEventTrigger: { subject: string; event: string; occurredAt: string; whyNow: string; consequence: string } | null;
 };
 
 type EvidenceSearchResult = {
@@ -81,7 +87,9 @@ type EvidenceSearch = (query: string) => Promise<EvidenceSearchResult[]>;
 export async function buildTrafficEvidencePackFromFastResearch(source: string, research: FastResearchLikeResult) {
   const researchSource = source.split(/\n+/).map((line) => line.trim()).filter((line) => line
     && !/^【.*(?:回归|测试).*】$/u.test(line)
-    && !/^(?:请|不要|不得|只使用|只基于|生成|围绕|要求|风险提示[：:])/u.test(line)).join("\n");
+    && !/^(?:请|不要|不得|只使用|只基于|要求|风险提示[：:])/u.test(line))
+    .map((line) => line.replace(/^(?:请)?(?:围绕|根据|基于)/u, "").replace(/(?:生成|创作|写|改写)(?:一篇|一版|一个)?(?:流量)?口播(?:文案)?[。！!]?$/u, "").trim())
+    .filter(Boolean).join("\n");
   const claims = extractTrafficClaims(researchSource);
   const calls: TrafficEvidenceSearchPlan["calls"] = research.trace.queries.map((item, index) => ({
     id: `fast-search-${index + 1}`,
@@ -94,7 +102,7 @@ export async function buildTrafficEvidencePackFromFastResearch(source: string, r
   const plan: TrafficEvidenceSearchPlan = {
     necessary: calls.length > 0,
     reason: calls.length ? "Fast Research 生成最小共享证据包" : "Fast Research 未发现必要查询",
-    budget: 3,
+    budget: Math.min(6, calls.length),
     calls,
   };
   const resultsByQuery = new Map(research.queryResults.map((item) => [item.query, item.results.map((result) => ({
@@ -134,6 +142,12 @@ export async function buildTrafficEvidencePack(source: string, search?: Evidence
     results: await searchWeb(call.query),
   })));
   const completedCalls = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const resultCount = completedCalls.reduce((sum, item) => sum + item.results.length, 0);
+  const researchStatus: TrafficEvidencePack["researchStatus"] = searchPlan.calls.length === 0 ? "skipped"
+    : completedCalls.length === 0 ? "failed"
+    : completedCalls.length < searchPlan.calls.length ? "partial"
+    : resultCount === 0 ? "empty"
+    : "success";
   const assessed = claims.map((claim, index) => {
     const claimId = `claim-${index + 1}`;
     const relevantCalls = completedCalls.filter(({ call }) => call.targetClaimIds.includes(claimId));
@@ -149,6 +163,7 @@ export async function buildTrafficEvidencePack(source: string, search?: Evidence
           provider: item.provider ?? "tavily",
           authorityTier: authority.tier,
           authorityScore: authority.score,
+          publisherKey: publisherKey(item.url ?? ""),
         };
       })
       .sort((a, b) => b.authorityScore - a.authorityScore)
@@ -163,28 +178,43 @@ export async function buildTrafficEvidencePack(source: string, search?: Evidence
     .map(({ call, result }, index) => {
       const source = toEvidenceSource(result);
       const relevanceScore = scoreMaterialRelevance(source, call.query, claims);
+      const sourceTokens = semanticTokens(`${source.title} ${source.snippet}`);
+      const siblingSources = completedCalls
+        .filter((item) => item.call.query === call.query)
+        .flatMap((item) => item.results)
+        .filter((item) => item.url && item.title)
+        .filter((item) => {
+          const tokens = semanticTokens(`${item.title} ${item.content ?? ""}`);
+          return [...sourceTokens].filter((token) => tokens.has(token)).length >= 2;
+        });
+      const independentSourceCount = new Set(siblingSources.map((item) => publisherKey(item.url ?? ""))).size;
+      const usage: NonNullable<TrafficEvidenceSource["usage"]> = "context_only";
       return {
         ...source,
+        independentSourceCount,
         relevanceScore,
         materialReason: buildMaterialReason(source, call.purpose, relevanceScore),
         id: `web-${index + 1}`,
         purpose: call.purpose === "claim_verification" ? "fact_check" as const : inferMaterialPurpose(source),
         confidence: source.authorityScore >= 80 ? "high" as const : source.authorityScore >= 60 ? "medium" as const : "low" as const,
-        usage: source.authorityScore >= 80 ? "verified_fact" as const : source.authorityScore >= 60 ? "attributed_view" as const : "context_only" as const,
+        usage,
         supportsClaimIds: call.targetClaimIds,
       };
     })
     .filter((item, index, all) => all.findIndex((candidate) => candidate.url === item.url) === index)
     .filter((item) => (item.relevanceScore ?? 0) >= 20)
-    .sort((a, b) => ((b.relevanceScore ?? 0) + b.authorityScore) - ((a.relevanceScore ?? 0) + a.authorityScore))
-    .slice(0, 5);
+    // Preserve search relevance instead of letting an internal authority score
+    // silently suppress a timely or narratively useful result.
+    .sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0))
+    .slice(0, 12);
   return {
     version: 2,
     generatedAt: new Date().toISOString(),
     searchPlan,
     claims: assessed,
     topicMaterials,
-    providersUsed: [...new Set(assessed.flatMap((claim) => claim.sources.map((source) => source.provider)))],
+    providersUsed: [...new Set([...assessed.flatMap((claim) => claim.sources.map((source) => source.provider)), ...topicMaterials.map((source) => source.provider)])],
+    researchStatus,
     unresolvedCount: assessed.filter((claim) => claim.status === "unresolved").length,
     potentialConflictCount: assessed.filter((claim) => claim.status === "potential_conflict").length,
   };
@@ -308,7 +338,7 @@ export function scoreSourceAuthority(url: string): { tier: TrafficEvidenceSource
   if (/(^|\.)gov\.cn$|(^|\.)gov$|pbc\.gov\.cn$|safe\.gov\.cn$|stats\.gov\.cn$|customs\.gov\.cn$|federalreserve\.gov$/.test(hostname)) {
     return { tier: "official", score: 100 };
   }
-  if (/(xinhuanet\.com|news\.cn|people\.com\.cn|cctv\.com|ce\.cn|reuters\.com|apnews\.com|bbc\.)/.test(hostname)) {
+  if (/(xinhuanet\.com|news\.cn|people\.com\.cn|cctv\.com|ce\.cn|chinanews\.com|中新网|thepaper\.cn|caixin\.com|yicai\.com|eeo\.com\.cn|reuters\.com|apnews\.com|bbc\.|rthk\.hk|scmp\.com|hk01\.com|mingpao\.com|wenweipo\.com)/.test(hostname)) {
     return { tier: "major_media", score: 80 };
   }
   if (/(finance|economy|insurance|health|medical|law|edu)/.test(hostname)) return { tier: "professional", score: 60 };
@@ -317,44 +347,45 @@ export function scoreSourceAuthority(url: string): { tier: TrafficEvidenceSource
 
 export function formatTrafficEvidencePack(pack: TrafficEvidencePack) {
   if (pack.claims.length === 0) return "";
-  const conflicts = pack.claims.filter((claim) => claim.status === "potential_conflict" || claim.conflictNote).map((claim) => `- ${claim.claim}${claim.conflictNote ? `：${claim.conflictNote}` : ""}`).slice(0, 4);
   return [
     "【原稿补充素材】",
-    `本次搜索 ${pack.searchPlan.calls.length} 次。以下素材用于丰富创作，不需要逐条复述。`,
-    ...(conflicts.length ? ["【需要修正或降级的原稿内容】", ...conflicts] : []),
+    `本次搜索 ${pack.searchPlan.calls.length} 次。以下是搜索返回的候选素材，由教练结合选题自然取用。`,
     ...(pack.topicMaterials.length > 0 ? [
       "【可选补充素材】",
       ...pack.topicMaterials.map((source, index) => [
         `【素材#${index + 1}｜${source.id ?? `web-${index + 1}`}】${source.title}`,
-        `来源等级：${source.authorityTier}${source.publishedAt ? `｜发布时间：${source.publishedAt}` : ""}`,
-        `用途：${source.purpose ?? "enrichment"}｜可信度：${source.confidence ?? "low"}｜可用方式：${source.usage ?? "context_only"}｜支持主张：${(source.supportsClaimIds ?? []).join("、") || "未绑定"}`,
+        `来源：${source.url}${source.publishedAt ? `｜发布时间：${source.publishedAt}` : ""}`,
         `原始摘要：${source.snippet}`,
-        `可用方向：${source.materialReason || "为本题补充事实、机制或场景"}`,
       ].join("\n")),
     ] : []),
-    "创作原则：以原稿的核心问题为主，搜索素材只在能让判断更准确、更有分析力时使用。发现明确冲突才修正；没有冲突，不因未搜索到就删除原稿的有效逻辑。",
+    "这些资料用于理解事件、寻找矛盾和形成观点；不要输出后台评级、核验过程或素材标签。",
   ].join("\n\n");
 }
 
 export function buildTrafficMaterialBriefPrompt(source: string, searchMaterials: string) {
   return [
     "你是同一个内容创作Agent的编辑判断阶段。阅读原稿和搜索返回的补充素材，为下一阶段创作者做一份简短编辑说明；不写口播成稿。",
-    "你需要自主判断：原稿哪些核心逻辑值得保留；搜索结果与原稿是否存在明确事实冲突；哪些搜索素材真正能让内容更准确或更有分析力；最后给出一个创作方向。",
-    "只有搜索结果与原稿在同一事实、时间、数字或口径上明确矛盾时，才写入corrections。搜索没有覆盖或不够充分，不等于原稿错误；不要为了安全删空原稿逻辑。素材不改写、不概括成新断言：从候选【素材#N】中最多选择3个编号，让下游创作者直接阅读其原始摘要和边界。",
-    "如果原稿只是人物名、热点名或‘很火/找角度/怎么写’这类宽泛请求，搜索不是可选装饰。必须从搜索结果中识别当前讨论最集中、与该人物或事件直接相关的唯一具体议题；selectedMaterialIndexes 至少选择1个直接相关素材，creativeDirection 必须写出该具体议题及内容切口，centralTension写清本题独有矛盾，requiredTopicAnchors列出正文必须实质解释的2—5个短概念。禁止退回‘家庭责任、风险意识、长期规划、现金流’等可以套在任何热点上的泛化方向。",
-    "事实可信度与选题可用性分开判断。官方文件、判决、当事人原话或高可信来源支持的事实放入safeFacts，可直接表达。两个以上相互独立来源一致报道，或媒体明确转述庭审、判决、文件、证人证言的关键原因，即使来源等级不高，也不要一律禁写：放入attributedFacts，写成‘据公开报道/据庭审报道/公开资料显示’，保留‘担心、认为、希望’等动机归属，不把报道推断升级成作者定论。只有单一匿名说法、来源互相转载而非独立印证、相互冲突、摘要本身含猜测或高风险法律结论，才放入doNotClaim。",
-    "若核心好奇是‘为什么这样做/为何如此安排/背后原因是什么’，编辑说明必须给出具体因果答案。证据只能支持归因表达时，就用attributedFacts回答；确实不足时，creativeDirection必须要求正文区分‘可确认的安排目的’和‘不能确认的私人动机’。不得用通用机制科普替代核心因果，也不得通过删除整个具体议题来规避局部事实风险。",
+    "你需要自主判断原稿与搜索结果里哪些人物、事件、时间节点、说法、争议和细节最有内容价值，并把它们自然组织成创作材料。不要做来源评级、事实裁决、风险审查或表达限制。不同材料说法不同时并列保留有传播价值的版本，交给创作者判断。",
+    "结合用户素材和搜索结果挑选真正有用的材料。从候选【素材#N】中可以选择1到8个编号，让下游创作者直接阅读其摘要。不要因为来源标签、待核验或存在争议而自动舍弃热点触发事件。",
+    "如果原稿只是人物名或宽泛热点请求，从搜索结果中寻找几个可能的具体议题、人性矛盾和内容切口，交给教练自由选择。",
+    "把搜索中的事实、说法、人物反应、争议和解释都作为候选素材交给教练判断。corrections、safeFacts、attributedFacts和doNotClaim全部返回空数组，避免后台标签干扰写作。",
+    "若核心好奇是‘为什么这样做/为何如此安排/背后原因是什么’，优先给出最有解释力、最符合素材的人性与决策答案，让教练决定采用直接判断、叙事、推测还是机制解释。",
+    "识别内容可能属于热点、人物故事、案例、时间线、机制或观点；requiredContentUnits只记录可用的内容方向，不代表正文必须逐项覆盖。",
+    "属于热点事件时填写currentEventTrigger，帮助创作者理解为什么现在值得讲；非热点内容填null。",
     "只返回JSON，不要Markdown：",
     JSON.stringify({
       keepFromSource: ["原稿中应保留的核心问题或洞察"],
-      corrections: ["只有明确冲突时才填写；没有则为空数组"],
+      corrections: [],
       selectedMaterialIndexes: [1, 2],
       creativeDirection: "用一句话说明如何把原稿与素材组织为独立口播",
       centralTension: "本题独有、不能被通用保险话术替代的矛盾",
       requiredTopicAnchors: ["必须解释的具体事件或机制"],
-      safeFacts: ["可以公开使用的最小事实或带归因表述"],
-      attributedFacts: ["多来源或庭审报道支撑、必须带来源边界使用的事实或人物动机"],
-      doNotClaim: ["证据不足、不得写成确定事实的细节"],
+      safeFacts: [],
+      attributedFacts: [],
+      doNotClaim: [],
+      contentType: "hot_event",
+      requiredContentUnits: ["最新事件", "发生时间", "为何此刻值得讲", "事件触发的后续状态", "核心拆解问题"],
+      currentEventTrigger: { subject: "事件主体", event: "最新发生的事件", occurredAt: "搜索材料中的发生时间", whyNow: "为何让旧话题重回讨论", consequence: "触发或改变的状态" },
     }),
     "【原稿】",
     source,
@@ -370,21 +401,29 @@ export function parseTrafficMaterialBrief(raw: string): TrafficMaterialBrief {
     const value = JSON.parse(fenced ?? (start >= 0 && end > start ? raw.slice(start, end + 1) : raw)) as Record<string, unknown>;
     const list = (item: unknown, limit: number) => Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim().slice(0, 360)).filter(Boolean).slice(0, limit) : [];
     const selectedMaterialIndexes = Array.isArray(value.selectedMaterialIndexes)
-      ? [...new Set(value.selectedMaterialIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 1 && index <= 5))].slice(0, 3)
+      ? [...new Set(value.selectedMaterialIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 1 && index <= 12))].slice(0, 8)
       : [];
+    const contentTypes = ["hot_event", "person_story", "case", "timeline", "mechanism", "opinion", "general"] as const;
+    const contentType = contentTypes.includes(value.contentType as typeof contentTypes[number]) ? value.contentType as TrafficMaterialBrief["contentType"] : "general";
+    const triggerValue = value.currentEventTrigger && typeof value.currentEventTrigger === "object" && !Array.isArray(value.currentEventTrigger) ? value.currentEventTrigger as Record<string, unknown> : null;
+    const triggerText = (key: string) => triggerValue && typeof triggerValue[key] === "string" ? String(triggerValue[key]).trim().slice(0, 240) : "";
+    const currentEventTrigger = contentType === "hot_event" && triggerValue ? { subject:triggerText("subject"),event:triggerText("event"),occurredAt:triggerText("occurredAt"),whyNow:triggerText("whyNow"),consequence:triggerText("consequence") } : null;
     return {
       keepFromSource: list(value.keepFromSource, 4),
-      corrections: list(value.corrections, 4),
+      corrections: [],
       selectedMaterialIndexes,
       creativeDirection: typeof value.creativeDirection === "string" ? value.creativeDirection.trim().slice(0, 400) : "围绕原稿的核心矛盾，结合真正有用的补充素材重新组织口播。",
       centralTension: typeof value.centralTension === "string" ? value.centralTension.trim().slice(0, 400) : "",
       requiredTopicAnchors: list(value.requiredTopicAnchors, 5),
-      safeFacts: list(value.safeFacts, 6),
-      attributedFacts: list(value.attributedFacts, 6),
-      doNotClaim: list(value.doNotClaim, 6),
+      safeFacts: [],
+      attributedFacts: [],
+      doNotClaim: [],
+      contentType,
+      requiredContentUnits: list(value.requiredContentUnits, 10),
+      currentEventTrigger,
     };
   } catch {
-    return { keepFromSource: [], corrections: [], selectedMaterialIndexes: [], creativeDirection: "围绕原稿的核心矛盾重新组织口播。", centralTension: "", requiredTopicAnchors: [], safeFacts: [], attributedFacts: [], doNotClaim: [] };
+    return { keepFromSource: [], corrections: [], selectedMaterialIndexes: [], creativeDirection: "围绕原稿的核心矛盾重新组织口播。", centralTension: "", requiredTopicAnchors: [], safeFacts: [], attributedFacts: [], doNotClaim: [], contentType:"general", requiredContentUnits:[], currentEventTrigger:null };
   }
 }
 
@@ -395,21 +434,22 @@ export function formatTrafficMaterialBrief(brief: TrafficMaterialBrief, candidat
   return [
     "【编辑素材说明】",
     ...(brief.keepFromSource.length ? ["原稿应保留：", ...brief.keepFromSource.map((item) => `- ${item}`)] : []),
-    ...(brief.corrections.length ? ["需要修正：", ...brief.corrections.map((item) => `- ${item}`)] : []),
     ...(selectedChunks.length ? ["【已选搜索素材 Chunk】", ...selectedChunks.map(({ index, source }) => [
       `【素材#${index}】${source.title}`,
       `来源：${source.url}`,
-      `发布时间：${source.publishedAt || "未提供"}｜来源等级：${source.authorityTier}`,
+      `发布时间：${source.publishedAt || "未提供"}`,
       `原始摘要：${source.snippet}`,
-      `使用边界：${source.materialReason || "仅在能增强本题判断时使用，不推导摘要未支持的结论。"}`,
     ].join("\n"))] : []),
     `创作方向：${brief.creativeDirection}`,
     ...(brief.centralTension ? [`核心矛盾：${brief.centralTension}`] : []),
-    ...(brief.requiredTopicAnchors.length ? [`必须实质解释的主题锚点：${brief.requiredTopicAnchors.join("、")}`] : []),
-    ...(brief.safeFacts.length ? ["可安全使用的最小事实：", ...brief.safeFacts.map((item) => `- ${item}`)] : []),
-    ...(brief.attributedFacts.length ? ["可归因表达的报道事实（必须保留‘据公开报道/据庭审报道/公开资料显示’等来源边界）：", ...brief.attributedFacts.map((item) => `- ${item}`)] : []),
-    ...(brief.doNotClaim.length ? ["不得写成确定事实：", ...brief.doNotClaim.map((item) => `- ${item}`)] : []),
-    "请把原稿与以上素材自然融合。素材 Chunk 是供判断和表达使用的原始片段，不要逐条复述、不要展示来源或这份说明，也不要把摘要未支持的推断写成事实。",
+    ...(brief.requiredTopicAnchors.length ? [`可用主题锚点：${brief.requiredTopicAnchors.join("、")}`] : []),
+    ...(brief.safeFacts.length ? ["可用事实素材：", ...brief.safeFacts.map((item) => `- ${item}`)] : []),
+    ...(brief.attributedFacts.length ? ["可用报道与观点素材：", ...brief.attributedFacts.map((item) => `- ${item}`)] : []),
+    ...(brief.doNotClaim.length ? ["其他可供教练判断的争议信息：", ...brief.doNotClaim.map((item) => `- ${item}`)] : []),
+    `内容类型：${brief.contentType}`,
+    ...(brief.requiredContentUnits.length ? [`可用内容单元：${brief.requiredContentUnits.join("、")}`] : []),
+    ...(brief.currentEventTrigger ? ["【当前事件参考】", `主体：${brief.currentEventTrigger.subject}`, `事件：${brief.currentEventTrigger.event}`, `发生时间：${brief.currentEventTrigger.occurredAt}`, `为什么今天讲：${brief.currentEventTrigger.whyNow}`, `后续状态：${brief.currentEventTrigger.consequence}`] : []),
+    "请把原稿与以上材料交给教练自然发挥，正文不需要解释内部素材整理过程。",
   ].join("\n");
 }
 
@@ -504,7 +544,21 @@ function toEvidenceSource(item: EvidenceSearchResult): TrafficEvidenceSource {
     provider: item.provider ?? "tavily",
     authorityTier: authority.tier,
     authorityScore: authority.score,
+    publisherKey: publisherKey(item.url ?? ""),
   };
+}
+
+export function publisherKey(url: string) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    const parts = hostname.split(".");
+    if (parts.length <= 2) return hostname;
+    const suffix = parts.slice(-2).join(".");
+    if (["com.cn", "org.cn", "gov.cn", "com.hk", "co.uk"].includes(suffix)) return parts.slice(-3).join(".");
+    return suffix;
+  } catch {
+    return url.trim().toLowerCase();
+  }
 }
 
 function scoreMaterialRelevance(source: TrafficEvidenceSource, query: string, claims: string[]) {
@@ -512,9 +566,13 @@ function scoreMaterialRelevance(source: TrafficEvidenceSource, query: string, cl
   const keywords = extractMaterialKeywords(`${query} ${claims.join(" ")}`);
   const matched = keywords.filter((keyword) => haystack.includes(keyword));
   const keywordScore = keywords.length > 0 ? Math.round((matched.length / Math.min(keywords.length, 8)) * 70) : 0;
+  const queryTokens = semanticTokens(query);
+  const sourceTokens = semanticTokens(haystack);
+  const genericOverlap = [...queryTokens].filter((token) => sourceTokens.has(token)).length;
+  const genericScore = Math.min(70, genericOverlap * 14);
   const evidenceBonus = extractNumbers(haystack).length > 0 ? 15 : 0;
   const explanatoryBonus = /(影响|原因|风险|意味着|家庭|企业|成本|支出|负债|案例|建议)/.test(haystack) ? 15 : 0;
-  return Math.min(100, keywordScore + evidenceBonus + explanatoryBonus);
+  return Math.min(100, Math.max(keywordScore, genericScore) + evidenceBonus + explanatoryBonus);
 }
 
 function extractMaterialKeywords(value: string) {
