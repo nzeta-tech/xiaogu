@@ -3,7 +3,8 @@ WORKDIR /app
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry https://registry.npmmirror.com && \
     corepack enable && \
-    corepack prepare pnpm@11.2.2 --activate && \
+    (corepack prepare pnpm@11.2.2 --activate || \
+      COREPACK_NPM_REGISTRY=https://registry.npmjs.org corepack prepare pnpm@11.2.2 --activate) && \
     pnpm config set registry https://registry.npmmirror.com
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -14,7 +15,8 @@ WORKDIR /app
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry https://registry.npmmirror.com && \
     corepack enable && \
-    corepack prepare pnpm@11.2.2 --activate && \
+    (corepack prepare pnpm@11.2.2 --activate || \
+      COREPACK_NPM_REGISTRY=https://registry.npmjs.org corepack prepare pnpm@11.2.2 --activate) && \
     pnpm config set registry https://registry.npmmirror.com
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
