@@ -56,6 +56,22 @@ type TrafficCopyCover = { workId: string; platform: string; style: string; sourc
 type TrafficCopyWorkState = { covers?: TrafficCopyCover[] };
 type TrafficCopyHeadlineSet = { batchId: string; creatorStyleId: string; creatorStyleLabel: string; titles: string[] };
 type TrafficCopyArchitecture = { headlines?: TrafficCopyHeadlineSet[] };
+type TrafficTopicResult = {
+  id?: string;
+  title?: string;
+  score?: number;
+  recommendationReason?: string;
+  editorialVerdict?: string;
+  humanTension?: string;
+  audience?: string;
+  assignedCoachLabel?: string;
+  professionalLens?: string;
+  professionalConnectionStrength?: "strong" | "medium" | "weak" | "none";
+  creatorFit?: "high" | "medium" | "low" | "none";
+  whyThisCreator?: string;
+  selectionRole?: "arena" | "positioning_wildcard";
+};
+type TrafficTopicArenaResult = { topics?: TrafficTopicResult[] };
 
 type WechatTheme = "default" | "warm" | "forest" | "editorial";
 type XhsFormat = "plain" | "image";
@@ -673,6 +689,7 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
   const imageScale = isImageWork ? Math.max(90, Math.min(140, fontScale)) : fontScale;
   const isWriteCopyWork = work?.platform === "write-copy" || linkRemixView === "write-copy";
   const isTrafficCopyWork = work?.platform === "traffic-copy" || linkRemixView === "traffic-copy";
+  const isTrafficTopicWork = isTrafficCopyWork && work?.app_run?.input_payload?.traffic_topic_only === "yes";
   const displayedGenerationProgress = resolveGenerationProgress({
     platform: workPlatform,
     status: workStatus,
@@ -1000,6 +1017,42 @@ export function WorkDetailPageClient({ workId }: { workId: string }) {
             {coverUrl ? <figure className="wechatStudioWorkCover"><img src={coverUrl} alt="公众号文章封面" /></figure> : null}
             <h1>{articleTitle}</h1>
             <ReadOnlyWechatArticle content={articleContent} images={articleImages} />
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (isTrafficTopicWork) {
+    const arena = work.app_run?.result_json?.trafficTopicArena as TrafficTopicArenaResult | undefined;
+    const topics = Array.isArray(arena?.topics) ? arena.topics : [];
+    const isRunning = work.app_run?.status === "running";
+    return (
+      <div className="workDetailPage trafficTopicResultPage">
+        <div className="page-content trafficTopicResultShell">
+          <ResultWorkspaceBar
+            detailsOpen={showResultDetails}
+            onToggleDetails={() => setShowResultDetails((current) => !current)}
+            returnHref={workReturnHref}
+            returnLabel={workReturnLabel}
+            work={work}
+            title={formatWorkTitle(work)}
+            primaryHref={!isRunning && topics.length ? appPath(`/apps/traffic-copy?topicWorkId=${work.id}&entry=traffic-copy`) : undefined}
+            primaryLabel="选择选题并生成"
+            onPrimaryAction={failedRetryAction}
+            primaryBusy={retryingWork}
+          />
+          <section className="trafficTopicResultHero">
+            <div><span>口播文案（流量型）· 选题作品</span><h1>{isRunning ? "正在分析并推荐选题" : "本轮推荐选题"}</h1><p>{isRunning ? "你可以离开当前页面，分析会在后台继续；每一步进度和最终结果都会保存在这条作品里。" : "本轮素材理解、候选方向、盲审和最终排序已经完整保存，可随时回来继续创作。"}</p></div>
+            {!isRunning && topics.length ? <strong>{topics.length} 个选题</strong> : <span className="trafficGenerationPulse" aria-hidden="true" />}
+          </section>
+          {showResultDetails ? <section className="trafficCopyStudioMeta"><div><span>任务状态</span><strong>{getWorkStatusLabel(work)}</strong></div><div><span>推荐数量</span><strong>{topics.length || "分析中"}</strong></div><div><span>最近更新</span><strong>{formatDate(work.updated_at)}</strong></div></section> : null}
+          <main className="trafficTopicResultCanvas">
+            {isRunning ? <div className="trafficInlineGenerationProgress">
+              <header><div><span className="trafficGenerationPulse" aria-hidden="true" /><strong>选题任务正在后台进行</strong></div><time>{formatGenerationElapsed(generationElapsedSeconds)}</time></header>
+              <ol>{displayedGenerationProgress.map((item) => <li className={item.status === "completed" ? "completed" : "active"} key={item.phase}><i>{item.status === "completed" ? "✓" : ""}</i><div><b>{item.label}</b><span>{item.detail}</span></div></li>)}</ol>
+              <p>页面会自动更新；刷新或稍后从作品列表进入，不会丢失任务。</p>
+            </div> : topics.length ? <div className="trafficTopicResultGrid">{topics.map((topic, index) => <article className="trafficTopicResultCard" key={topic.id || `${index}-${topic.title}`}><header><i>{index + 1}</i><span>{topic.selectionRole === "positioning_wildcard" ? "定位保送" : typeof topic.score === "number" ? `${topic.score} 分` : "推荐"}</span></header><h2>{topic.title || "未命名选题"}</h2><div className="trafficTopicSignals"><span>{topic.professionalLens || "通用视角"}</span><span>专业连接：{formatStoredTopicLevel(topic.professionalConnectionStrength)}</span><span>定位适配：{formatStoredTopicLevel(topic.creatorFit)}</span></div>{topic.editorialVerdict || topic.recommendationReason ? <p>{topic.editorialVerdict || topic.recommendationReason}</p> : null}<dl>{topic.whyThisCreator ? <div><dt>为什么是你</dt><dd>{topic.whyThisCreator}</dd></div> : null}{topic.humanTension ? <div><dt>人性矛盾</dt><dd>{topic.humanTension}</dd></div> : null}{topic.audience ? <div><dt>目标人群</dt><dd>{topic.audience}</dd></div> : null}{topic.assignedCoachLabel ? <div><dt>推荐教练</dt><dd>{topic.assignedCoachLabel}</dd></div> : null}</dl></article>)}</div> : <section className="panel emptyState">选题结果暂未返回，请稍后刷新。</section>}
           </main>
         </div>
       </div>
@@ -4632,6 +4685,13 @@ function formatGenerationElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatStoredTopicLevel(value?: "strong" | "medium" | "weak" | "high" | "low" | "none") {
+  if (value === "strong" || value === "high") return "高";
+  if (value === "medium") return "中";
+  if (value === "weak" || value === "low") return "低";
+  return "无";
 }
 
 function formatWechatLayout(value?: string) {

@@ -1,3 +1,14 @@
+import type { ContentDomain, DomainScores } from "@/lib/domain/context";
+
+export type HotTopicTab = "热点" | "财经" | "香港" | "国际";
+
+export type HotTopicAngle = {
+  domain: ContentDomain;
+  label: string;
+  angle: string;
+  rationale: string;
+};
+
 export type HotTopic = {
   id: string;
   title: string;
@@ -7,12 +18,20 @@ export type HotTopic = {
   category: string;
   insuranceRelevance: "高" | "中" | "低";
   recommendedAngle: string;
+  primaryDomain?: ContentDomain;
+  domainScores?: DomainScores;
+  recommendedAngles?: HotTopicAngle[];
+  contentValue?: number;
   riskNote: string;
   sourceUrl?: string;
+  /** Source-provided cover image. Missing images deliberately render as compact text cards. */
+  imageUrl?: string;
   sourceTitle?: string;
   sourcePublishedAt?: string;
   evidence?: string;
   verification?: HotTopicVerification;
+  tab?: HotTopicTab;
+  discoverySource?: "board" | "search";
 };
 
 export type HotTopicVerification = { status: "ready" | "needs-review"; note: string };

@@ -1,8 +1,10 @@
 import { seedTopics } from "./seeds";
-import { discoverTopicsWithSearch, enrichTopicsWithSearch } from "./search-enrichment";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { HotTopic } from "./types";
-import { ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, normalizeSourcePublishedAt, validateHotTopic } from "./rules";
+import { enrichHotTopicDomains, ensureInternationalFinanceCoverage, inferHotTopicCategory, inferHotTopicRelevance, normalizeSourcePublishedAt, validateHotTopic } from "./rules";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
+import type { VolcengineSearchResult } from "@/lib/search/volcengine-search";
 
 const platformMap: Record<string, string> = {
   weibo: "微博",
@@ -12,6 +14,7 @@ const platformMap: Record<string, string> = {
   toutiao: "头条",
   news: "新闻",
 };
+const execFileAsync = promisify(execFile);
 
 const rebangSources = [
   { name: "全站", tab: "top", subTab: "today", url: "https://rebang.today/?tab=top" },
@@ -42,6 +45,9 @@ type RebangItem = {
 type FreejkItem = {
   title?: string;
   desc?: string;
+  cover?: string;
+  image?: string;
+  img?: string;
   hot?: string | number;
   url?: string;
   mobileUrl?: string;
@@ -50,18 +56,19 @@ type FreejkItem = {
   publishedAt?: string | number;
 };
 
-export async function getHotTopics(options: { refresh?: boolean; topicPreference?: string } = {}): Promise<HotTopic[]> {
-  const [searchTopics, rebangTopics, freejkTopics] = await Promise.all([
-    discoverTopicsWithSearch(options),
+/** Fetches source candidates only. Ranking and persistence are handled by the ingestion task. */
+export async function collectHotTopicCandidates(options: { refresh?: boolean } = {}): Promise<HotTopic[]> {
+  const [baiduRealtimeTopics, rebangTopics, freejkTopics, rthkTopics] = await Promise.all([
+    fetchBaiduRealtimeTopics(options),
     fetchRebangTopics(options),
     fetchFreejkTopics(options),
+    fetchRthkTopics(options),
   ]);
-  const baseUrl = process.env.DAILY_HOT_API_BASE;
+  // This optional endpoint can be a commercial aggregation service. Keep it
+  // explicitly opt-in so the standard Xiaogu topic supply is public-source only.
+  const baseUrl = process.env.TOPIC_USE_OPTIONAL_DAILY_HOT_API === "1" ? process.env.DAILY_HOT_API_BASE : undefined;
   if (!baseUrl) {
-    const fallbackTopics = rankAndDiversifyTopics(dedupeTopics([...freejkTopics, ...rebangTopics, ...searchTopics]), options.topicPreference);
-    if (fallbackTopics.length > 0) return fallbackTopics;
-    if (isDemoModeEnabled()) return seedTopics;
-    throw new Error("话题来源未配置，生产模式不能使用本地种子热点");
+    return dedupeTopics([...baiduRealtimeTopics, ...freejkTopics, ...rebangTopics, ...rthkTopics]);
   }
 
   const platforms = ["weibo", "douyin", "baidu", "zhihu"];
@@ -74,14 +81,15 @@ export async function getHotTopics(options: { refresh?: boolean; topicPreference
       });
       if (!response.ok) return [];
       const payload = (await response.json()) as {
-        data?: Array<{ title?: string; desc?: string; hot?: string | number }>;
+        data?: Array<{ title?: string; desc?: string; hot?: string | number; cover?: string; image?: string; img?: string }>;
       };
       return (payload.data ?? []).slice(0, 5).map((item, index): HotTopic => {
         const title = item.title?.trim() || "未命名热点";
         return {
           id: `${platform}-${index}-${encodeURIComponent(title).slice(0, 24)}`,
           title,
-          summary: item.desc?.trim() || "来自门户热榜，建议结合搜索结果补充背景。",
+          summary: item.desc?.trim() || "来自公开门户热榜，发布前请打开原始来源核验。",
+          imageUrl: item.cover ?? item.image ?? item.img,
           source: platformMap[platform] ?? platform,
           heat: index < 2 ? "高" : "中",
           category: inferHotTopicCategory(title),
@@ -97,18 +105,68 @@ export async function getHotTopics(options: { refresh?: boolean; topicPreference
   const remoteTopics = settled
     .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
     .filter((topic) => topic.title !== "未命名热点")
-    .sort((a, b) => relevanceRank(b.insuranceRelevance) - relevanceRank(a.insuranceRelevance));
+    .map(enrichHotTopicDomains)
+    .sort((a, b) => (b.contentValue ?? 0) - (a.contentValue ?? 0));
 
-  const candidateTopics = rankAndDiversifyTopics(dedupeTopics([
+  return dedupeTopics([
+    ...baiduRealtimeTopics,
     ...freejkTopics,
-    ...searchTopics,
     ...rebangTopics,
-    ...remoteTopics.filter((topic) => topic.insuranceRelevance !== "低"),
-  ]), options.topicPreference);
+    ...rthkTopics,
+    ...remoteTopics,
+  ]);
+}
 
-  if (candidateTopics.length > 0) return enrichTopicsWithSearch(candidateTopics, options);
+export function searchResultsToHotTopics(results: VolcengineSearchResult[]): HotTopic[] {
+  const now = Date.now();
+  return results.map((item, index): HotTopic | null => {
+    const publishedAt = normalizeSourcePublishedAt(item.publishedDate);
+    const publishedTime = publishedAt ? new Date(publishedAt).getTime() : NaN;
+    if (Number.isFinite(publishedTime) && now - publishedTime > 72 * 60 * 60 * 1000) return null;
+    const title = cleanSearchTitle(item.title);
+    if (!title || !isTopicCandidate(title) || isSearchIndexPage(title, item.url)) return null;
+    const summary = cleanCandidateSummary(item.content);
+    return {
+      id: `search-${index}-${encodeURIComponent(title).slice(0, 24)}`,
+      title,
+      summary: summary || "实时搜索发现的热点候选，需打开原始来源了解完整背景。",
+      source: "实时搜索补充",
+      heat: index < 4 ? "高" : "中",
+      category: inferHotTopicCategory(title),
+      insuranceRelevance: scoreInsuranceRelevance(title),
+      recommendedAngle: buildInsuranceAngle(title),
+      riskNote: "搜索结果用于补充热点候选，不代表事件细节已经完成事实核验。",
+      sourceUrl: item.url,
+      sourceTitle: item.title,
+      sourcePublishedAt: publishedAt,
+      verification: validateHotTopic({ title, source: "实时搜索补充", sourceUrl: item.url, sourcePublishedAt: publishedAt }),
+      tab: "热点",
+      discoverySource: "search",
+    };
+  }).filter((topic): topic is HotTopic => Boolean(topic));
+}
+
+function cleanSearchTitle(value: string) {
+  return value.replace(/\s*[-_|｜].{0,24}(?:新闻|资讯|网|平台|频道)\s*$/i, "").trim().slice(0, 120);
+}
+
+function cleanCandidateSummary(value: string) {
+  return value.replace(/适合结合最新公开信息核验后转化为保险内容选题[。.]?/g, "").replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function isSearchIndexPage(title: string, url: string) {
+  return /热搜榜|热榜首页|热点榜单|今日热点汇总|新闻首页/.test(title) || /(?:\/search|\/so\?|[?&](?:q|query|keyword)=)/i.test(url);
+}
+
+export async function getHotTopics(options: { refresh?: boolean; topicPreference?: string } = {}): Promise<HotTopic[]> {
+  const candidates = await collectHotTopicCandidates(options);
+  if (candidates.length > 0) return rankHotTopicCandidates(candidates, options.topicPreference);
   if (isDemoModeEnabled()) return seedTopics;
   throw new Error("话题来源暂不可用，请检查热榜或搜索服务配置");
+}
+
+export function rankHotTopicCandidates(candidates: HotTopic[], topicPreference = "") {
+  return rankAndDiversifyTopics(dedupeTopics(candidates).map(enrichHotTopicDomains), topicPreference);
 }
 
 async function fetchRebangTopics(options: { refresh?: boolean }) {
@@ -169,11 +227,21 @@ async function fetchRebangTopics(options: { refresh?: boolean }) {
 
 async function fetchFreejkTopics(options: { refresh?: boolean }) {
   const sources = [
-    { key: "thepaper", name: "澎湃新闻" },
-    { key: "36kr", name: "36氪" },
-    { key: "toutiao", name: "头条" },
-    { key: "douyin", name: "抖音" },
-    { key: "zhihu", name: "知乎" },
+    { key: "qq-news", name: "腾讯新闻", tab: "热点" as const },
+    { key: "sina-news", name: "新浪新闻", tab: "热点" as const },
+    { key: "netease-news", name: "网易新闻", tab: "热点" as const },
+    { key: "thepaper", name: "澎湃新闻", tab: "热点" as const },
+    { key: "toutiao", name: "头条", tab: "热点" as const },
+    { key: "douyin", name: "抖音", tab: "热点" as const },
+    { key: "zhihu", name: "知乎", tab: "热点" as const },
+    { key: "weatheralarm", name: "天气预警", tab: "热点" as const },
+    { key: "36kr", name: "36氪", tab: "财经" as const },
+    { key: "geekpark", name: "极客公园", tab: "财经" as const },
+    { key: "ifanr", name: "爱范儿", tab: "财经" as const },
+    { key: "ithome", name: "IT之家", tab: "财经" as const },
+    { key: "51cto", name: "51CTO", tab: "财经" as const },
+    { key: "smzdm", name: "什么值得买", tab: "财经" as const },
+    { key: "sspai", name: "少数派", tab: "财经" as const },
   ];
 
   const settled = await Promise.allSettled(
@@ -191,19 +259,21 @@ async function fetchFreejkTopics(options: { refresh?: boolean }) {
       };
       if (payload.code !== 200 || !Array.isArray(payload.data)) return [];
 
-      return payload.data.slice(0, 18).map((item, index): HotTopic => {
+      return payload.data.slice(0, 50).map((item, index): HotTopic => {
         const title = item.title?.trim() || "未命名热点";
         return {
           id: `freejk-${source.key}-${index}-${encodeURIComponent(title).slice(0, 24)}`,
           title,
           summary: item.desc?.trim() || `来自 ${source.name} 热榜，适合结合最新公开信息核验后转化为保险内容选题。`,
           source: `FreeJK · ${source.name}`,
+          tab: source.tab,
           heat: index < 5 ? "高" : "中",
           category: inferHotTopicCategory(title),
           insuranceRelevance: scoreInsuranceRelevance(title),
           recommendedAngle: buildInsuranceAngle(title),
           riskNote: "热榜信息需要二次核验，不把网络热度直接等同于事实结论。",
           sourceUrl: item.url ?? item.mobileUrl,
+          imageUrl: item.cover ?? item.image ?? item.img,
           sourceTitle: `${source.name} 热榜`,
           sourcePublishedAt: normalizeSourcePublishedAt(item.updateTime ?? item.timestamp ?? item.publishedAt),
           verification: validateHotTopic({ title, source: `FreeJK · ${source.name}`, sourceUrl: item.url ?? item.mobileUrl, sourcePublishedAt: normalizeSourcePublishedAt(item.updateTime ?? item.timestamp ?? item.publishedAt) }),
@@ -214,18 +284,145 @@ async function fetchFreejkTopics(options: { refresh?: boolean }) {
 
   return settled
     .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
-    .filter((topic) => topic.title !== "未命名热点" && isTopicCandidate(topic.title))
+    // 热点保留小谷原有创作相关性；财经必须是可被家庭、市场或商业创作者直接解释的财经事实。
+    .filter((topic) => topic.title !== "未命名热点" && (topic.tab !== "热点" || isTopicCandidate(topic.title)) && (topic.tab !== "财经" || isFinanceTopicCandidate(topic.title)))
     .sort((a, b) => topicScore(b) - topicScore(a));
+}
+
+/** Official Baidu realtime board is deliberately kept intact for the 热点 tab. */
+async function fetchBaiduRealtimeTopics(options: { refresh?: boolean }) {
+  const boardUrl = "https://top.baidu.com/board?tab=realtime";
+  const html = await fetchSourceText(boardUrl, options);
+  if (!html) return [];
+  const items = [...html.matchAll(/\{"appUrl":"([^"\\]*(?:\\.[^"\\]*)*)","desc":"([^"\\]*(?:\\.[^"\\]*)*)"[\s\S]*?"word":"([^"\\]*(?:\\.[^"\\]*)*)"/g)];
+  return items.slice(0, 50).map((match, index): HotTopic | null => {
+    const title = decodeJsonString(match[3]);
+    if (!title) return null;
+    return {
+      id: `baidu-realtime-${index}-${encodeURIComponent(title).slice(0, 24)}`,
+      title,
+      summary: decodeJsonString(match[2]) || "百度实时热榜当前词条，打开来源查看完整事件背景。",
+      source: "百度实时热榜",
+      tab: "热点",
+      heat: index < 10 ? "高" : "中",
+      category: inferHotTopicCategory(title),
+      insuranceRelevance: scoreInsuranceRelevance(title),
+      recommendedAngle: buildInsuranceAngle(title),
+      riskNote: "热榜只代表实时讨论度，发布前须核验原始事实与时间。",
+      sourceUrl: decodeJsonString(match[1]) || boardUrl,
+      imageUrl: (() => {
+        const imageMatch = match[0].match(/"img":"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        return imageMatch ? decodeJsonString(imageMatch[1]) : undefined;
+      })(),
+      sourceTitle: "百度热搜 · 实时榜",
+      sourcePublishedAt: new Date().toISOString(),
+      verification: validateHotTopic({ title, source: "百度实时热榜", sourceUrl: decodeJsonString(match[1]) || boardUrl, sourcePublishedAt: new Date().toISOString() }),
+    };
+  }).filter((topic): topic is HotTopic => Boolean(topic));
+}
+
+async function fetchRthkTopics(options: { refresh?: boolean }) {
+  const sources = [
+    { category: 3, name: "RTHK 本地即时", tab: "香港" as const },
+    { category: 5, name: "RTHK 财经即时", tab: "财经" as const },
+    { category: 4, name: "RTHK 国际即时", tab: "国际" as const },
+  ];
+  const settled = await Promise.allSettled(sources.map(async (source) => {
+    const url = `https://news.rthk.hk/rthk/webpageCache/services/loadModNewsShowSp2List.php?lang=zh-TW&cat=${source.category}&newsCount=60&dayShiftMode=1&archive_date=`;
+    const html = await fetchSourceText(url, options, true);
+    if (!html) return [];
+    const items = [...html.matchAll(/<h4 class='ns2-title'><a href='([^']+)'>([\s\S]*?)<\/a><\/h4>[\s\S]*?<div class='ns2-created'>([^<]+)<\/div>/g)];
+    return Promise.all(items.map(async (match, index): Promise<HotTopic> => {
+      const title = decodeHtml(match[2]).trim();
+      const publishedAtValue = match[3].replace(" HKT", "+08:00").replace(" ", "T");
+      const publishedAtTimestamp = Date.parse(publishedAtValue);
+      const sourcePublishedAt = Number.isNaN(publishedAtTimestamp) ? undefined : new Date(publishedAtTimestamp).toISOString();
+      // The RTHK list endpoint intentionally carries no thumbnail. Preload the
+      // first creator-visible page of article covers from each Hong Kong/world feed.
+      const imageUrl = (source.tab === "香港" || source.tab === "国际") && index < 24
+        ? await fetchRthkArticleCover(match[1], options)
+        : undefined;
+      return {
+        id: `rthk-${source.category}-${index}-${encodeURIComponent(title).slice(0, 24)}`,
+        title,
+        summary: `${source.name} 即时新闻，发布前请打开原始报道核验完整背景。`,
+        source: source.name,
+        tab: source.tab,
+        heat: index < 8 ? "高" : "中",
+        category: inferHotTopicCategory(title),
+        insuranceRelevance: scoreInsuranceRelevance(title),
+        recommendedAngle: buildInsuranceAngle(title),
+        riskNote: "新闻事件应以原始报道为准，避免将即时信息推导为投资或保障结论。",
+        sourceUrl: match[1],
+        imageUrl,
+        sourceTitle: source.name,
+        sourcePublishedAt,
+        verification: validateHotTopic({ title, source: source.name, sourceUrl: match[1], sourcePublishedAt }),
+      };
+    })).then((topics) => topics.filter((topic) => topic.title));
+  }));
+  return settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+}
+
+async function fetchRthkArticleCover(url: string, options: { refresh?: boolean }) {
+  const html = await fetchSourceText(url, options);
+  const match = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+    ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  return match?.[1]?.replace(/&amp;/g, "&");
+}
+
+function decodeHtml(value: string) {
+  return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+function decodeJsonString(value: string) {
+  try { return JSON.parse(`"${value}"`); } catch { return value.replace(/\\"/g, '"').replace(/\\n/g, " "); }
+}
+
+/**
+ * A few public Chinese news hosts intermittently time out in Node's HTTP stack
+ * while succeeding through the host network path. URLs are internal constants;
+ * curl never receives user-provided input and remains a narrowly-scoped fallback.
+ */
+async function fetchSourceText(url: string, options: { refresh?: boolean }, preferCurl = false) {
+  const timeout = Number(process.env.TOPIC_SOURCE_TIMEOUT_MS ?? 8000);
+  if (!preferCurl) {
+    try {
+      const response = await fetch(url, {
+        cache: options.refresh ? "no-store" : undefined,
+        next: options.refresh ? undefined : { revalidate: 600 },
+        signal: AbortSignal.timeout(timeout),
+        headers: { "user-agent": "Mozilla/5.0 (compatible; XiaoguTopicBot/1.0)" },
+      });
+      if (response.ok) {
+        const body = await response.text();
+        // Some upstream edge nodes respond 200 with an empty cache body.
+        if (body.trim().length >= 200) return body;
+      }
+    } catch {
+      // Try the host-network fallback below.
+    }
+  }
+  try {
+    const { stdout } = await execFileAsync("curl", ["-L", "--fail", "--silent", "--show-error", "--max-time", "15", "-A", "XiaoguTopicBot/1.0", url], { maxBuffer: 3_000_000 });
+    return stdout;
+  } catch {
+    return "";
+  }
 }
 
 function isTopicCandidate(title: string) {
   if (/彩票|明星八卦|恋情|离婚|游戏皮肤|综艺|影视剧|演唱会|饭圈|抽奖|穿搭|妆容|写真/.test(title)) return false;
   return (
-    scoreInsuranceRelevance(title) !== "低" ||
+    isFinanceTopicCandidate(title) ||
     /涨价|降价|罢工|停产|裁员|倒闭|破产|事故|暴雷|危机|处罚|召回|缺货|延迟|改革|新规|调整|补贴|补偿|赔偿|工资|房贷|利率|物价|生育|教育|家庭|父母|孩子|老人|年轻人|打工人|普通人|中年|医院|学校|企业|航空|车企|实体店|价格倒挂|汛情|灾情|禁令|禁止/.test(
       title,
     )
   );
+}
+
+function isFinanceTopicCandidate(title: string) {
+  return /股|市|金融|经济|银行|利率|房贷|存款|理财|基金|债|保险|财报|营收|利润|融资|上市|并购|裁员|投资|企业|公司|地产|房价|汽车|行业|资本|贸易|补贴|监管|税|财政|央行|汇率|黄金|原油|港元|港股|美股|美元|消费|物价|就业|工资|养老金|社保/.test(title);
 }
 
 function dedupeTopics(topics: HotTopic[]) {
@@ -261,7 +458,10 @@ function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "") {
     if (!selected.some((item) => item.title === topic.title)) selected.push(topic);
   }
 
-  return ensureInternationalFinanceCoverage([...selected, ...ranked], 12);
+  const result = [...selected, ...ranked].slice(0, 12);
+  return /财经|金融|市场|股票|利率|汇率|黄金|美股|港股/.test(topicPreference)
+    ? ensureInternationalFinanceCoverage(result, 12)
+    : result;
 }
 
 function scoreInsuranceRelevance(title: string): HotTopic["insuranceRelevance"] {
@@ -269,7 +469,8 @@ function scoreInsuranceRelevance(title: string): HotTopic["insuranceRelevance"] 
 }
 
 function topicScore(topic: HotTopic, topicPreference = "") {
-  let score = relevanceRank(topic.insuranceRelevance) * 20;
+  const domainPeak = topic.domainScores ? Math.max(...Object.values(topic.domainScores)) : relevanceRank(topic.insuranceRelevance) * 20;
+  let score = domainPeak * 0.6 + (topic.contentValue ?? 0) * 0.4;
   if (topic.heat === "高") score += 10;
   if (/谁能想到|首次|突然|暴涨|暴跌|崩了|没了|罕见|冲上热搜|全网|紧急|官宣|新规|调整|回应|通报|热议/.test(topic.title)) score += 14;
   if (/涨价|降价|裁员|倒闭|破产|停产|罢工|事故|赔偿|补偿|医保|养老金|退休|医院|药|癌|暴雨|台风|地震|火灾|车祸|生育|教育|房贷|物价|暴雷|危机/.test(topic.title)) score += 14;
@@ -279,7 +480,20 @@ function topicScore(topic: HotTopic, topicPreference = "") {
   if (/报告|研究|白皮书|论文|指数|论坛|会议/.test(topic.title)) score -= 14;
   if (matchesPreference(topic, topicPreference)) score += 18;
   if (topic.evidence || topic.sourceUrl) score += 4;
+  score += freshnessScore(topic.sourcePublishedAt);
+  if (topic.discoverySource === "search") score += 3;
   return score;
+}
+
+function freshnessScore(value?: string) {
+  if (!value) return -4;
+  const ageHours = (Date.now() - new Date(value).getTime()) / 3_600_000;
+  if (!Number.isFinite(ageHours)) return -4;
+  if (ageHours <= 6) return 18;
+  if (ageHours <= 24) return 12;
+  if (ageHours <= 48) return 3;
+  if (ageHours <= 72) return -8;
+  return -30;
 }
 
 function matchesPreference(topic: HotTopic, topicPreference: string) {

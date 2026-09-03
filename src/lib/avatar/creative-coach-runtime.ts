@@ -95,19 +95,19 @@ const cleanIds = (value: unknown, limit: number) => Array.isArray(value)
 export function renderCreativeCoachPersona(runtime: CreativeCoachRuntime) {
   const persona = runtime.skillModules.persona;
   if (!persona) return runtime.skillModules.voice ?? "";
-  return JSON.stringify({ identity:persona.identity,audience:persona.audience,stablePositions:persona.stablePositions,voiceTraits:persona.voiceTraits,adaptiveVoice:persona.adaptiveVoice,avoid:persona.avoid });
+  return JSON.stringify({ identity:persona.identity,audience:persona.audience,stablePositions:persona.stablePositions,voiceTraits:persona.voiceTraits,adaptiveVoice:persona.adaptiveVoice });
 }
 
 export function renderCreativeCoachSkillIndex(runtime: CreativeCoachRuntime) {
   const hierarchy = runtime.skillModules.skillHierarchy ?? [];
-  if (hierarchy.length) return hierarchy.map((item) => JSON.stringify({ id:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId,description:item.description,solves:item.solves,when:item.when,notFor:item.notFor,childSkillIds:item.childSkillIds })).join("\n");
-  return (runtime.skillModules.discoveredMethods ?? []).map((item) => JSON.stringify({ id:item.key,name:item.name,level:item.level ?? "functional",parentSkillId:item.parentSkillId,description:item.summary,solves:item.solves,when:item.when,notFor:item.notFor })).join("\n");
+  if (hierarchy.length) return hierarchy.map((item) => JSON.stringify({ id:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId,description:item.description,solves:item.solves,when:item.when,childSkillIds:item.childSkillIds })).join("\n");
+  return (runtime.skillModules.discoveredMethods ?? []).map((item) => JSON.stringify({ id:item.key,name:item.name,level:item.level ?? "functional",parentSkillId:item.parentSkillId,description:item.summary,solves:item.solves,when:item.when })).join("\n");
 }
 
 export function buildCreativeCoachSkillRoutePrompt(runtime: CreativeCoachRuntime, taskProfile: Record<string, unknown>) {
   return [
     "你是教练Skill渐进加载路由器，不写正文、不选择观点。根据任务画像先选择0或1个strategy，再选择最多6个值得展开查看的候选方法。允许不选。",
-    "这里只看到轻量目录。不得因名称听起来相关就选择；优先匹配solves、when和notFor。候选不是最终使用方法，后续教练仍需执行不可替代价值和删除测试。",
+    "根据题目和教练经验自由选择最能激发表达的方法；候选方法可以组合、改造或不用。",
     `【任务画像】${JSON.stringify(taskProfile)}`,
     `【全量轻量Skill目录】\n${renderCreativeCoachSkillIndex(runtime)}`,
     "严格JSON：{strategySkillIds:string[],candidateMethodIds:string[],rationale:string}。strategySkillIds最多1个，candidateMethodIds最多6个。",
@@ -123,14 +123,14 @@ export function parseCreativeCoachSkillRoute(raw: string, runtime: CreativeCoach
       candidateMethodIds: cleanIds(value.candidateMethodIds, 6).filter((id) => allowed.has(id)),
       rationale: typeof value.rationale === "string" ? value.rationale.trim().slice(0, 800) : "",
     };
-  } catch { return { strategySkillIds: [], candidateMethodIds: [], rationale: "路由结果无法解析，使用零方法安全回退" }; }
+  } catch { return { strategySkillIds: [], candidateMethodIds: [], rationale: "路由结果无法解析，交给教练自由发挥" }; }
 }
 
 export function renderSelectedCreativeCoachMethods(runtime: CreativeCoachRuntime, names: Array<string | null | undefined>) {
   const selected = new Set(names.filter((name): name is string => typeof name === "string" && Boolean(name.trim())).map((name) => name.trim()));
   const methods = (runtime.skillModules.discoveredMethods ?? []).filter((method) => selected.has(method.key ?? "") || selected.has(method.name ?? "")).slice(0, 6);
   if (!methods.length) return "";
-  return methods.map((method) => JSON.stringify({ name:method.name,key:method.key,summary:method.summary,steps:method.steps,notFor:method.notFor,evidence:method.evidence?.slice(0,3) })).join("\n");
+  return methods.map((method) => JSON.stringify({ name:method.name,key:method.key,summary:method.summary,steps:method.steps,evidence:method.evidence?.slice(0,3) })).join("\n");
 }
 
 export function renderProgressivelyLoadedCreativeCoachSkills(runtime: CreativeCoachRuntime, route: CreativeCoachSkillRoute) {
@@ -150,12 +150,21 @@ export function renderCreativeCoachSkill(runtime: CreativeCoachRuntime, stage: "
   if (template) {
     const rendered = template.replaceAll("{{coach_label}}", runtime.label);
     const voice = stage === "writing" ? runtime.skillModules.voice?.replaceAll("{{coach_label}}", runtime.label) : "";
-    return [rendered, voice ? `【表达声纹｜只控制表达实现】\n${voice}` : ""].filter(Boolean).join("\n\n");
+    return [relaxCoachSkill(rendered), voice ? `【表达声纹】\n${relaxCoachSkill(voice)}` : ""].filter(Boolean).join("\n\n");
   }
   // Compatibility for historical coach versions that have not yet been modularized.
-  if (stage === "research") return [runtime.ipPositioningPrompt, runtime.growthPrompt].filter(Boolean).join("\n\n");
-  if (stage === "brief") return [runtime.contentCreationPrompt, runtime.ipPositioningPrompt, runtime.growthPrompt].filter(Boolean).join("\n\n");
-  return [runtime.contentCreationPrompt, runtime.skillModules.voice ? `【表达声纹｜只控制表达实现】\n${runtime.skillModules.voice}` : ""].filter(Boolean).join("\n\n");
+  if (stage === "research") return relaxCoachSkill([runtime.ipPositioningPrompt, runtime.growthPrompt].filter(Boolean).join("\n\n"));
+  if (stage === "brief") return relaxCoachSkill([runtime.contentCreationPrompt, runtime.ipPositioningPrompt, runtime.growthPrompt].filter(Boolean).join("\n\n"));
+  return [relaxCoachSkill(runtime.contentCreationPrompt), runtime.skillModules.voice ? `【表达声纹】\n${relaxCoachSkill(runtime.skillModules.voice)}` : ""].filter(Boolean).join("\n\n");
+}
+
+export function relaxCoachSkill(value: string) {
+  const restrictive = /(不得|禁止|严禁|不能|不允许|不可|不承诺|不保证|不补造|不编造|不夸大|避免绝对|事实.*边界|推断.*条件|风险边界|合规边界|适用条件|待核验|需核验|核验要求|证据不足|信息不足|可靠材料|专业复核|高风险专业|不假装全知|删除测试|停止规则|停止条件|完成既定停止点|只按|仅依据|只执行)/u;
+  return value
+    .split(/(?<=[。！？!?；;])|\n+/u)
+    .map((item) => item.trim())
+    .filter((item) => item && !restrictive.test(item))
+    .join("\n");
 }
 
 export async function resolveCreativeCoachRuntime(userId: string, versionId: string): Promise<CreativeCoachRuntime | null> {

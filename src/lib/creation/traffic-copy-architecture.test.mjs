@@ -13,6 +13,7 @@ import {
   fallbackTrafficCopyCreativeBrief,
   fallbackTrafficSourceBlueprint,
   measureTrafficExpressionSimilarity,
+  mergeTrafficSourceBlueprint,
   normalizeTrafficBriefForSource,
   parseTrafficCopyAudit,
   parseTrafficCopyCreativeBrief,
@@ -30,7 +31,7 @@ test("source blueprint extracts semantic assets instead of preserving prose", ()
   }), "原稿");
   assert.equal(blueprint.taskMode, "source_adaptation");
   assert.equal(blueprint.contentAssets[0].meaning, "先管理现金流");
-  assert.equal(authorityForTrafficTask(blueprint.taskMode).positionOwner, "source");
+  assert.equal(authorityForTrafficTask(blueprint.taskMode).positionOwner, "coach");
 });
 
 test("structured hotspot envelope cannot be mistaken for a source transcript", () => {
@@ -40,51 +41,80 @@ test("structured hotspot envelope cannot be mistaken for a source transcript", (
   assert.equal(blueprint.originalThesis, "某款量产车下线");
 });
 
-test("topic creation binds the thesis to the concrete researched discussion", () => {
+test("topic creation leaves researched material open to coach judgment", () => {
   const blueprintPrompt = buildTrafficSourceBlueprintPrompt("梅艳芳今天很火，帮我找一个角度写", "创作方向：围绕遗产信托安排展开\n必须实质解释的主题锚点：遗产信托、按规则使用");
-  assert.match(blueprintPrompt, /拥有本轮立题权/);
-  assert.match(blueprintPrompt, /不得用家庭责任.*替换具体事件/);
+  assert.match(blueprintPrompt, /研究后的编辑材料是创作参考/);
+  assert.match(blueprintPrompt, /教练自行决定保留、重组、放大或舍弃/);
   const prompt = buildTrafficCopyCreativeBriefPrompt({
     source: "梅艳芳今天很火，帮我找一个角度写",
     context: ["创作方向：围绕遗产信托按月支付养老费用展开"],
     blueprint: parseTrafficSourceBlueprint(JSON.stringify({ taskMode: "topic_creation", originalThesis: "梅艳芳热点" }), "梅艳芳今天很火，帮我找一个角度写"),
     authority: authorityForTrafficTask("topic_creation"),
   });
-  assert.match(prompt, /workingThesis必须点明该具体议题/);
-  assert.match(prompt, /不得绕开它退回通用家庭责任/);
+  assert.match(prompt, /内容资产、任务画像和候选方法都只是灵感材料/);
+  assert.match(prompt, /可以选择、组合、改写或舍弃/);
+});
+
+test("researched blueprint enriches without erasing source-owned required facts", () => {
+  const base = parseTrafficSourceBlueprint(JSON.stringify({
+    originalThesis:"为什么梅艳芳这样安排信托",
+    contentAssets:[{id:"source-event",kind:"evidence",meaning:"梅艳芳母亲已经离世",function:"解释为什么今天重提",importance:"required",sourceStatus:"source",mayReframe:false}],
+    standaloneContext:{mode:"public_named",requiredSubjects:["梅艳芳母亲"],eventSummary:"梅艳芳母亲离世",eventAnchors:["离世","2026年8月30日"],openingSentenceWindow:3},
+  }), "为什么梅艳芳这样安排信托".repeat(30));
+  const researched = parseTrafficSourceBlueprint(JSON.stringify({
+    originalThesis:"信托为何按月支付",
+    contentAssets:[{id:"mechanism",kind:"reasoning",meaning:"按月支付限制一次性处置",function:"拆解安排",importance:"required",sourceStatus:"source",mayReframe:true}],
+    standaloneContext:{mode:"public_named",requiredSubjects:["梅艳芳"],eventSummary:"信托安排",eventAnchors:["按月支付"],openingSentenceWindow:3},
+  }), "为什么梅艳芳这样安排信托".repeat(30));
+  const merged = mergeTrafficSourceBlueprint(base, researched);
+  assert.ok(merged.contentAssets.some((item)=>item.meaning.includes("母亲已经离世")));
+  assert.ok(merged.contentAssets.some((item)=>item.meaning.includes("按月支付")));
+  assert.deepEqual(merged.standaloneContext.eventAnchors,["离世","2026年8月30日","按月支付"]);
+});
+
+test("every required event unit must land instead of any one anchor", () => {
+  const cleanAudit = parseTrafficCopyAudit(JSON.stringify({status:"pass",issues:[],semanticCoverage:1,expressionSimilarity:.1}));
+  const blueprint = parseTrafficSourceBlueprint(JSON.stringify({
+    standaloneContext:{mode:"public_named",requiredSubjects:["梅艳芳母亲"],eventSummary:"离世触发信托关键节点",eventAnchors:["离世","2026年8月30日","信托关键节点"],openingSentenceWindow:3},
+  }), "梅艳芳母亲离世触发信托关键节点".repeat(20));
+  const guarded = applyTrafficDeterministicAuditChecks(cleanAudit,"梅艳芳母亲离世后，相关安排再次受到关注。",{blueprint});
+  assert.equal(guarded.status,"revise");
+  assert.match(guarded.issues.find((item)=>item.type === "subject_context_missing")?.reason ?? "",/2026年8月30日.*信托关键节点/);
 });
 
 test("coach independently re-plans expression and flexible duration", () => {
   const prompt = buildTrafficCopyCreativeBriefPrompt({ source:"人民币升值参考稿", creatorSkill:"先判断再解释" });
-  assert.match(prompt, /只重新立题和编排，不写正文/);
-  assert.match(prompt, /不得强制制造矛盾/);
-  assert.match(prompt, /至少从受众场景、问题入口、论证顺序/);
-  assert.match(prompt, /弹性区间/);
+  assert.match(prompt, /你就是所选创作教练/);
+  assert.match(prompt, /自由决定这篇口播真正值得讲什么/);
+  assert.match(prompt, /人性洞察、传播欲、鲜明判断和自然口语/);
+  assert.match(prompt, /不受固定开头、段落顺序、CTA、时长或停止规则限制/);
   assert.match(prompt, /durationRange/);
 });
 
-test("decision parser keeps asset selection, method tools and duration range", () => {
+test("decision parser keeps creative choices while stripping restrictive control fields", () => {
   const brief = parseTrafficCopyCreativeBrief(JSON.stringify({ worthCreating:true, topicRelation:"strong", audience:"家庭", attentionReason:"现金压力", entryMode:"顾虑", entryContent:"钱会不会不够用", workingThesis:"先解决流动性", preserveOriginalThesis:true, contentGaps:[{id:"g1",description:"受众没有意识到流动性风险",consequenceIfUnresolved:"仍只看资产总额"}], reasoningPlan:[{id:"p1",purpose:"解释压力",evidenceIds:["s1"]}], selectedAssetIds:["a1","a2"], mustKeepEvidenceIds:["s1"], selectedMethods:[{methodId:"顾虑钩子",purpose:"说出担忧",appliesTo:"开头",targetGap:"g1",uniqueContribution:"让受众代入尚未说出的现金顾虑",removalTest:"删除后受众无法理解问题与自己的关系",necessary:true},{methodId:"总结清单",purpose:"丰富结尾",appliesTo:"结尾",targetGap:"g1",uniqueContribution:"更丰富",removalTest:"删除也不影响判断",necessary:false}], stoppingRule:"解释完现金压力和行动后停止",structureBudget:{requiredUnits:3,allowedFunctions:["顾虑","机制","行动"]}, durationRange:{preferredSeconds:[180,240],preferredCharacters:[800,1100]}, durationBasis:{coreClaims:1,reasoningSteps:4,evidenceUnits:3,boundaryUnits:2}, durationRationale:"需要完整论证", expressionPlan:{newEntry:"家庭现金吃紧",newOrder:["场景","机制","行动"],changedDimensions:["入口","顺序"],avoidSourcePhrases:["原钩子"]}, endingMode:"行动提醒", endingRationale:"给出盘点动作", voicePlan:{tension:"strong",rhythm:"短长交替",stance:"直接"}, forbiddenMoves:["不承诺收益"] }));
   assert.equal(brief.primaryMethod, "顾虑钩子");
   assert.deepEqual(brief.selectedAssetIds, ["a1","a2"]);
   assert.deepEqual(brief.durationRange.preferredSeconds, [180,240]);
   assert.equal(brief.targetSeconds, 210);
   assert.equal(brief.selectedMethods.length, 1);
-  assert.equal(brief.stoppingRule, "解释完现金压力和行动后停止");
+  assert.equal(brief.stoppingRule, "");
+  assert.deepEqual(brief.contentGaps, []);
+  assert.deepEqual(brief.mustKeepEvidenceIds, []);
+  assert.deepEqual(brief.expressionPlan.avoidSourcePhrases, []);
   assert.equal(brief.structureBudget.requiredUnits, 3);
 });
 
-test("writer sees semantic assets but never receives the full source prose", () => {
+test("writer receives coach-led inspiration without the full source prose", () => {
   const source = "核心判断。这个完整原稿专属长句不应该进入写作器。";
   const blueprint = parseTrafficSourceBlueprint(JSON.stringify({ taskMode:"source_adaptation", originalThesis:"核心判断", contentAssets:[{id:"a1",kind:"thesis",meaning:"核心判断",function:"结论",importance:"required",sourceStatus:"source",mayReframe:true}] }), source);
   const prompt = buildTrafficCopyWritingPrompt({ source, blueprint, creatorSkill:"克制直接", brief:fallbackTrafficCopyCreativeBrief(source) });
-  assert.match(prompt, /你看不到完整原稿/);
+  assert.match(prompt, /有经验、有个性、有判断的真实创作者/);
   assert.match(prompt, /【成稿契约】/);
   assert.doesNotMatch(prompt, /这个完整原稿专属长句/);
   assert.doesNotMatch(prompt, /sourceStatus/);
   assert.doesNotMatch(prompt, /【教练决策单】|【搜索与补充材料】/);
-  assert.match(prompt, /durationRange由系统按本题信息量自动计算/);
-  assert.match(prompt, /不得自我介绍、复述身份画像/);
+  assert.match(prompt, /开头、结构、篇幅、节奏、称谓、案例组织、观点强度和结尾全部由教练声纹与本题内容决定/);
 });
 
 test("publication contract exposes permissions without leaking internal provenance", () => {
@@ -117,7 +147,8 @@ test("automatic duration and routed method boundary are deterministic", () => {
   const parsed = parseTrafficCopyCreativeBrief(JSON.stringify({ selectedMethods:[{methodId:"allowed",purpose:"x",targetGap:"g1",uniqueContribution:"only",removalTest:"breaks",necessary:true},{methodId:"invented",purpose:"x",targetGap:"g2",uniqueContribution:"only",removalTest:"breaks",necessary:true}], durationRange:{preferredSeconds:[300,600],preferredCharacters:[2400,3000]} }));
   const normalized = normalizeTrafficBriefForSource(parsed, "资".repeat(400), ["allowed"]);
   assert.deepEqual(normalized.selectedMethods.map((item) => item.methodId), ["allowed"]);
-  assert.deepEqual(normalized.durationRange.preferredCharacters, [612,900]);
+  assert.deepEqual(normalized.durationRange.preferredCharacters, [750,1000]);
+  assert.deepEqual(normalized.durationRange.preferredSeconds, [180,240]);
   assert.equal(normalized.primaryMethod, "allowed");
 });
 
@@ -132,12 +163,12 @@ test("identity and automatic length guards request one minimal revision", () => 
   assert.ok(guarded.reductionPlan.length > 0);
 });
 
-test("automatic length guard blocks materially incomplete short drafts", () => {
+test("automatic length guard warns without treating character count as semantic proof", () => {
   const cleanAudit = parseTrafficCopyAudit(JSON.stringify({ status:"pass",issues:[],semanticCoverage:1,expressionSimilarity:.1 }));
   const brief = normalizeTrafficBriefForSource(fallbackTrafficCopyCreativeBrief("资".repeat(400)), "资".repeat(400));
   const guarded = applyTrafficDeterministicAuditChecks(cleanAudit, "观点很重要，但正文没有解释具体机制。", { brief });
-  assert.equal(guarded.status, "revise");
-  assert.equal(guarded.hardBlocking, true);
+  assert.equal(guarded.status, "pass");
+  assert.equal(guarded.hardBlocking, false);
   assert.ok(guarded.issues.some((item) => item.type === "automatic_length_underrun"));
 });
 
@@ -162,23 +193,26 @@ test("public event context is blocked when named subjects disappear from the ope
   assert.ok(guarded.issues.some((item)=>item.type==="subject_context_missing"));
 });
 
-test("why questions stay as required causal work across planning, writing and audit", () => {
+test("why questions remain creative opportunities without forced disclaimer language", () => {
   const blueprintPrompt = buildTrafficSourceBlueprintPrompt("梅艳芳为什么这样安排信托？", "据庭审报道，她希望持续照顾母亲但不一次性交付整笔遗产。");
-  assert.match(blueprintPrompt, /具体因果答案列为required reasoning资产/);
+  assert.match(blueprintPrompt, /提供素材能够激发的因果、人性和决策解释/);
+  assert.doesNotMatch(blueprintPrompt, /可确认的安排目的.*不可确认的内心动机/);
 
   const briefPrompt = buildTrafficCopyCreativeBriefPrompt({
     source:"梅艳芳为什么这样安排信托？",
     blueprint:fallbackTrafficSourceBlueprint("梅艳芳为什么这样安排信托？"),
     context:["可归因表达的报道事实：据庭审报道，她担心母亲不善管理整笔资金。"],
   });
-  assert.match(briefPrompt, /仅解释一般机制.*视为未解决/);
+  assert.match(briefPrompt, /优先追求人性洞察、传播欲、鲜明判断和自然口语/);
 
   const brief = fallbackTrafficCopyCreativeBrief("梅艳芳为什么这样安排信托？");
   const writingPrompt = buildTrafficCopyWritingPrompt({ source:"梅艳芳为什么这样安排信托？",brief,context:[] });
-  assert.match(writingPrompt, /必须在前半段给出.*具体因果链/);
+  assert.match(writingPrompt, /允许大胆判断、合理推演和有争议的观点/);
+  assert.doesNotMatch(writingPrompt, /能确认的是.*不能确认的是/);
 
   const auditPrompt = buildTrafficCopyAuditPrompt({ source:"梅艳芳为什么这样安排信托？",draft:"信托可以持续照顾家人。",blueprint:fallbackTrafficSourceBlueprint("梅艳芳为什么这样安排信托？"),authority:authorityForTrafficTask("topic_creation"),brief,context:[] });
-  assert.match(auditPrompt, /core_question_unanswered/);
+  assert.match(auditPrompt, /核心问题未回答/);
+  assert.match(auditPrompt, /不得主动增加免责声明/);
 });
 
 test("a suspense first sentence passes when the public event lands inside the opening window", () => {
@@ -208,9 +242,17 @@ test("dual audit detects hard omissions and expression overlap without punishing
   assert.equal(reduction.status, "revise");
   assert.equal(reduction.hardBlocking, false);
   const prompt = buildTrafficCopyAuditPrompt({ source:"原稿原稿原稿", draft:"新表达", blueprint:parseTrafficSourceBlueprint("{}","主题"), authority:authorityForTrafficTask("topic_creation"), brief:fallbackTrafficCopyCreativeBrief("主题"), context:[] });
-  assert.match(prompt, /双向检查器/);
-  assert.match(prompt, /generic_topic_fallback/);
-  assert.match(prompt, /最多一次最小修订/);
+  assert.match(prompt, /独立成稿编辑/);
+  assert.match(prompt, /整篇退回通用套话/);
+  assert.match(prompt, /每篇最多一次局部修改/);
+});
+
+test("selected arena topics must pass the 80 point fulfillment gate", () => {
+  const audit = parseTrafficCopyAudit(JSON.stringify({status:"pass",issues:[],semanticCoverage:1,expressionSimilarity:.1,topicFulfillment:{score:72,coreQuestion:18,humanTension:12,titlePromise:12,thesis:12,audience:8,mechanism:10}}));
+  const guarded = applyTrafficDeterministicAuditChecks(audit,"正文仍然相关，但没有兑现完整的人性冲突。",{enforceTopicFulfillment:true});
+  assert.equal(guarded.status,"revise");
+  assert.equal(guarded.hardBlocking,true);
+  assert.ok(guarded.issues.some((item)=>item.type==="topic_fulfillment_below_gate"));
 });
 
 test("deterministic overlap and speaking rate support post-write measurement", () => {

@@ -82,7 +82,8 @@ export function startBackgroundWorkRun(input: {
   retryAttempt?: number;
 }) {
   const existing = activeWorkRuns.get(input.workId);
-  if (existing) return existing.promise;
+  if (existing?.snapshot.status === "running") return existing.promise;
+  if (existing) activeWorkRuns.delete(input.workId);
 
   const retryAttempt = input.retryAttempt ?? 0;
   const listeners = new Set<(event: WorkRunEvent) => void>();

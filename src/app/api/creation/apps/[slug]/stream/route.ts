@@ -1,13 +1,13 @@
 import { requireSessionUser } from "@/lib/auth/session";
 import { requireQuota } from "@/lib/billing/enforce";
 import { executeCreationAppRun } from "@/lib/creation/execute-app-run";
-import { tryGetCreationAppBySlug, tryGetSystemSettings, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { tryGetCreationAppBySlug, tryGetSystemSettings } from "@/lib/db/repositories";
+import { getCreationAppBySlug } from "@/lib/apps/catalog";
 import { getCreationUserError } from "@/lib/creation/errors";
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
-  await trySyncCreationCatalog();
-  const app = await tryGetCreationAppBySlug(slug);
+  const app = (await tryGetCreationAppBySlug(slug)) ?? getCreationAppBySlug(slug);
   if (!app) {
     return Response.json({ error: "应用不存在" }, { status: 404 });
   }
