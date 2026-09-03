@@ -24,7 +24,7 @@ ssh -o BatchMode=yes -i "$ssh_key" "$primary" "
   docker exec -w /tmp/xiaogu-release-migrations \"\$container\" node regression-topic-ingestion.mjs
   docker exec \"\$container\" rm -rf /tmp/xiaogu-release-migrations
   docker cp '$remote_stage' "\$container:/tmp/xiaogu-release-migrations"
-  docker exec -w /tmp/xiaogu-release-migrations "\$container" node regression-workbuddy-traffic-persistence.mjs
+  docker exec -e XIAOGU_CONTAINER_RUNTIME=1 -w /tmp/xiaogu-release-migrations "\$container" node regression-workbuddy-traffic-persistence.mjs
   docker exec "\$container" rm -rf /tmp/xiaogu-release-migrations
   rm -rf '$remote_stage'
 "

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { Pool } from "pg";
+
+const pg = await import(
+  process.env.XIAOGU_CONTAINER_RUNTIME === "1"
+    ? "file:///app/node_modules/pg/lib/index.js"
+    : "pg"
+);
+const Pool = pg.Pool ?? pg.default?.Pool;
+if (!Pool) throw new Error("pg Pool is unavailable");
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
