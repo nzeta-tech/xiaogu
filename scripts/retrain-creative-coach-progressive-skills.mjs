@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { Pool } from "pg";
 
 const MO_SOURCE_SKILL_IDS = [
@@ -20,37 +21,72 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const base = (process.env.MODEL_API_BASE || "https://api.openai.com/v1").replace(/\/$/, "");
 const apiKey = process.env.MODEL_API_KEY;
 const models = [...new Set([process.env.TRAINING_MODEL_NAME || process.env.MODEL_NAME || "gpt-5.6-terra", process.env.TRAINING_FALLBACK_MODEL || "gpt-5.5"].filter(Boolean))];
-const lightBatchSize = Math.max(8, Number(process.env.COACH_LIGHT_BATCH_SIZE || 24));
+const mergeModels = [...new Set([process.env.TRAINING_MERGE_MODEL || "gpt-5.4-mini", process.env.TRAINING_MERGE_FALLBACK_MODEL || "gpt-5.5"].filter(Boolean))];
+const lightBatchSize = Math.max(4, Number(process.env.COACH_LIGHT_BATCH_SIZE || 8));
 const deepBatchSize = Math.max(2, Number(process.env.COACH_DEEP_BATCH_SIZE || 4));
 const configuredDeepSampleTarget = Math.max(8, Number(process.env.COACH_DEEP_SAMPLE_TARGET || 80));
 const concurrency = Math.max(1, Math.min(4, Number(process.env.COACH_TRAINING_CONCURRENCY || 2)));
-if (!process.env.DATABASE_URL || !apiKey) throw new Error("DATABASE_URL and MODEL_API_KEY are required");
+const runningAsScript=Boolean(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href);
+if (runningAsScript&&(!process.env.DATABASE_URL || !apiKey)) throw new Error("DATABASE_URL and MODEL_API_KEY are required");
 
 const compact = (value, limit = 1000) => String(value || "").replace(/\s+/g, " ").trim().slice(0, limit);
 const parseJson = (value, fallback = {}) => { try { return JSON.parse(String(value).match(/\{[\s\S]*\}/)?.[0] || ""); } catch { return fallback; } };
 const fingerprint = (row) => createHash("sha256").update(`${compact(row.title, 200)}\n${compact(row.transcript, 6000)}`.replace(/\s+/g, "").toLowerCase()).digest("hex");
 const stableRank = (key) => createHash("sha256").update(`coach-v7:${key}`).digest("hex");
+export function reconcileEvidenceBackedSkills(mergedSkills,partialSkills,levels=["general","strategy","functional","atomic"]){
+  const clean=(value,limit=120)=>String(value||"").replace(/\s+/g," ").trim().slice(0,limit);
+  const identity=(skill)=>clean(skill?.id||skill?.name).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g,"");
+  const evidenceBacked=(skill)=>Number(skill?.supportCount)>=2&&Array.isArray(skill?.sourceWorkFingerprints)&&skill.sourceWorkFingerprints.length>=2;
+  const reconciled=(Array.isArray(mergedSkills)?mergedSkills:[]).map((skill)=>{
+    const key=identity(skill);
+    const matches=(Array.isArray(partialSkills)?partialSkills:[]).filter((candidate)=>key&&identity(candidate)===key||(clean(candidate?.name)&&clean(candidate?.name)===clean(skill?.name)));
+    if(!matches.length)return skill;
+    const sourceWorkFingerprints=[...new Set(matches.flatMap((candidate)=>candidate.sourceWorkFingerprints||[]))];
+    return {...skill,sourceWorkFingerprints,supportCount:Math.max(sourceWorkFingerprints.length,...matches.map((candidate)=>Number(candidate.supportCount)||0))};
+  }).filter(evidenceBacked);
+  const signatures=new Set(reconciled.map((skill)=>`${skill.level}:${skill.id||skill.name}`));
+  for(const level of levels){
+    if(reconciled.some((skill)=>skill.level===level))continue;
+    const supplement=(Array.isArray(partialSkills)?partialSkills:[]).filter((skill)=>skill.level===level&&evidenceBacked(skill)&&!signatures.has(`${skill.level}:${skill.id||skill.name}`)).sort((left,right)=>(Number(right.supportCount)||0)-(Number(left.supportCount)||0))[0];
+    if(supplement){reconciled.push(supplement);signatures.add(`${supplement.level}:${supplement.id||supplement.name}`);}
+  }
+  return reconciled;
+}
 const evidenceSlices = (transcript, span = 150) => {
   const text = compact(transcript, 10000);
   if (text.length <= span * 3) return text;
   const middle = Math.max(0, Math.floor(text.length / 2) - Math.floor(span / 2));
   return `${text.slice(0, span)}\n[…中段…]\n${text.slice(middle, middle + span)}\n[…结尾…]\n${text.slice(-span)}`;
 };
+const restrictiveSkillText = /(不得|禁止|严禁|不能|不允许|不可|不承诺|不保证|不补造|不编造|不夸大|避免绝对|事实.*边界|推断.*条件|风险边界|合规边界|适用条件|待核验|需核验|核验要求|证据不足|信息不足|可靠材料|专业复核|高风险专业|不假装全知|删除测试|停止规则|停止条件|完成既定停止点|只按|仅依据|只执行)/u;
+const restrictiveSkillKeys = new Set(["avoid","riskAttitude","notFor","requires","conflictsWith","stoppingRule","stoppingRules","counterExamples","doNotAdd","omittedMethods","negativeEvidence","contentGaps","forbiddenMoves","mustKeepEvidence","mustKeepEvidenceIds","uncertainClaims","doNotClaim","riskBoundary","factBoundary","complianceBoundary"]);
+function relaxTrainedSkill(value) {
+  if (typeof value === "string") return value.split(/(?<=[。！？!?；;])|\n+/u).map((item)=>item.trim()).filter((item)=>item&&!restrictiveSkillText.test(item)).join("\n");
+  if (Array.isArray(value)) return value.map(relaxTrainedSkill).filter((item)=>item!==""&&item!=null);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key])=>!restrictiveSkillKeys.has(key)).map(([key,item])=>[key,relaxTrainedSkill(item)]));
+}
 
-async function complete(prompt, maxTokens = 3000) {
+async function complete(prompt, maxTokens = 3000, options = {}) {
+  const maxAttempts = Math.max(1, Number(options.maxAttempts || 6));
+  const timeoutMs = Math.max(30_000, Number(options.timeoutMs || 250_000));
+  const candidateModels = Array.isArray(options.models) && options.models.length ? options.models : models;
   let lastError;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const model = models[attempt % models.length];
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const model = candidateModels[attempt % candidateModels.length];
     try {
       const response = await fetch(`${base}/chat/completions`, {
         method:"POST", headers:{ authorization:`Bearer ${apiKey}`,"content-type":"application/json" },
-        body:JSON.stringify({ model,temperature:0.1,max_tokens:maxTokens,messages:[{role:"user",content:prompt}] }),
-        signal:AbortSignal.timeout(250_000),
+        body:JSON.stringify({ model,temperature:0.1,max_tokens:maxTokens,...(options.reasoningEffort?{reasoning_effort:options.reasoningEffort}:{}),messages:[{role:"user",content:prompt}] }),
+        signal:AbortSignal.timeout(timeoutMs),
       });
       if (response.ok) return { text:compact((await response.json()).choices?.[0]?.message?.content, 100000), model };
       lastError = new Error(`HTTP ${response.status}: ${compact(await response.text(), 500)}`);
     } catch (error) { lastError = error; }
-    await new Promise((resolve) => setTimeout(resolve, Math.min(120_000, 5_000 * 2 ** attempt)));
+    if (attempt + 1 < maxAttempts) {
+      console.log(JSON.stringify({ phase:"model-retry",attempt:attempt + 1,maxAttempts,error:compact(lastError?.message || lastError,300) }));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(120_000, 5_000 * 2 ** attempt)));
+    }
   }
   throw lastError || new Error("model request failed");
 }
@@ -60,11 +96,12 @@ async function mapConcurrent(items, worker) {
   const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (cursor < items.length) {
       const index = cursor++;
-      for (let outage = 0; ; outage += 1) {
+      for (let outage = 0; outage < 5; outage += 1) {
         try { await worker(items[index], index); break; }
         catch (error) {
+          if (outage === 4) throw error;
           const delayMs = Math.min(300_000, 15_000 * 2 ** Math.min(outage, 4));
-          console.warn(JSON.stringify({ phase:"batch-retry",batch:index + 1,delayMs,error:compact(error?.message || error,500) }));
+          console.log(JSON.stringify({ phase:"batch-retry",batch:index + 1,attempt:outage + 1,delayMs,error:compact(error?.message || error,500) }));
           await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
       }
@@ -75,6 +112,28 @@ async function mapConcurrent(items, worker) {
 
 async function updateManifest(versionId, phase, patch = {}) {
   await pool.query(`update creative_coach_versions set training_manifest=coalesce(training_manifest,'{}'::jsonb)||$2::jsonb,change_summary=$3 where id=$1`, [versionId,JSON.stringify({ ...patch,phase,updatedAt:new Date().toISOString() }),`渐进Skill训练：${phase}`]);
+}
+
+async function saveMergeCheckpoint(versionId, bucket, key, value) {
+  await pool.query(
+    `update creative_coach_versions
+        set training_manifest=coalesce(training_manifest,'{}'::jsonb)||jsonb_build_object(
+          $2::text,coalesce(training_manifest->($2::text),'{}'::jsonb)||jsonb_build_object($3::text,$4::jsonb)
+        )
+      where id=$1`,
+    [versionId,bucket,key,JSON.stringify(value)],
+  );
+}
+
+async function withFinalMergeLock(worker) {
+  const client=await pool.connect();
+  try {
+    await client.query(`select pg_advisory_lock(hashtext('creative-coach-final-skill-merge'))`);
+    return await worker();
+  } finally {
+    await client.query(`select pg_advisory_unlock(hashtext('creative-coach-final-skill-merge'))`).catch(()=>undefined);
+    client.release();
+  }
 }
 
 async function upsertAnalysis(versionId, work, level, payload, model) {
@@ -142,18 +201,18 @@ async function main() {
   await mapConcurrent(lightBatches, async (batch,index) => {
     const material = batch.map((work,i) => `【${i}｜${work.fingerprint}】标题：${compact(work.title,90)}；来源：${work.source_name}；片段：${evidenceSlices(work.transcript,80)}`).join("\n\n");
     const { text,model } = await complete([
-      "对每条创作者作品做低成本任务画像，不提炼最终Skill、不模仿句子。必须逐条返回，index与输入一致。",
-      "任务类型由沟通目标、材料形态、受众状态、必要深度、证据负荷和决策复杂度决定，禁止使用账号或栏目名作为类型。",
-      "严格JSON：{items:[{index:number,taskProfile:{communicationGoal,materialShape:string[],requiredDepth:'light'|'medium'|'deep',evidenceLoad:'low'|'medium'|'high',audienceState,decisionComplexity:'low'|'medium'|'high'},topicTags:string[],observedMoveLabels:string[],naturalStop:string}]}。",
+      "逐条观察创作者作品，识别它真正想讲什么、为谁而讲、使用了什么切口、情绪、人性判断、叙事动作和语言动作。index与输入一致。",
+      "任务画像服务于发现创作者的表达可能性，不生成风险、证据负荷、适用限制或停止条件。",
+      "严格JSON：{items:[{index:number,taskProfile:{communicationGoal,materialShape:string[],audienceState},topicTags:string[],observedMoveLabels:string[]}]}。",
       material,
-    ].join("\n\n"), 3500);
+    ].join("\n\n"), 5000);
     const parsed = parseJson(text,{items:[]});
     const items = Array.isArray(parsed.items) ? parsed.items : [];
     const indexes = new Set(items.map((item) => Number(item.index)).filter((index) => Number.isInteger(index) && index >= 0 && index < batch.length));
     if (indexes.size !== batch.length) throw new Error(`incomplete light batch: expected ${batch.length}, received ${indexes.size}`);
     for (const item of items) {
       const work = batch[Number(item.index)]; if (!work) continue;
-      await upsertAnalysis(versionId,work,"light",{ taskProfile:item.taskProfile,localSkills:[],personaSignals:[],stoppingEvidence:item.naturalStop?[item.naturalStop]:[],negativeEvidence:[] },model);
+      await upsertAnalysis(versionId,work,"light",{ taskProfile:item.taskProfile,localSkills:[],personaSignals:[],stoppingEvidence:[],negativeEvidence:[] },model);
     }
     const count = await pool.query(`select count(*)::int count from creative_coach_work_analyses where coach_version_id=$1 and analysis_level='light'`,[versionId]);
     await updateManifest(versionId,"light-analysis",{ lightCompleted:count.rows[0].count,lightBatchesCompleted:index+1 });
@@ -170,9 +229,9 @@ async function main() {
   await mapConcurrent(deepBatches, async (batch,index) => {
     const material = batch.map((work,i)=>`【${i}｜${work.fingerprint}】标题：${compact(work.title,100)}\n转写：${evidenceSlices(work.transcript,180)}`).join("\n\n");
     const {text,model}=await complete([
-      "独立分析每条作品的可观察行为，不看已有方法名，不寻找预设钩子，不评价主题知识。提取它如何让受众代入、推进判断、解释证据、处理顾虑，以及为何在该处停止。",
-      "localSkills只是轨迹局部候选，不得直接上升为通用规则。negativeEvidence记录没有继续使用哪些常见动作及为什么已经足够。personaSignals只记录跨任务可能稳定的价值判断或声纹证据。",
-      "严格JSON：{items:[{index,taskProfile,localSkills:[{provisionalName,level:'general'|'strategy'|'functional'|'atomic',solves:string[],when:string[],notFor:string[],observedSteps:string[],evidenceExcerpt}],personaSignals:[{kind:'identity'|'position'|'voice'|'avoid',signal,evidenceExcerpt}],stoppingEvidence:[{stopAfter,reason,evidenceExcerpt}],negativeEvidence:[{omittedMove,reason,evidenceExcerpt}]}]}。",
+      "独立分析每条作品的可观察创作行为。提取它如何选题、洞察人性、制造冲突、让受众代入、组织故事、推进判断、使用情绪和形成个人语言。",
+      "localSkills记录所有有辨识度、可启发新创作的能力，包括只在少量作品中出现但很有爆发力的动作。personaSignals记录稳定立场、判断方式和声纹。",
+      "严格JSON：{items:[{index,taskProfile,localSkills:[{provisionalName,level:'general'|'strategy'|'functional'|'atomic',solves:string[],when:string[],observedSteps:string[],evidenceExcerpt}],personaSignals:[{kind:'identity'|'position'|'voice',signal,evidenceExcerpt}]}]}。",
       material,
     ].join("\n\n"),4200);
     const parsed=parseJson(text,{items:[]});
@@ -186,35 +245,122 @@ async function main() {
   });
 
   const deep = await pool.query(`select work_fingerprint,task_profile,local_skills,persona_signals,stopping_evidence,negative_evidence from creative_coach_work_analyses where coach_version_id=$1 and analysis_level='deep' order by work_fingerprint`,[versionId]);
-  const mergeGroups = Array.from({length:Math.ceil(deep.rows.length/20)},(_,i)=>deep.rows.slice(i*20,(i+1)*20));
-  const partials=[];
-  await mapConcurrent(mergeGroups,async(group,index)=>{
-    const {text}=await complete([
-      "把以下轨迹局部候选在组内聚类，合并同义行为，但保留适用条件差异。至少两个独立作品支持才能成为候选；单例保留为rareCandidates。",
+  const mergeGroupSize=5;
+  const mergeGroups = Array.from({length:Math.ceil(deep.rows.length/mergeGroupSize)},(_,i)=>deep.rows.slice(i*mergeGroupSize,(i+1)*mergeGroupSize));
+  const storedManifest=version.rows[0]?.training_manifest&&typeof version.rows[0].training_manifest==="object"?version.rows[0].training_manifest:{};
+  const partialCheckpoints=storedManifest.partialMergeCheckpoints&&typeof storedManifest.partialMergeCheckpoints==="object"?storedManifest.partialMergeCheckpoints:{};
+  const partials=Array.from({length:mergeGroups.length},(_,index)=>partialCheckpoints[String(index)]||null);
+  const pendingMergeGroups=mergeGroups.map((group,index)=>({group,index})).filter(({index})=>!partials[index]);
+  await mapConcurrent(pendingMergeGroups,async({group,index})=>{
+    const {text}=await withFinalMergeLock(()=>complete([
+      "把以下创作能力在组内聚类，合并同义行为，同时保留少见但有辨识度、有传播潜力的单例能力。",
       "输出层级必须区分general、strategy、functional、atomic。三个钩子若存在只能作为atomic，不得自动成为完整模板。",
-      "严格JSON：{skills:[{id,name,level,parentHint,description,solves,when,notFor,requires,conflictsWith,steps,stoppingRule,supportCount,sourceWorkFingerprints}],rareCandidates:[]}。",
-      compact(JSON.stringify(group),45000),
-    ].join("\n\n"),5000);
+      "严格JSON：{skills:[{id,name,level,parentHint,description,solves,when,steps,supportCount,sourceWorkFingerprints}],rareCandidates:[]}。",
+      compact(JSON.stringify(group),7000),
+    ].join("\n\n"),2400,{timeoutMs:90_000,maxAttempts:2,models:mergeModels,reasoningEffort:"low"}));
     partials[index]=parseJson(text,{skills:[],rareCandidates:[]});
+    await saveMergeCheckpoint(versionId,"partialMergeCheckpoints",String(index),partials[index]);
+    const completed=partials.filter(Boolean).length;
+    await updateManifest(versionId,"hierarchical-merge",{partialMergeCount:completed,partialMergeTotal:mergeGroups.length});
+    console.log(JSON.stringify({phase:"partial-merge",completed,total:mergeGroups.length}));
   });
-  await updateManifest(versionId,"hierarchical-merge",{partialMergeCount:partials.length});
-  const {text:mergedRaw}=await complete([
-    "合并以下分组Skill，输出无冲突的四层教练Skill体系，最多保留14张证据最强、差异最清楚的Skill。不得因高频就提升为通用原则；任务专用能力保留在strategy或functional。合并重复项，拆分同名异义项，并为每项保留来源指纹。",
-    "同时产生Skill Patch，相对当前版本只描述add/strengthen/split/merge/deprecate/unchanged，不直接覆盖正式版本。",
-    "严格JSON：{skills:[{id,name,level:'general'|'strategy'|'functional'|'atomic',parentSkillId,description,solves:string[],when:string[],notFor:string[],requires:string[],conflictsWith:string[],steps:string[],stoppingRule,positiveExamples:[],counterExamples:[],supportCount,sourceWorkFingerprints:string[]}],hierarchy:[{id,name,level,parentSkillId,description,solves,when,notFor,childSkillIds}],stoppingRules:[],patches:[{operation,targetSkillId,reason,evidenceCount,sourceWorkFingerprints,affectedTaskProfiles,before,after}]}。",
-    compact(JSON.stringify(partials),45000),
-  ].join("\n\n"),6000);
-  const merged=parseJson(mergedRaw,{skills:[],hierarchy:[],patches:[],stoppingRules:[]});
+  await updateManifest(versionId,"hierarchical-merge",{partialMergeCount:partials.length,partialMergeTotal:mergeGroups.length});
+  const mergeRoundCheckpoints=storedManifest.mergeRoundCheckpoints&&typeof storedManifest.mergeRoundCheckpoints==="object"?storedManifest.mergeRoundCheckpoints:{};
+  const compactMergeCandidate=(candidate)=>({
+    skills:(Array.isArray(candidate?.skills)?candidate.skills:[]).map((item)=>({
+      id:compact(item.id,80),name:compact(item.name,80),level:item.level,parentSkillId:compact(item.parentSkillId||item.parentHint,80),
+      description:compact(item.description,220),solves:(item.solves||[]).slice(0,3).map((value)=>compact(value,100)),
+      when:(item.when||[]).slice(0,3).map((value)=>compact(value,100)),
+      steps:(item.steps||[]).slice(0,4).map((value)=>compact(value,120)),
+      supportCount:Number(item.supportCount)||0,sourceWorkFingerprints:(item.sourceWorkFingerprints||[]).slice(0,8),
+    })),
+  });
+  const mergeLevels=["general","strategy","functional","atomic"];
+  const buildMergePayload=(batch,budget=7000)=>{
+    const candidates=batch.flatMap((candidate,candidateIndex)=>compactMergeCandidate(candidate).skills.map((skill)=>({skill,candidateIndex})));
+    const score=({skill})=>(Number(skill.supportCount)||0)*100+(skill.sourceWorkFingerprints?.length||0)*10+(skill.when?.length||0)+(skill.steps?.length||0);
+    const queues=new Map();
+    for(const item of candidates){
+      const level=mergeLevels.includes(item.skill.level)?item.skill.level:"functional";
+      item.skill.level=level;
+      const key=`${item.candidateIndex}:${level}`;
+      if(!queues.has(key))queues.set(key,[]);
+      queues.get(key).push(item);
+    }
+    for(const queue of queues.values())queue.sort((left,right)=>score(right)-score(left)||stableRank(left.skill.id||left.skill.name).localeCompare(stableRank(right.skill.id||right.skill.name)));
+    const selected=[];const signatures=new Set();
+    const tryAdd=({skill})=>{
+      const signature=`${skill.level}:${skill.id||skill.name}`;
+      if(signatures.has(signature))return false;
+      const next=[...selected,skill];
+      if(JSON.stringify({skills:next}).length>budget)return false;
+      selected.push(skill);signatures.add(signature);return true;
+    };
+    let progressed=true;
+    while(progressed){
+      progressed=false;
+      for(let candidateIndex=0;candidateIndex<batch.length;candidateIndex+=1){
+        for(const level of mergeLevels){
+          const queue=queues.get(`${candidateIndex}:${level}`)||[];
+          if(queue.length&&tryAdd(queue.shift()))progressed=true;
+        }
+      }
+    }
+    const remainder=[...queues.values()].flat().sort((left,right)=>score(right)-score(left)||stableRank(left.skill.id||left.skill.name).localeCompare(stableRank(right.skill.id||right.skill.name)));
+    for(const item of remainder)tryAdd(item);
+    return {payload:{skills:selected},audit:{inputCount:candidates.length,selectedCount:selected.length,omittedCount:candidates.length-selected.length,byLevel:Object.fromEntries(mergeLevels.map((level)=>[level,selected.filter((skill)=>skill.level===level).length])),budget,serializedChars:JSON.stringify({skills:selected}).length}};
+  };
+  const mergeCandidateBatch=async(batch,round,index)=>{
+    const key=`${round}-${index}`;
+    if(mergeRoundCheckpoints[key])return mergeRoundCheckpoints[key];
+    const {payload,audit}=buildMergePayload(batch);
+    const {text}=await complete([
+      "只合并下面这一小批 Skill 候选。合并同义项，保留条件不同的同名项；必须尽量保留 general、strategy、functional、atomic 四层覆盖，不解释过程。最多保留10项。",
+      "严格JSON：{skills:[{id,name,level:'general'|'strategy'|'functional'|'atomic',parentSkillId,description,when:string[],steps:string[],supportCount,sourceWorkFingerprints:string[]}]}。",
+      JSON.stringify(payload),
+    ].join("\n\n"),1500,{timeoutMs:90_000,maxAttempts:2,models:mergeModels,reasoningEffort:"low"});
+    const parsed=parseJson(text,{skills:[]});
+    const skills=Array.isArray(parsed.skills)?parsed.skills:[];
+    const result={
+      skills,
+      hierarchy:skills.map((item)=>({id:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId||null,description:item.description||"",solves:item.solves||[],when:item.when||[],childSkillIds:skills.filter((child)=>child.parentSkillId===item.id).map((child)=>child.id)})),
+      stoppingRules:[],
+      patches:[],
+      mergeAudit:audit,
+    };
+    await saveMergeCheckpoint(versionId,"mergeRoundCheckpoints",key,result);
+    mergeRoundCheckpoints[key]=result;
+    console.log(JSON.stringify({phase:"merge-round",round,batch:index+1,inputCount:batch.length}));
+    return result;
+  };
+  const merged=await withFinalMergeLock(async()=>{
+    let candidates=partials;let round=1;
+    while(candidates.length>1){
+      const batches=Array.from({length:Math.ceil(candidates.length/2)},(_,index)=>candidates.slice(index*2,(index+1)*2));
+      const next=[];
+      for(const [index,batch] of batches.entries())next.push(await mergeCandidateBatch(batch,round,index));
+      candidates=next;round+=1;
+    }
+    return candidates[0]||{skills:[],hierarchy:[],patches:[],stoppingRules:[]};
+  });
   if(!Array.isArray(merged.skills)||merged.skills.length<4)throw new Error("hierarchical merge produced insufficient skills");
+  const allPartialSkills=partials.flatMap((candidate)=>compactMergeCandidate(candidate).skills);
+  merged.skills=reconcileEvidenceBackedSkills(merged.skills,allPartialSkills,mergeLevels);
+  merged.hierarchy=merged.skills.map((item)=>({id:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId||null,description:item.description||"",solves:item.solves||[],when:item.when||[],childSkillIds:merged.skills.filter((child)=>child.parentSkillId===item.id).map((child)=>child.id)}));
+  merged.stoppingRules=[];
+  const allEvidence=new Set(allPartialSkills.flatMap((skill)=>skill.sourceWorkFingerprints||[]));
+  const retainedEvidence=new Set(merged.skills.flatMap((skill)=>skill.sourceWorkFingerprints||[]));
+  const mergeEvidenceAudit={inputSkillCount:allPartialSkills.length,finalSkillCount:merged.skills.length,inputEvidenceCount:allEvidence.size,retainedEvidenceCount:retainedEvidence.size,evidenceCoverage:allEvidence.size?Number((retainedEvidence.size/allEvidence.size).toFixed(4)):1,byLevel:Object.fromEntries(mergeLevels.map((level)=>[level,merged.skills.filter((skill)=>skill.level===level).length])),allSkillsEvidenceBacked:merged.skills.every((skill)=>Number(skill.supportCount)>=2&&Array.isArray(skill.sourceWorkFingerprints)&&skill.sourceWorkFingerprints.length>=2)};
+  await updateManifest(versionId,"merge-evidence-audit",{mergeEvidenceAudit});
 
   const personaMaterial=deep.rows.flatMap((row)=>Array.isArray(row.persona_signals)?row.persona_signals.map((signal)=>({...signal,workFingerprint:row.work_fingerprint})):[]);
   const {text:personaRaw}=await complete([
-    "从证据中提炼创作者Persona，只保存身份、服务对象、稳定立场、风险态度、声纹和不会采用的表达。不得写方法、固定结构、具体事实或课程。只有跨多个作品稳定出现才能进入。另提炼2到3个signatureTags，用于教练选择卡，必须概括这位教练真正擅长解决的问题、服务对象或判断领域；不得使用IP定位、内容创作、获客增长等标准能力名，也不得只写直接、温暖、专业等通用语气词。每项不超过8个汉字。",
+    "从作品中提炼创作者Persona：身份、服务对象、稳定立场、人性洞察、判断锋芒、情绪幅度、声纹和最有辨识度的表达偏好。另提炼2到3个signatureTags，概括这位教练真正擅长解决的问题、服务对象或判断领域。",
     `创作者名称统一使用“${creatorName}”。自动转写中与名称近音的称呼属于噪声，不得据此发明其他自称或人格名称。`,
-    "严格JSON：{identity,audience:string[],stablePositions:string[],riskAttitude:string[],voiceTraits:string[],signatureTags:string[],adaptiveVoice:[{taskProfile,guidance}],avoid:string[],evidence:[{workFingerprint,signal}]}。",
+    "严格JSON：{identity,audience:string[],stablePositions:string[],humanInsights:string[],voiceTraits:string[],signatureTags:string[],adaptiveVoice:[{taskProfile,guidance}],evidence:[{workFingerprint,signal}]}。",
     compact(JSON.stringify(personaMaterial),50000),
   ].join("\n\n"),4500);
-  const persona=parseJson(personaRaw,{});
+  const persona=relaxTrainedSkill(parseJson(personaRaw,{}));
 
   const deepByFingerprint = new Map(deep.rows.map((row) => [row.work_fingerprint,row]));
   const materializeSkill = (item) => {
@@ -225,23 +371,19 @@ async function main() {
       const excerpt = candidates.map((candidate) => compact(candidate.evidenceExcerpt,180)).find(Boolean);
       return excerpt ? [{ workFingerprint:fp,excerpt }] : [];
     }).slice(0,3);
-    const counterExamples = sourceFingerprints.flatMap((fp) => {
-      const row = deepByFingerprint.get(fp);
-      const candidates = Array.isArray(row?.negative_evidence) ? row.negative_evidence : [];
-      return candidates.flatMap((candidate) => candidate?.reason ? [{ workFingerprint:fp,omittedMove:compact(candidate.omittedMove,120),reason:compact(candidate.reason,240),excerpt:compact(candidate.evidenceExcerpt,180) }] : []);
-    }).slice(0,3);
-    return { ...item,positiveExamples:positiveExamples.length?positiveExamples:item.positiveExamples||[],counterExamples:counterExamples.length?counterExamples:item.counterExamples||[] };
+    return { ...item,positiveExamples:positiveExamples.length?positiveExamples:item.positiveExamples||[] };
   };
-  merged.skills = merged.skills.map(materializeSkill);
+  merged.skills = merged.skills.map(materializeSkill).map(relaxTrainedSkill);
+  merged.hierarchy = merged.skills.map((item)=>({id:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId||null,description:item.description||"",solves:item.solves||[],when:item.when||[],childSkillIds:merged.skills.filter((child)=>child.parentSkillId===item.id).map((child)=>child.id)}));
 
-  const skillSummary=merged.skills.map((item)=>JSON.stringify({key:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId,summary:item.description,solves:item.solves,when:item.when,notFor:item.notFor,requires:item.requires,conflictsWith:item.conflictsWith,steps:item.steps,stoppingRule:item.stoppingRule,supportCount:item.supportCount,evidence:(item.sourceWorkFingerprints||[]).slice(0,6).map((fp)=>({title:fp,excerpt:"轨迹证据已结构化落库"}))}));
+  const skillSummary=merged.skills.map((item)=>JSON.stringify({key:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId,summary:item.description,solves:item.solves,when:item.when,steps:item.steps,supportCount:item.supportCount,evidence:(item.sourceWorkFingerprints||[]).slice(0,6).map((fp)=>({title:fp,excerpt:"轨迹证据已结构化落库"}))}));
   const {text:modulesRaw}=await complete([
     "为获客教练生成运行时模块，严格JSON {research,brief,writing,voice}，每项是非空字符串且不超过700字。",
-    "research只判断题值、受众、任务画像和研究缺口；brief只在渐进加载的候选卡中做0到3个必要方法选择并执行删除测试；writing只执行成稿契约和Persona，不重新决策；voice只控制稳定声纹及按任务适配。不要写课程。",
+    "research发现题值、人性冲突、受众欲望和可能爆发的角度；brief让教练自由选择、组合或改造方法并形成鲜明创作方向；writing允许继续判断和即兴组织，完整释放Persona的锋芒、情绪、节奏和语言；voice提炼稳定声纹及不同题材下的自然变化。不要生成风险边界、禁写项、核验要求、停止规则、删除测试或免责声明。",
     `Persona：${compact(JSON.stringify(persona),10000)}`,
     `Skill体系摘要：${compact(skillSummary.join("\n"),30000)}`,
   ].join("\n\n"),4000);
-  const modules=parseJson(modulesRaw,{});
+  const modules=relaxTrainedSkill(parseJson(modulesRaw,{}));
   if(!["research","brief","writing","voice"].every((key)=>typeof modules[key]==="string"&&modules[key].trim()))throw new Error("runtime modules incomplete");
 
   const previous=await pool.query(`select id,version,skill_modules from creative_coach_versions where coach_id=$1 and status in ('active','restored') order by version desc limit 1`,[coachId]);
@@ -253,7 +395,7 @@ async function main() {
       `insert into creative_coach_skill_patches(coach_version_id,operation,target_skill_id,reason,evidence_count,source_work_fingerprints,affected_task_profiles,before_value,after_value) values($1,$2,$3,$4,$5,$6::text[],$7::jsonb,$8::jsonb,$9::jsonb)`,
       [versionId,["add","strengthen","split","merge","deprecate","unchanged"].includes(patch.operation)?patch.operation:"add",compact(patch.targetSkillId,200),compact(patch.reason,2000),Number(patch.evidenceCount)||0,patch.sourceWorkFingerprints||[],JSON.stringify(patch.affectedTaskProfiles||[]),JSON.stringify(patch.before||{}),JSON.stringify(patch.after||{})],
     );
-    const skillModules={schemaVersion:2,...modules,persona,discoveredMethods:merged.skills.map((item)=>({key:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId,summary:item.description,solves:item.solves,when:item.when,notFor:item.notFor,requires:item.requires,conflictsWith:item.conflictsWith,steps:item.steps,stoppingRule:item.stoppingRule,positiveExamples:item.positiveExamples,counterExamples:item.counterExamples,supportCount:item.supportCount,evidence:(item.sourceWorkFingerprints||[]).slice(0,8).map((fp)=>({title:fp,excerpt:"证据见creative_coach_work_analyses"}))})),skillHierarchy:merged.hierarchy,stoppingRules:merged.stoppingRules,skillPatches:merged.patches,trainingCheckpoint:{phase:"candidate-ready",completedAt:new Date().toISOString()}};
+    const skillModules={schemaVersion:3,...modules,persona,discoveredMethods:merged.skills.map((item)=>({key:item.id,name:item.name,level:item.level,parentSkillId:item.parentSkillId,summary:item.description,solves:item.solves,when:item.when,steps:item.steps,positiveExamples:item.positiveExamples,supportCount:item.supportCount,evidence:(item.sourceWorkFingerprints||[]).slice(0,8).map((fp)=>({title:fp,excerpt:"证据见creative_coach_work_analyses"}))})),skillHierarchy:merged.hierarchy,skillPatches:merged.patches,trainingCheckpoint:{phase:"candidate-ready",completedAt:new Date().toISOString(),creativeFreedom:true}};
     await client.query(`update creative_coach_versions set status='candidate',persona_profile=$2::jsonb,skill_hierarchy=$3::jsonb,skill_modules=$4::jsonb,ip_positioning_prompt=$5,content_creation_prompt=$6,growth_prompt=$7,source_run_ids=$8::uuid[],sample_count=$9,training_manifest=training_manifest||$10::jsonb,change_summary=$11 where id=$1`,[versionId,JSON.stringify(persona),JSON.stringify(merged.hierarchy||[]),JSON.stringify(skillModules),modules.research,modules.writing,modules.brief,runIds,deepWorks.length,JSON.stringify({phase:"candidate-ready",completedAt:new Date().toISOString(),previousVersionId:previous.rows[0]?.id,fullCorpusCount:works.length,deepSampleCount:deepWorks.length,skillCount:merged.skills.length}),`渐进Skill候选：全量轻分析 ${works.length} 条，覆盖性深训 ${deepWorks.length} 条，形成 ${merged.skills.length} 张分层Skill`]);
     await client.query("commit");
   }catch(error){await client.query("rollback");throw error;}finally{client.release();}
@@ -285,4 +427,6 @@ async function main() {
   console.log(JSON.stringify({phase:autoActivate?"active":"candidate-ready",coachId,versionId,version:version.rows[0].version,fullCorpus:works.length,deepSamples:deepWorks.length,skills:merged.skills.length,previousVersion:previous.rows[0]?.version}));
 }
 
-try { await main(); } catch (error) { console.error(error); process.exitCode=1; } finally { await pool.end(); }
+if(runningAsScript){
+  try { await main(); } catch (error) { console.error(error); process.exitCode=1; } finally { await pool.end(); }
+}

@@ -14,6 +14,18 @@ function canonicalPayload(coaches) {
   return JSON.stringify(coaches);
 }
 
+function runtimeTrainingManifest(manifest) {
+  const source = manifest && typeof manifest === "object" ? manifest : {};
+  const { partialMergeCheckpoints, mergeRoundCheckpoints, ...runtime } = source;
+  return {
+    ...runtime,
+    checkpointSummary: {
+      partialMergeCount: partialMergeCheckpoints && typeof partialMergeCheckpoints === "object" ? Object.keys(partialMergeCheckpoints).length : 0,
+      mergeRoundCount: mergeRoundCheckpoints && typeof mergeRoundCheckpoints === "object" ? Object.keys(mergeRoundCheckpoints).length : 0,
+    },
+  };
+}
+
 await client.connect();
 try {
   const result = await client.query(
@@ -49,7 +61,7 @@ try {
       skillModules: row.skill_modules ?? {},
       personaProfile: row.persona_profile ?? {},
       skillHierarchy: row.skill_hierarchy ?? [],
-      trainingManifest: row.training_manifest ?? {},
+      trainingManifest: runtimeTrainingManifest(row.training_manifest),
     },
   }));
   const snapshot = {
