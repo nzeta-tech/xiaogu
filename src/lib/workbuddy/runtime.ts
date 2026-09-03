@@ -174,7 +174,14 @@ async function invokeNativeCapability(input: Parameters<typeof invokeWorkbuddyCa
     researchTrace = research.trace;
   }
   if (nativeType === "fast-research") {
-    const research = await runFastResearch({ objective, context, initialQueries: input.taskInput.searchQueries, userId: input.user.id, onEvent: input.onEvent, signal: input.signal });
+    const research = await runFastResearch({
+      objective,
+      context,
+      initialQueries: input.taskInput.searchQueries,
+      userId: input.user.id,
+      onEvent: (event) => input.onEvent?.({ ...event, message: event.message ?? "正在执行快速查证" }),
+      signal: input.signal,
+    });
     sources = research.sources;
     fastResearchTrace = research.trace;
   }
@@ -182,7 +189,7 @@ async function invokeNativeCapability(input: Parameters<typeof invokeWorkbuddyCa
     sourceInspection = await inspectWorkbuddySource({
       userId: input.user.id,
       text: [objective, context, followup].filter(Boolean).join("\n"),
-      onEvent: input.onEvent,
+      onEvent: (event) => input.onEvent?.({ ...event, message: event.message ?? "正在补充实时热点" }),
       signal: input.signal,
     });
   }
@@ -250,7 +257,7 @@ async function invokeHotTopicDiscovery(input: Parameters<typeof invokeWorkbuddyC
       objective: input.taskInput.objective,
       context: input.taskInput.context,
       userId: input.user.id,
-      onEvent: input.onEvent,
+      onEvent: (event) => input.onEvent?.({ ...event, message: event.message ?? "正在补充实时热点" }),
       signal: input.signal,
       maxQueries: 4,
       mode: "discovery",
