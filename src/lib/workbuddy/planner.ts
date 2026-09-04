@@ -72,6 +72,9 @@ export function deterministicWorkbuddyRoute(objective: string, hasContext = fals
   if (/(今天|今日|现在|当前|最近).{0,12}(热点|热搜|热议|选题)|有什么.{0,8}(热点|热搜)/.test(text)) {
     return { mode: "fast-research", intent: text.slice(0, 160), targetCapabilityId: "tool.hot-topic-discovery", requiresFreshInformation: true, rationale: "需要结合热榜与搜索发现当前热点" };
   }
+  if (/(?:我想|我要|需要|请|帮我|给我|替我|开始|进入).{0,16}(?:写|做|制作|生成|创作|分析).{0,10}(?:流量型.{0,4})?口播(?:稿|文案)?|(?:口播文案|口播稿).{0,8}(?:流量型|创作|生成|选题流程)/.test(text)) {
+    return { mode: "capability", intent: text.slice(0, 160), targetCapabilityId: "app.traffic-copy", requiresFreshInformation: /(?:热点|新闻|热搜|最近|最新|当前)/.test(text), rationale: "用户明确要求创作流量型口播，确定性进入口播文案应用" };
+  }
   if (hasContext && /^(总结|概括|润色|改写|翻译|提炼|整理)/.test(text)) {
     return { mode: "direct", intent: text.slice(0, 160), targetCapabilityId: null, requiresFreshInformation: false, rationale: "已有资料足够完成简单处理" };
   }
