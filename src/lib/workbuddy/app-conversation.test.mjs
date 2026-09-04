@@ -68,4 +68,7 @@ test("traffic copy only skips topic selection when the creator explicitly asks",
   assert.equal(shouldSkipTrafficTopicSelection("热点标题：多地小学老师转教初中"), false);
   assert.equal(shouldSkipTrafficTopicSelection("这个题目已经定了，直接写正文"), true);
   assert.equal(shouldSkipTrafficTopicSelection("不用推荐选题，直接生成口播"), true);
+  assert.equal(shouldSkipTrafficTopicSelection("请先进入选题流程，不要直接写正文"), false);
+  assert.equal(shouldSkipTrafficTopicSelection("不要跳过选题，也别直接生成正文"), false);
+  assert.equal(shouldSkipTrafficTopicSelection("不要再推荐选题，直接写正文"), true);
 });

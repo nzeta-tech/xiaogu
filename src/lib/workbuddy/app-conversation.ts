@@ -70,7 +70,8 @@ export function isGenericApplicationIntent(request: string, app?: CreationApp) {
 }
 
 export function shouldSkipTrafficTopicSelection(text: string) {
-  return /(?:题目|选题|角度)(?:已经|已|就|都)?(?:定了|确定|明确)|(?:无需|不用|不要|跳过)(?:再)?(?:分析|推荐|选择)?选题|直接(?:按这个题|根据这个题|写|生成)(?:口播|文案|正文|稿)?/.test(text);
+  const intentText = text.replace(/(?:不要|别|先别|不必)(?:再)?(?:跳过选题|直接(?:写|生成)(?:口播|文案|正文|稿)?)/g, "");
+  return /(?:题目|选题|角度)(?:已经|已|就|都)?(?:定了|确定|明确)|(?:无需|不用|不要|跳过)(?:再)?(?:分析|推荐|选择)?选题|直接(?:按这个题|根据这个题|写|生成)(?:口播|文案|正文|稿)?/.test(intentText);
 }
 
 function escapeRegExp(value: string) {
