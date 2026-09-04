@@ -57,7 +57,12 @@ export async function invokeWorkbuddyCapability(input: {
   const values = mergeConversationAppParameters(capability.buildInput(input.taskInput, app), taskText, app.slug);
   const trafficTopicSelection = app.slug === "traffic-copy" ? await resolveWorkbuddyTrafficTopicSelection(input.user.id, values) : null;
   if (trafficTopicSelection) Object.assign(values, trafficTopicSelection.values);
-  const isTrafficTopicStage = app.slug === "traffic-copy" && !trafficTopicSelection && !shouldSkipTrafficTopicSelection(taskText);
+  // Whether to bypass topic selection is a user decision. Do not infer it from
+  // planner-written instructions or accumulated research observations: those
+  // often contain phrases such as “题目已明确” and previously caused a topic
+  // request to jump straight into body generation.
+  const userTrafficIntent = input.taskInput.followup?.trim() || input.taskInput.objective;
+  const isTrafficTopicStage = app.slug === "traffic-copy" && !trafficTopicSelection && !shouldSkipTrafficTopicSelection(userTrafficIntent);
   if (isTrafficTopicStage) values.traffic_topic_only = "yes";
   input.onEvent?.({ type: "app.preparing", message: `正在准备${app.name}的执行参数`, data: { appSlug: app.slug } });
   const quota = await requireQuota(input.user, "write_script", app.points);
