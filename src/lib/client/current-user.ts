@@ -11,16 +11,22 @@ let currentUserRequest: Promise<CurrentUser | null> | null = null;
 
 export function getCurrentUser() {
   if (!currentUserRequest) {
-    currentUserRequest = fetch(apiPath("/api/auth/me"), { credentials: "include" })
+    const request = fetch(apiPath("/api/auth/me"), { credentials: "include" })
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          if (currentUserRequest === request) currentUserRequest = null;
+          return null;
+        }
         const payload = await response.json() as { user?: CurrentUser | null };
-        return payload.user ?? null;
+        const user = payload.user ?? null;
+        if (!user && currentUserRequest === request) currentUserRequest = null;
+        return user;
       })
       .catch((error) => {
-        currentUserRequest = null;
+        if (currentUserRequest === request) currentUserRequest = null;
         throw error;
       });
+    currentUserRequest = request;
   }
   return currentUserRequest;
 }

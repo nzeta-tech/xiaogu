@@ -37,3 +37,24 @@ test("clearing the cache allows a fresh auth request", async (t) => {
   clearCurrentUserCache();
   assert.equal((await getCurrentUser())?.id, "fixture-2");
 });
+
+test("does not cache an unauthenticated result across a later login", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    clearCurrentUserCache();
+  });
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return calls === 1
+      ? Response.json({ user: null }, { status: 401 })
+      : Response.json({ user: { id: "logged-in-user", role: "broker" } });
+  };
+
+  clearCurrentUserCache();
+  assert.equal(await getCurrentUser(), null);
+  assert.equal((await getCurrentUser())?.id, "logged-in-user");
+  assert.equal(calls, 2);
+});
