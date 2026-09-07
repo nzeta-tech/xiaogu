@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { apiPath, appPath } from "@/lib/client/url";
 import { isSupportedLinkRemixUrl } from "@/lib/creation/link-remix-source";
 import type { HotTopic } from "@/lib/topics/types";
@@ -249,7 +250,7 @@ export function WorkbenchPageClient() {
         )}
       </section>
 
-      {selectedArticle ? <div className="viralArticleModal" role="dialog" aria-modal="true" aria-labelledby="viral-article-modal-title"><button className="viralArticleModalBackdrop" aria-label="关闭原文" onClick={() => setSelectedArticle(null)} /><div className="viralArticleModalPanel"><div className="viralArticleModalHeader"><div><span>{selectedArticle.platform} · {selectedArticle.category}</span><h2 id="viral-article-modal-title">{selectedArticle.title}</h2></div><button className="viralArticleModalClose" aria-label="关闭原文" onClick={() => setSelectedArticle(null)}>×</button></div><div className="viralArticleModalMeta">{selectedArticle.metricLabel} · {selectedArticle.publishedAt ? formatDate(selectedArticle.publishedAt) : `抓取 ${formatDate(selectedArticle.fetchedAt)}`}</div><div className="viralArticleModalBody">{selectedArticle.articleBody ?? "当前来源暂未提供正文内容，请打开原文查看。"}</div><div className="viralArticleModalFooter"><a href={selectedArticle.sourceUrl} target="_blank" rel="noreferrer">打开平台原文 <span aria-hidden="true">↗</span></a><button onClick={() => setSelectedArticle(null)}>关闭</button></div></div></div> : null}
+      {selectedArticle ? createPortal(<div className="viralArticleModal" role="dialog" aria-modal="true" aria-labelledby="viral-article-modal-title"><button className="viralArticleModalBackdrop" aria-label="关闭原文" onClick={() => setSelectedArticle(null)} /><div className="viralArticleModalPanel"><div className="viralArticleModalHeader"><div><span>{selectedArticle.platform} · {selectedArticle.category}</span><h2 id="viral-article-modal-title">{selectedArticle.title}</h2></div><button className="viralArticleModalClose" aria-label="关闭原文" onClick={() => setSelectedArticle(null)}>×</button></div><div className="viralArticleModalMeta">{selectedArticle.metricLabel} · {selectedArticle.publishedAt ? formatDate(selectedArticle.publishedAt) : `抓取 ${formatDate(selectedArticle.fetchedAt)}`}</div><div className="viralArticleModalBody">{selectedArticle.articleBody ?? "当前来源暂未提供正文内容，请打开原文查看。"}</div><div className="viralArticleModalFooter"><a href={selectedArticle.sourceUrl} target="_blank" rel="noreferrer">打开平台原文 <span aria-hidden="true">↗</span></a><button onClick={() => setSelectedArticle(null)}>关闭</button></div></div></div>, document.body) : null}
 
     </div>
   );

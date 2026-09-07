@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
@@ -3359,7 +3360,7 @@ function ImageEditDialog({
     };
   }, [busy, onClose]);
 
-  return <div className="imageEditOverlay" onClick={onClose} role="presentation">
+  return createPortal(<div className="imageEditOverlay" onClick={onClose} role="presentation">
     <aside className="imageEditDialog" aria-labelledby="image-edit-title" aria-modal="true" onClick={(event) => event.stopPropagation()} role="dialog">
       <header>
         <div><span>二次修改</span><h2 id="image-edit-title">修改这张卡片</h2></div>
@@ -3383,7 +3384,7 @@ function ImageEditDialog({
         <div><button disabled={busy} onClick={onClose} type="button">取消</button><button className="primary" disabled={busy || !instruction.trim()} onClick={onSubmit} type="button">{busy ? "正在修改…" : "生成修改版"}</button></div>
       </footer>
     </aside>
-  </div>;
+  </div>, document.body);
 }
 
 function PreviewFieldModal({
@@ -3393,7 +3394,7 @@ function PreviewFieldModal({
   previewField: PreviewField;
   onClose: () => void;
 }) {
-  return (
+  return createPortal(
     <div className="instancePreviewOverlay" onClick={onClose} role="presentation">
       <div className="instancePreviewDialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={previewField.label}>
         <div className="instancePreviewHeader">
@@ -3413,7 +3414,7 @@ function PreviewFieldModal({
           )}
         </div>
       </div>
-    </div>
+    </div>, document.body
   );
 }
 
@@ -3424,7 +3425,7 @@ function PreviewImageModal({
   previewImage: PreviewImage;
   onClose: () => void;
 }) {
-  return (
+  return createPortal(
     <div className="instancePreviewOverlay" onClick={onClose} role="presentation">
       <div className="instancePreviewDialog instanceImagePreviewDialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={previewImage.label}>
         <div className="instancePreviewHeader">
@@ -3440,7 +3441,7 @@ function PreviewImageModal({
           <img alt={previewImage.label} className="instanceImagePreviewAsset" src={previewImage.url} />
         </div>
       </div>
-    </div>
+    </div>, document.body
   );
 }
 

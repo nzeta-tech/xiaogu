@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getCreationAppFamily,
@@ -1983,7 +1984,7 @@ function TrafficTopicCoachCard({ coach, coachId, contribution, isRecommended, on
 
 function TrafficCoachPicker({ coaches, recommendedCoachId, selectedCoachId, onClose, onSelect }:{ coaches:CreativeCoachOption[];recommendedCoachId:string;selectedCoachId:string;onClose:()=>void;onSelect:(coachId:string)=>void }) {
   const options:[string,CreativeCoachOption|undefined][]=[["default",undefined],...coaches.map((coach)=>[coach.id,coach] as [string,CreativeCoachOption])];
-  return <div className="trafficCoachPickerBackdrop" onClick={onClose} role="presentation">
+  return createPortal(<div className="trafficCoachPickerBackdrop" onClick={onClose} role="presentation">
     <section aria-label="选择创作教练" aria-modal="true" className="trafficCoachPicker" onClick={(event)=>event.stopPropagation()} role="dialog">
       <header><div><span>创作教练</span><h2>选择谁来完成这个选题</h2><p>推荐只是参考，你可以根据账号定位和表达偏好重新选择。</p></div><button aria-label="关闭教练选择" onClick={onClose} type="button">×</button></header>
       <div className="trafficCoachPickerGrid">{options.map(([id,coach])=>{const card=coach?.identity_card??{};const tags=coach?readCoachFeatureTags(card):["通用判断","内容结构","自然表达"];const selected=id===selectedCoachId;return <button aria-pressed={selected} className={selected?"trafficCoachPickerCard active":"trafficCoachPickerCard"} key={id} onClick={()=>onSelect(id)} type="button">
@@ -1994,7 +1995,7 @@ function TrafficCoachPicker({ coaches, recommendedCoachId, selectedCoachId, onCl
         {selected?<u>✓ 已选择</u>:null}
       </button>;})}</div>
     </section>
-  </div>;
+  </div>, document.body);
 }
 
 function formatTopicConnection(value: TrafficTopicCandidate["professionalConnectionStrength"]) {

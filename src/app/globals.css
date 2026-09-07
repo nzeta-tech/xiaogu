@@ -23972,6 +23972,11 @@ body .xhsStyleGallery button>img { display:none !important; }.xhsStyleGallery bu
   box-shadow: 0 10px 18px rgba(15, 23, 42, 0.1);
 }
 
+/* Full-screen work previews use the dynamic mobile viewport. */
+.instancePreviewOverlay { height: 100dvh; }
+.instancePreviewDialog { max-height: min(78dvh, 820px); }
+.instancePreviewModalBody { max-height: min(70dvh, 720px); overscroll-behavior: contain; }
+
 .instancePreviewModalBody {
   padding: 22px 26px 26px;
 }
