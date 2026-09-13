@@ -10,6 +10,8 @@ remote_stage="$remote_project/.release-migrations"
 ssh -o BatchMode=yes -i "$ssh_key" "$primary" "mkdir -p '$remote_stage/migrations'"
 rsync -a --delete -e "ssh -i $ssh_key" "$repo_path/migrations/" "$primary:$remote_stage/migrations/"
 rsync -a -e "ssh -i $ssh_key" "$repo_path/scripts/migrate.mjs" "$primary:$remote_stage/migrate.mjs"
+rsync -a -e "ssh -i $ssh_key" "$repo_path/scripts/regression-topic-ingestion.mjs" "$primary:$remote_stage/regression-topic-ingestion.mjs"
+rsync -a -e "ssh -i $ssh_key" "$repo_path/scripts/regression-workbuddy-traffic-persistence.mjs" "$primary:$remote_stage/regression-workbuddy-traffic-persistence.mjs"
 
 ssh -o BatchMode=yes -i "$ssh_key" "$primary" "
   set -eu
@@ -19,6 +21,10 @@ ssh -o BatchMode=yes -i "$ssh_key" "$primary" "
   docker exec \"\$container\" rm -rf /tmp/xiaogu-release-migrations
   docker cp '$remote_stage' \"\$container:/tmp/xiaogu-release-migrations\"
   docker exec -w /tmp/xiaogu-release-migrations \"\$container\" node migrate.mjs
+  docker exec -w /tmp/xiaogu-release-migrations \"\$container\" node regression-topic-ingestion.mjs
   docker exec \"\$container\" rm -rf /tmp/xiaogu-release-migrations
+  docker cp '$remote_stage' "\$container:/tmp/xiaogu-release-migrations"
+  docker exec -e XIAOGU_CONTAINER_RUNTIME=1 -w /tmp/xiaogu-release-migrations "\$container" node regression-workbuddy-traffic-persistence.mjs
+  docker exec "\$container" rm -rf /tmp/xiaogu-release-migrations
   rm -rf '$remote_stage'
 "

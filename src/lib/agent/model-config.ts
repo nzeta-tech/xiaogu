@@ -1,4 +1,4 @@
-const LEGACY_TEXT_MODELS = new Set(["gpt-5.4", "gpt-5-4", "gpt_5_4"]);
+const LEGACY_TEXT_MODELS = new Set(["gpt-5.4", "gpt-5-4", "gpt_5_4", "gpt-5.6-sol"]);
 
 export const XIAOGU_TEXT_MODEL = "gpt-5.6-terra";
 

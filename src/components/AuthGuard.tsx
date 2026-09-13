@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiPath, appPath } from "@/lib/client/url";
+import { appPath } from "@/lib/client/url";
+import { getCurrentUser } from "@/lib/client/current-user";
 
 export function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
   const router = useRouter();
@@ -16,9 +17,7 @@ export function AuthGuard({ children, requireAdmin = false }: { children: React.
 
     async function check() {
       try {
-        const response = await fetch(apiPath("/api/auth/me"));
-        const payload = (await response.json()) as { user: unknown };
-        const user = payload.user as { role?: string } | null | undefined;
+        const user = await getCurrentUser();
         if (user) {
           if (requireAdmin && user.role !== "admin") {
             router.replace("/create");

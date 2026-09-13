@@ -1,3 +1,5 @@
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
+
 const MAX_EXTRACTED_KNOWLEDGE_CHARS = 6000;
 export type ImageRemixConsistencyAudit = {
   status: "passed" | "warning" | "unavailable";

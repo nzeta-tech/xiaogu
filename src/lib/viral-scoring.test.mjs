@@ -33,6 +33,12 @@ test("the publication gate rejects generic news without insurance or finance int
   assert.equal(isInsuranceFinanceRelevant({ title: "普通家庭如何规划养老金", category: "养老规划" }), true);
 });
 
+test("trusted Douyin finance rankings pass while an untrusted generic finance tag does not", () => {
+  assert.equal(isInsuranceFinanceRelevant({ title: "市场今天发生了什么", category: "财经", tags: ["财经爆款", "TopHub"] }), true);
+  assert.equal(isInsuranceFinanceRelevant({ title: "市场今天发生了什么", category: "财经", tags: ["财经爆款", "Valuefocus"] }), true);
+  assert.equal(isInsuranceFinanceRelevant({ title: "市场今天发生了什么", category: "财经", tags: ["财经爆款"] }), false);
+});
+
 test("temporary WeChat signatures do not create duplicate work identities", () => {
   const first = buildViralSourceIdentity({ platform: "公众号", title: "保险理赔怎么做", authorName: "保姐", canonicalUrl: "https://mp.weixin.qq.com/s?src=11&signature=one" });
   const second = buildViralSourceIdentity({ platform: "公众号", title: "保险理赔怎么做", authorName: "保姐", canonicalUrl: "https://mp.weixin.qq.com/s?src=11&signature=two" });

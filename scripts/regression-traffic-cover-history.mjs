@@ -33,6 +33,11 @@ try {
   const child = (await pool.query("insert into works(user_id,app_id,app_run_id,title,source_channel) values($1,$2,$3,$4,'video-cover') returning id", [userId, apps["video-cover"], childRun.id, `${marker}-child`])).rows[0];
   await pool.query("insert into work_versions(work_id,version_no,content,content_json,created_from) values($1,1,'',$2::jsonb,'generation')", [child.id, JSON.stringify({ images: [{ id: "image-1", url: "https://assets.example.invalid/cover.png" }] })]);
 
+  const flags = await pool.query("select id,is_history_child from works where id=any($1::uuid[])", [[parent.id, child.id]]);
+  const flagsById = Object.fromEntries(flags.rows.map((row) => [row.id, row.is_history_child]));
+  check(flagsById[parent.id] === false, "parent work must remain history-visible");
+  check(flagsById[child.id] === true, "child work must be marked outside history");
+
   const history = await request("/api/creation/hub?view=works&page=1&pageSize=20&state=all&platform=all&sort=updated-desc");
   check(history.response.ok, "history request must succeed");
   const items = history.body.works?.items ?? history.body.items ?? [];

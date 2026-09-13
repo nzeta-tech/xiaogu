@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "profileId": "xiaogu-production-text-v1",
+  "environment": {
+    "MODEL_PROVIDER": "openai",
+    "MODEL_NAME": "gpt-5.6-terra",
+    "MODEL_API_BASE": "https://cheap-llm.com/v1"
+  },
+  "runtime": {
+    "modelFallbackEnabled": false,
+    "fallbackBaseUrl": "",
+    "fallbackModel": "",
+    "requestTimeoutSeconds": 120,
+    "circuitBreakerEnabled": true,
+    "circuitFailureThreshold": 3,
+    "circuitCooldownSeconds": 300
+  },
+  "trafficRequestTimeoutSeconds": 180
+}
