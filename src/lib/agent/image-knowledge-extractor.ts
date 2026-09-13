@@ -122,4 +122,3 @@ export async function auditImageRemixConsistency(input: {
     return { status: "unavailable", facts: [], results: [] };
   }
 }
-import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
