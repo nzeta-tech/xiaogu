@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+import { readFile, writeFile } from "node:fs/promises";
+
+const root = new URL(`../artifacts/${process.env.MULTI_COACH_ARTIFACT_DIR || "mo-v61-fixed-three-way"}/`, import.meta.url);
+const runsPath = new URL("runs.json", root);
+const evaluationPath = new URL("evaluation.json", root);
+const reportPath = new URL("report.md", root);
+const base = (process.env.MODEL_API_BASE || "https://api.openai.com/v1").replace(/\/$/, "");
+const key = process.env.MODEL_API_KEY;
+const models = [...new Set([process.env.TRAINING_MODEL_NAME || process.env.MODEL_NAME || "gpt-5.6-terra", process.env.TRAINING_FALLBACK_MODEL || "gpt-5.5"])];
+const axes = ["thesisFidelity","reasoningFidelity","evidenceFidelity","boundaryFidelity","mindShiftFidelity","expressionIndependence","structuralReorganization","nonCopying","voiceFidelity","coachDistinctiveness","methodFit","nonGeneric","clarity","informationDensity","spokenNaturalness","structureFit","boundarySafety"];
+const labels = { thesisFidelity:"核心判断",reasoningFidelity:"论证链",evidenceFidelity:"关键论据",boundaryFidelity:"条件边界",mindShiftFidelity:"认知变化",expressionIndependence:"表达独立",structuralReorganization:"结构重组",nonCopying:"非照搬",voiceFidelity:"作者声纹",coachDistinctiveness:"教练辨识度",methodFit:"方法适配",nonGeneric:"非通用化",clarity:"清晰度",informationDensity:"信息密度",spokenNaturalness:"口语自然",structureFit:"结构适配",boundarySafety:"边界安全" };
+const sleep=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
+const parse=(raw)=>JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0]||"{}");
+async function complete(messages){let error;for(let i=0;i<8;i+=1){try{const response=await fetch(`${base}/chat/completions`,{method:"POST",headers:{authorization:`Bearer ${key}`,"content-type":"application/json"},body:JSON.stringify({model:models[i%models.length],temperature:.1,max_tokens:5200,messages}),signal:AbortSignal.timeout(250_000)});if(response.ok)return parse((await response.json()).choices?.[0]?.message?.content);error=Error(`HTTP ${response.status}`)}catch(caught){error=caught}await sleep(Math.min(120000,5000*2**i))}throw error}
+const avg=(values)=>values.reduce((sum,value)=>sum+value,0)/Math.max(1,values.length);
+const rotations=[{A:"default",B:"v6",C:"v61"},{A:"v6",B:"v61",C:"default"},{A:"v61",B:"default",C:"v6"}];
+const candidateLabel=process.env.THREE_WAY_CANDIDATE_LABEL||"V6.1";
+const variantLabel={default:"默认",v6:"V6",v61:candidateLabel};
+function normalizeWinner(winner,map){return winner==="tie"?"tie":map[winner]||"tie"}
+function rows(state,evaluation){return state.items.map((item,index)=>{const result=evaluation.items[item.sampleId],map=rotations[index%rotations.length],reverse=Object.fromEntries(Object.entries(map).map(([letter,name])=>[name,letter]));return {item,result,map,reverse,scores:{default:result?.[reverse.default],v6:result?.[reverse.v6],v61:result?.[reverse.v61]},fidelityWinner:normalizeWinner(result?.fidelityWinner,map),productionWinner:normalizeWinner(result?.productionWinner,map)}})}
+function counts(group,key){return group.reduce((out,row)=>{out[row[key]]=(out[row[key]]||0)+1;return out},{default:0,v6:0,v61:0,tie:0})}
+function report(state,evaluation){const normalized=rows(state,evaluation),out=[`# Mo姐 ${candidateLabel} 固定10条三方盲评`,"",`- 固定样本来自：${state.design?.baselineRunsPath||"V6基准"}`,`- 同一原文比较默认版、V6、${candidateLabel}；A/B/C顺序轮换，评审不知道版本身份。`,`- 自动转写错字、断句不计入评分。`,`- 本报告可直接判断${candidateLabel}相对V6的版本影响，因为两者使用完全相同的10条原稿。`,""];
+for(const groupId of [...new Set(normalized.map((row)=>row.item.groupId))]){const group=normalized.filter((row)=>row.item.groupId===groupId),fw=counts(group,"fidelityWinner"),pw=counts(group,"productionWinner");out.push(`## ${group[0].item.groupLabel}`,"",`- 思想/作者保真：默认 ${fw.default}｜V6 ${fw.v6}｜${candidateLabel} ${fw.v61}｜平 ${fw.tie}`,`- 独立成品质量：默认 ${pw.default}｜V6 ${pw.v6}｜${candidateLabel} ${pw.v61}｜平 ${pw.tie}`,"",`|维度|默认|V6|${candidateLabel}|${candidateLabel}-V6|`,`|---|---:|---:|---:|---:|`);for(const axis of axes){const d=avg(group.map((row)=>+row.scores.default?.[axis]||0)),v6=avg(group.map((row)=>+row.scores.v6?.[axis]||0)),v61=avg(group.map((row)=>+row.scores.v61?.[axis]||0));out.push(`|${labels[axis]}|${d.toFixed(2)}|${v6.toFixed(2)}|${v61.toFixed(2)}|${(v61-v6).toFixed(2)}|`)}out.push("")}
+out.push("## 逐题"," ");for(const row of normalized){out.push(`### ${row.item.sampleId}｜${String(row.item.title).replaceAll("|","/")}`,"",`保真胜者：${variantLabel[row.fidelityWinner]||"平局"}；成品胜者：${variantLabel[row.productionWinner]||"平局"}。${row.result?.reason||""}`,`${candidateLabel}变化：${row.scores.v61?.diagnosis||"—"}`,"")};return out.join("\n")}
+
+async function main(){if(!key)throw Error("MODEL_API_KEY is required");const state=JSON.parse(await readFile(runsPath,"utf8"));if(state.items.some((item)=>!item.default?.text||!item.v6?.text||!item.coach?.text))throw Error("three-way generation incomplete");let evaluation;try{evaluation=JSON.parse(await readFile(evaluationPath,"utf8"))}catch{evaluation={schemaVersion:1,items:{}}}
+for(let index=0;index<state.items.length;index+=1){const item=state.items[index];if(evaluation.items[item.sampleId])continue;const map=rotations[index%rotations.length],texts={default:item.default.text,v6:item.v6.text,v61:item.coach.text};const payload={id:item.sampleId,title:item.title,ORIGINAL:item.transcript,A:texts[map.A],B:texts[map.B],C:texts[map.C]};const rubric=`ORIGINAL是Mo姐本人原始口播转写，只作为思想、论证和声纹金标准。A/B/C是匿名改写；忽略转写错字、断句和标点。分别按1-5评分：${axes.join("、")}。保真看语义资产；独立看是否重新表达；voice看设问、反差、信息密度、判断力度、案例和收束；不得奖励机械模板、重复解释或无必要结构。严格JSON {id,A:{所有维度数字,diagnosis:string},B:{所有维度数字,diagnosis:string},C:{所有维度数字,diagnosis:string},fidelityWinner:'A'|'B'|'C'|'tie',productionWinner:'A'|'B'|'C'|'tie',reason:string}。`;evaluation.items[item.sampleId]=await complete([{role:"system",content:rubric},{role:"user",content:JSON.stringify(payload)}]);await writeFile(evaluationPath,`${JSON.stringify(evaluation,null,2)}\n`);console.log(JSON.stringify({phase:"evaluate",completed:Object.keys(evaluation.items).length,total:state.items.length,sampleId:item.sampleId}))}
+await writeFile(reportPath,report(state,evaluation));console.log(JSON.stringify({phase:"completed",report:reportPath.pathname}))}
+await main();

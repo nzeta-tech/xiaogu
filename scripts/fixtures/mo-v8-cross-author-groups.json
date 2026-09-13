@@ -1,0 +1,47 @@
+[
+  {
+    "id": "mo-combined",
+    "label": "Mo姐-财富观与财富说",
+    "coachLabel": "Mo姐教练 V8",
+    "versionId": "a124bf1e-8c83-4cb8-85f1-e85a16c4437c",
+    "runIds": ["1fd86806-26f3-4134-a875-67bdc551f7dd", "440b63e2-2abc-46c0-a041-b390aa083458"],
+    "count": 5,
+    "selection": "seeded-random",
+    "minChars": 600,
+    "maxChars": 2400
+  },
+  {
+    "id": "victoria-harbour",
+    "label": "维港保典",
+    "coachLabel": "Mo姐教练 V8（跨作者）",
+    "versionId": "a124bf1e-8c83-4cb8-85f1-e85a16c4437c",
+    "runId": "fd9216f5-6fb7-4063-8568-bd83945c3efc",
+    "count": 5,
+    "selection": "seeded-random",
+    "minChars": 600,
+    "maxChars": 2400
+  },
+  {
+    "id": "bauhinia-insurance",
+    "label": "紫荆保险规划",
+    "coachLabel": "Mo姐教练 V8（跨作者）",
+    "versionId": "a124bf1e-8c83-4cb8-85f1-e85a16c4437c",
+    "runId": "a81fcf7c-0833-475b-b447-9114a0cb969d",
+    "count": 5,
+    "selection": "seeded-random",
+    "minChars": 600,
+    "maxChars": 2400
+  },
+  {
+    "id": "zhu-meiyin",
+    "label": "朱美音",
+    "coachLabel": "Mo姐教练 V8（跨作者）",
+    "versionId": "a124bf1e-8c83-4cb8-85f1-e85a16c4437c",
+    "runId": "9c47010d-7b48-4329-89fb-83afe4c0161d",
+    "count": 5,
+    "selection": "seeded-random",
+    "minChars": 120,
+    "maxChars": 2400,
+    "lowConfidence": true
+  }
+]

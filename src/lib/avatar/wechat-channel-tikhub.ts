@@ -27,12 +27,18 @@ export type WechatChannelTrainingWork = {
   sourceUrl: string;
 };
 
-export async function discoverWechatChannelWorks(input: { channelId: string; limit: 10 | 20 | 50 | 100 | "all" }, refreshAccount = false) {
+type DiscoveryLimit = 10 | 20 | 50 | 100 | "all";
+
+export async function discoverWechatChannelWorks(
+  input: { channelId: string; limit: DiscoveryLimit },
+  refreshAccount = false,
+  resolvedAccount?: { username: string; nickname: string },
+) {
   const token = process.env.TIKHUB_API_TOKEN?.trim();
   if (!token) throw new Error("尚未配置 TIKHUB_API_TOKEN");
   let providerRequestCount = 0;
   let cacheHitCount = 0;
-  const accountResult = await getOrLoadWechatChannelCache({
+  const accountResult = resolvedAccount ? { value: resolvedAccount, cacheHit: false } : await getOrLoadWechatChannelCache({
     scope: "account",
     identity: input.channelId,
     // The channel ID → finder username mapping is stable. Keep it indefinitely
@@ -46,7 +52,7 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
     },
   });
   if (accountResult.cacheHit) cacheHitCount += 1;
-  const accountData = accountResult.value;
+  const accountData = record(accountResult.value);
   const username = text(accountData.username);
   if (!username) throw new Error(text(accountData.error) || "没有找到对应的视频号账号");
   const authorName = text(accountData.nickname);
@@ -127,6 +133,39 @@ export async function discoverWechatChannelWorks(input: { channelId: string; lim
   }
   await persistWorkIndex();
   return { channelId: input.channelId, username, authorName, candidates, requestCount: pageCount, pageCount, cacheHitCount, providerRequestCount, reachedTrainingLimit: input.limit === "all" && candidates.length >= MAX_CHANNEL_TRAINING_WORKS, maxTrainingWorks: MAX_CHANNEL_TRAINING_WORKS };
+}
+
+export async function discoverWechatChannelWorksFromShareUrl(input: { shareUrl: string; limit: DiscoveryLimit }) {
+  const token = process.env.TIKHUB_API_TOKEN?.trim();
+  if (!token) throw new Error("尚未配置 TIKHUB_API_TOKEN");
+  const shareUrl = input.shareUrl.trim();
+  if (!/^https?:\/\/weixin\.qq\.com\/sph\/[A-Za-z0-9]+\/?$/.test(shareUrl)) throw new Error("请输入有效的视频号作品链接");
+
+  const detailPayload = await postTikHub("fetch_video_detail", { share_url: shareUrl, raw: false }, token);
+  const detail = record(detailPayload.data);
+  const username = text(detail.username);
+  const nickname = text(detail.nickname);
+  if (!username) throw new Error("未能从该作品识别视频号作者");
+
+  const infoPayload = await postTikHub("fetch_channel_info", { username, raw: false }, token);
+  const infoData = record(infoPayload.data);
+  const info = record(infoData.info);
+  const channelId = text(infoData.channel_id) || text(info["Channels ID"]);
+  if (!/^sph[A-Za-z0-9_-]+$/.test(channelId)) throw new Error("已识别作者，但未能获取其视频号 ID");
+
+  await updateWechatChannelDiscoveryCache({
+    scope: "account",
+    identity: channelId,
+    payload: { username, nickname, trainingWorks: [] },
+    ttlSeconds: null,
+  });
+  const discovered = await discoverWechatChannelWorks({ channelId, limit: input.limit }, false, { username, nickname });
+  return {
+    ...discovered,
+    sourceShareUrl: shareUrl,
+    sourceVideoId: text(detail.id),
+    providerRequestCount: discovered.providerRequestCount + 2,
+  };
 }
 
 function normalizePageWorks(videos: unknown[], fallbackAuthorName: string): WechatChannelCandidate[] {

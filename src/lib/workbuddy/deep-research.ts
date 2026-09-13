@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
-import { searchVolcengineWeb, type VolcengineSearchResult } from "@/lib/search/volcengine-search";
+import { searchWeb, type VolcengineSearchResult } from "@/lib/search/volcengine-search";
 import type { WorkbuddyRuntimeEvent } from "./runtime";
 
 const researchActionSchema = z.discriminatedUnion("type", [
@@ -38,6 +38,7 @@ export async function runDeepResearch(input: {
   const maxActions = 12;
   const maxSearches = 8;
   let actionTimeouts = 0;
+  let consecutiveEmptySearches = 0;
   input.onEvent?.({ type: "research.scope", message: "深度研究 Agent 正在读取目标与当前证据", data: { objective: input.objective, maxActions, maxSearches } });
 
   for (let iteration = 1; iteration <= maxActions; iteration += 1) {
@@ -103,15 +104,21 @@ export async function runDeepResearch(input: {
     seenQueries.add(key);
     trace.totalQueries.push(action.query);
     input.onEvent?.({ type: "search.query", message: `检索：${action.query}`, data: { iteration, query: action.query, purpose: action.purpose } });
-    const results = await searchVolcengineWeb(action.query, { count: 7, timeoutMs: 12_000, requireContent: true });
+    const results = await searchWeb(action.query, { count: 7, timeoutMs: 15_000, requireContent: true });
     let added = 0;
     for (const result of results) {
       if (!seenUrls.has(result.url)) { seenUrls.add(result.url); sources.push(result); added += 1; }
     }
+    consecutiveEmptySearches = results.length ? 0 : consecutiveEmptySearches + 1;
     const observation = `命中 ${results.length} 条，新增 ${added} 个去重来源；结果：${results.slice(0, 5).map(item => `${item.title}（${item.publishedDate || "日期未知"}）`).join("；") || "无"}`;
     trace.actions.push({ iteration, action, observation, newSourceCount: added });
     trace.rounds.push({ round: iteration, queries: [{ query: action.query, purpose: action.purpose }], sourceCount: sources.length, assessment: { sufficient: false, findings: [], gaps: [], nextQueries: [], stopReason: "等待 Agent 根据本次观察决定下一步" } });
-    input.onEvent?.({ type: "search.query_completed", message: `“${action.query}”命中 ${results.length} 条，新增 ${added} 个来源`, data: { iteration, query: action.query, count: results.length, added, results: results.map(({ title, url, publishedDate }) => ({ title, url, publishedDate })) } });
+    input.onEvent?.({ type: "search.query_completed", message: `“${action.query}”命中 ${results.length} 条，新增 ${added} 个来源`, data: { iteration, query: action.query, count: results.length, added, providers: [...new Set(results.map(item => item.provider))], results: results.map(({ title, url, publishedDate, provider }) => ({ title, url, publishedDate, provider })) } });
+    if (consecutiveEmptySearches >= 3 && sources.length === 0) {
+      trace.stopReason = "连续三次跨提供商检索均无结果，提前停止以避免无效空转";
+      input.onEvent?.({ type: "research.guard", message: trace.stopReason, data: { iteration, consecutiveEmptySearches } });
+      break;
+    }
   }
 
   if (!trace.stopReason) trace.stopReason = sources.length ? "达到行动预算，使用当前证据形成有边界的报告" : "达到行动预算且没有取得可用公开证据";

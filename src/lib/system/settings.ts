@@ -140,14 +140,27 @@ export type SystemSettings = {
     circuitFailureThreshold: number;
     circuitCooldownSeconds: number;
   };
+  digitalHuman: {
+    enabled: boolean;
+    heygenEnabled: boolean;
+    chanjingEnabled: boolean;
+    preferredProvider: "auto" | "heygen" | "chanjing";
+    localDiskEnabled: boolean;
+    localDiskPath: string;
+    localDiskNodeId: string;
+    localDiskMaxGb: number;
+    databaseFallbackEnabled: boolean;
+    databaseMaxFileMb: number;
+    databaseWarningMb: number;
+  };
 };
 
 export const defaultSystemSettings: SystemSettings = {
   site: {
     siteName: "小谷",
-    siteSubtitle: "保险内容增长助手",
+    siteSubtitle: "财富、保险与财经内容助手",
     supportContact: "support@nzeta.ai",
-    footerNote: "让保险内容生产更稳定、更易运营。",
+    footerNote: "让专业内容生产更稳定、更易运营。",
     maintenanceMode: false,
     maintenanceMessage: "系统正在维护，请稍后再试。",
     logoUrl: "/brand/xiaogu-icon.png",
@@ -284,6 +297,19 @@ AI 结果可能存在遗漏或错误。用户在对外发布或用于客户沟�
   runtime: {
     modelFallbackEnabled: false, fallbackBaseUrl: "", fallbackModel: "", fallbackApiKeyEncrypted: "", requestTimeoutSeconds: 120,
     circuitBreakerEnabled: true, circuitFailureThreshold: 3, circuitCooldownSeconds: 300,
+  },
+  digitalHuman: {
+    enabled: true,
+    heygenEnabled: true,
+    chanjingEnabled: true,
+    preferredProvider: "auto",
+    localDiskEnabled: true,
+    localDiskPath: "storage/digital-human",
+    localDiskNodeId: "xiaogu-media-primary",
+    localDiskMaxGb: 200,
+    databaseFallbackEnabled: true,
+    databaseMaxFileMb: 30,
+    databaseWarningMb: 1024,
   },
 };
 

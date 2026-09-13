@@ -5,7 +5,7 @@ import { cancelWorkbuddyTask, continueWorkbuddyTask, getWorkbuddyTask, resolveWo
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cancel-task") }),
   z.object({ action: z.literal("resolve-approval"), approvalId: z.string().uuid(), decision: z.enum(["approved", "rejected"]), note: z.string().trim().max(1000).default("") }),
-  z.object({ action: z.literal("continue-task"), message: z.string().trim().min(1).max(6000) }),
+  z.object({ action: z.literal("continue-task"), message: z.string().trim().min(1).max(6000), context: z.string().max(30000).optional().default(""), requestedCapabilityId: z.string().trim().min(3).max(120).optional() }),
   z.object({ action: z.literal("message-feedback"), messageId: z.string().uuid(), rating: z.enum(["up", "down"]).nullable() }),
 ]);
 
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return task ? Response.json({ task }) : Response.json({ error: "任务不存在或无法停止" }, { status: 404 });
   }
   if (parsed.data.action === "continue-task") {
-    const task = await continueWorkbuddyTask(user, id, parsed.data.message).catch(() => null);
+    const task = await continueWorkbuddyTask(user, id, parsed.data.message, undefined, undefined, parsed.data.context, parsed.data.requestedCapabilityId).catch(() => null);
     return task ? Response.json({ task }) : Response.json({ error: "任务不存在或继续执行失败" }, { status: 404 });
   }
   if (parsed.data.action === "message-feedback") {

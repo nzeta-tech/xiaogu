@@ -24,6 +24,7 @@ import {
 } from "@/lib/creation/lead-copy";
 import { buildXiaohongshuCheckPrompt } from "@/lib/creation/xiaohongshu-check";
 import { buildWechatSectionImagePrompts } from "@/lib/creation/wechat-article-images";
+import { assertImageDeliverablesComplete, buildImageDeliverablePlan } from "@/lib/creation/image-deliverable-plan";
 import {
   tryCompleteAppRun,
   tryCreateAppRun,
@@ -42,7 +43,7 @@ import { buildCreativeCoachSkillRoutePrompt, parseCreativeCoachSkillRoute, rende
 import { getCreationUserError, isRetryableCreationError } from "@/lib/creation/errors";
 import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
-import { buildTrafficEvidencePackFromFastResearch, buildTrafficMaterialBriefPrompt, formatTrafficEvidencePack, formatTrafficMaterialBrief, parseTrafficMaterialBrief, type TrafficEvidencePack } from "@/lib/creation/traffic-copy-evidence";
+import { buildTrafficEvidencePackFromFastResearch, formatTrafficEvidencePack, planTrafficEvidenceSearch, type TrafficEvidencePack } from "@/lib/creation/traffic-copy-evidence";
 import { runFastResearch } from "@/lib/workbuddy/fast-research";
 import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
 import { buildPersistedCreatorStyleText, type CreatorStyleResult } from "@/lib/creation/creator-style-result";
@@ -74,6 +75,7 @@ import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabi
 import { parseSelectedTrafficTopics, trafficTopicGenerationContext, type TrafficTopicCandidate } from "@/lib/creation/traffic-topic-arena";
 import { runTrafficTopicAnalysis } from "@/lib/creation/traffic-topic-analysis";
 import { applyPortfolioDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, type TrafficPortfolioPlan } from "@/lib/creation/traffic-copy-portfolio";
+import { assertVideoCoverMaterial, deriveVideoCoverHeadline, renderVideoCoverHeadlines } from "@/lib/creation/video-cover-contract";
 
 type FieldValue = CreationFieldValue;
 
@@ -86,6 +88,10 @@ export class RetryableCreationRunError extends Error {
   }
 }
 
+export class CancelledCreationRunError extends Error {
+  constructor(message = "任务已取消") { super(message); this.name = "CancelledCreationRunError"; }
+}
+
 export async function executeCreationAppRun(input: {
   slug: string;
   userId: string;
@@ -93,6 +99,9 @@ export async function executeCreationAppRun(input: {
   workId?: string | null;
   quotaCost: number;
   existingRunId?: string | null;
+  usageMetadata?: Record<string, unknown>;
+  signal?: AbortSignal;
+  shouldCommit?: () => Promise<boolean>;
   onEvent?: (payload: {
     type: "meta" | "progress" | "delta" | "images" | "done" | "error";
     runId?: string | null;
@@ -109,6 +118,9 @@ export async function executeCreationAppRun(input: {
     coachLabel?: string | null;
   }) => void | Promise<void>;
 }) {
+  const assertActive = async () => {
+    if (input.signal?.aborted || input.shouldCommit && !(await input.shouldCommit())) throw new CancelledCreationRunError();
+  };
   // The request has already resolved the catalog entry. Do not reconcile the
   // entire catalog again before emitting the app-run id and first progress
   // event; that turns background startup into a long synchronous DB migration.
@@ -228,7 +240,17 @@ export async function executeCreationAppRun(input: {
         ? buildImageCardStylePrompt(imageCardStyles[0])
         : buildImagePrompt(effectiveApp.name, effectiveApp.fields, values, caseContext, effectiveApp.promptHint, referenceKnowledge)
     : null;
+  const videoCoverHeadline = app.slug === "video-cover" ? deriveVideoCoverHeadline(stringifyCreationFieldValue(values.source)) : "";
+  if (app.slug === "video-cover") assertVideoCoverMaterial(stringifyCreationFieldValue(values.source));
   const imageCardVariantPrompts = imageCardStyles.length ? imageCardStyles.map(buildImageCardStylePrompt) : undefined;
+  const imageDeliverableSource = Object.entries(values)
+    .filter(([key]) => !["style", "ratio", "reference_image", "avatar_visual_asset_ids"].includes(key))
+    .map(([key, value]) => `${key}：${stringifyCreationFieldValue(value)}`)
+    .filter(line => !line.endsWith("："))
+    .join("\n");
+  const imageDeliverablePlan = effectiveApp.resultType === "image" && !isImageCardRemix && imagePrompt
+    ? buildImageDeliverablePlan(imageDeliverableSource, imagePrompt)
+    : null;
   // `wechat-images` also powers the Xiaohongshu studio's chapter cards.  A
   // shared prompt produces near-duplicate variations, so derive one prompt
   // per section before asking the image model for a set.
@@ -304,6 +326,7 @@ export async function executeCreationAppRun(input: {
   let resultJson: Record<string, unknown> | undefined;
 
   try {
+    await assertActive();
     if (isTrafficTopicOnly) {
       const analysis = await runTrafficTopicAnalysis({
         slug: app.slug,
@@ -332,8 +355,8 @@ export async function executeCreationAppRun(input: {
               prompt: imagePrompt ?? "",
               style: imageCardStyles.length ? imageCardStyles.join("、") : stringifyCreationFieldValue(values.style) || app.name,
               ratio: stringifyCreationFieldValue(values.ratio) || (app.slug === "wechat-images" ? "3:4" : "1:1"),
-              count: sectionImagePlan?.prompts.length ?? (imageCardStyles.length || (isPolicyRenewalCard || app.slug !== "wechat-images" ? 1 : 4)),
-              variantPrompts: sectionImagePlan?.prompts ?? imageCardVariantPrompts,
+              count: sectionImagePlan?.prompts.length ?? (imageDeliverablePlan?.expectedCount && imageDeliverablePlan.expectedCount > 1 ? imageDeliverablePlan.expectedCount : null) ?? (imageCardStyles.length || (isPolicyRenewalCard || app.slug !== "wechat-images" ? 1 : 4)),
+              variantPrompts: sectionImagePlan?.prompts ?? (imageDeliverablePlan?.variantPrompts.length ? imageDeliverablePlan.variantPrompts : imageCardVariantPrompts),
               // For image remix, the source card must stay the primary image;
               // avatar references only define the optional inserted person.
               referenceImages: isImageCardRemix
@@ -342,6 +365,16 @@ export async function executeCreationAppRun(input: {
             })
           : null;
 
+      if (app.slug === "video-cover" && imageResult?.images?.length) {
+        const headlines = imageDeliverablePlan?.sourceItems.length
+          ? imageDeliverablePlan.sourceItems.map(deriveVideoCoverHeadline)
+          : [videoCoverHeadline];
+        imageResult.images = await renderVideoCoverHeadlines(imageResult.images, headlines);
+      }
+
+      if (imageDeliverablePlan && imageResult?.mode === "image") {
+        assertImageDeliverablesComplete(imageDeliverablePlan.expectedCount, imageResult.images.length);
+      }
       result =
         effectiveApp.resultType === "image"
           ? imageResult?.summary ?? buildImagePlan(app.name, app.fields, values, caseContext, app.promptHint)
@@ -351,8 +384,13 @@ export async function executeCreationAppRun(input: {
         images: imageResult?.images ?? [],
         imageMode: imageResult?.mode ?? null,
         imageStyles: imageCardStyles,
+        imageDeliverablePlan: imageDeliverablePlan ? { expectedCount: imageDeliverablePlan.expectedCount, source: imageDeliverablePlan.source } : undefined,
         retryable: imageResult?.retryable ?? false,
         avatarVisualAssetIds: visualReferences.map((item) => item.id),
+        ...(videoCoverHeadline ? { videoCoverHeadline } : {}),
+        ...(app.slug === "video-cover" && imageDeliverablePlan?.sourceItems.length
+          ? { videoCoverHeadlines: imageDeliverablePlan.sourceItems.map(deriveVideoCoverHeadline) }
+          : {}),
       };
 
       await input.onEvent?.({ type: "delta", content: result });
@@ -413,18 +451,11 @@ export async function executeCreationAppRun(input: {
           await input.onEvent?.({ type:"progress",phase:"task_started",status:"completed",label:"任务准备完成",detail:"素材和所选教练已经就绪。" });
         }
         await input.onEvent?.({ type:"progress",phase:"source_understanding",status:"active",label:"正在理解素材",detail:"识别主题、人物、事件、矛盾和可展开的内容方向。" });
+        // Do not spend a model turn on a provisional blueprint that will be
+        // replaced after research. The deterministic version is sufficient to
+        // scope search; one model-built blueprint is created from the final
+        // shared evidence below.
         trafficSourceBlueprint = fallbackTrafficSourceBlueprint(source);
-        try {
-          const rawBlueprint = await runInsuranceContentAgent(
-            [{ role: "user", content: buildTrafficSourceBlueprintPrompt(source) }],
-            input.userId,
-            "traffic",
-            { creatorContextMode:"none" },
-          );
-          trafficSourceBlueprint = parseTrafficSourceBlueprint(rawBlueprint, source);
-        } catch {
-          // The deterministic fallback still preserves an explicit task mode and source boundary.
-        }
         trafficAuthority = authorityForTrafficTask(trafficSourceBlueprint.taskMode);
         await input.onEvent?.({ type:"progress",phase:"source_understanding",status:"completed",label:"素材理解完成",detail:"已经整理核心观点、必要论据和发布边界。" });
         let sharedTrafficResearch = "";
@@ -434,7 +465,11 @@ export async function executeCreationAppRun(input: {
             sharedTrafficEvidencePack = precomputedTrafficEvidencePack;
             await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"选题资料已复用",detail:"正在复用选题阶段集中搜索形成的素材池，不再重复联网检索。" });
           } else {
-            await input.onEvent?.({ type:"progress",phase:"fast_research",status:"active",label:"正在集中搜索资料",detail:"本次没有选题研究包，将执行一次最多 6 个问题的兜底搜索。" });
+            const deterministicSearchPlan = planTrafficEvidenceSearch(source);
+            const initialQueries = deterministicSearchPlan.calls.map((call) => call.query);
+            await input.onEvent?.({ type:"progress",phase:"fast_research",status:"active",label:"正在集中搜索资料",detail:initialQueries.length
+              ? `已从素材中的时效事实生成 ${initialQueries.length} 个精准检索问题。`
+              : "素材较宽泛，正在规划最多 3 个必要检索问题。" });
             const fastResearch = await runFastResearch({
               objective: `为口播创作补充公开事实、争议和创作判断：${trafficSourceBlueprint.originalThesis || source.slice(0, 180)}`,
               context: [
@@ -443,43 +478,44 @@ export async function executeCreationAppRun(input: {
                 "按相关性覆盖当前事件、历史背景、具体安排、人物说法或动机、争议观点、结果影响；不要重复搜索。",
               ].join("\n\n"),
               userId: input.userId,
-              maxQueries: 6,
+              initialQueries: initialQueries.length ? initialQueries : undefined,
+              maxQueries: 3,
             });
             sharedTrafficEvidencePack = await buildTrafficEvidencePackFromFastResearch(source, fastResearch);
             rawSearchMaterials = formatTrafficEvidencePack(sharedTrafficEvidencePack);
             await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料搜索完成",detail:`已完成 ${fastResearch.trace.queries.length} 个检索问题，形成统一创作素材池。` });
           }
           sharedTrafficResearch = rawSearchMaterials;
-          await input.onEvent?.({ type:"progress",phase:"material_synthesis",status:"active",label:"正在整理创作材料",detail:"把核验结果压缩成可用于写作的事实、背景和边界。" });
-          try {
-            const rawBrief = await runInsuranceContentAgent([{ role: "user", content: buildTrafficMaterialBriefPrompt(source, rawSearchMaterials) }], input.userId, "traffic", { creatorContextMode:"none" });
-            sharedTrafficResearch = formatTrafficMaterialBrief(parseTrafficMaterialBrief(rawBrief), sharedTrafficEvidencePack?.topicMaterials ?? []);
-          } catch {
-            // The structured evidence pack remains usable if material editing fails.
+          // The evidence pack is already deduplicated, ranked and truncated.
+          // Passing it straight to the final angle/brief stages avoids a second
+          // model summary that often repeats the later creative brief.
+          await input.onEvent?.({ type:"progress",phase:"material_synthesis",status:"completed",label:"创作材料整理完成",detail:"搜索材料已经去重并形成可直接创作的共享素材池。" });
+          if (selectedTrafficTopics.length) {
+            // The user already confirmed a topic carrying its own question,
+            // thesis and mechanism. Each unit below turns that selection into
+            // a required blueprint, so another model turn here is redundant.
+            await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"completed",label:"已采用确认选题",detail:"直接使用已确认选题的核心问题和判断进入创作。" });
+          } else {
+            await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"active",label:"正在确定核心切入角度",detail:"结合最新材料确认这篇内容必须回答的问题和叙事主线。" });
+            try {
+              const researchedBlueprint = await runInsuranceContentAgent(
+                [{ role: "user", content: buildTrafficSourceBlueprintPrompt(source, sharedTrafficResearch) }],
+                input.userId,
+                "traffic",
+                { creatorContextMode:"none" },
+              );
+              trafficSourceBlueprint = mergeTrafficSourceBlueprint(trafficSourceBlueprint, parseTrafficSourceBlueprint(researchedBlueprint, source));
+              trafficAuthority = authorityForTrafficTask(trafficSourceBlueprint.taskMode);
+            } catch {
+              // Keep the source-only blueprint if the researched rebuild fails.
+            }
+            await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"completed",label:"核心切入角度已确定",detail:"事件背景、核心问题和创作主线已经就绪。" });
           }
-          await input.onEvent?.({ type:"progress",phase:"material_synthesis",status:"completed",label:"创作材料整理完成",detail:"已整理事件背景、人物关系、争议、细节和可展开方向。" });
-          // Broad topic requests only become a stable content blueprint after
-          // research has selected one concrete angle. Rebuild the blueprint so
-          // the selected mechanism is a required asset, not optional context.
-          await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"active",label:"正在确定核心切入角度",detail:"结合最新材料确认这篇内容必须回答的问题和叙事主线。" });
-          try {
-            const researchedBlueprint = await runInsuranceContentAgent(
-              [{ role: "user", content: buildTrafficSourceBlueprintPrompt(source, sharedTrafficResearch) }],
-              input.userId,
-              "traffic",
-              { creatorContextMode:"none" },
-            );
-            trafficSourceBlueprint = mergeTrafficSourceBlueprint(trafficSourceBlueprint, parseTrafficSourceBlueprint(researchedBlueprint, source));
-            trafficAuthority = authorityForTrafficTask(trafficSourceBlueprint.taskMode);
-          } catch {
-            // Keep the source-only blueprint if the researched rebuild fails.
-          }
-          await input.onEvent?.({ type:"progress",phase:"angle_refinement",status:"completed",label:"核心切入角度已确定",detail:"事件背景、核心问题和创作主线已经就绪。" });
         } catch {
           // Search is supplemental. Creation can continue from the source blueprint.
           await input.onEvent?.({ type:"progress",phase:"fast_research",status:"completed",label:"资料准备完成",detail:"公开搜索暂未返回补充材料，将根据现有素材继续创作。" });
         }
-        if (selectedTrafficTopics.length > 1) {
+        if (selectedTrafficTopics.length > 2) {
           await input.onEvent?.({type:"progress",phase:"portfolio_planning",status:"active",label:"正在规划多选题分工",detail:"为每篇确定独家任务、内容形式和自然时长，避免重复讲同一套背景。"});
           try {
             const rawPlan=await runInsuranceContentAgent([{role:"user",content:buildTrafficPortfolioPlanPrompt(selectedTrafficTopics)}],input.userId,"traffic",{creatorContextMode:"positioning"});
@@ -488,14 +524,20 @@ export async function executeCreationAppRun(input: {
             trafficPortfolioPlan=parseTrafficPortfolioPlan("",selectedTrafficTopics);
           }
           await input.onEvent?.({type:"progress",phase:"portfolio_planning",status:"completed",label:"多选题分工完成",detail:trafficPortfolioPlan.overlapWarnings.length?`发现 ${trafficPortfolioPlan.overlapWarnings.length} 处潜在重复，已写入各篇分工。`:"每篇已经获得不同的内容任务。"});
+        } else if (selectedTrafficTopics.length > 1) {
+          trafficPortfolioPlan=parseTrafficPortfolioPlan("",selectedTrafficTopics);
+          await input.onEvent?.({type:"progress",phase:"portfolio_planning",status:"completed",label:"多选题分工完成",detail:"已按每题核心问题直接分工，不额外调用规划模型。"});
         }
         prompts = [];
+        const baseTrafficBlueprint = trafficSourceBlueprint ?? fallbackTrafficSourceBlueprint(source);
+        const resolvedTrafficAuthority = trafficAuthority ?? authorityForTrafficTask(baseTrafficBlueprint.taskMode);
         const topicUnits: Array<TrafficTopicCandidate | null> = selectedTrafficTopics.length ? selectedTrafficTopics : [null];
-        for (const topic of topicUnits) for (const style of topic?.assignedCoachId ? creatorStyles.filter((candidate)=>candidate.id===topic.assignedCoachId) : creatorStyles) {
+        const trafficUnits = topicUnits.flatMap((topic) => (topic?.assignedCoachId ? creatorStyles.filter((candidate)=>candidate.id===topic.assignedCoachId) : creatorStyles).map((style) => ({ topic, style })));
+        const preparedTrafficUnits = await Promise.all(trafficUnits.map(async ({ topic, style }) => {
           const topicContext = topic ? [trafficTopicGenerationContext(topic),portfolioUnitContext(trafficPortfolioPlan,topic.id)].filter(Boolean).join("\n\n") : "";
           const unitSource = topic ? `${source}\n\n${topicContext}` : source;
           const unitBlueprint = topic ? parseTrafficSourceBlueprint(JSON.stringify({
-            ...trafficSourceBlueprint,
+            ...baseTrafficBlueprint,
             originalThesis: topic.workingThesis,
             attentionReason: topic.humanTension,
             entryMode: "反差",
@@ -503,9 +545,9 @@ export async function executeCreationAppRun(input: {
             intendedMindShift: topic.workingThesis,
             contentAssets: [
               { id: `selected-${topic.id}`, kind: "thesis", meaning: topic.workingThesis, function: `回答：${topic.coreQuestion}`, importance: "required", sourceStatus: "source", mayReframe: false },
-              ...trafficSourceBlueprint.contentAssets.filter((item) => item.kind !== "thesis"),
+              ...baseTrafficBlueprint.contentAssets.filter((item) => item.kind !== "thesis"),
             ],
-          }), unitSource) : trafficSourceBlueprint;
+          }), unitSource) : baseTrafficBlueprint;
           await input.onEvent?.({ type:"progress",phase:`coach_decision:${style.id}`,status:"active",label:`${style.label}正在确定表达方向`,detail:"判断受众入口、核心观点和本题真正需要的方法。",coachId:style.id,coachLabel:style.label });
           const trafficContext = [
             ...(remixDefinition ? remixTargetContext : caseContext),
@@ -513,10 +555,6 @@ export async function executeCreationAppRun(input: {
             sharedTrafficResearch,
             topicContext,
           ].filter(Boolean);
-          trafficContexts.push(trafficContext);
-          trafficBlueprints.push(unitBlueprint);
-          trafficPromptStyles.push(style);
-          trafficPromptTopics.push(topic);
           let progressivelyLoadedSkills = "";
           let skillRoute: ReturnType<typeof parseCreativeCoachSkillRoute> | null = null;
           if (style.runtime) {
@@ -526,14 +564,13 @@ export async function executeCreationAppRun(input: {
               progressivelyLoadedSkills = renderProgressivelyLoadedCreativeCoachSkills(style.runtime, skillRoute);
             } catch { /* Zero-method fallback is valid and safer than loading the entire library. */ }
           }
-          trafficSkillRoutes.push(skillRoute);
           const briefPrompt = buildTrafficCopyCreativeBriefPrompt({
             source: unitSource,
             creatorSkill: [style.briefSkill, progressivelyLoadedSkills ? `【渐进加载的候选Skill｜候选不等于必须使用】\n${progressivelyLoadedSkills}` : "【渐进加载结果】本题没有需要展开的方法卡，允许零方法完成。"].filter(Boolean).join("\n\n"),
             context: trafficContext,
             promptHint: remixTargetApp?.promptHint ?? effectiveApp.promptHint,
             blueprint: unitBlueprint,
-            authority: trafficAuthority,
+            authority: resolvedTrafficAuthority,
           });
           let creativeBrief: TrafficCopyCreativeBrief;
           try {
@@ -551,23 +588,33 @@ export async function executeCreationAppRun(input: {
           creativeBrief = normalizeTrafficBriefForSource(creativeBrief, unitSource, routedIds);
           creativeBrief = applyPortfolioDuration(creativeBrief, topic ? trafficPortfolioPlan?.units.find((item)=>item.topicId===topic.id) : undefined);
           await input.onEvent?.({ type:"progress",phase:`coach_decision:${style.id}`,status:"completed",label:`${style.label}已确定创作方向`,detail:creativeBrief.workingThesis ? `核心方向：${creativeBrief.workingThesis.slice(0, 80)}` : "已确定内容入口、论证顺序和收束方式。",coachId:style.id,coachLabel:style.label });
-          trafficCreativeBriefs.push(creativeBrief);
           const selectedMethodCards = style.runtime ? renderSelectedCreativeCoachMethods(style.runtime, creativeBrief.selectedMethods.map((item) => item.methodId)) : "";
-          prompts.push(buildTrafficCopyWritingPrompt({
+          const writingPrompt = buildTrafficCopyWritingPrompt({
             source: unitSource,
             creatorSkill: [style.writingSkill, selectedMethodCards ? `【本题获准使用的方法卡】\n${selectedMethodCards}` : ""].filter(Boolean).join("\n\n"),
             context: trafficContext,
             promptHint: remixTargetApp?.promptHint ?? effectiveApp.promptHint,
             brief: creativeBrief,
             blueprint: unitBlueprint,
-            authority: trafficAuthority,
-          }));
+            authority: resolvedTrafficAuthority,
+          });
+          return { topic, style, trafficContext, unitBlueprint, skillRoute, creativeBrief, writingPrompt };
+        }));
+        for (const prepared of preparedTrafficUnits) {
+          trafficContexts.push(prepared.trafficContext);
+          trafficBlueprints.push(prepared.unitBlueprint);
+          trafficPromptStyles.push(prepared.style);
+          trafficPromptTopics.push(prepared.topic);
+          trafficSkillRoutes.push(prepared.skillRoute);
+          trafficCreativeBriefs.push(prepared.creativeBrief);
+          prompts.push(prepared.writingPrompt);
         }
       } else {
         prompts = [prompt];
       }
 
       for (const [promptIndex, channelPrompt] of prompts.entries()) {
+        await assertActive();
         let currentOutput = "";
         if (isTrafficExecution) {
           const baseSource = app.slug === "link-remix" ? buildRemixStudioSource(values) : stringifyCreationFieldValue(values.source);
@@ -599,6 +646,10 @@ export async function executeCreationAppRun(input: {
               finalAudit=parseTrafficCopyAudit(rawFinalAudit);
             }catch{finalDraft=draftV1;revised=false;revisionDrafts.length=0;finalAudit=firstAudit;}
           }
+          // Cap automated repair at one pass. A second revision+audit pair can
+          // add minutes of latency while often changing only minor wording.
+          // Preserve the complete first repair and surface remaining blocking
+          // issues as “待复核”, instead of silently looping on the model.
           await input.onEvent?.({ type:"progress",phase:`audit:${style?.id ?? promptIndex}`,status:"completed",label:`${style?.label ?? "教练"}版本完成`,detail:revised?"独立编辑已完成一次局部精简或增强。":"独立编辑已完成选题兑现、专业增量和口播效率复审。",coachId:style?.id,coachLabel:style?.label });
           currentOutput = finalDraft;
           result += currentOutput;
@@ -610,6 +661,7 @@ export async function executeCreationAppRun(input: {
           trafficExecutions.push({ creatorStyleId: style?.id ?? "default", taskMode: blueprint.taskMode, taskProfile: blueprint.taskProfile, skillRoute: trafficSkillRoutes[promptIndex], contentGaps: brief.contentGaps, selectedMethods: brief.selectedMethods, stoppingRule: brief.stoppingRule, structureBudget: brief.structureBudget, durationRange: brief.durationRange, durationBasis: brief.durationBasis, actualCharacters, estimatedSpeakingRate, estimatedSeconds: Math.round(actualCharacters / estimatedSpeakingRate * 60), expressionOverlap: measureTrafficExpressionSimilarity(source, currentOutput), draftV1, draftV2: revised ? finalDraft : null, revisionDrafts, finalStatus: finalAudit.status });
         } else {
           for await (const chunk of streamInsuranceContentAgent([{ role: "user", content: channelPrompt }], input.userId, styleMode)) {
+            await assertActive();
             result += chunk;
             currentOutput += chunk;
             await input.onEvent?.({ type: "delta", content: chunk });
@@ -645,12 +697,12 @@ export async function executeCreationAppRun(input: {
       // event so app_runs, works and plainText never retain those notices.
       if (isTrafficExecution && creatorStyleResults.length > 0) {
         const originalStyleIndexes = new Map(creatorStyleResults.map((style, index) => [style.id, index]));
-        const publishableResults = creatorStyleResults.filter((_, index) => trafficAudits[index]?.final.status === "pass");
-        if (publishableResults.length === 0) {
-          const reasons = [...new Set(trafficAudits.flatMap((item) => item.final.issues.filter((issue) => issue.severity === "blocking").map((issue) => issue.reason)).filter(Boolean))].slice(0, 3);
-          throw new Error(`成稿检查未通过，待人工复核草稿未发布${reasons.length ? `：${reasons.join("；")}` : "。请补充更具体的事实来源或核心问题后重试。"}`);
-        }
-        creatorStyleResults.splice(0, creatorStyleResults.length, ...publishableResults);
+        const completedResults = creatorStyleResults.map((style, index) => {
+          const audit = trafficAudits[index]?.final;
+          const reviewIssues = audit?.issues.filter(issue => issue.severity === "blocking").map(issue => issue.reason).filter(Boolean).slice(0, 3) ?? [];
+          return { ...style, reviewStatus: audit?.status === "pass" ? "approved" as const : "needs_review" as const, reviewIssues };
+        });
+        creatorStyleResults.splice(0, creatorStyleResults.length, ...completedResults);
         await input.onEvent?.({ type:"progress",phase:"result_packaging",status:"active",label:"正在整理最终结果",detail:"整理教练版本和可用标题，马上完成。" });
         const titleSets = await Promise.all(creatorStyleResults.map(async (style) => ({
           id: style.id,
@@ -659,7 +711,8 @@ export async function executeCreationAppRun(input: {
         const titlesByStyleId = new Map(titleSets.map((item) => [item.id, item.titles]));
         creatorStyleResults.forEach((style) => { style.titles = titlesByStyleId.get(style.id) ?? []; });
         result = buildPersistedCreatorStyleText(creatorStyleResults);
-        await input.onEvent?.({ type:"progress",phase:"result_packaging",status:"completed",label:"结果整理完成",detail:publishableResults.length === trafficAudits.length ? "所有教练版本已经生成并通过检查。" : `已发布 ${publishableResults.length} 个通过检查的版本；未通过事实或核心问题检查的草稿未发布。` });
+        const approvedCount = creatorStyleResults.filter(style => style.reviewStatus === "approved").length;
+        await input.onEvent?.({ type:"progress",phase:"result_packaging",status:"completed",label:"结果整理完成",detail:approvedCount === trafficAudits.length ? "所有选题均已生成并通过检查。" : `已完成 ${creatorStyleResults.length} 篇：${approvedCount} 篇通过检查，${creatorStyleResults.length-approvedCount} 篇已标记为待复核稿。` });
       }
 
       if (app.slug === "xiaohongshu-studio" || remixDefinition?.id === "xiaohongshu-studio") result = limitXiaohongshuTitle(result);
@@ -710,13 +763,19 @@ export async function executeCreationAppRun(input: {
               batches: creatorStyleResults.map((style, index) => ({
                 id: `creator-style-${style.id}-${index + 1}`,
                 label: style.label,
-                items: [{ id: `creator-style-${style.id}-${index + 1}-item`, title: style.label, body: style.content, viewMode: "plain", summary: style.content.slice(0, 120) }],
+                status: style.reviewStatus ?? "approved",
+                reviewIssues: style.reviewIssues ?? [],
+                items: [{ id: `creator-style-${style.id}-${index + 1}-item`, title: style.label, body: style.content, viewMode: "plain", summary: style.content.slice(0, 120), status: style.reviewStatus ?? "approved", reviewIssues: style.reviewIssues ?? [] }],
               })),
             }
           : buildCreationOutputJson(result, Array.isArray(values.targets) ? values.targets : []),
       };
     }
   } catch (error) {
+    if (error instanceof CancelledCreationRunError) {
+      await tryCompleteAppRun({ runId: run?.id ?? null, status: "cancelled", resultText: result, resultJson, errorMessage: error.message });
+      throw error;
+    }
     const userError = getCreationUserError(error);
     const retryable = isTrafficRequested && isRetryableCreationError(error);
     await tryCompleteAppRun({
@@ -743,6 +802,8 @@ export async function executeCreationAppRun(input: {
     throw new Error("本次生成没有返回有效内容，请稍后重试。");
   }
 
+  await assertActive();
+
   const title = isTrafficTopicOnly
     ? `选题分析｜${topicSourceTitle}`
     : buildWorkTitle({
@@ -762,6 +823,8 @@ export async function executeCreationAppRun(input: {
     resultText: result,
     resultJson,
   });
+
+  await assertActive();
 
   // Another worker may have completed the same recovered run first. In that
   // case its persisted result and usage record are authoritative.
@@ -827,6 +890,7 @@ export async function executeCreationAppRun(input: {
       appSlug: app.slug,
       resultType: effectiveApp.resultType,
       streamed: Boolean(input.onEvent),
+      ...(input.usageMetadata ?? {}),
     },
   });
 
@@ -846,6 +910,7 @@ export async function executeCreationAppRun(input: {
       streamed: Boolean(input.onEvent),
       workId: work?.id ?? input.workId ?? null,
       appRunId: run?.id ?? null,
+      ...(input.usageMetadata ?? {}),
     },
   });
 
@@ -1002,13 +1067,13 @@ function buildVideoScriptPolishPrompt(
     ...caseContext,
     `应用提示：${promptHint}`,
     "请按下述精修报告契约输出，不复写示例，不输出额外前言。",
-    "输出必须严格使用以下 6 个一级模块，且标题必须完全一致：",
-    "1)【博主风格画像】",
-    "2)【第一部分：整体诊断与数据分析】",
-    "3)【第二部分：逐句精细批改】",
-    "4)【第三部分：系统提升方法论】",
-    "5)【第四部分：完善后的文案】",
-    "6)【推荐标题+标签】",
+    "输出必须严格使用以下 6 个 Markdown 二级标题，且标题文字必须完全一致：",
+    "## 博主风格画像",
+    "## 第一部分：整体诊断与数据分析",
+    "## 第二部分：逐句精细批改",
+    "## 第三部分：系统提升方法论",
+    "## 第四部分：完善后的文案",
+    "## 推荐标题与标签",
     "具体要求：",
     "1. 博主风格画像：用 3 个要点输出，分别是表达风格、专业程度、人设定位。",
     "2. 第一部分：整体诊断：按“观察 + 原文证据 + 修改建议”写法，至少覆盖开头、逻辑衔接、信息密度、口语节奏、行动召唤和合规风险；不要伪造数据或预测完播率。",
@@ -1017,7 +1082,8 @@ function buildVideoScriptPolishPrompt(
     "5. 第四部分：完善后的文案：输出一版完整的精修口播成稿，可直接朗读。",
     "6. 推荐标题+标签：给 5 个标题建议，再给一组标签。",
     "7. 整体语气要专业、克制，每条判断都应能在用户原稿中找到依据。",
-    "8. 不要输出 Markdown 表格符号 `|`，改用自然语言排版；可以使用项目符号和编号。",
+    "8. 不要输出 Markdown 表格符号 `|`。每个模块先给一句结论，再展开必要证据；段落控制在 2-4 句，避免连续堆叠项目符号。",
+    "9. 只在模块标题下使用三级标题组织关键维度，例如“### 开头”“### 逻辑衔接”；标签词如“观察、原文、建议”使用加粗，不要写成方括号标题。不同一级模块之间插入一条 `---` 分隔线。",
     "待精修原稿：",
     draft,
   ].filter(Boolean).join("\n\n");
@@ -1449,6 +1515,7 @@ function buildVideoCoverPrompt(values: Record<string, FieldValue>, caseContext: 
   const platformGuidance = platform === "douyin"
     ? "抖音：首屏冲击力更强，标题控制在 8-14 个字，突出一个冲突或判断。"
     : "微信视频号：可信、克制，标题控制在 12-16 个字，突出一个清晰判断或生活场景。";
+  const headline = deriveVideoCoverHeadline(stringifyCreationFieldValue(values.source));
   return [
     "你正在为短视频制作一张竖版中文视频封面。",
     ...caseContext,
@@ -1458,8 +1525,8 @@ function buildVideoCoverPrompt(values: Record<string, FieldValue>, caseContext: 
     stringifyCreationFieldValue(values.avatar_visual_mode) === "yes"
       ? "人物形象要求：画面必须使用所提供形象参考图中的同一个人，保持可识别的脸部、发型、肤色、年龄与整体气质；可按封面主题调整姿态、服装和背景，但不要生成无关人物，也不要把参考照中的背景和构图当作硬约束。"
       : "人物形象要求：本次不使用用户本人形象；除非主题确有必要，否则优先使用场景、物件或抽象视觉表达。",
-    "先从文案中提炼唯一的核心冲突或判断，作为封面主标题。主标题必须是清晰、可读的简体中文，不要编造文案中没有的事实；副标题可选且简短。",
-    "画面必须预留足够文字留白，标题占画面视觉中心；不要包含二维码、联系方式、平台 Logo、复杂小字、收益承诺、理赔承诺、绝对化用语或恐吓式画面。",
+    `已确定的封面主标题：${headline}。主标题会由系统在生成后统一排版；背景图中不要自行生成任何文字。`,
+    "画面上方 15%—42% 必须保持低细节、低对比的标题安全区；不要包含二维码、联系方式、平台 Logo、复杂小字、收益承诺、理赔承诺、绝对化用语或恐吓式画面。",
     "文案内容：",
     stringifyCreationFieldValue(values.source),
   ].filter(Boolean).join("\n\n");

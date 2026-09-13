@@ -9,3 +9,11 @@ node_modules
 tsconfig.tsbuildinfo
 .pnpm-store
 .tmp
+.codex-tmp
+.local-tools
+deliverables
+marketing-film
+tmp
+coverage
+research
+storage

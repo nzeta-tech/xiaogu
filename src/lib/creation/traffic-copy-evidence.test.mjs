@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTrafficEvidencePack, buildTrafficEvidencePackFromFastResearch, buildTrafficEvidenceSearchPlanningPrompt, buildTrafficMaterialBriefPrompt, extractTrafficClaims, formatTrafficMaterialBrief, parseTrafficEvidenceSearchPlan, parseTrafficMaterialBrief, planTrafficEvidenceSearch, scoreSourceAuthority } from "./traffic-copy-evidence.ts";
+import { buildTrafficEvidencePack, buildTrafficEvidencePackFromFastResearch, buildTrafficEvidenceSearchPlanningPrompt, buildTrafficMaterialBriefPrompt, buildTrafficTopicSearchQueries, extractTrafficClaims, formatTrafficMaterialBrief, parseTrafficEvidenceSearchPlan, parseTrafficMaterialBrief, planTrafficEvidenceSearch, scoreSourceAuthority } from "./traffic-copy-evidence.ts";
 
 test("adapts one shared Fast Research run into the traffic evidence contract", async () => {
   const pack = await buildTrafficEvidencePackFromFastResearch("景甜与孙宇晨涉及3000万元财产争议。", {
@@ -170,6 +170,17 @@ test("builds diversified high-value queries for the RMB source instead of malfor
     "人民币汇率双向波动历史",
     "人民币汇率走强原因",
   ]);
+});
+
+test("medicine price queries keep product names and the price contrast while removing envelope labels", () => {
+  const source="热点标题：卤米松原研药从30元涨到800元\n热点摘要：近日，一款皮肤科临床常用药新适确得（卤米松/三氯生乳膏）因缺货、涨价引发关注。9月8日，记者看到，新适确得仅少量药房在售，单盒售价从30元涨到800元。";
+  const queries=planTrafficEvidenceSearch(source).calls.map((call)=>call.query);
+  assert.ok(queries.some((query)=>query.includes("新适确得")&&query.includes("30元")&&query.includes("800元")));
+  assert.ok(queries.every((query)=>!/(热点标题|热点摘要|记者看到|数量数据)/.test(query)));
+});
+
+test("broad topic discovery gets one deterministic query without an LLM planning turn", () => {
+  assert.deepEqual(buildTrafficTopicSearchQueries("梅艳芳今天很火，帮我找一个角度写"),["梅艳芳 最新进展"]);
 });
 
 test("treats a target exchange-rate point as a forecast rather than a conflicting fact", async () => {

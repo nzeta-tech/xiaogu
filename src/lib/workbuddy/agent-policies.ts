@@ -57,6 +57,14 @@ export function evaluateHumanControl(action: WorkbuddyAgentAction, capability?: 
   return { outcome: "allow" };
 }
 
+export function hasExplicitExternalWriteApproval(text: string, capabilityId: string) {
+  if (capabilityId !== "mcp.openchatcut") return false;
+  const normalized = text.replace(/\s+/g, "").toLowerCase();
+  return /^(确认|同意|授权|可以|开始|执行|继续)(本次)?(openchatcut)?(剪辑|编辑|操作|执行)?[。.!！]?$/.test(normalized)
+    || normalized.includes("确认授权openchatcut")
+    || normalized.includes("同意使用openchatcut");
+}
+
 export function buildAgentPolicyPrompt() {
   return [
     "【角色与循环】\n" + XIAOGU_ROLE_POLICY,
@@ -75,7 +83,8 @@ export function buildFinalAnswerPolicy() {
     INSURANCE_POLICY,
     "保留必要来源、事实边界和待核验项。",
     "优先保证扫读体验：第一屏先给结论和选择依据，使用短段落与明确小标题，避免大段铺陈、重复总结和过深层级。",
-    "存在多个候选时，先用紧凑对比表列出候选、适配理由、推荐切口与风险边界，再详细展开最值得做的少量候选；每个候选保持相同字段顺序。",
+    "存在多个候选且用户处于探索阶段时，优先用3—5个短编号项列出候选、适配理由、推荐切口与核验状态，然后请用户选择；不要立即展开成长报告。只有确实需要逐列比较时才使用表格。",
+    "用户追问‘还有、其他、换一个’时，必须排除持续对话状态中已经讨论的话题及其同义改写；第一屏直接给新候选，不复述旧答案。",
     "表格只用于两个及以上同类对象、方案或产品的逐项比较。单一新闻事件、人物事件、时间线、事实梳理和来源核验不得使用表格，应使用短段落、要点或时间顺序叙述；多家来源不等于多个候选对象。",
     "热点类回答必须明确榜单发现时间、事实核验状态和来源；不得把热搜排名直接写成已经核验的新闻结论。",
   ].join("\n");

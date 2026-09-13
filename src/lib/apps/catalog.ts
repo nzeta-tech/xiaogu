@@ -40,6 +40,8 @@ export type CreationField = {
   revealAfter?: string[];
   /** Data fields are populated by parsers or dedicated controls, not rendered as ordinary inputs. */
   presentation?: "field" | "data";
+  /** In conversational handoffs, lock this field when usable upstream material is already present. */
+  inheritedSourceValue?: string;
   step?: number;
   maxLength?: number;
 };
@@ -111,7 +113,7 @@ export const creationApps: CreationApp[] = [
     resultType: "text",
     fields: [
       { id: "topic", label: "原文或创作想法", type: "textarea", required: true, placeholder: "基于原文创作：粘贴完整原文；基于想法创作：写下想表达的主题、角度和必须核验的问题。", maxLength: 6000 },
-      { id: "creation_mode", label: "创作方式", type: "radio", required: true, options: [{ label: "我有一个内容素材", value: "rewrite" }, { label: "我有一个想法", value: "idea" }] },
+      { id: "creation_mode", label: "创作方式", type: "radio", required: true, inheritedSourceValue: "rewrite", options: [{ label: "我有一个内容素材", value: "rewrite" }, { label: "我有一个想法", value: "idea" }] },
       { id: "length_mode", label: "笔记长度", type: "radio", required: true, options: [{ label: "常规 · 约 500 字", value: "standard" }, { label: "长文 · 1000 字以内", value: "long" }] },
     ],
   },

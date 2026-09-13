@@ -10,8 +10,8 @@ function hasValue(value: CreationFieldValue | undefined) {
 function matches(condition: CreationFieldCondition, values: Values) {
   const value = values[condition.fieldId];
   if (condition.hasValue !== undefined && hasValue(value) !== condition.hasValue) return false;
-  if (condition.equals !== undefined && String(value ?? "") !== condition.equals) return false;
-  if (condition.oneOf && !condition.oneOf.includes(String(value ?? ""))) return false;
+  if (condition.equals !== undefined && (Array.isArray(value) ? !value.includes(condition.equals) : String(value ?? "") !== condition.equals)) return false;
+  if (condition.oneOf && (Array.isArray(value) ? !value.some(item => condition.oneOf?.includes(item)) : !condition.oneOf.includes(String(value ?? "")))) return false;
   return true;
 }
 

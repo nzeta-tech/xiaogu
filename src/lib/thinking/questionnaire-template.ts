@@ -65,8 +65,8 @@ export const localQuestionnaireTemplate: QuestionnaireTemplate = {
         section_title: "身份与经历",
         section_description: "先说明你是谁，以及哪些经历构成了你的专业可信度。",
         questions: [
-          textQuestion("display_name", "希望数字分身如何称呼你？", "可以是真名、昵称或稳定使用的 IP 名称。", "例如：林姐说保障"),
-          textQuestion("role_context", "你目前主要以什么身份工作和生活？", "写出职业角色，也可以补充家庭角色、城市或人生阶段。", "例如：独立保险经纪人、两个孩子的妈妈、长期服务新中产家庭"),
+          textQuestion("display_name", "希望数字分身如何称呼你？", "可以是真名、昵称或稳定使用的 IP 名称。", "例如：林姐说财富 / 林姐说保障"),
+          textQuestion("role_context", "你目前主要以什么身份工作和生活？", "写出职业角色，也可以补充家庭角色、城市或人生阶段。", "例如：财富顾问、保险经纪人、财经创作者、两个孩子的妈妈"),
           textQuestion("career_path", "哪些关键经历把你带到今天？", "不必写完整简历，重点说明转折、选择及其影响。", "按时间或转折点描述你的职业路径"),
           textQuestion("credentials", "哪些事实能够证明你的专业与可靠？", "可填写资质、年限、项目成果、客户反馈或可核验经历。", "列出 1-5 项具体事实", false),
           textQuestion("identity_tags", "别人通常会用哪些词描述你？", "优先填写带有行为证据的标签，而不是宽泛形容词。", "例如：解释复杂问题很耐心、做方案会反复核对细节"),

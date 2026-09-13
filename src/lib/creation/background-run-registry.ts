@@ -1,4 +1,4 @@
-import { executeCreationAppRun, RetryableCreationRunError } from "@/lib/creation/execute-app-run";
+import { CancelledCreationRunError, executeCreationAppRun, RetryableCreationRunError } from "@/lib/creation/execute-app-run";
 import type { CreationFieldValue } from "@/lib/creation/output";
 import { getCreationUserError, shouldRetryCreationError } from "@/lib/creation/errors";
 import { trySaveAppRunProgress } from "@/lib/db/repositories";
@@ -29,6 +29,7 @@ type BackgroundWorkRunEntry = {
   promise: Promise<void>;
   listeners: Set<(event: WorkRunEvent) => void>;
   snapshot: BackgroundWorkRunSnapshot;
+  controller: AbortController;
 };
 
 const backgroundRunRegistryKey = Symbol.for("xiaogu.background-work-runs");
@@ -51,6 +52,15 @@ export function getBackgroundWorkRunSnapshot(workId: string) {
 
 export function getBackgroundWorkRunPromise(workId: string) {
   return activeWorkRuns.get(workId)?.promise ?? null;
+}
+
+export function cancelBackgroundWorkRun(workId: string) {
+  const entry = activeWorkRuns.get(workId);
+  if (!entry) return false;
+  entry.controller.abort();
+  entry.snapshot.status = "error";
+  entry.snapshot.error = "任务已取消";
+  return true;
 }
 
 export async function waitForBackgroundWorkRunStart(workId: string, timeoutMs = 3000) {
@@ -80,12 +90,18 @@ export function startBackgroundWorkRun(input: {
   quotaCost: number;
   existingRunId?: string | null;
   retryAttempt?: number;
+  usageMetadata?: Record<string, unknown>;
+  signal?: AbortSignal;
+  shouldCommit?: () => Promise<boolean>;
 }) {
   const existing = activeWorkRuns.get(input.workId);
   if (existing?.snapshot.status === "running") return existing.promise;
   if (existing) activeWorkRuns.delete(input.workId);
 
   const retryAttempt = input.retryAttempt ?? 0;
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort();
+  input.signal?.addEventListener("abort", abortFromParent, { once: true });
   const listeners = new Set<(event: WorkRunEvent) => void>();
   const initialProgress: Extract<WorkRunEvent, { type: "progress" }>[] = input.slug === "traffic-copy"
     ? [{ type: "progress", ...TRAFFIC_COPY_INITIAL_PROGRESS }]
@@ -143,15 +159,17 @@ export function startBackgroundWorkRun(input: {
   const task = persistInitialProgress
     .then(() => runBackgroundWorkAttempt({
       ...input,
+      signal: controller.signal,
       retryAttempt,
       onEvent: emit,
     }))
     .then(() => undefined)
     .finally(() => {
+      input.signal?.removeEventListener("abort", abortFromParent);
       activeWorkRuns.delete(input.workId);
     });
 
-  activeWorkRuns.set(input.workId, { promise: task, listeners, snapshot });
+  activeWorkRuns.set(input.workId, { promise: task, listeners, snapshot, controller });
   return task;
 }
 
@@ -163,6 +181,9 @@ export function ensureBackgroundWorkRun(input: {
   quotaCost?: number;
   existingRunId?: string | null;
   retryAttempt?: number;
+  usageMetadata?: Record<string, unknown>;
+  signal?: AbortSignal;
+  shouldCommit?: () => Promise<boolean>;
 }) {
   if (activeWorkRuns.has(input.workId)) {
     return activeWorkRuns.get(input.workId)?.promise ?? Promise.resolve();
@@ -176,6 +197,9 @@ export function ensureBackgroundWorkRun(input: {
     quotaCost: input.quotaCost ?? 0,
     existingRunId: input.existingRunId ?? null,
     retryAttempt: input.retryAttempt ?? 0,
+    usageMetadata: input.usageMetadata,
+    signal: input.signal,
+    shouldCommit: input.shouldCommit,
   });
 }
 
@@ -191,6 +215,9 @@ async function runBackgroundWorkAttempt(input: {
   quotaCost: number;
   existingRunId?: string | null;
   retryAttempt: number;
+  usageMetadata?: Record<string, unknown>;
+  signal?: AbortSignal;
+  shouldCommit?: () => Promise<boolean>;
   onEvent: (event: WorkRunEvent) => void;
 }) {
   try {
@@ -201,9 +228,13 @@ async function runBackgroundWorkAttempt(input: {
       workId: input.workId,
       quotaCost: input.quotaCost,
       existingRunId: input.existingRunId ?? null,
+      usageMetadata: input.usageMetadata,
+      signal: input.signal,
+      shouldCommit: input.shouldCommit,
       onEvent: input.onEvent,
     });
   } catch (error) {
+    if (error instanceof CancelledCreationRunError) return;
     const shouldRetry =
       error instanceof RetryableCreationRunError &&
       shouldRetryCreationError(error, input.retryAttempt, MAX_BACKGROUND_RETRIES);

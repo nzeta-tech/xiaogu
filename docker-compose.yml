@@ -4,12 +4,17 @@ services:
       context: .
       target: local-agent
     ports:
-      - "3000:3000"
+      # Keep the Docker scheduler available without colliding with the usual
+      # local Next development server on port 3000. Workers use app:3000
+      # inside the Compose network; set APP_HOST_PORT=3000 when no dev server
+      # is running and direct host access to this container is desired.
+      - "${APP_HOST_PORT:-3001}:3000"
       - "${VNC_BIND_ADDRESS:-127.0.0.1}:${VNC_HOST_PORT:-6081}:6080"
       - "${WERSS_BIND_ADDRESS:-127.0.0.1}:${WERSS_HOST_PORT:-8002}:8001"
       - "${WECHATSOGOU_BIND_ADDRESS:-127.0.0.1}:${WECHATSOGOU_HOST_PORT:-8011}:8010"
     env_file:
       - .env
+      - .env.local
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,6 +32,7 @@ services:
       REDIS_URL: redis://redis:6379
       LOCAL_AGENT_ENABLED: ${LOCAL_AGENT_ENABLED:-1}
       LOCAL_AGENT_TOKEN: ${LOCAL_AGENT_TOKEN:-xiaogu-local-agent-development-token}
+      DIGITAL_HUMAN_LOCAL_STORAGE_DIR: /data/digital-human-media
       LOCAL_AGENT_EXECUTOR: "1"
       VIRAL_INSPECT_OPENAI_API_BASE: ${VIRAL_INSPECT_OPENAI_API_BASE:-https://api.openai.com/v1}
       VIRAL_INSPECT_OPENAI_API_KEY: ${VIRAL_INSPECT_OPENAI_API_KEY:-}
@@ -104,6 +110,7 @@ services:
       VIRAL_CREATOR_REFRESH_MAX_WORKS: ${VIRAL_CREATOR_REFRESH_MAX_WORKS:-10}
       VIRAL_CREATOR_TARGET_PER_PLATFORM: ${VIRAL_CREATOR_TARGET_PER_PLATFORM:-100}
       VIRAL_CREATOR_DISCOVERY_INTERVAL_MS: ${VIRAL_CREATOR_DISCOVERY_INTERVAL_MS:-86400000}
+      VIRAL_CREATOR_PLATFORM_TIMEOUT_MS: ${VIRAL_CREATOR_PLATFORM_TIMEOUT_MS:-90000}
       VIRAL_CREATOR_DISCOVERY_QUERIES: ${VIRAL_CREATOR_DISCOVERY_QUERIES:-}
       VIRAL_SOGOU_ACCOUNT_SEARCH_MAX_PAGES: ${VIRAL_SOGOU_ACCOUNT_SEARCH_MAX_PAGES:-2}
     volumes:
@@ -115,6 +122,8 @@ services:
       - viral_media:/tmp/xiaogu-viral-media
       - wx_channel_data:/wx-channel:ro
       - werss_data:/opt/werss/data
+      - "${DIGITAL_HUMAN_LOCAL_STORAGE_HOST_DIR:-./storage/digital-human}:/data/digital-human-media"
+      - ./research/provider-scene-catalog:/xiaogu/research/provider-scene-catalog:ro
 
   local-agent:
     build:
@@ -123,12 +132,62 @@ services:
     env_file:
       - .env
     environment:
-      LOCAL_AGENT_BASE_URL: http://app:3000
-      LOCAL_AGENT_EXECUTOR_URL: http://app:3000
-      LOCAL_AGENT_BROWSER_HEALTH_URL: http://app:3000/api/internal/local-agent/executor-health
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/insurance_content_agent
+      REDIS_URL: redis://redis:6379
+      LOCAL_AGENT_RUNNER: "1"
+      LOCAL_AGENT_EXECUTOR: "1"
+      # This image starts its own Next server. Keeping queue traffic on loopback
+      # makes worker restarts independent of an optional host dev server.
+      LOCAL_AGENT_BASE_URL: http://127.0.0.1:3000
+      LOCAL_AGENT_EXECUTOR_URL: http://127.0.0.1:3000
+      LOCAL_AGENT_EXECUTOR_HEALTH_URL: http://127.0.0.1:3000/login
+      LOCAL_AGENT_BROWSER_HEALTH_URL: http://127.0.0.1:9222/json/version
+      VIRAL_XHS_BROWSER_ENABLED: "0"
+      VIRAL_SOGOU_BROWSER_ENABLED: "0"
+      VIRAL_WECHAT_MP_DISCOVERY_ENABLED: "0"
+      VIRAL_WERSS_ENABLED: "0"
+      VIRAL_WECHATSOGOU_ENABLED: "0"
+      WERSS_ENABLED: "0"
       LOCAL_AGENT_TOKEN: ${LOCAL_AGENT_TOKEN:-xiaogu-local-agent-development-token}
       LOCAL_AGENT_ID: xiaogu-local-compose
+      LOCAL_AGENT_CAPABILITIES: source.inspect,xiaogu.video.compose
+      # Long 视频号视频的下载与 CPU 转写可能超过默认 10 分钟；避免有效
+      # 任务在正常执行时因租约过期而被重复领取。
+      LOCAL_AGENT_LEASE_SECONDS: ${LOCAL_AGENT_LEASE_SECONDS:-1800}
+      LOCAL_AGENT_TASK_TIMEOUT_MS: ${LOCAL_AGENT_TASK_TIMEOUT_MS:-1800000}
+      LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS: ${LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS:-600000}
+      LOCAL_AGENT_MEDIA_UPLOAD_TIMEOUT_MS: ${LOCAL_AGENT_MEDIA_UPLOAD_TIMEOUT_MS:-1200000}
+      LOCAL_AGENT_VIDEO_TASK_TIMEOUT_MS: ${LOCAL_AGENT_VIDEO_TASK_TIMEOUT_MS:-3600000}
+      VIRAL_TRANSCRIBE_API_BASE: http://transcriber:8000
+      VIRAL_WECHAT_DISCOVERY_API_BASE: http://wx-channel:2026
+      CONTAINER_BROWSER_CDP_PORT: 9222
+    volumes:
+      - ./scripts/local-agent.mjs:/xiaogu/scripts/local-agent.mjs:ro
+    command: ["./start-app.sh"]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+      transcriber:
+        condition: service_healthy
+      wx-channel:
+        condition: service_started
+
+  # A separate node keeps training throughput at two concurrent items while
+  # the queue continues to give interactive remix work its higher priority.
+  local-agent-training-2:
+    image: insurance-content-agent-local-agent:latest
+    env_file:
+      - .env
+    environment:
+      LOCAL_AGENT_BASE_URL: http://127.0.0.1:3000
+      LOCAL_AGENT_EXECUTOR_URL: http://127.0.0.1:3000
+      LOCAL_AGENT_BROWSER_HEALTH_URL: http://127.0.0.1:9222/json/version
+      LOCAL_AGENT_TOKEN: ${LOCAL_AGENT_TOKEN:-xiaogu-local-agent-development-token}
+      LOCAL_AGENT_ID: xiaogu-local-compose-training-2
       LOCAL_AGENT_CAPABILITIES: source.inspect
+      LOCAL_AGENT_LEASE_SECONDS: ${LOCAL_AGENT_LEASE_SECONDS:-1800}
       LOCAL_AGENT_TASK_TIMEOUT_MS: ${LOCAL_AGENT_TASK_TIMEOUT_MS:-1800000}
       LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS: ${LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS:-600000}
       VIRAL_TRANSCRIBE_API_BASE: http://transcriber:8000
@@ -192,10 +251,15 @@ services:
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_MAX_UPLOAD_BYTES: ${WHISPER_MAX_UPLOAD_BYTES:-104857600}
+      WHISPER_STREAM_HEARTBEAT_SECONDS: ${WHISPER_STREAM_HEARTBEAT_SECONDS:-10}
+      WHISPER_SENTENCE_PAUSE_SECONDS: ${WHISPER_SENTENCE_PAUSE_SECONDS:-0.55}
+      WHISPER_PARAGRAPH_PAUSE_SECONDS: ${WHISPER_PARAGRAPH_PAUSE_SECONDS:-1.2}
+      WHISPER_MAX_TRANSCRIPT_CHARS: ${WHISPER_MAX_TRANSCRIPT_CHARS:-12000}
     ports:
       - "127.0.0.1:${VIRAL_TRANSCRIBER_PORT:-8000}:8000"
     volumes:
       - whisper_models:/models
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s

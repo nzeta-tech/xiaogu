@@ -22,6 +22,48 @@ export type PreparedViralItem = {
   item: ViralExample;
 };
 
+export type CreatorPoolStatus = "candidate" | "active" | "watchlist" | "rejected" | "archived";
+export type CreatorTier = "S" | "A" | "potential";
+
+export type CreatorPoolRefreshCandidate = {
+  id: string;
+  platform: string;
+  platform_creator_key: string | null;
+  display_name: string;
+  profile_url: string | null;
+  pool_status: CreatorPoolStatus;
+  tier: CreatorTier | null;
+  creator_type: "personal" | "institution" | "unknown";
+  quality_score: number;
+  vertical_score: number;
+  professional_score: number;
+  activity_score: number;
+  risk_level: "low" | "medium" | "high";
+  next_refresh_at: string | null;
+};
+
+/**
+ * Cross-platform refresh queue. Platform-specific collectors only need to
+ * consume their own rows; the author-pool lifecycle remains platform-neutral.
+ */
+export async function listCreatorPoolRefreshCandidates(platform: string, limit = 50) {
+  const result = await query<CreatorPoolRefreshCandidate>(
+    `select id, platform, platform_creator_key, display_name, profile_url, pool_status, tier,
+            creator_type, quality_score, vertical_score, professional_score, activity_score,
+            risk_level, next_refresh_at
+       from viral_creators
+      where platform = $1
+        and status = 'active'
+        and pool_status in ('active', 'watchlist')
+        and (next_refresh_at is null or next_refresh_at <= now())
+      order by case tier when 'S' then 0 when 'A' then 1 when 'potential' then 2 else 3 end,
+               next_refresh_at nulls first, quality_score desc, last_discovered_at desc
+      limit $2`,
+    [platform, Math.min(Math.max(limit, 1), 100)],
+  );
+  return result.rows;
+}
+
 export async function createViralDataRun(triggerType: string) {
   const result = await query<ViralDataRun>(
     `insert into viral_data_runs(trigger_type, status)
@@ -197,14 +239,33 @@ export async function publishViralDataRun(runId: string, preparedItems: Prepared
     }
 
     if (refreshedPlatforms.length > 0) {
-      await client.query(
-        `update viral_contents
-         set status = 'offline', updated_at = now()
-         where source_type = 'automatic'
-           and platform = any($1::text[])
-           and data_run_id is distinct from $2::uuid`,
-        [refreshedPlatforms, runId],
-      );
+      // 抖音由多个独立榜单供给。不能因为 TopHub 本轮成功而把
+      // Valuefocus 的上一批成果当作“消失”而下线；只替换同一来源。
+      const douyinSourceTags = [...new Set(preparedItems
+        .filter(({ item }) => item.platform === "抖音")
+        .flatMap(({ item }) => item.tags.filter((tag) => tag === "TopHub" || tag === "Valuefocus")))];
+      const otherPlatforms = refreshedPlatforms.filter((platform) => platform !== "抖音");
+      if (otherPlatforms.length > 0) {
+        await client.query(
+          `update viral_contents
+             set status = 'offline', updated_at = now()
+           where source_type = 'automatic'
+             and platform = any($1::text[])
+             and data_run_id is distinct from $2::uuid`,
+          [otherPlatforms, runId],
+        );
+      }
+      if (refreshedPlatforms.includes("抖音") && douyinSourceTags.length > 0) {
+        await client.query(
+          `update viral_contents
+             set status = 'offline', updated_at = now()
+           where source_type = 'automatic'
+             and platform = '抖音'
+             and tags ?| $1::text[]
+             and data_run_id is distinct from $2::uuid`,
+          [douyinSourceTags, runId],
+        );
+      }
     }
 
     const countResult = await client.query<{ count: string }>(
@@ -242,6 +303,25 @@ export async function listTopDouyinDeepVerificationCandidates(runId: string, lim
      order by vc.viral_score desc,vc.fetched_at desc
      limit $2`,
     [runId, Math.min(Math.max(limit, 1), 10)],
+  );
+  return result.rows;
+}
+
+/** Published works stay invisible to the creator board until the local Agent
+ * has persisted a usable cover. This is the hand-off from candidate discovery
+ * to the media-enrichment queue. */
+export async function listViralCoverEnrichmentCandidates(runId: string, limit: number) {
+  const result = await query<{ id: string; source_url: string; platform: string }>(
+    `select vc.id,vc.source_url,vc.platform
+       from viral_contents vc
+       left join viral_content_cover_assets cover on cover.viral_content_id=vc.id
+      where vc.data_run_id=$1
+        and vc.source_type='automatic'
+        and vc.status='published'
+        and (cover.viral_content_id is null or octet_length(cover.image_data) < 1024)
+      order by vc.viral_score desc,vc.fetched_at desc
+      limit $2`,
+    [runId, Math.min(Math.max(limit, 1), 50)],
   );
   return result.rows;
 }

@@ -346,14 +346,14 @@ export function DraftsPageClient() {
 
       {data.pagination.hasMore ? <button className="creationHistoryLoadMore" type="button" disabled={loadingMore} onClick={() => void loadWorks(data.pagination.page + 1, true)}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
 
-      {noteItem ? (
+      {noteItem ? createPortal(
         <div className="creationHistoryModalBackdrop" role="presentation" onMouseDown={() => setNoteItem(null)}>
           <section className="creationHistoryNoteModal" role="dialog" aria-modal="true" aria-labelledby="note-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
             <header><div><strong id="note-dialog-title">作品备注</strong><span>{formatWorkTitle(noteItem)}</span></div><button type="button" aria-label="关闭" onClick={() => setNoteItem(null)}>×</button></header>
             <textarea autoFocus maxLength={500} value={noteValue} onChange={(event) => setNoteValue(event.target.value)} placeholder="记录发布渠道、修改建议或后续计划..." />
             <footer><span>{noteValue.length}/500</span><button type="button" onClick={() => setNoteItem(null)}>取消</button><button className="primary" type="button" onClick={() => void saveNote()}>保存备注</button></footer>
           </section>
-        </div>
+        </div>, document.body
       ) : null}
 
       {undoItem ? <div className="creationHistoryToast" role="status"><span>作品已归档</span><button type="button" onClick={() => void undoArchive()}>撤销</button><button type="button" aria-label="关闭提示" onClick={() => setUndoItem(null)}>×</button></div> : null}

@@ -1,7 +1,10 @@
 import { inferHotTopicCategory } from "./topics/rules";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { tryListPublishedViralContents } from "./db/repositories";
 import { getLatestViralDataRun } from "./viral-data-repository";
 import { inspectDouyinPublicMetadata } from "./creation/douyin-download";
+import { parseTopHubDouyinRankingHtml, parseValuefocusDouyinPayload } from "./viral-douyin-ranking";
 import { inspectWechatChannelsWithContainerBrowser } from "./creation/wechat-channels-container";
 import { parseSogouAccountResults } from "./viral-creator-sources";
 import { getCachedLinkRemixSourceUrls, normalizeLinkRemixCacheUrl } from "./creation/link-remix-cache";
@@ -105,6 +108,9 @@ const defaultContentMaxAgeDays = 30;
 const defaultWechatChannelDiscoveryQueries = ["保险", "保险理赔", "健康告知", "养老规划"];
 const douyinHotSearchApiBase = "https://aweme.snssdk.com/aweme/v1/hot/search";
 const douyinHotTopicPattern = /保险|医保|医疗|养老|退休|健康|疾病|医院|社保|家庭|收入|裁员|台风|暴雨|事故|车祸|理赔|灾害/;
+const topHubDouyinVideoUrl = "https://tophub.today/n/2me3N3xdwj";
+const valuefocusDouyinTrendsApi = "https://base44.app/api/apps/6a297a9d7ba7cdb27a8bfef0/functions/douyinTrends";
+const execFileAsync = promisify(execFile);
 const scaledCreatorDiscoveryQueries = [
   "保险", "保险理赔", "健康告知", "医疗险", "重疾险", "寿险", "养老规划", "年金险",
   "家庭保障", "保险经纪人", "资产配置", "家庭理财", "基金投资", "个人理财", "退休规划", "财务规划",
@@ -145,7 +151,9 @@ const viralPlatformSearches: NativeSearchConfig[] = [
 
 export async function getViralExamples(options: { refresh?: boolean } = {}) {
   void options;
-  const rows = await tryListPublishedViralContents(24);
+  // 前端按“更多爆款”逐行展开，接口不能在全平台混排阶段提前截断，
+  // 否则视频号会占用总名额，导致抖音已发布内容（如 TopHub）看不到。
+  const rows = await tryListPublishedViralContents(100);
   const cachedUrls = await getCachedLinkRemixSourceUrls(rows.map((row) => row.source_url));
   const items = rows.map((item) => databaseRowToExample(item, cachedUrls));
   const latestSuccessfulRun = await getLatestViralDataRun("succeeded").catch(() => null);
@@ -165,7 +173,11 @@ function databaseRowToExample(row: Awaited<ReturnType<typeof tryListPublishedVir
     id: row.id, title: row.title, platform: row.platform as ViralExample["platform"],
     type: row.example_type === "爆文" || row.content_type === "爆文" ? "爆文" : "短视频", sourceUrl: row.source_url,
     sourceTitle: row.source_title, authorName: row.source_author || undefined,
-    excerpt: row.summary || undefined, thumbnailUrl: row.has_local_cover ? `/api/viral-covers/${row.id}` : row.thumbnail_url ?? undefined, mediaUrl: row.media_url ?? undefined,
+    excerpt: row.summary || undefined,
+    // Version the local image URL by its own cache time. A failed request made
+    // before background cover enrichment must not remain a grey browser cache.
+    thumbnailUrl: row.has_local_cover ? `/api/viral-covers/${row.id}?v=${encodeURIComponent(row.cover_updated_at ?? row.updated_at)}` : row.thumbnail_url ?? undefined,
+    mediaUrl: row.media_url ?? undefined,
     embedUrl: row.embed_url ?? undefined, articleBody: row.article_body || undefined,
     fetchedAt: row.fetched_at ?? row.updated_at, publishedAt: row.publish_at ?? undefined, metricLabel: row.metric_label,
     metricValue: row.metric_value ?? undefined, metricUnit: row.metric_unit || undefined, category: row.category,
@@ -251,13 +263,18 @@ export async function discoverViralCreatorsAtScale(options: { refresh?: boolean;
   const configuredQueries = (process.env.VIRAL_CREATOR_DISCOVERY_QUERIES ?? "")
     .split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean);
   const queries = [...new Set(configuredQueries.length > 0 ? configuredQueries : scaledCreatorDiscoveryQueries)].slice(0, 40);
+  const discoveryTimeoutMs = boundedInteger(process.env.VIRAL_CREATOR_PLATFORM_TIMEOUT_MS, 90_000, 15_000, 300_000);
   const searchable = viralPlatformSearches
     .filter((config) => config.platform !== "公众号")
-    .map((config) => collectSearchCreatorCandidates(config, queries, targetPerPlatform, Boolean(options.refresh)));
+    .map((config) => withCreatorDiscoveryTimeout(
+      collectSearchCreatorCandidates(config, queries, targetPerPlatform, Boolean(options.refresh)),
+      config.platform,
+      discoveryTimeoutMs,
+    ));
   const results = await Promise.all([
     ...searchable,
-    collectWechatOfficialAccountCreatorCandidates(queries, targetPerPlatform, Boolean(options.refresh)),
-    collectWechatChannelCreatorCandidates(queries, targetPerPlatform),
+    withCreatorDiscoveryTimeout(collectWechatOfficialAccountCreatorCandidates(queries, targetPerPlatform, Boolean(options.refresh)), "公众号", discoveryTimeoutMs),
+    withCreatorDiscoveryTimeout(collectWechatChannelCreatorCandidates(queries, targetPerPlatform), "视频号", discoveryTimeoutMs),
   ]);
   const creators = deduplicateCreatorCandidates(results.flatMap((result) => result.creators));
   await enrichCreatorProfiles(creators);
@@ -266,6 +283,28 @@ export async function discoverViralCreatorsAtScale(options: { refresh?: boolean;
     diagnostics: results.map((result) => result.diagnostics),
     targetPerPlatform,
   };
+}
+
+/** A stalled platform must not prevent other platform pools from refreshing. */
+async function withCreatorDiscoveryTimeout<T extends { creators: ViralCreatorCandidate[]; diagnostics: ViralCreatorDiscoveryDiagnostics }>(
+  discovery: Promise<T>,
+  platform: ViralExample["platform"],
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      discovery,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve({
+          creators: [],
+          diagnostics: { platform, queryCount: 0, rawResultCount: 0, creatorCount: 0, profileCount: 0, errors: 1 },
+        } as unknown as T), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function collectWechatOfficialAccountCreatorCandidates(queries: string[], target: number, refresh: boolean) {
@@ -507,12 +546,17 @@ function parseDouyinRenderedCreators(html: string, query: string): ViralCreatorC
     const creatorKey = decodeHtml(match[2]);
     if (seen.has(creatorKey)) continue;
     const card = match[3];
+    // The old card used a <p> for the display name. The current search UI
+    // renders a div/span card instead, where the first text before either the
+    // verification badge or the Follow control is the account name.
     const displayMarkup = card.match(/<p\b[^>]*>([\s\S]*?)<\/p>/i)?.[1];
-    const displayName = cleanText(stripMarkup(decodeHtml(displayMarkup ?? "")));
+    const cardText = cleanText(stripMarkup(decodeHtml(card)));
+    const displayName = cleanText(stripMarkup(decodeHtml(displayMarkup ?? "")))
+      || cleanText(cardText.split(/\s*(?:认证徽章|关注)\s*/)[0] ?? "");
     if (!displayName) continue;
     let profileUrl: string | undefined;
     try { profileUrl = new URL(decodeHtml(match[1]), "https://www.douyin.com").toString().split("?")[0]; } catch { profileUrl = undefined; }
-    const text = cleanText(stripMarkup(decodeHtml(card)));
+    const text = cardText;
     const followerText = text.match(/([\d.]+)\s*万?粉丝/)?.[0] ?? "";
     const followerCount = parseChineseMetric(followerText);
     results.push({
@@ -619,7 +663,11 @@ export async function discoverPlatformViralData(options: { refresh?: boolean } =
     viralPlatformSearches.find((config) => config.platform === "公众号")?.queries ?? [],
     boundedInteger(process.env.VIRAL_WECHAT_PROVIDER_ARTICLE_LIMIT, 30, 3, 100),
   );
-  const candidates = (await Promise.all(viralPlatformSearches.flatMap((config) => config.queries.map(async (query, queryIndex) => {
+  // Keep the previous Douyin search warm as a safety net. Its results are only
+  // published when both preferred finance rankings return no usable entries.
+  const legacyDouyinFallbackEnabled = process.env.VIRAL_DOUYIN_LEGACY_FALLBACK_ENABLED !== "0";
+  const contentSearches = viralPlatformSearches.filter((config) => config.platform !== "抖音" || legacyDouyinFallbackEnabled);
+  const candidates = (await Promise.all(contentSearches.flatMap((config) => config.queries.map(async (query, queryIndex) => {
     try {
       const source = config.platform === "公众号"
         ? await fetchSogouArticleSearchPage(config.searchUrl(query), options.refresh)
@@ -717,14 +765,20 @@ export async function discoverPlatformViralData(options: { refresh?: boolean } =
       return counts;
     }, {}),
   });
-  const douyinHotItems = nativeItems.some((item) => item.platform === "抖音") ? [] : await discoverDouyinHotExamples();
+  const externalDouyinItems = await discoverExternalDouyinExamples();
+  const publishableNativeItems = externalDouyinItems.length > 0
+    ? nativeItems.filter((item) => item.platform !== "抖音")
+    : nativeItems;
+  const publishableSelected = externalDouyinItems.length > 0
+    ? selected.filter((item) => item.config.platform !== "抖音")
+    : selected;
   const providerArticles = await providerArticlePromise;
   const providerWechatItems = providerArticles.items.map(wechatProviderArticleToExample);
   const wechatChannelItems = await discoverAuthorizedWechatChannelExamples();
   const wechatChannelSearchItems = await discoverWechatChannelSearchExamples();
-  const directlyDiscoveredItems = [...nativeItems, ...providerWechatItems, ...douyinHotItems, ...wechatChannelItems, ...wechatChannelSearchItems];
+  const directlyDiscoveredItems = [...publishableNativeItems, ...externalDouyinItems, ...providerWechatItems, ...wechatChannelItems, ...wechatChannelSearchItems];
   const initialWorkCandidates = deduplicateWorkCandidates([
-    ...selected.map(({ config, query, result }) => ({
+    ...publishableSelected.map(({ config, query, result }) => ({
       platform: config.platform,
       sourceUrl: result.url,
       title: result.title,
@@ -741,6 +795,88 @@ export async function discoverPlatformViralData(options: { refresh?: boolean } =
   const items = deduplicateViralExamples([...directlyDiscoveredItems, ...creatorProfileItems]);
   const workCandidates = deduplicateWorkCandidates([...initialWorkCandidates, ...creatorProfileItems.map(viralExampleToCandidate)]);
   return { items, creators, candidates: workCandidates };
+}
+
+/** Preferred Douyin finance rankings. Each source can be disabled without a
+ * deployment; when both are empty, discoverPlatformViralData keeps the legacy
+ * platform search results as a fallback. */
+async function discoverExternalDouyinExamples(): Promise<ViralExample[]> {
+  const [valuefocus, topHub] = await Promise.all([
+    process.env.VIRAL_DOUYIN_VALUEFOCUS_ENABLED === "0" ? Promise.resolve([]) : discoverValuefocusDouyinExamples(),
+    process.env.VIRAL_DOUYIN_TOPHUB_ENABLED === "0" ? Promise.resolve([]) : discoverTopHubDouyinExamples(),
+  ]);
+  return deduplicateViralExamples([...valuefocus, ...topHub]).slice(0, 100);
+}
+
+async function discoverValuefocusDouyinExamples(): Promise<ViralExample[]> {
+  try {
+    return parseValuefocusDouyinPayload(await fetchValuefocusDouyinPayload());
+  } catch (error) {
+    console.warn("[viral-examples] Valuefocus Douyin source unavailable", error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+async function fetchValuefocusDouyinPayload(): Promise<unknown> {
+  try {
+    const response = await fetch(valuefocusDouyinTrendsApi, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  } catch (fetchError) {
+    // On some local Node runtimes Cloudflare's connection can time out while
+    // the system TLS client succeeds. Both requests read the same public API;
+    // use this fallback only for that transport failure.
+    try {
+      const { stdout } = await execFileAsync("curl", [
+        "--fail", "--silent", "--show-error", "--max-time", "25",
+        "-X", "POST", valuefocusDouyinTrendsApi,
+        "-H", "content-type: application/json", "--data", "{}",
+      ], { maxBuffer: 1_000_000 });
+      return JSON.parse(stdout) as unknown;
+    } catch {
+      throw fetchError;
+    }
+  }
+}
+
+async function discoverTopHubDouyinExamples(): Promise<ViralExample[]> {
+  try {
+    return parseTopHubDouyinRankingHtml(await fetchTopHubDouyinRankingHtml());
+  } catch (error) {
+    console.warn("[viral-examples] TopHub Douyin source unavailable", error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+async function fetchTopHubDouyinRankingHtml() {
+  // TopHub responds 503 to bot-like clients. A normal browser identity reads
+  // the same public page that creators see. Some local Node/Undici paths also
+  // intermittently time out at connection setup, so use curl as a transport
+  // fallback rather than treating the ranking as empty.
+  const headers = {
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/139 Safari/537.36",
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  };
+  try {
+    const response = await fetch(topHubDouyinVideoUrl, { headers, signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } catch (fetchError) {
+    try {
+      const { stdout } = await execFileAsync("curl", [
+        "--fail", "--silent", "--show-error", "--compressed", "--max-time", "25",
+        "-A", headers["user-agent"], "-H", `accept: ${headers.accept}`, topHubDouyinVideoUrl,
+      ], { maxBuffer: 2_000_000 });
+      return stdout;
+    } catch {
+      throw fetchError;
+    }
+  }
 }
 
 function wechatProviderArticleToExample(article: WechatProviderArticle, index: number): ViralExample {
@@ -1555,7 +1691,12 @@ async function fetchSearchPageWithCdpUnlocked(url: string, douyinCreatorMode = f
         if (!douyinQuery && !xiaohongshuQuery && !sogouQuery && target.id) void fetch(`${base}/json/close/${target.id}`).catch(() => undefined);
         resolve(value);
       };
-      const timer = setTimeout(() => finish(null), Number(process.env.VIRAL_SEARCH_BROWSER_TIMEOUT_MS ?? 12000));
+      const configuredTimeout = Number(process.env.VIRAL_SEARCH_BROWSER_TIMEOUT_MS ?? 12000);
+      // User-search pages need an initial navigation before their input is
+      // interactive. Give that sequence enough time without slowing ordinary
+      // content searches.
+      const timeoutMs = douyinCreatorMode ? Math.max(configuredTimeout, 18_000) : configuredTimeout;
+      const timer = setTimeout(() => finish(null), timeoutMs);
       socket.addEventListener("open", () => {
         socket.send(JSON.stringify({ id: ++commandId, method: "Page.enable" }));
         if (douyinQuery && !douyinCreatorMode) {
@@ -1568,16 +1709,19 @@ async function fetchSearchPageWithCdpUnlocked(url: string, douyinCreatorMode = f
           })), 2_000);
         }
         if (douyinQuery && douyinCreatorMode) {
+          // Reusing one trusted tab preserves the logged-in browser session,
+          // but requires explicit navigation for every new keyword.
+          socket.send(JSON.stringify({ id: ++commandId, method: "Page.navigate", params: { url } }));
           setTimeout(() => socket.send(JSON.stringify({
             id: ++commandId,
             method: "Runtime.evaluate",
             params: { expression: buildDouyinSearchTrigger(douyinQuery), returnByValue: true },
-          })), 600);
+          })), 3_000);
           setTimeout(() => socket.send(JSON.stringify({
             id: ++commandId,
             method: "Runtime.evaluate",
             params: { expression: "[...document.querySelectorAll('span,div')].find((element) => element.children.length === 0 && element.textContent?.trim() === '用户')?.click()", returnByValue: true },
-          })), 3_000);
+          })), 6_000);
         }
         if (xiaohongshuQuery) {
           // A direct search URL triggers security verification even with a
@@ -1602,7 +1746,7 @@ async function fetchSearchPageWithCdpUnlocked(url: string, douyinCreatorMode = f
           htmlCommandId = ++commandId;
           socket.send(JSON.stringify({ id: htmlCommandId, method: "Runtime.evaluate", params: { expression: "document.documentElement.outerHTML", returnByValue: true } }));
         };
-        setTimeout(requestRenderedHtml, douyinCreatorMode ? 6_000 : xiaohongshuQuery ? 5_500 : sogouQuery ? 5_000 : 4_500);
+        setTimeout(requestRenderedHtml, douyinCreatorMode ? 11_000 : xiaohongshuQuery ? 5_500 : sogouQuery ? 5_000 : 4_500);
       });
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: { requestId?: string; response?: { url?: string } }; result?: { result?: { value?: string }; body?: string } };

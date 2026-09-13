@@ -13,6 +13,11 @@ launchctl bootout "$service" 2>/dev/null || true
 install -m 755 "$repo_path/scripts/run-production-ppt-agent.sh" "$agent_bin/run-production-ppt-agent.sh"
 install -m 644 "$repo_path/scripts/local-agent.mjs" "$agent_bin/ppt-local-agent.mjs"
 install -m 644 "$plist_source" "$plist_target"
-launchctl bootstrap "gui/$(id -u)" "$plist_target"
+if ! launchctl bootstrap "gui/$(id -u)" "$plist_target"; then
+  sleep 2
+  launchctl bootout "$service" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$plist_target"
+fi
+launchctl enable "$service"
 launchctl kickstart -k "$service"
 echo "[xiaogu-ppt-agent] launchd service installed"

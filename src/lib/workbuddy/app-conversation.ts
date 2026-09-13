@@ -2,8 +2,15 @@ import type { CreationApp, CreationField, CreationFieldCondition } from "../apps
 import type { CreationFieldValue } from "../creation/output.ts";
 import { remixCapabilityOptions } from "../creation/capabilities.ts";
 import { getRemixCapabilitySettings } from "../creation/remix-capability-registry.ts";
+import { createCreationAppInitialValues } from "../creation/app-input-values.ts";
+import { isCreationFieldVisible } from "../apps/field-interaction.ts";
+import { workflowContractForApp } from "../apps/workflow-contract.ts";
+import { isOperationalOnlyMaterial, stripOperationalMaterial } from "./material-quality.ts";
 
 const PARAMETER_MARKER = "[应用参数:";
+const MATERIAL_FIELD_PATTERN = /^(source|topic|draft|article|content|prompt|material|special_requirements)/i;
+
+type HandoffObservation = { capabilityId: string; status: string; summary: string };
 
 export type ConversationAppField = {
   id: string;
@@ -24,20 +31,184 @@ export type ConversationAppField = {
   initialValue?: CreationFieldValue;
 };
 
+export function resolveConversationFormState(
+  fields: ConversationAppField[],
+  values: Record<string, CreationFieldValue>,
+  uploading = false,
+) {
+  const eligibleFields = fields.filter(field => field.presentation === "data" || isCreationFieldVisible(field, values));
+  const missingFields = eligibleFields.filter(field => field.required && (Array.isArray(values[field.id]) ? !values[field.id].length : !String(values[field.id] ?? "").trim()));
+  return { eligibleFields, missingFields, submitDisabled: uploading };
+}
+
 export function parseConversationAppParameters(text: string, appSlug: string) {
+  return parseConversationAppParametersAtDepth(text, appSlug, 0);
+}
+
+function parseConversationAppParametersAtDepth(text: string, appSlug: string, depth: number): Record<string, CreationFieldValue> | null {
   const marker = `${PARAMETER_MARKER}${appSlug}]`;
-  const start = text.lastIndexOf(marker);
-  if (start < 0) return null;
-  const line = text.slice(start + marker.length).trimStart().split("\n", 1)[0]?.trim() ?? "";
-  if (!line) return null;
-  try {
-    const parsed = JSON.parse(line.startsWith("{") ? line : decodeURIComponent(line)) as Record<string, CreationFieldValue>;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch { return null; }
+  let before = text.length;
+  while (before > 0) {
+    const start = text.lastIndexOf(marker, before - 1);
+    if (start < 0) return null;
+    const line = text.slice(start + marker.length).trimStart().split("\n", 1)[0]?.trim() ?? "";
+    if (line) {
+      try {
+        const parsed = JSON.parse(line.startsWith("{") ? line : decodeURIComponent(line)) as Record<string, CreationFieldValue>;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return depth >= 4 ? parsed : unwrapNestedAppParameters(parsed, appSlug, depth);
+      } catch { /* A marker may occur inside an escaped source value; keep scanning backwards. */ }
+    }
+    before = start;
+  }
+  return null;
+}
+
+function unwrapNestedAppParameters(parameters: Record<string, CreationFieldValue>, appSlug: string, depth: number) {
+  const normalized = { ...parameters };
+  for (const [id, value] of Object.entries(parameters)) {
+    if (!/^(source|topic|draft|article|content|prompt|material)/i.test(id) || typeof value !== "string" || !value.includes(PARAMETER_MARKER)) continue;
+    const nested = parseConversationAppParametersAtDepth(value, appSlug, depth + 1);
+    if (!nested) continue;
+    const replacement = typeof nested[id] === "string" && nested[id].trim()
+      ? nested[id]
+      : Object.entries(nested).find(([nestedId, nestedValue]) => /^(source|topic|draft|article|content|prompt|material)/i.test(nestedId) && typeof nestedValue === "string" && nestedValue.trim())?.[1];
+    if (typeof replacement === "string") normalized[id] = replacement;
+  }
+  return normalized;
+}
+
+/**
+ * Builds the durable material passed across the Agent -> confirmation form -> app
+ * boundary. Tool observations live only for one Agent runtime, so the form must
+ * carry the useful evidence itself instead of carrying a planner instruction.
+ */
+export function buildConversationAppHandoffSource(input: {
+  appSlug: string;
+  instruction: string;
+  currentRequest: string;
+  objective: string;
+  observations: HandoffObservation[];
+  priorConversationSource?: string;
+}) {
+  const directSource = resolveConversationAppSource(input.instruction, input.currentRequest, input.objective, input.appSlug);
+  const successful = input.observations.filter(item =>
+    item.status === "success"
+    && item.summary.trim()
+    && !isOperationalOnlyMaterial(item.summary)
+    && (item.capabilityId.startsWith("agent.") || item.capabilityId.startsWith("tool.") || item.capabilityId.startsWith("app.")),
+  );
+  const hasVerifiedResearch = successful.some(item => ["agent.fast-research", "agent.deep-research"].includes(item.capabilityId));
+  const usefulObservations = successful
+    .filter(item => !(hasVerifiedResearch && item.capabilityId === "tool.hot-topic-discovery"))
+    .reverse();
+  const priorConversationSource = stripOperationalMaterial(stripConversationAppProtocols(input.priorConversationSource ?? "")).slice(0, 14000);
+  if (!usefulObservations.length && !priorConversationSource) return isOperationalOnlyMaterial(directSource) ? "" : directSource;
+
+  const evidence = usefulObservations.map((item, index) =>
+    `【已有成果${index + 1}｜${item.capabilityId}】\n${removeApplicationProtocol(item.summary)}`,
+  ).filter(item => item.trim()).join("\n\n").slice(0, 22000);
+  return [
+    priorConversationSource && `【上一轮已经确认的主题与成果（本次必须承接，不得重新选题）】\n${priorConversationSource}`,
+    evidence && `【已取得的研究、读取或上游应用成果（必须作为本次素材，不得另换主题）】\n${evidence}`,
+    `【用户本次要求】\n${removeApplicationProtocol(input.currentRequest || input.objective)}`,
+    directSource && directSource !== input.currentRequest && directSource !== input.objective
+      ? `【应用执行目标】\n${removeApplicationProtocol(directSource)}`
+      : "",
+  ].filter(Boolean).join("\n\n").slice(0, 24000);
+}
+
+export function buildPriorConversationAppSource(input: {
+  currentRequest: string;
+  activeTopic: string;
+  latestAssistantContent: string;
+  app?: CreationApp;
+}) {
+  const request = input.currentRequest.trim();
+  const referential = /(?:这个|该|上述|上面|刚才|前面|这些|刚完成(?:的)?|刚生成(?:的)?|刚写好(?:的)?|刚才完成(?:的)?)(?:话题|新闻|事件|方向|角度|内容|材料|稿子|成果|正文|文案|文章|口播|图片|视频)?/.test(request)
+    || /^(?:重新写(?:一版)?|重写|再写一版|再写一个版本|换个版本|另写一版|从头写|重新生成)(?:一下|一遍|正文|这篇|这一篇|吧)?[。！!\s]*$/.test(request);
+  if (!referential && !isGenericApplicationIntent(request, input.app)) return "";
+  const topic = stripConversationAppProtocols(input.activeTopic).trim();
+  const result = stripConversationAppProtocols(input.latestAssistantContent).trim();
+  if (result.length < 40) return "";
+  return [topic && topic !== request ? `【当前承接主题】\n${topic}` : "", `【上一轮成果】\n${result}`].filter(Boolean).join("\n\n").slice(0, 16000);
+}
+
+/** A confirmation handoff is single-use and app-scoped. Historical forms must
+ * never leak their material into a later free-form request. */
+export function resolvePendingApplicationHandoff(
+  messages: Array<{ message_type?: string; metadata_json?: Record<string, unknown> | null }>,
+  currentRequest: string,
+) {
+  const confirmedApp = currentRequest.match(/\[应用参数:([^\]]+)\]/)?.[1]?.trim();
+  if (!confirmedApp) return { instruction: "", source: "" };
+  const clarification = [...messages].reverse().find(item =>
+    item.message_type === "clarification"
+    && item.metadata_json?.reason === `app-parameters:${confirmedApp}`,
+  );
+  return {
+    instruction: typeof clarification?.metadata_json?.pendingAppInstruction === "string" ? clarification.metadata_json.pendingAppInstruction : "",
+    source: typeof clarification?.metadata_json?.pendingAppSource === "string" ? clarification.metadata_json.pendingAppSource : "",
+  };
+}
+
+/** Remove internal confirmation envelopes from material fields before billing. */
+export function sanitizeConversationAppValues(values: Record<string, CreationFieldValue>, appSlug: string) {
+  const sanitized = { ...values };
+  for (const [id, value] of Object.entries(sanitized)) {
+    if (!MATERIAL_FIELD_PATTERN.test(id) || typeof value !== "string" || !value.includes(PARAMETER_MARKER)) continue;
+    const nested = parseConversationAppParameters(value, appSlug);
+    const replacement = nested && Object.entries(nested).find(([nestedId, nestedValue]) => MATERIAL_FIELD_PATTERN.test(nestedId) && typeof nestedValue === "string" && nestedValue.trim())?.[1];
+    sanitized[id] = typeof replacement === "string" ? replacement.trim() : removeApplicationProtocol(value);
+  }
+  return sanitized;
+}
+
+function removeApplicationProtocol(value: string) {
+  if (!value.includes(PARAMETER_MARKER)) return value.trim();
+  return value.slice(0, value.indexOf(PARAMETER_MARKER))
+    .replace(/已确认(?:[“\"]?.+?[”\"]?的)?创作设置[：:]?/g, "")
+    .replace(/开始生成[。.]?/g, "")
+    .replace(/^[\s。.:：]+|[\s。.:：]+$/g, "")
+    .trim();
+}
+
+/**
+ * Keep historical chat useful as prose while removing executable form
+ * envelopes. This is intentionally app-agnostic so one application's old
+ * confirmation cannot leak into another application's source field.
+ */
+export function stripConversationAppProtocols(value: string) {
+  if (!value.includes(PARAMETER_MARKER)) return value;
+  const lines = value.split("\n");
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index].trim().startsWith(PARAMETER_MARKER)) {
+      kept.push(lines[index]);
+      continue;
+    }
+    const next = lines[index + 1]?.trim() ?? "";
+    if (next) {
+      try { JSON.parse(next.startsWith("{") ? next : decodeURIComponent(next)); index += 1; } catch { /* discard only the marker */ }
+    }
+  }
+  return kept.join("\n")
+    .replace(/已确认(?:[“"]?.+?[”"]?的)?创作设置[：:]?\s*/g, "")
+    .replace(/开始生成[。.]?\s*/g, "")
+    .trim();
 }
 
 export function hasConversationAppParameters(text: string, appSlug: string) {
   return Boolean(parseConversationAppParameters(text, appSlug));
+}
+
+export function resolveConversationAppParameters(currentMessage: string, context: string, appSlug: string) {
+  const marker = `${PARAMETER_MARKER}${appSlug}]`;
+  if (currentMessage.includes(marker)) return parseConversationAppParameters(currentMessage, appSlug);
+  // Application envelopes are single-use commands. Historical conversation
+  // context may explain the user's intent, but must never silently re-submit a
+  // form from an earlier turn (or reuse a consumed workflow/work id).
+  void context;
+  return null;
 }
 
 export function applicationNeedsConversationForm(app: CreationApp) {
@@ -64,30 +235,43 @@ export function assessApplicationReadiness(app: CreationApp, currentRequest: str
 
 export function isGenericApplicationIntent(request: string, app?: CreationApp) {
   const normalized = request.replace(/[，。！？!?、；;：:\s]/g, "").replace(/^(请|可以|麻烦)?(帮我|给我|替我)/, "");
-  if (/^(我)?(想|要|需要|打算)?(写|做|制作|生成|创作|优化|分析|整理|看|看看|诊断|弄)(一下|下)?(一|1)?(篇|个|份|条|张|套|段)?(短视频)?(口播稿?|文案|文章|公众号文章|小红书笔记|图片|海报|封面|知识卡片|PPT|幻灯片|视频|报告|方案|保单|产品|资料|直播稿|招募文案|续期提醒卡|IP定位)$/.test(normalized)) return true;
+  if (/^(我)?(想|要|需要|打算)?(写|做|制作|生成|创作|优化|分析|整理|看|看看|诊断|弄)(一下|下)?(一|1)?(篇|个|份|条|张|套|段)?(短视频)?(口播文案稿?|口播稿?|文案稿?|文章|公众号文章|小红书笔记|图片|海报|封面|知识(?:卡片|图片)|PPT|幻灯片|视频|报告|方案|保单|产品|资料|直播稿|招募文案|续期提醒卡|IP定位)$/.test(normalized)) return true;
   const appName = app?.name.replace(/[（）()·\s]/g, "");
   return Boolean(appName && new RegExp(`^(我)?(想|要|需要)?(用|使用|打开|做|制作|生成)?${escapeRegExp(appName)}$`).test(normalized));
 }
 
 export function shouldSkipTrafficTopicSelection(text: string) {
-  return /(?:题目|选题|角度)(?:已经|已|就|都)?(?:定了|确定|明确)|(?:无需|不用|不要|跳过)(?:再)?(?:分析|推荐|选择)?选题|直接(?:按这个题|根据这个题|写|生成)(?:口播|文案|正文|稿)?/.test(text);
+  const hasCompiledFocus = text.includes("【当前焦点｜必须优先承接】") || text.includes("【上一轮已经确认的主题与成果（本次必须承接，不得重新选题）】");
+  const createsFromContext = /(?:写|生成|创作|制作|输出|做成|转成).{0,18}(?:口播|文案|正文|稿|文章|脚本)/.test(text);
+  return hasCompiledFocus && createsFromContext || /(?:题目|选题|角度)(?:已经|已|就|都)?(?:定了|确定|明确)|(?:无需|不用|不要|跳过)(?:再)?(?:分析|推荐|选择)?选题|直接(?:按这个题|根据这个题|写|生成)(?:口播|文案|正文|稿)?|^(?:重新写(?:一版)?|重写|再写一版|再写一个版本|换个版本|另写一版|从头写|重新生成)(?:一下|一遍|正文|这篇|这一篇|吧)?[。！!\s]*$|(?:重新写(?:一版)?|重写|再写一版|换个版本|另写一版|从头写|重新生成(?:并优化)?).{0,50}(?:已承接|已有|上一版|原(?:来|有)|口播|正文|文案)/.test(text);
 }
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function resolveConversationAppSource(pendingInstruction: string, followup: string, objective: string) {
-  return pendingInstruction.trim() || followup.trim() || objective.trim();
+export function resolveConversationAppSource(pendingInstruction: string, followup: string, objective: string, appSlug = "") {
+  for (const candidate of [pendingInstruction, followup]) {
+    const parameters = appSlug ? parseConversationAppParameters(candidate, appSlug) : null;
+    if (parameters) {
+      const material = Object.entries(parameters).find(([id, value]) => MATERIAL_FIELD_PATTERN.test(id) && typeof value === "string" && value.trim());
+      if (material) return String(material[1]).trim();
+    }
+    const plain = candidate.trim();
+    if (plain && !plain.includes(PARAMETER_MARKER)) return plain;
+  }
+  return objective.trim();
 }
 
 export function buildConversationAppFields(app: CreationApp, source: string): ConversationAppField[] {
-  const base = app.fields.map((field) => fieldToConversationField(field, source));
+  const initialValues = createCreationAppInitialValues(app);
+  const base = app.fields.map((field) => fieldToConversationField(field, source, initialValues[field.id]));
+  if (app.slug === "image-card" && source.trim()) return lockImageCardToTextCreation(base);
   if (app.slug !== "link-remix") return base;
   const dynamic = new Map<string, ConversationAppField>();
   for (const target of remixCapabilityOptions) {
     for (const setting of getRemixCapabilitySettings(target.value)) {
-      const converted = fieldToConversationField(setting, source);
+      const converted = fieldToConversationField(setting, source, initialValues[setting.id]);
       const existing = dynamic.get(converted.id);
       dynamic.set(converted.id, {
         ...(existing ?? converted),
@@ -101,12 +285,64 @@ export function buildConversationAppFields(app: CreationApp, source: string): Co
   return [...base, ...dynamic.values()];
 }
 
-function fieldToConversationField(field: CreationField, source: string): ConversationAppField {
+/** Upgrade persisted forms created before newer field constraints existed. */
+export function upgradeStoredConversationPresentation(metadata: Record<string, unknown>, apps: CreationApp[]) {
+  const presentation = metadata.presentation;
+  if (!presentation || typeof presentation !== "object" || !Array.isArray((presentation as { blocks?: unknown }).blocks)) return metadata;
+  const blocks = (presentation as { blocks: Array<Record<string, unknown>> }).blocks.map(block => {
+    if (block.type === "choices" && Array.isArray(block.options)) return {
+      ...block,
+      options: (block.options as Array<Record<string, unknown>>).map(option => {
+        const continuation = option.continuation;
+        if (!continuation || typeof continuation !== "object") return option;
+        const value = continuation as Record<string, unknown>;
+        return value.appSlug === "xiaohongshu-studio" && value.kind === "same-work" && value.targetStep === "assets"
+          ? { ...option, href: undefined, continuation: { ...value, targetCapabilityId: "skill.xiaohongshu-assets", presentation: "inline-form" } }
+          : option;
+      }),
+    };
+    if (block.type !== "form" || typeof block.appSlug !== "string" || !Array.isArray(block.fields)) return block;
+    const app = apps.find(item => item.slug === block.appSlug);
+    if (!app) return block;
+    const storedFields = block.fields as Array<Record<string, unknown>>;
+    const source = storedFields.find(field => typeof field.id === "string" && MATERIAL_FIELD_PATTERN.test(field.id) && typeof field.initialValue === "string" && field.initialValue.trim())?.initialValue;
+    if (typeof source !== "string" || !source.trim()) return block;
+    const currentFields = new Map(buildConversationAppFields(app, source).map(field => [field.id, field]));
+    return {
+      ...block,
+      fields: storedFields.map(field => {
+        const current = typeof field.id === "string" ? currentFields.get(field.id) : null;
+        return current?.presentation === "data" && current.initialValue
+          ? { ...field, presentation: "data", initialValue: current.initialValue }
+          : field;
+      }),
+    };
+  });
+  return { ...metadata, presentation: { ...(presentation as Record<string, unknown>), blocks } };
+}
+
+function lockImageCardToTextCreation(fields: ConversationAppField[]) {
+  return fields.flatMap(field => {
+    if (["remix_instruction", "portrait_reference_image"].includes(field.id)) return [];
+    if (field.id === "creation_mode") return [{ ...field, presentation: "data" as const, initialValue: "text_to_card" }];
+    if (field.id === "reference_image") return [{
+      ...field,
+      label: "选择或上传人物参考图",
+      helper: "仅在选择“使用我上传的形象照”后显示，可上传 1—3 张清晰参考图。",
+      visibleWhen: [{ fieldId: "draw_portrait", equals: "yes" }],
+      visibleWhenAny: undefined,
+    }];
+    return [field];
+  });
+}
+
+function fieldToConversationField(field: CreationField, source: string, initialValue?: CreationFieldValue): ConversationAppField {
   const type = field.type === "radio" || field.type === "select" ? "single"
     : field.type === "multiselect" ? "multiple"
       : field.type === "file" || field.type === "text_or_file" ? "file"
         : field.type;
-  const sourceLike = /^(source|topic|draft|article|content|prompt|material)/i.test(field.id);
+  const sourceLike = MATERIAL_FIELD_PATTERN.test(field.id);
+  const inheritedSourceValue = source.trim() && field.inheritedSourceValue;
   return {
     id: field.id,
     label: field.label,
@@ -120,10 +356,10 @@ function fieldToConversationField(field: CreationField, source: string): Convers
     visibleWhen: field.visibleWhen,
     visibleWhenAny: field.visibleWhenAny,
     revealAfter: field.revealAfter,
-    presentation: field.presentation,
+    presentation: inheritedSourceValue ? "data" : field.presentation,
     step: field.step,
     options: field.options?.map((option) => ({ label: option.label, value: option.value, description: option.hint, previewUrl: option.previewUrl })),
-    initialValue: sourceLike && (type === "text" || type === "textarea" || type === "file") ? source : type === "multiple" ? [] : "",
+    initialValue: inheritedSourceValue || (sourceLike && (type === "text" || type === "textarea" || type === "file") ? source : initialValue ?? (type === "multiple" ? [] : "")),
   };
 }
 
@@ -131,23 +367,23 @@ export function mergeConversationAppParameters(base: Record<string, CreationFiel
   return { ...base, ...(parseConversationAppParameters(taskText, appSlug) ?? {}) };
 }
 
-export function appNextActions(appSlug: string, resultType: CreationApp["resultType"]) {
-  const specific: Record<string, Array<{ label: string; value: string; description: string }>> = {
-    "traffic-copy": [
-      { label: "制作视频封面", value: "请基于刚完成的口播正文，调用视频封面制作应用继续完成发布封面。", description: "继续在对话中选择平台、风格和尺寸" },
-      { label: "继续优化口播", value: "请保留当前口播的事实和核心观点，先问我想调整哪一部分，再继续优化。", description: "调整开头、节奏、观点或结尾" },
-    ],
-    "wechat-studio": [
-      { label: "生成公众号配图", value: "请基于刚完成的公众号文章，调用公众号配图应用继续生成配图方案。", description: "沿用当前文章作为素材" },
-      { label: "继续修改文章", value: "请基于刚完成的公众号文章，先让我选择要调整的部分，再继续修改。", description: "标题、结构、语气或篇幅" },
-    ],
-    "xiaohongshu-studio": [
-      { label: "制作知识卡片", value: "请基于刚完成的小红书内容，调用知识卡片应用继续制作配图。", description: "把核心观点转成可发布卡片" },
-      { label: "继续修改笔记", value: "请基于刚完成的小红书笔记，先让我选择要调整的部分，再继续修改。", description: "标题、正文、标签或语气" },
-    ],
-  };
-  return specific[appSlug] ?? [
-    { label: "继续修改", value: "请基于刚完成的产物，先问我希望调整的部分，再继续修改。", description: "保留当前结果并进行定向调整" },
-    { label: resultType === "text" ? "转换内容形式" : "再生成一个版本", value: resultType === "text" ? "请基于刚完成的产物，给我可转换的内容形式选项。" : "请保留当前要求，再生成一个不同版本。", description: resultType === "text" ? "选择口播、公众号、小红书等形式" : "沿用本次参数继续创作" },
-  ];
+export function appNextActions(appSlug: string, resultType: CreationApp["resultType"], resultUrl = "", context: { workId?: string; sourceArtifactId?: string } = {}) {
+  const contract = workflowContractForApp({ slug: appSlug, name: appSlug, resultType });
+  return contract.continuations.map(continuation => ({
+    label: continuation.label,
+    value: continuation.instruction,
+    description: continuation.description,
+    ...(continuation.presentation === "embedded-workspace" && resultUrl ? { href: resultUrl } : {}),
+    continuation: {
+      protocolVersion: 1 as const,
+      appSlug,
+      id: continuation.id,
+      kind: continuation.kind,
+      presentation: continuation.presentation,
+      ...(continuation.targetStep ? { targetStep: continuation.targetStep } : {}),
+      ...(continuation.targetCapabilityId ? { targetCapabilityId: continuation.targetCapabilityId } : {}),
+      ...(context.workId ? { workId: context.workId } : {}),
+      ...(context.sourceArtifactId ? { sourceArtifactId: context.sourceArtifactId } : {}),
+    },
+  }));
 }

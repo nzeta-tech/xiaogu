@@ -7,7 +7,7 @@ const MAX_SOURCE_CHARS = 60000;
 const pageCounts = new Set([5, 8, 12]);
 
 function createShortTitle(topic: string, source: string) {
-  const fallback = source.split(/\r?\n/).find((line) => line.trim()) ?? "未命名 PPT";
+  const fallback = source.split(/\r?\n/).map((line) => line.trim()).find((line) => line && !/^【.*】$/.test(line) && !/^(?:基于|根据|结合|请|帮我|生成|制作|执行|补充资料)/.test(line)) ?? "未命名 PPT";
   const value = (topic || fallback).replace(/\s+/g, " ").trim();
   return value.length > 20 ? `${value.slice(0, 19)}…` : value;
 }

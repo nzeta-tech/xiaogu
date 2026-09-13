@@ -99,13 +99,16 @@ export async function GET() {
     id: string; coach_name: string; status: string; phase: string; attempt_count: number;
     error_message: string; updated_at: string; source_run_id: string; source_status: string;
     source_total: number; source_completed: number; source_successful: number;
+    details_json: Record<string, unknown>; training_manifest: Record<string, unknown>;
   }>(
     `select jobs.id,coaches.name coach_name,jobs.status,jobs.phase,jobs.attempt_count,jobs.error_message,
             jobs.updated_at,jobs.source_run_id,runs.status source_status,runs.total_count source_total,
-            runs.completed_count source_completed,runs.successful_count source_successful
+            runs.completed_count source_completed,runs.successful_count source_successful,
+            jobs.details_json,coalesce(versions.training_manifest,'{}'::jsonb) training_manifest
        from creative_coach_training_jobs jobs
        join creative_coaches coaches on coaches.id=jobs.coach_id
        join avatar_training_runs runs on runs.id=jobs.source_run_id
+       left join creative_coach_versions versions on versions.id=jobs.progressive_version_id
       order by case when jobs.status in ('waiting_source','queued','training') then 0 else 1 end,jobs.updated_at desc limit 20`,
   ).catch(() => ({ rows: [] }));
   return Response.json({ coaches: result.rows, runs: runs.rows, jobs: jobs.rows }, { headers: { "cache-control": "private, no-store" } });

@@ -1,5 +1,5 @@
 import { runInsuranceContentAgent } from "@/lib/agent/insurance-agent";
-import { searchVolcengineWeb, type VolcengineSearchResult } from "@/lib/search/volcengine-search";
+import { searchWeb, type VolcengineSearchResult } from "@/lib/search/volcengine-search";
 import type { WorkbuddyRuntimeEvent } from "./runtime";
 
 type FastResearchPlan = {
@@ -30,6 +30,7 @@ export async function runFastResearch(input: {
   signal?: AbortSignal;
   verifyEmergentCriticalFacts?: boolean;
   maxQueries?: number;
+  searchTimeoutMs?: number;
   mode?: "answer" | "discovery";
 }) {
   const startedAt = Date.now();
@@ -41,7 +42,7 @@ export async function runFastResearch(input: {
   const initialBatches = await Promise.all(plan.queries.map(async ({ query, purpose }) => {
     assertRunning(input.signal);
     input.onEvent?.({ type: "search.query", message: `快速检索：${query}`, data: { query, purpose, mode: "fast" } });
-    const results = await searchVolcengineWeb(query, { count: 6, timeoutMs: 9_000, requireContent: true });
+    const results = await searchWeb(query, { count: 6, timeoutMs: input.searchTimeoutMs ?? 12_000, requireContent: true });
     return { query, purpose, results };
   }));
   assertRunning(input.signal);
@@ -51,7 +52,7 @@ export async function runFastResearch(input: {
   const verificationBatches = await Promise.all(verificationQueries.map(async ({ query, purpose }) => {
     assertRunning(input.signal);
     input.onEvent?.({ type: "search.query", message: `关键事实复核：${query}`, data: { query, purpose, mode: "fast" } });
-    const results = await searchVolcengineWeb(query, { count: 8, timeoutMs: 9_000, requireContent: true });
+    const results = await searchWeb(query, { count: 8, timeoutMs: 12_000, requireContent: true });
     return { query, purpose, results };
   }));
   const batches = [...initialBatches, ...verificationBatches];
@@ -66,13 +67,17 @@ export async function runFastResearch(input: {
       sources.push(result);
       added += 1;
     }
-    input.onEvent?.({ type: "search.query_completed", message: `“${batch.query}”命中 ${batch.results.length} 条，新增 ${added} 个来源`, data: { query: batch.query, count: batch.results.length, added, mode: "fast", results: batch.results.map(({ title, url, publishedDate }) => ({ title, url, publishedDate })) } });
+    input.onEvent?.({ type: "search.query_completed", message: `“${batch.query}”命中 ${batch.results.length} 条，新增 ${added} 个来源`, data: { query: batch.query, count: batch.results.length, added, mode: "fast", providers: [...new Set(batch.results.map(item => item.provider))], results: batch.results.map(({ title, url, publishedDate, provider }) => ({ title, url, publishedDate, provider })) } });
     return { query: batch.query, purpose: batch.purpose, resultCount: batch.results.length, newSourceCount: added };
   });
-  const trace: FastResearchTrace = { mode, evidenceTarget: plan.evidenceTarget, queries: queryTrace, sourceCount: Math.min(sources.length, 12), elapsedMs: Date.now() - startedAt };
+  // Discovery builds a reusable candidate pool, while answer mode intentionally
+  // keeps a compact evidence packet. Previously both were truncated to 12,
+  // so unshown hotspots disappeared before a follow-up could identify them.
+  const sourceLimit = mode === "discovery" ? 30 : 12;
+  const trace: FastResearchTrace = { mode, evidenceTarget: plan.evidenceTarget, queries: queryTrace, sourceCount: Math.min(sources.length, sourceLimit), elapsedMs: Date.now() - startedAt };
   input.onEvent?.({ type: "fast_research.completed", message: `快速研究完成：${queryTrace.length} 次并发检索，保留 ${trace.sourceCount} 个来源`, data: trace });
   return {
-    sources: sources.slice(0, 12),
+    sources: sources.slice(0, sourceLimit),
     trace,
     queryResults: batches.map(({ query, purpose, results }) => ({ query, purpose, results })),
   } satisfies FastResearchResult;
@@ -127,7 +132,7 @@ async function planFastResearch(input: { objective: string; context: string; ini
   }
 
   const now = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "full", timeStyle: "medium" }).format(new Date());
-  const discoveryInstruction = input.mode === "discovery" ? `当前任务是发现并扩充热点候选池，不是解释某个热点为什么火，也不是核验已有候选。查询应根据用户目标覆盖不同热点来源或领域，寻找榜单可能遗漏的当日新事件；不要预设具体事件名称。` : "当前任务是取得回答所需的最小证据包。";
+  const discoveryInstruction = input.mode === "discovery" ? `当前任务是发现并扩充热点候选池，不是解释某个热点为什么火，也不是核验已有候选。查询应形成互补的发现面，至少考虑社交讨论、综合新闻与公共事件、商业科技、政策公共事务、国际动态等不同信号面；根据用户目标调整权重，但不能因为用户从事某一行业就只检索该行业。寻找榜单可能遗漏的当日新事件，不要预设具体事件名称。` : "当前任务是取得回答所需的最小证据包。";
   const prompt = `你是通用 Fast Research 的轻量检索规划器。${discoveryInstruction}只规划搜索，不写答案。
 
 当前北京时间：${now}

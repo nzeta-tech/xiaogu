@@ -1,6 +1,7 @@
 import { requireSessionUser } from "@/lib/auth/session";
 import { tryGetCreationHubData, tryGetCreationWorksView, tryListCreationCatalog, tryListCreationTasks, trySyncCreationCatalog } from "@/lib/db/repositories";
 import { getLinkRemixAvailability, getPptAvailability } from "@/lib/local-agent/repository";
+import { hiddenWorkspaceCardSlugs } from "@/lib/apps/workspace-visibility";
 
 export async function GET(request: Request) {
   const user = await requireSessionUser();
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
   return Response.json({
     hub,
     categories: catalog.categories,
-    apps: catalog.apps,
+    apps: catalog.apps.filter((app) => !hiddenWorkspaceCardSlugs.has(app.slug)),
     appRuntime: { "link-remix": linkRemix, "ppt-maker": pptMaker },
     mode: "server",
   });

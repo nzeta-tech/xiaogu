@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { query } from "@/lib/db/client";
 import { hasModelConfig, isDemoModeEnabled } from "@/lib/config/runtime";
+import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 
 const execFileAsync = promisify(execFile);
 
@@ -38,7 +39,7 @@ async function checkModel() {
     const base = process.env.MODEL_API_BASE ?? "https://generativelanguage.googleapis.com/v1beta";
     const key = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
     if (!key) throw new Error("未配置 Google API Key");
-    const model = process.env.MODEL_NAME ?? "gemini-2.0-flash";
+    const model = resolveConfiguredTextModel("gemini-2.0-flash");
     const response = await fetch(`${base.replace(/\/$/, "")}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -55,7 +56,7 @@ async function checkModel() {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: process.env.MODEL_NAME ?? (provider === "groq" ? "llama-3.3-70b-versatile" : "gpt-4o-mini"),
+      model: resolveConfiguredTextModel(provider === "groq" ? "llama-3.3-70b-versatile" : "gpt-4o-mini"),
       messages: [{ role: "user", content: "Reply with OK." }],
       max_tokens: 1,
       temperature: 0,

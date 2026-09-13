@@ -17,7 +17,7 @@ export type AgentMessage = {
 };
 
 export type WritingStyleMode = "general" | "traffic" | "marketing";
-export type XiaoguAgentOptions = { timeoutSeconds?: number; domainContext?: DomainContext; creatorContextMode?: CreatorContextMode };
+export type XiaoguAgentOptions = { timeoutSeconds?: number; domainContext?: DomainContext; creatorContextMode?: CreatorContextMode; responseFormat?: "json_object"; temperature?: number };
 const memoryScopeForStyle = (styleMode: WritingStyleMode): AvatarMemoryScope => styleMode === "traffic" ? "short_video" : styleMode === "marketing" ? "marketing" : "global";
 
 export async function runInsuranceContentAgent(
@@ -176,7 +176,7 @@ async function callModel(
     try {
       const output = provider === "google"
         ? await callGoogleGemini(system, normalized, timeoutSeconds)
-        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, timeoutSeconds);
+        : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), { temperature: options?.temperature, responseFormat: options?.responseFormat }, timeoutSeconds);
       await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - started, settings: runtime.settings });
       return output;
     } catch (error) {
@@ -185,7 +185,7 @@ async function callModel(
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
-  const output = await callOpenAICompatible(system, normalized, runtime.fallback, undefined, timeoutSeconds);
+  const output = await callOpenAICompatible(system, normalized, runtime.fallback, { temperature: options?.temperature, responseFormat: options?.responseFormat }, timeoutSeconds);
   await recordModelRuntime({ provider: "fallback", model: runtime.fallback.model, outcome: "fallback", latencyMs: Date.now() - started, settings: runtime.settings });
   return output;
 }
@@ -216,7 +216,20 @@ async function* streamModel(
       return;
     } catch (error) {
       await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: isTimeoutError(error) ? "timeout" : "error", latencyMs: Date.now() - started, error, settings: runtime.settings });
-      if (yielded || !runtime.fallback) throw error;
+      if (yielded) throw error;
+      if (!runtime.fallback) {
+        // A stream can be dropped by a proxy or upstream gateway before the
+        // first token even though the ordinary completion endpoint is healthy.
+        // At that point nothing has reached the user, so one non-streaming
+        // recovery is safe and cannot duplicate visible content.
+        const recoveryStarted = Date.now();
+        const output = provider === "google"
+          ? await callGoogleGemini(system, messages, timeoutSeconds)
+          : await callOpenAICompatible(system, normalized, provider === "groq" ? getGroqConfig() : primaryOpenAIConfig(), undefined, timeoutSeconds);
+        await recordModelRuntime({ provider, model: resolveConfiguredTextModel(), outcome: "success", latencyMs: Date.now() - recoveryStarted, settings: runtime.settings });
+        if (output) yield output;
+        return;
+      }
     }
   }
   if (!runtime.fallback) throw new Error("主模型熔断中，且未配置备用模型");
@@ -307,7 +320,7 @@ async function callOpenAICompatible(
   system: string,
   messages: AgentMessage[],
   config: { baseUrl: string; apiKey?: string; model: string },
-  options?: { temperature?: number },
+  options?: { temperature?: number; responseFormat?: "json_object" },
   timeoutSeconds = 120,
 ) {
   if (!config.apiKey) throw new Error("大模型 API key 未配置");
@@ -321,6 +334,7 @@ async function callOpenAICompatible(
     body: JSON.stringify({
       model: config.model,
       temperature: options?.temperature ?? 0.6,
+      ...(options?.responseFormat ? { response_format: { type: options.responseFormat } } : {}),
       messages: [{ role: "system", content: system }, ...messages],
     }),
   } satisfies RequestInit;

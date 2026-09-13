@@ -6,6 +6,7 @@ import {
   type CreationApp,
   type CreationCategory,
 } from "@/lib/apps/catalog";
+import { hiddenWorkspaceCardSlugs } from "@/lib/apps/workspace-visibility";
 import { appPath, apiPath } from "@/lib/client/url";
 
 type HubPayload = {
@@ -53,7 +54,19 @@ const workspaceCategories: Array<{ id: WorkspaceCategory; label: string; descrip
   { id: "image", label: "做图", description: "知识卡片与文章配图" },
 ];
 
-const workspaceCards: WorkspaceCard[] = [
+const allWorkspaceCards: WorkspaceCard[] = [
+  {
+    slug: "digital-human-video",
+    appSlug: "digital-human-video",
+    name: "数字人视频",
+    emoji: "🎭",
+    pointsLabel: "12",
+    badge: "新",
+    description: "选择自己的数字人，把确认后的口播文案直接生成视频。",
+    hint: "数字人需先在数字分身的形象资产中创建或收藏。",
+    actionLabel: "使用",
+    goals: ["attention", "trust", "conversion", "brand"],
+  },
   {
     slug: "xiaohongshu-studio",
     appSlug: "xiaohongshu-studio",
@@ -367,22 +380,7 @@ const workspaceCards: WorkspaceCard[] = [
   },
 ];
 
-const hiddenWorkspaceCardSlugs = new Set([
-  "write-copy",
-  "lead-copy",
-  "wechat-article-polish",
-  "lead-package",
-  "topic-picker",
-  "general-content",
-  "letter",
-  "xiaohongshu-check",
-  "policy-diagnosis",
-  "breakthrough",
-  "personality-card",
-  "recruit-script",
-  "recruit-followup",
-  "ip-positioning",
-]);
+const workspaceCards = allWorkspaceCards.filter((card) => !hiddenWorkspaceCardSlugs.has(card.appSlug));
 
 const visibleWorkspaceCards = workspaceCards.filter((card) => !hiddenWorkspaceCardSlugs.has(card.slug));
 
@@ -643,7 +641,7 @@ function getCardOutputLabel(card: WorkspaceCard) {
 }
 
 function getWorkspaceCategory(card: WorkspaceCard): Exclude<WorkspaceCategory, "all"> {
-  if (["video-script-polish", "voice-note-copy", "live-script", "video-cover"].includes(card.slug)) return "video";
+  if (["digital-human-video", "video-script-polish", "voice-note-copy", "live-script", "video-cover"].includes(card.slug)) return "video";
   if (["image-card", "wechat-images", "policy-renewal-card"].includes(card.slug)) return "image";
   if (["topic-picker", "ip-positioning", "letter"].includes(card.slug)) return "brand";
   return "copy";

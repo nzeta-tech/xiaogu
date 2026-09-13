@@ -5,7 +5,7 @@ import { bootstrapBackgroundWorkRecovery } from "@/lib/creation/background-run-b
 
 export const metadata: Metadata = {
   title: "小谷",
-  description: "面向保险经纪人的专业、有温度的热点选题与短视频文案智能体",
+  description: "面向财富、保险与财经从业者的专业内容与经营助手",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

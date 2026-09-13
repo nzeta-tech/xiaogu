@@ -4,7 +4,7 @@ import pdf from "pdf-parse/lib/pdf-parse.js";
 import { requireSessionUser } from "@/lib/auth/session";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const supportedExtensions = new Set([".txt", ".md", ".pdf", ".docx"]);
+const supportedExtensions = new Set([".txt", ".md", ".csv", ".pdf", ".docx"]);
 
 export async function POST(request: Request) {
   const user = await requireSessionUser();
@@ -22,14 +22,14 @@ export async function POST(request: Request) {
 
   const ext = path.extname(file.name).toLowerCase();
   if (!supportedExtensions.has(ext)) {
-    return Response.json({ error: "当前仅支持 txt / md / pdf / docx" }, { status: 400 });
+    return Response.json({ error: "当前仅支持 txt / md / csv / pdf / docx" }, { status: 400 });
   }
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
     let text = "";
 
-    if (ext === ".txt" || ext === ".md") {
+    if (ext === ".txt" || ext === ".md" || ext === ".csv") {
       text = bytes.toString("utf8");
     } else if (ext === ".pdf") {
       text = (await pdf(bytes)).text;

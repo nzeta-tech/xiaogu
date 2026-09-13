@@ -1,8 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeWechatChannelTrainingTokens, discoverWechatChannelWorks } from "./wechat-channel-tikhub.ts";
+import { decodeWechatChannelTrainingTokens, discoverWechatChannelWorks, discoverWechatChannelWorksFromShareUrl } from "./wechat-channel-tikhub.ts";
 
 const testRunId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+test("resolves a share URL to its author before discovering all works", async () => {
+  process.env.TIKHUB_API_TOKEN = "test-token";
+  process.env.SETTINGS_ENCRYPTION_KEY = "test-encryption-key";
+  const originalFetch = globalThis.fetch;
+  const channelId = `sphShare${testRunId}`;
+  const username = `v2_share_${testRunId}@finder`;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(String(init?.body || "{}"));
+    requests.push({ url: String(url), body });
+    if (String(url).endsWith("fetch_video_detail")) return Response.json({ code: 200, data: { id: "123", username, nickname: "链接作者" } });
+    if (String(url).endsWith("fetch_channel_info")) return Response.json({ code: 200, data: { info: { "Channels ID": channelId } } });
+    return Response.json({ code: 200, data: { videos: Array.from({ length: 12 }, (_, index) => ({ id: String(index), title: `作品${index}`, media: { full_url: `https://example.com/${index}.mp4`, decode_key: "1" } })), last_buffer: "" } });
+  };
+  try {
+    const result = await discoverWechatChannelWorksFromShareUrl({ shareUrl: "https://weixin.qq.com/sph/AXrPWlorfi", limit: "all" });
+    assert.equal(result.channelId, channelId);
+    assert.equal(result.authorName, "链接作者");
+    assert.equal(result.sourceVideoId, "123");
+    assert.equal(result.candidates.length, 12);
+    assert.equal(requests.some((request) => request.url.endsWith("fetch_channel_id_to_username")), false);
+    assert.equal(requests.filter((request) => request.url.endsWith("fetch_user_videos")).length, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("discovers requested count across pages and keeps media credentials server-encrypted", async () => {
   process.env.TIKHUB_API_TOKEN = "test-token";

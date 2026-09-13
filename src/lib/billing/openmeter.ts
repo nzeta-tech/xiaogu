@@ -38,20 +38,32 @@ export async function getQuotaBalance(customerId: string) {
     };
   }
 
-  const customer = await ensureCustomer(customerId);
-  if (!customer?.id) {
+  let response: Response;
+  try {
+    const customer = await ensureCustomer(customerId);
+    if (!customer?.id) {
+      return {
+        balance: localBalance || (isDemoModeEnabled() ? 100 : 0),
+        hasAccess: localBalance > 0 || isDemoModeEnabled(),
+        mode: "openmeter" as const,
+      };
+    }
+
+    response = await fetch(`${baseUrl}/customers/${encodeURIComponent(customer.id)}/entitlement-access`, {
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+      },
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch {
+    // The local credit ledger remains authoritative for admission. A temporary
+    // telemetry/DNS outage must not turn an otherwise valid creation into a 500.
     return {
       balance: localBalance || (isDemoModeEnabled() ? 100 : 0),
       hasAccess: localBalance > 0 || isDemoModeEnabled(),
       mode: "openmeter" as const,
     };
   }
-
-  const response = await fetch(`${baseUrl}/customers/${encodeURIComponent(customer.id)}/entitlement-access`, {
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-    },
-  });
 
   if (!response.ok) {
     return {
@@ -115,31 +127,38 @@ export async function reportUsage(input: {
     return { ok: true, mode: "demo" as const, amount };
   }
 
-  await ensureCustomer(input.customerId);
+  try {
+    await ensureCustomer(input.customerId);
 
-  const response = await fetch(`${baseUrl}/events`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/cloudevents+json",
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      specversion: "1.0",
-      id: crypto.randomUUID(),
-      type: "ai.content.quota.consumed",
-      source: namespace,
-      subject: input.customerId,
-      time: new Date().toISOString(),
-      data: {
-        action: input.action,
-        credits: amount,
-        customer_id: input.customerId,
-        ...input.metadata,
+    const response = await fetch(`${baseUrl}/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/cloudevents+json",
+        authorization: `Bearer ${apiKey}`,
       },
-    }),
-  });
+      body: JSON.stringify({
+        specversion: "1.0",
+        id: crypto.randomUUID(),
+        type: "ai.content.quota.consumed",
+        source: namespace,
+        subject: input.customerId,
+        time: new Date().toISOString(),
+        data: {
+          action: input.action,
+          credits: amount,
+          customer_id: input.customerId,
+          ...input.metadata,
+        },
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
 
-  return { ok: response.ok, mode: "openmeter" as const, amount };
+    return { ok: response.ok, mode: "openmeter" as const, amount };
+  } catch {
+    // Usage is also persisted to the local ledger by the creation pipeline.
+    // Report the remote sync miss without failing the completed creation.
+    return { ok: false, mode: "openmeter" as const, amount };
+  }
 }
 
 export async function grantCredits(input: {
@@ -225,6 +244,7 @@ async function ensureCustomer(customerId: string) {
       authorization: `Bearer ${apiKey}`,
       accept: "application/json",
     },
+    signal: AbortSignal.timeout(5_000),
   });
 
   if (existing.ok) {
@@ -244,6 +264,7 @@ async function ensureCustomer(customerId: string) {
       key: customerId,
       name: `Broker ${customerId.slice(0, 8)}`,
     }),
+    signal: AbortSignal.timeout(5_000),
   });
 
   if (!created.ok) return null;

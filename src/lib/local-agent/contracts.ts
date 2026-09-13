@@ -7,6 +7,9 @@ export const localAgentTaskTypes = [
   "metrics.snapshot",
   "douyin.deep_verify",
   "ppt.generate",
+  "heygen.video.generate",
+  "xiaogu.video.compose",
+  "openchatcut.edit",
 ] as const;
 
 export const LOCAL_AGENT_PROTOCOL_VERSION = 1;

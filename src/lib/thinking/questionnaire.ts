@@ -9,7 +9,7 @@ export const thinkingQuestions: ThinkingQuestion[] = [
   {
     id: "persona",
     label: "你希望客户记住你是谁？",
-    placeholder: "例如：专业克制、擅长讲清家庭保障和养老规划，不靠焦虑成交。",
+    placeholder: "例如：专业克制，擅长讲清宏观变化、家庭财富或保险规划，不靠焦虑成交。",
     helper: "这会影响后续应用的人设定位、语气和内容判断。",
   },
   {

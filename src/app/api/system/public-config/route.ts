@@ -5,7 +5,7 @@ export async function GET() {
   return Response.json({
     site: {
       siteName: String(settings.site.siteName ?? "小谷"),
-      siteSubtitle: String(settings.site.siteSubtitle ?? "保险内容增长助手"),
+      siteSubtitle: String(settings.site.siteSubtitle ?? "财富、保险与财经内容助手"),
       supportContact: String(settings.site.supportContact ?? ""),
       footerNote: String(settings.site.footerNote ?? ""),
       logoUrl: settings.site.logoUrl,

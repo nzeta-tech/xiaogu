@@ -56,6 +56,11 @@ const schema = z.object({
     s3Enabled: z.boolean(), s3Endpoint: z.string().trim().max(1000), s3Region: z.string().trim().min(1).max(80), s3Bucket: z.string().trim().max(200), s3Prefix: z.string().trim().max(500), s3AccessKeyId: z.string().trim().max(500), s3Secret: z.string().max(1000).optional(), s3ForcePathStyle: z.boolean(),
   }).optional(),
   runtime: z.object({ modelFallbackEnabled: z.boolean(), fallbackBaseUrl: z.string().trim().max(1000), fallbackModel: z.string().trim().max(200), fallbackApiKey: z.string().max(1000).optional(), requestTimeoutSeconds: z.number().int().min(5).max(900), circuitBreakerEnabled: z.boolean(), circuitFailureThreshold: z.number().int().min(1).max(100), circuitCooldownSeconds: z.number().int().min(10).max(86400) }).optional(),
+  digitalHuman: z.object({
+    enabled: z.boolean(), heygenEnabled: z.boolean(), chanjingEnabled: z.boolean(), preferredProvider: z.enum(["auto", "heygen", "chanjing"]),
+    localDiskEnabled: z.boolean(), localDiskPath: z.string().trim().min(1).max(500), localDiskNodeId: z.string().trim().min(1).max(100).regex(/^[a-zA-Z0-9._-]+$/), localDiskMaxGb: z.number().int().min(1).max(100000),
+    databaseFallbackEnabled: z.boolean(), databaseMaxFileMb: z.number().int().min(1).max(200), databaseWarningMb: z.number().int().min(100).max(102400),
+  }).optional(),
 });
 
 async function requireAdmin() {
@@ -109,7 +114,7 @@ export async function PATCH(request: Request) {
   if (parsed.data.runtime) {
     input.runtime = { ...parsed.data.runtime, fallbackApiKeyEncrypted: parsed.data.runtime.fallbackApiKey ? encryptSettingSecret(parsed.data.runtime.fallbackApiKey) : current.runtime.fallbackApiKeyEncrypted };
     delete input.runtime.fallbackApiKey;
-    if (parsed.data.runtime.modelFallbackEnabled && (!parsed.data.runtime.fallbackBaseUrl || !parsed.data.runtime.fallbackModel || !input.runtime.fallbackApiKeyEncrypted)) return Response.json({ error: "启用模型回退前必须配置地址、模型和 API Key" }, { status: 400 });
+    if (parsed.data.runtime.modelFallbackEnabled && !parsed.data.runtime.fallbackModel) return Response.json({ error: "启用模型回退前必须配置备用模型；地址和 API Key 留空时继承当前主模型通道" }, { status: 400 });
   }
   const effectiveEmail = { ...current.email, ...(input.email ?? {}) };
   const effectiveAuth = { ...current.auth, ...(input.auth ?? {}) };

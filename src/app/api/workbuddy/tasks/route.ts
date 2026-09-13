@@ -7,6 +7,7 @@ const inputSchema = z.object({
   scenario: z.enum(["content", "video", "customer", "product", "team", "research", "general"]).optional(),
   context: z.string().trim().max(20000).default(""),
   priority: z.enum(["low", "normal", "high"]).default("normal"),
+  requestedCapabilityId: z.string().trim().min(3).max(120).optional(),
 });
 
 export async function GET() {

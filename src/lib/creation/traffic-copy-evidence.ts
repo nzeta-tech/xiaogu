@@ -79,7 +79,7 @@ export type TrafficEvidenceSearchPlan = {
 
 type FastResearchLikeResult = {
   trace: { queries: Array<{ query: string; purpose: string }> };
-  queryResults: Array<{ query: string; purpose: string; results: Array<{ title: string; url: string; content: string; publishedDate?: string; provider: "volcengine" }> }>;
+  queryResults: Array<{ query: string; purpose: string; results: Array<{ title: string; url: string; content: string; publishedDate?: string; provider: "volcengine" | "tavily" }> }>;
 };
 
 type EvidenceSearch = (query: string) => Promise<EvidenceSearchResult[]>;
@@ -306,12 +306,28 @@ export function planTrafficEvidenceSearch(source: string, claims = extractTraffi
       targetClaimIds: [item.id],
     });
   }
+  const namedProduct = detectNamedProduct(source);
+  if (namedProduct && /(缺货|断货|无货|供应)/.test(source) && calls.length < budget && !calls.some((call) => /(缺货|断货|恢复供应)/.test(call.query))) {
+    calls.push({
+      id: `search-${calls.length + 1}`,
+      purpose: "topic_evidence",
+      query: `${namedProduct} 缺货 原因 恢复供应`,
+      targetClaimIds: searchable.filter((item) => /(缺货|断货|无货|供应)/.test(item.claim)).map((item) => item.id),
+    });
+  }
   return {
     necessary: true,
     reason: calls.length === 1 ? "一个短查询核验最重要的外部事实" : `按风险拆分为${calls.length}个单意图短查询`,
     budget,
     calls,
   };
+}
+
+export function buildTrafficTopicSearchQueries(source: string) {
+  const planned = planTrafficEvidenceSearch(source).calls.map((call) => call.query);
+  if (planned.length) return planned;
+  const subject = detectTopicSubject(source);
+  return subject && subject !== "核心话题" ? [`${subject} 最新进展`] : [];
 }
 
 export function extractTrafficClaims(source: string, limit = 8) {
@@ -466,6 +482,15 @@ function buildFocusedQuery(claim: string) {
 }
 
 function buildTopicResearchQuery(source: string, claim: string, category: string) {
+  const normalizedClaim = stripSearchEnvelope(claim);
+  const product = detectNamedProduct(source) || detectNamedProduct(normalizedClaim);
+  const money = [...new Set(normalizedClaim.match(/\d+(?:[.,]\d+)?元/g) ?? [])].slice(0, 2);
+  if (product && money.length >= 2 && /(涨|价格|售价)/.test(normalizedClaim)) {
+    return `${product} ${money.join(" ")} 涨价`;
+  }
+  if (product && /(缺货|断货|无货|供应)/.test(normalizedClaim)) {
+    return `${product} 缺货 原因 恢复供应`;
+  }
   const topic = detectTopicSubject(source);
   if (topic === "人民币汇率") {
     if (category === "current") return "人民币汇率近期走势";
@@ -475,7 +500,7 @@ function buildTopicResearchQuery(source: string, claim: string, category: string
   if (category === "current") return `${topic}近期变化`;
   if (category === "historical") return `${topic}历史变化`;
   if (category === "macro") return `${topic}影响因素`;
-  return buildFocusedQuery(claim);
+  return buildFocusedQuery(normalizedClaim || claim);
 }
 
 function detectTopicSubject(source: string) {
@@ -483,11 +508,35 @@ function detectTopicSubject(source: string) {
   if (/(医保|医疗保险)/.test(source)) return "医保";
   if (/(养老|养老金)/.test(source)) return "养老";
   if (/(保险)/.test(source)) return "保险";
-  return compactSubject(source) || "核心话题";
+  return detectNamedProduct(source) || compactSubject(stripSearchEnvelope(source)) || "核心话题";
+}
+
+function stripSearchEnvelope(value: string) {
+  return value
+    .replace(/(?:^|\s)(?:热点标题|热点摘要|标题|摘要|已知事实|建议角度)[：:]/g, " ")
+    .replace(/(?:近日|日前|记者(?:看到|发现|获悉)|据(?:媒体|报道)消息)[，,:：]?/g, " ")
+    .replace(/[（）()【】]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectNamedProduct(value: string) {
+  const branded = value.match(/([\p{Script=Han}A-Za-z·-]{2,18})[（(]([^）)]{2,24})[）)]/u);
+  if (branded) {
+    const brand = branded[1].replace(/^.*(?:常用药|药品|产品|一款)/u, "");
+    return `${brand} ${branded[2].replace(/[\/／]/g, " ")}`.trim();
+  }
+  const cleaned = stripSearchEnvelope(value);
+  const medicine = cleaned.match(/([\p{Script=Han}A-Za-z·-]{2,18}(?:乳膏|药膏|胶囊|片|注射液|口服液))/u)?.[1];
+  return medicine ?? "";
 }
 
 function compactSubject(value: string) {
-  return value
+  return stripSearchEnvelope(value)
+    .replace(/(?:今天|最近|近期)?很火/g, " ")
+    .replace(/(?:请)?帮我(?:找|想|分析|写)[^，。！？!?]{0,30}/g, " ")
+    .replace(/(?:给我|围绕|根据|基于).{0,8}(?:角度|选题|口播|文案)/g, " ")
+    .replace(/[，。！？；：、“”]/g, " ")
     .replace(/(?:19|20)\d{2}年?/g, "")
     .replace(/(最近|近期|当前|今年|去年|数据显示|官方|公布|发布|按照|根据|接近|明显|出现)/g, " ")
     .replace(/\d+(?:[.,]\d+)*(?:%|万亿|亿|万|元|美元|人民币|年|月|日|个点)?/g, " ")

@@ -82,9 +82,9 @@ export function standardizeSourceInspection(input: {
   const fields = stringRecord(result.fields);
   const sourceUrl = input.sourceUrl;
   const title = fields.source_title ?? "";
-  const transcript = fields.source_transcript ?? "";
+  const transcript = fields.source_transcript ?? fields.source_text ?? "";
   const taskFailed = input.taskStatus === "failed" || input.taskStatus === "cancelled";
-  const missingReason = !title ? "未读取到作品标题。" : !transcript ? "未读取到可用于训练的口播转写。" : "";
+  const missingReason = !title ? "未读取到作品标题。" : !transcript ? "未读取到可用于训练的正文或口播转写。" : "";
   const failureReason = taskFailed ? (input.errorMessage?.trim() || "作品处理失败。") : missingReason;
   return {
     sourceUrl,

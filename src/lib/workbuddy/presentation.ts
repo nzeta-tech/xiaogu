@@ -13,7 +13,16 @@ const presentationBlockSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("choices"),
     question: z.string().max(500),
-    options: z.array(z.object({ label: z.string().max(120), value: z.string().max(500), description: z.string().max(300).optional() })).min(1).max(8),
+    options: z.array(z.object({
+      label: z.string().max(120), value: z.string().max(500), description: z.string().max(300).optional(), href: z.string().max(1000).optional(),
+      continuation: z.object({
+        protocolVersion: z.literal(1), appSlug: z.string().max(100), id: z.string().max(100),
+        kind: z.enum(["same-work", "cross-app", "revise", "external-handoff"]),
+        presentation: z.enum(["inline-form", "inline-step", "embedded-workspace", "external-workspace"]),
+        targetStep: z.string().max(100).optional(), targetCapabilityId: z.string().max(150).optional(),
+        workId: z.string().max(150).optional(), sourceArtifactId: z.string().max(150).optional(),
+      }).optional(),
+    })).min(1).max(8),
     multiple: z.boolean().optional(),
     minSelections: z.number().int().min(1).max(8).optional(),
     maxSelections: z.number().int().min(1).max(8).optional(),

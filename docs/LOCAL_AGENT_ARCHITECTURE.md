@@ -13,9 +13,21 @@ test override. It contains:
   complete WechatSogou, and the existing Xiaogu extraction adapters.
 - `transcriber`: `faster-whisper`, CPU `int8`; no external transcription API.
 - `wx-channel`: the existing Video Channels browser parsing dependency.
+- `OpenChatCut`: optional local editable timeline engine, reached through its
+  Streamable HTTP MCP endpoint by the Local Agent's Codex CLI.
 
 The local stack has no production `DATABASE_URL` and does not accept inbound
 traffic from AWS. It only makes outbound HTTPS requests to the ALB.
+
+## HeyGen dual execution channel
+
+When `heygen.video.generate` is advertised, Xiaogu routes a HeyGen video job to
+the local Codex + HeyGen Skill channel while that Agent is healthy and below its
+configured concurrency limit. Otherwise the same creator request is submitted
+through the server-side HeyGen API channel. The creator sees one job model and a
+short, user-facing decision summary; credentials, channel names and model
+reasoning remain internal. Once a remote HeyGen session has been created, the
+job is never resubmitted through the other channel, preventing duplicate cost.
 
 ## Availability heartbeat
 
@@ -88,11 +100,27 @@ LOCAL_AGENT_CAPABILITIES=source.inspect,ppt.generate
 LOCAL_AGENT_PROTOCOL_VERSION=1
 WHISPER_MODEL=small
 CODEX_CLI_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
-CODEX_CLI_MODEL=gpt-5.6-sol
+CODEX_CLI_MODEL=gpt-5.6-terra
 PPT_TASK_TIMEOUT_MS=900000
 # Optional. Required when the local network reaches ChatGPT only through a proxy.
 CODEX_CLI_PROXY_URL=http://127.0.0.1:7890
+OPENCHATCUT_MCP_URL=http://host.docker.internal:5199/api/external-mcp/mcp
+OPENCHATCUT_MCP_TOKEN=
+OPENCHATCUT_EDITOR_URL=http://localhost:5199
 ```
+
+### OpenChatCut editing
+
+Advertise `openchatcut.edit` only on a node that can reach a running OpenChatCut
+instance and a healthy Codex CLI. WorkBuddy records the approval and queues the
+editing brief; the Local Agent lets Codex operate OpenChatCut's real timeline
+through MCP, then returns the project id, clean editor URL, and a concise edit
+summary. Projects and source media stay on the user's machine. Export is not
+implicit: the executor requests it only when the user's approved brief does.
+
+OpenChatCut's current bridge is single-machine and single-user. Do not point
+multiple Xiaogu users at one shared instance. Set `OPENCHATCUT_MCP_TOKEN` on
+both sides when the endpoint is reachable beyond the local host.
 
 ### PPT generation
 
@@ -101,7 +129,7 @@ parses accepted TXT/MD/DOCX/PDF material and places a size-bounded structured
 brief in the task payload. The local Agent creates an isolated temporary
 directory, writes `brief.json`, and invokes the configured Codex CLI there with
 `--model "$CODEX_CLI_MODEL" --skip-git-repo-check`; the model defaults to
-`gpt-5.6-sol` and the task directory is intentionally isolated, not a Git checkout.
+`gpt-5.6-terra` and the task directory is intentionally isolated, not a Git checkout.
 The CLI must create `output/result.pptx`; the Agent checks that it is a ZIP
 based Office file before returning it to the authenticated completion endpoint.
 

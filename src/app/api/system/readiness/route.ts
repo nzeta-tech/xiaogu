@@ -12,6 +12,7 @@ import { query } from "@/lib/db/client";
 
 export async function GET() {
   const remixDependencies = await checkLinkRemixDependencies();
+  const production = isProductionRuntime();
   const checks = [
     {
       key: "database",
@@ -52,8 +53,8 @@ export async function GET() {
     {
       key: "stripe_live",
       label: "Stripe live mode",
-      ok: !isProductionRuntime() || hasLiveStripeConfig(),
-      required: process.env.APP_ENV === "production",
+      ok: !production || hasLiveStripeConfig(),
+      required: production,
     },
     {
       key: "topic_source",
@@ -82,7 +83,7 @@ export async function GET() {
     {
       ready,
       environment: process.env.APP_ENV ?? process.env.NODE_ENV,
-      productionRuntime: isProductionRuntime(),
+      productionRuntime: production,
       checks,
     },
     { status: ready ? 200 : 503 },

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTrafficTopicDecisionPrompt, buildTrafficTopicNewsroomInsightPrompt, buildTrafficTopicProposalPrompt, buildTrafficTopicReviewPrompt, parseSelectedTrafficTopics, parseTrafficTopicArena, parseTrafficTopicChallenges, parseTrafficTopicNewsroomInsight, trafficTopicGenerationContext } from "./traffic-topic-arena.ts";
+import { applyLocalTrafficTopicCoachRecommendations, applyTrafficTopicCoachRecommendations, buildTrafficTopicCoachRecommendationPrompt, buildTrafficTopicDecisionPrompt, buildTrafficTopicFastDecisionPrompt, buildTrafficTopicNewsroomInsightPrompt, buildTrafficTopicProposalPrompt, buildTrafficTopicReviewPrompt, parseSelectedTrafficTopics, parseTrafficTopicArena, parseTrafficTopicChallenges, parseTrafficTopicNewsroomInsight, trafficTopicGenerationContext } from "./traffic-topic-arena.ts";
 
 const topic = (index) => ({
   title:`选题${index}`,angleType:"反常识",audience:"家庭决策者",humanTension:"爱与控制",coreQuestion:`问题${index}`,
@@ -49,6 +49,44 @@ test("final decision treats coach skills as optional references",()=>{
   assert.match(decision,/不必服从任何固定题型或机械评分公式/);
   assert.match(decision,/个人定位保送题/);
   assert.match(decision,/数字分身中的identity、audience、expertise、story、boundary/);
+});
+
+test("fast topic decision collapses the editorial pipeline without loading coach skills",()=>{
+  const prompt=buildTrafficTopicFastDecisionPrompt({source:"药品缺货涨价",research:"搜索摘要"});
+  assert.match(prompt,/一次完成素材理解、候选发散、反方筛选和最终决选/);
+  assert.match(prompt,/前5个只按素材价值/);
+  assert.match(prompt,/不要推荐、分配或模仿任何教练/);
+  assert.doesNotMatch(prompt,/可选教练技巧参考/);
+  assert.match(prompt,/正好6个/);
+});
+
+test("coach recommendation runs after topic selection and only uses compact cards",()=>{
+  const prompt=buildTrafficTopicCoachRecommendationPrompt({topics:parseTrafficTopicArena(JSON.stringify({topics:[topic(1)]})),coaches:[{id:"coach-a",label:"故事教练",title:"人物故事",summary:"擅长人物叙事",scenarios:["人物故事"],styleTags:["温和"],bestFor:"情感冲突"}]});
+  assert.match(prompt,/不得修改、重排或重新评价选题/);
+  assert.match(prompt,/coach-a/);
+  assert.doesNotMatch(prompt,/完整Skill|训练作品/);
+});
+
+test("coach recommendation applies valid ids and ignores unknown coaches",()=>{
+  const topics=parseTrafficTopicArena(JSON.stringify({topics:[topic(1),topic(2)]}));
+  const coaches=[{id:"default",label:"小谷教练",title:"通用",summary:"",scenarios:[],styleTags:[],bestFor:""},{id:"coach-a",label:"故事教练",title:"故事",summary:"",scenarios:[],styleTags:[],bestFor:""}];
+  const assigned=applyTrafficTopicCoachRecommendations(topics,JSON.stringify({assignments:[{topicId:"topic-1",coachId:"coach-a",reason:"适合人物叙事"},{topicId:"topic-2",coachId:"missing",reason:"无效"}]}),coaches);
+  assert.equal(assigned[0].assignedCoachId,"coach-a");
+  assert.equal(assigned[0].coachContribution,"适合人物叙事");
+  assert.equal(assigned[1].assignedCoachId,"default");
+});
+
+test("local coach fallback matches compact cards instead of assigning every topic to Xiaogu",()=>{
+  const topics=parseTrafficTopicArena(JSON.stringify({topics:[{...topic(1),title:"AI如何改变保险团队",coreQuestion:"保险团队如何使用AI",workingThesis:"AI应进入保险获客工作流"},{...topic(2),title:"家庭养老现金流",coreQuestion:"家庭如何准备养老",workingThesis:"先保障家庭现金流"}]}));
+  const coaches=[
+    {id:"default",label:"小谷教练",title:"通用",summary:"",scenarios:[],styleTags:[],bestFor:""},
+    {id:"ai",label:"AI教练",title:"保险AI",summary:"保险团队AI获客",scenarios:["人工智能工作流"],styleTags:[],bestFor:"保险团队"},
+    {id:"wealth",label:"财富教练",title:"家庭财富",summary:"养老与家庭现金流",scenarios:["资产配置"],styleTags:[],bestFor:"家庭养老"},
+  ];
+  const assigned=applyLocalTrafficTopicCoachRecommendations(topics,coaches);
+  assert.equal(assigned[0].assignedCoachId,"ai");
+  assert.equal(assigned[1].assignedCoachId,"wealth");
+  assert.match(assigned[0].coachContribution,/快速匹配/);
 });
 
 test("returns five arena finalists plus one positioning wildcard",()=>{

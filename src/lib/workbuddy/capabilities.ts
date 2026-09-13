@@ -2,10 +2,16 @@ import { creationApps, type CreationApp } from "@/lib/apps/catalog";
 import { hiddenWorkspaceCardSlugs } from "@/lib/apps/workspace-visibility";
 import type { CreationFieldValue } from "@/lib/creation/output";
 import { tryListCreationCatalog, trySyncCreationCatalog } from "@/lib/db/repositories";
+import { buildCreationAppConversationValues } from "@/lib/creation/app-input-values";
+import type { ToolCallEnvelope } from "./interaction-protocol";
+import { buildCapabilitySourceText } from "./capability-material";
+import { decomposeWorkbuddyMaterial } from "./material-envelope";
+import { workflowContractForApp, type ApplicationWorkflowContract } from "@/lib/apps/workflow-contract";
 
 export type CapabilityKind = "app" | "skill" | "mcp" | "connector" | "agent";
 export type CapabilityRisk = "read" | "generate" | "external-write";
 export type CapabilityExecutionMode = "sync" | "async" | "interactive";
+export type WorkbuddyOperation = "chat" | "answer" | "research" | "create" | "regenerate" | "revise" | "reselect" | "transform" | "verify";
 
 export type WorkbuddyCapability = {
   id: string;
@@ -16,11 +22,19 @@ export type WorkbuddyCapability = {
   riskLevel: CapabilityRisk;
   executionMode: CapabilityExecutionMode;
   outputTypes: Array<"text" | "image" | "presentation" | "video" | "data">;
+  /** Canonical semantic deliverables used by the router. Unlike outputTypes,
+   * these distinguish platform notes, spoken scripts, articles, covers, etc. */
+  outputFormats?: string[];
+  inputKinds?: Array<"text" | "image" | "presentation" | "video" | "data" | "topic" | "research">;
+  /** Shared by Creation Plaza and Workbuddy. This is the authoritative step
+   * graph; chat must not invent a second application flow. */
+  workflow?: ApplicationWorkflowContract;
   autoInvoke: boolean;
+  operations?: WorkbuddyOperation[];
   systemSkill?: boolean;
   skillIcon?: string;
   skillOrder?: number;
-  nativeType?: "general-orchestrator" | "customer-followup" | "product-analysis" | "team-review" | "deep-research" | "fast-research" | "hot-topic-discovery" | "video-link-summary" | "link-reader" | "file-analysis";
+  nativeType?: "general-orchestrator" | "customer-followup" | "product-analysis" | "team-review" | "deep-research" | "fast-research" | "hot-topic-discovery" | "video-link-summary" | "link-reader" | "file-analysis" | "openchatcut-edit" | "digital-human-handoff" | "xiaohongshu-assets";
   buildInput: (input: CapabilityTaskInput, app: CreationApp) => Record<string, CreationFieldValue>;
 };
 
@@ -30,36 +44,21 @@ export type CapabilityTaskInput = {
   previousArtifact?: string;
   followup?: string;
   searchQueries?: string[];
+  operation?: WorkbuddyOperation;
+  protocol?: ToolCallEnvelope<Record<string, unknown>>;
+  sourceMaterial?: string;
 };
 
-const sourceText = (input: CapabilityTaskInput) => [
-  input.objective,
-  input.context && `补充资料：\n${input.context}`,
-  input.previousArtifact && `已有版本：\n${input.previousArtifact}`,
-  input.followup && `本轮修改要求：\n${input.followup}`,
-].filter(Boolean).join("\n\n");
+const sourceText = (input: CapabilityTaskInput) => buildCapabilitySourceText(input);
 
-function selectedTrafficCoachIds(input: CapabilityTaskInput) {
-  const text = [input.objective, input.context, input.followup].filter(Boolean).join("\n");
-  const raw = text.match(/创作教练ID[：:]\s*([^\n]+)/)?.[1] ?? "";
-  const ids = raw.split(/[，,]/).map((value) => value.trim()).filter(Boolean).slice(0, 2);
-  return ids.length ? ids : ["default"];
-}
-
-const excludedAppSlugs = new Set(["digital-human-video"]);
+const excludedAppSlugs = new Set<string>();
 
 function isExcludedApp(app: CreationApp) {
-  return excludedAppSlugs.has(app.slug) || app.slug.startsWith("digital-human-") || hiddenWorkspaceCardSlugs.has(app.slug);
+  return excludedAppSlugs.has(app.slug) || hiddenWorkspaceCardSlugs.has(app.slug);
 }
 
 function buildGenericInput(input: CapabilityTaskInput, app: CreationApp) {
-  const source = sourceText(input);
-  return Object.fromEntries(app.fields.map((field) => {
-    if (field.type === "multiselect") return [field.id, field.options?.slice(0, 2).map((option) => option.value) ?? []];
-    if (field.type === "radio" || field.type === "select") return [field.id, field.options?.[0]?.value ?? ""];
-    if (field.type === "file") return [field.id, ""];
-    return [field.id, source];
-  })) as Record<string, CreationFieldValue>;
+  return buildCreationAppConversationValues(app, sourceText(input));
 }
 
 function genericCapability(app: CreationApp): WorkbuddyCapability {
@@ -73,46 +72,72 @@ function genericCapability(app: CreationApp): WorkbuddyCapability {
     riskLevel: "generate",
     executionMode: needsInteractiveInput ? "interactive" : "sync",
     outputTypes: [app.resultType === "presentation" ? "presentation" : app.resultType === "image" || app.resultType === "image-plan" ? "image" : "text"],
+    outputFormats: [app.slug],
+    inputKinds: ["text", "topic", "research"],
     autoInvoke: !needsInteractiveInput,
+    operations: ["create", "regenerate", "revise", "transform"],
     buildInput: buildGenericInput,
   };
 }
 
 const appCapabilities: WorkbuddyCapability[] = [
   {
+    id: "skill.xiaohongshu-assets", kind: "skill", name: "小红书图文配套", nativeType: "xiaohongshu-assets",
+    description: "承接同一篇已完成的小红书笔记，在对话中生成并交付一张头图和四张正文配图。仅用于小红书作品的配图续作，不得替换为文章配图、知识卡片或视频封面。",
+    riskLevel: "generate", executionMode: "interactive", outputTypes: ["image"], outputFormats: ["xiaohongshu-image-package"], inputKinds: ["text"], autoInvoke: false,
+    operations: ["create", "regenerate", "transform"], buildInput: () => ({}),
+  },
+  {
+    id: "app.digital-human-video", kind: "app", name: "数字人视频", appSlug: "digital-human-video", nativeType: "digital-human-handoff",
+    description: "把已选定的口播文案完整带入数字人视频工作台，由用户确认人物、声音和画幅后提交生成。", riskLevel: "generate", executionMode: "sync", outputTypes: ["data"], autoInvoke: true,
+    operations: ["create", "regenerate", "transform"], buildInput: () => ({}),
+  },
+  {
     id: "app.traffic-copy", kind: "app", name: "口播文案（流量型）", appSlug: "traffic-copy",
     description: "把已经选定的热点、事件或观点生成一条可直接录制的流量型口播。用户明确要求流量口播、获客口播或选择候选后要求写口播时，应调用本应用交付专业产物；已有上下文足以构成素材时无需再次询问。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
-    buildInput: (input) => ({ source: sourceText(input), creative_coach_version_ids: selectedTrafficCoachIds(input) }),
+    operations: ["create", "regenerate", "reselect"],
+    outputFormats: ["spoken-script", "traffic-spoken-script"], inputKinds: ["text", "topic", "research"],
+    buildInput: buildGenericInput,
   },
   {
     id: "app.topic-picker", kind: "app", name: "找选题", appSlug: "topic-picker",
     description: "围绕财经、财富、保险或通用业务目标生成可执行选题，并保持用户指定领域。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
+    operations: ["create", "reselect"],
     buildInput: (input) => ({ special_requirements: sourceText(input) }),
   },
   {
     id: "app.write-copy", kind: "app", name: "多平台文案创作", appSlug: "write-copy",
     description: "生成口播、小红书、公众号与朋友圈等多平台文案。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
-    buildInput: (input) => ({ tone: "self", source: sourceText(input), targets: ["video_script", "xiaohongshu", "wechat_article", "moments"] }),
+    buildInput: buildGenericInput,
   },
   {
     id: "app.xiaohongshu-studio", kind: "app", name: "小红书笔记创作", appSlug: "xiaohongshu-studio",
     description: "根据素材或想法生成完整小红书笔记。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
-    buildInput: (input) => ({ topic: sourceText(input), creation_mode: input.context || input.previousArtifact ? "rewrite" : "idea", length_mode: "standard" }),
+    buildInput: buildGenericInput,
+    outputFormats: ["xiaohongshu-note"], inputKinds: ["text", "topic", "research"],
   },
   {
     id: "app.wechat-studio", kind: "app", name: "公众号文章创作", appSlug: "wechat-studio",
     description: "生成可继续排版与发布的公众号文章。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
-    buildInput: (input) => ({ topic: sourceText(input), audience: "existing-clients", tone: "professional", lengthMode: "standard" }),
+    buildInput: buildGenericInput,
+    outputFormats: ["wechat-article"], inputKinds: ["text", "topic", "research"],
   },
   {
     id: "app.video-script-polish", kind: "app", name: "口播稿优化", appSlug: "video-script-polish",
     description: "把已有内容优化为自然、准确且符合原题领域的口播稿。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
-    buildInput: (input) => ({ draft: sourceText(input) }),
+    operations: ["revise"],
+    // The polish application must receive one clean draft. Feeding the whole
+    // conversation into `draft` makes it diagnose routing notes and old
+    // artifacts instead of editing the latest delivered copy.
+    buildInput: (input, app) => buildCreationAppConversationValues(app, [
+      decomposeWorkbuddyMaterial(input.previousArtifact || input.sourceMaterial || input.followup || input.objective).formatted,
+      input.followup && `本轮修改要求：${input.followup}`,
+    ].filter(Boolean).join("\n\n")),
   },
   {
     id: "app.general-content", kind: "app", name: "泛内容创作", appSlug: "general-content",
     description: "把业务资料整理为多渠道内容成果。", riskLevel: "generate", executionMode: "sync", outputTypes: ["text"], autoInvoke: true,
-    buildInput: (input) => ({ source: sourceText(input), targets: ["video_script", "wechat_article"] }),
+    buildInput: buildGenericInput,
   },
   {
     id: "app.policy-diagnosis", kind: "app", name: "保单结构复核", appSlug: "policy-diagnosis",
@@ -127,6 +152,13 @@ const appCapabilities: WorkbuddyCapability[] = [
 ];
 
 const nativeCapabilities: WorkbuddyCapability[] = [
+  {
+    id: "mcp.openchatcut", kind: "mcp", name: "OpenChatCut 智能剪辑", nativeType: "openchatcut-edit",
+    description: "在用户本机的 OpenChatCut 中创建或修改可继续编辑的视频工程，支持素材编排、口播剪辑、字幕、B-roll、动效和按需导出。用户要求剪辑视频、制作可编辑时间线或明确使用 OpenChatCut 时调用；只执行用户要求的编辑，不默认导出成片。",
+    riskLevel: "external-write", executionMode: "async", outputTypes: ["video", "data"], autoInvoke: true,
+    systemSkill: true, skillIcon: "剪", skillOrder: 7,
+    buildInput: () => ({}),
+  },
   {
     id: "tool.video-link-summary", kind: "connector", name: "视频链接转写总结", nativeType: "video-link-summary",
     description: "读取抖音、视频号或小红书作品链接，完成语音转写，并输出摘要、结构、关键信息和完整转写。", riskLevel: "read", executionMode: "async", outputTypes: ["text", "data"], autoInvoke: true, systemSkill: true, skillIcon: "▶", skillOrder: 1,
@@ -182,27 +214,58 @@ const nativeCapabilities: WorkbuddyCapability[] = [
   },
 ];
 
+// Native capabilities do not participate in the Creation Plaza visibility
+// boundary, so deferred native integrations need an explicit release gate.
+const unreleasedNativeCapabilityIds = new Set(["mcp.openchatcut"]);
+
+function releasedNativeCapabilities() {
+  return nativeCapabilities.filter((capability) => !unreleasedNativeCapabilityIds.has(capability.id));
+}
+
 const explicitCapabilityBySlug = new Map(appCapabilities.flatMap((capability) => capability.appSlug ? [[capability.appSlug, capability] as const] : []));
+// Composite workflow capabilities are not backed by a Creation Plaza app row,
+// so they must be registered independently. Keeping them only in
+// `appCapabilities` made a continuation ID valid in the UI contract but absent
+// from the runtime registry.
+const workflowCapabilities = appCapabilities.filter((capability) => !capability.appSlug);
 
 function capabilityForApp(app: CreationApp) {
-  return explicitCapabilityBySlug.get(app.slug) ?? genericCapability(app);
+  return { ...(explicitCapabilityBySlug.get(app.slug) ?? genericCapability(app)), workflow: workflowContractForApp(app) };
 }
 
 export function listWorkbuddyCapabilities() {
-  return [...nativeCapabilities.map((capability) => ({ ...capability, points: 0, available: true })), ...creationApps.filter((app) => !isExcludedApp(app)).map((app) => {
+  return assertCapabilityRegistry([...releasedNativeCapabilities().map((capability) => ({ ...capability, points: 0, available: true })), ...workflowCapabilities.map((capability) => ({ ...capability, points: 0, available: true })), ...creationApps.filter((app) => !isExcludedApp(app)).map((app) => {
     const capability = capabilityForApp(app);
     return { ...capability, points: app?.points ?? 0, available: Boolean(app) };
-  })];
+  })]);
 }
 
 export async function listActiveWorkbuddyCapabilities() {
   await trySyncCreationCatalog();
   const catalog = await tryListCreationCatalog();
-  return [...nativeCapabilities.map((capability) => ({ ...capability, points: 0, available: true })), ...catalog.apps.filter((app) => !isExcludedApp(app)).map((app) => ({ ...capabilityForApp(app), points: app.points, available: true }))];
+  return assertCapabilityRegistry([...releasedNativeCapabilities().map((capability) => ({ ...capability, points: 0, available: true })), ...workflowCapabilities.map((capability) => ({ ...capability, points: 0, available: true })), ...catalog.apps.filter((app) => !isExcludedApp(app)).map((app) => ({ ...capabilityForApp(app), points: app.points, available: true }))]);
+}
+
+function assertCapabilityRegistry<T extends WorkbuddyCapability & { available?: boolean }>(capabilities: T[]) {
+  const ids = new Set<string>();
+  const errors: string[] = [];
+  for (const capability of capabilities) {
+    if (ids.has(capability.id)) errors.push(`duplicate:${capability.id}`);
+    ids.add(capability.id);
+  }
+  for (const capability of capabilities) {
+    for (const continuation of capability.workflow?.continuations ?? []) {
+      if (continuation.targetCapabilityId && !ids.has(continuation.targetCapabilityId)) {
+        errors.push(`missing_target:${capability.id}:${continuation.id}->${continuation.targetCapabilityId}`);
+      }
+    }
+  }
+  if (errors.length) throw new Error(`Workbuddy capability registry invalid: ${errors.join(", ")}`);
+  return capabilities;
 }
 
 export function getWorkbuddyCapability(id: string) {
-  const native = nativeCapabilities.find((item) => item.id === id);
+  const native = [...releasedNativeCapabilities(), ...workflowCapabilities].find((item) => item.id === id);
   if (native) return native;
   const app = creationApps.find((item) => `app.${item.slug}` === id && !isExcludedApp(item));
   return app ? capabilityForApp(app) : null;

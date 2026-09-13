@@ -14,6 +14,7 @@ import { HOT_TOPIC_TABS, topicDedupeKey } from "@/lib/topics/ingestion";
 import { defaultSystemSettings, systemSettingKeys, type SystemSettings } from "@/lib/system/settings";
 import { decryptSettingSecret, encryptSettingSecret } from "@/lib/security/secrets";
 import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
+import { hydrateCreationFieldConfig, serializeCreationFieldConfig } from "@/lib/apps/field-config";
 
 export async function tryCreateConversation(input: {
   userId: string | null;
@@ -2028,7 +2029,7 @@ export async function tryCreateAppRun(input: {
 
 export async function tryCompleteAppRun(input: {
   runId: string | null;
-  status: "succeeded" | "failed";
+  status: "succeeded" | "failed" | "cancelled";
   resultText?: string;
   resultJson?: Record<string, unknown>;
   errorMessage?: string | null;
@@ -2044,7 +2045,7 @@ export async function tryCompleteAppRun(input: {
            error_message = $5,
            completed_at = now()
        where id = $1
-         and status <> 'succeeded'
+         and status not in ('succeeded','cancelled')
        returning id, status, completed_at`,
       [
         input.runId,
@@ -2185,11 +2186,7 @@ export async function trySyncCreationCatalog() {
             field.placeholder ?? "",
             field.helper ?? "",
             JSON.stringify(field.options ?? []),
-            JSON.stringify({
-              accept: field.accept ?? null,
-              multiple: field.multiple ?? false,
-              maxLength: field.maxLength ?? null,
-            }),
+            JSON.stringify(serializeCreationFieldConfig(field)),
             fieldIndex,
           ],
         );
@@ -2258,9 +2255,11 @@ export async function tryListCreationCatalog() {
 
     if (appRows.rows.length === 0) return { categories: [], apps: [] };
 
+    const staticAppByDatabaseId = new Map(appRows.rows.map(row => [row.id, creationApps.find(app => app.slug === row.slug)]));
     const fieldsByAppId = new Map<string, CreationApp["fields"]>();
     for (const row of fieldRows.rows) {
       const current = fieldsByAppId.get(row.app_id) ?? [];
+      const staticField = staticAppByDatabaseId.get(row.app_id)?.fields.find(field => field.id === row.field_key);
       current.push({
         id: row.field_key,
         label: row.label,
@@ -2269,9 +2268,7 @@ export async function tryListCreationCatalog() {
         placeholder: row.placeholder || undefined,
         helper: row.helper_text || undefined,
         options: Array.isArray(row.options_json) ? row.options_json : [],
-        accept: typeof row.config_json?.accept === "string" ? row.config_json.accept : undefined,
-        multiple: Boolean(row.config_json?.multiple),
-        maxLength: typeof row.config_json?.maxLength === "number" ? row.config_json.maxLength : undefined,
+        ...hydrateCreationFieldConfig(row.config_json ?? {}, staticField),
       });
       fieldsByAppId.set(row.app_id, current);
     }

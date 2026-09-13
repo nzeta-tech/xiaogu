@@ -20,6 +20,9 @@ type Topic = {
   category: string;
   insuranceRelevance: string;
   recommendedAngle: string;
+  primaryDomain?: "general" | "finance" | "wealth" | "insurance" | "hybrid";
+  domainScores?: { finance: number; wealth: number; insurance: number; general: number };
+  recommendedAngles?: Array<{ domain: string; label: string; angle: string }>;
   riskNote: string;
   sourceUrl?: string;
   sourceTitle?: string;
@@ -48,11 +51,11 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 const starterMessages: Message[] = [
   {
     role: "assistant",
-    content: "你好，我是小谷。把热点、产品资料或客户画像发给我，我会按你的账号人设生成可用的保险内容。",
+    content: "你好，我是小谷。把财经热点、财富或保险主题、产品资料和客户画像发给我，我会保持你的专业领域与账号人设完成内容。",
   },
 ];
 
-const quickActions = ["今天有哪些适合保险经纪人的热点选题？"];
+const quickActions = ["今天有哪些值得讲的财经、财富或保险热点？"];
 
 const writingModes: Array<{ mode: WritingStyleMode; label: string; prefix: string }> = [
   {
@@ -75,6 +78,10 @@ const dailyQuotes = [
 ];
 
 const topicCacheKey = "ica:last-topics";
+
+function domainLabel(domain?: Topic["primaryDomain"]) {
+  return ({ general: "通用", finance: "泛财经", wealth: "家庭财富", insurance: "保险", hybrid: "交叉" } as const)[domain ?? "general"];
+}
 
 export function ChatWorkspace() {
   const searchParams = useSearchParams();
@@ -569,7 +576,7 @@ export function ChatWorkspace() {
           <div>
             <h2>话题雷达</h2>
             <p>
-              来自实时热榜，小谷会转成稳妥的保险内容角度。
+              来自实时热榜，小谷会提供原生财经、家庭财富或保险专业角度。
               {topicRefreshedAt ? ` 更新于 ${formatRefreshTime(topicRefreshedAt)}` : ""}
             </p>
           </div>
@@ -581,7 +588,7 @@ export function ChatWorkspace() {
           {topicLoading && visibleTopics.length === 0 ? (
             <div className="topicLoading">
               <strong>小谷正在整理今日话题榜</strong>
-              <span>正在筛选热榜、判断保险相关度，并生成合规切入角度。</span>
+              <span>正在筛选热榜、判断领域与内容价值，并生成可选切入角度。</span>
             </div>
           ) : null}
           {!topicLoading && topicError ? <div className="emptyMini">{topicError}</div> : null}
@@ -600,10 +607,10 @@ export function ChatWorkspace() {
                     <span>{topic.source}</span>
                     <span>{topic.heat}热度</span>
                     <span>{topic.category}</span>
-                    <span>{topic.insuranceRelevance}相关</span>
+                    <span>{domainLabel(topic.primaryDomain)}领域</span>
                   </div>
                   <div className="topicRisk">
-                    <span>切入角度</span>
+                    <span>推荐角度</span>
                     <em>{topic.recommendedAngle}</em>
                   </div>
                   {topic.evidence ? <p className="topicEvidence">{topic.evidence}</p> : null}
@@ -627,7 +634,7 @@ export function ChatWorkspace() {
                   className="textButton strong"
                   onClick={() =>
                     void sendMessage(
-                      `口播文案（流量型）：围绕“${topic.title}”写一条适合社交媒体传播的文案。背景：${topic.summary} 保险角度：${topic.recommendedAngle}`,
+                      `口播文案（流量型）：围绕“${topic.title}”写一条适合社交媒体传播的文案。保持${domainLabel(topic.primaryDomain)}领域，不要强行关联保险。背景：${topic.summary} 推荐角度：${topic.recommendedAngle}`,
                       "traffic",
                     )
                   }
@@ -638,7 +645,7 @@ export function ChatWorkspace() {
                   className="textButton strong"
                   onClick={() =>
                     void sendMessage(
-                      `营销文案：围绕“${topic.title}”写一条适合保险经纪人获客的营销稿。背景：${topic.summary} 保险角度：${topic.recommendedAngle}`,
+                      `营销文案：围绕“${topic.title}”写一条适合专业服务者获客的营销稿。保持${domainLabel(topic.primaryDomain)}领域。背景：${topic.summary} 推荐角度：${topic.recommendedAngle}`,
                       "marketing",
                     )
                   }

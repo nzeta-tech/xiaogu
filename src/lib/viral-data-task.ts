@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/db/client";
 import { canonicalizeViralSourceUrl, discoverPlatformViralData, discoverPlatformViralExamples } from "@/lib/viral-examples";
-import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRun, getLatestViralDataRun, listTopDouyinDeepVerificationCandidates, publishViralDataRun, recordViralDiscovery } from "@/lib/viral-data-repository";
+import { completeViralDataRunWithoutChanges, createViralDataRun, failViralDataRun, getLatestViralDataRun, listTopDouyinDeepVerificationCandidates, listViralCoverEnrichmentCandidates, publishViralDataRun, recordViralDiscovery } from "@/lib/viral-data-repository";
 import { enqueueLocalAgentTask, isDouyinDeepVerificationAvailable } from "@/lib/local-agent/repository";
 import { buildViralSourceIdentity, isInsuranceFinanceRelevant } from "@/lib/viral-scoring";
 
@@ -55,6 +55,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
     const evaluatedPlatforms = [...new Set(discovery.candidates.map((item) => item.platform))];
     const published = await publishViralDataRun(runId, prepared, evaluatedPlatforms, discovery.candidates.length);
     const deepVerificationQueued = await queueTopDouyinDeepVerifications(runId);
+    const coverEnrichmentQueued = await queueViralCoverEnrichments(runId);
     return {
       started: true as const,
       succeeded: true as const,
@@ -63,6 +64,7 @@ export async function runViralDataPreparation(options: { force?: boolean; trigge
       creatorDiscoveredCount: discovery.creators.length,
       eligibleCount: prepared.length,
       deepVerificationQueued,
+      coverEnrichmentQueued,
       ...published,
     };
   } catch (error) {
@@ -89,6 +91,24 @@ async function queueTopDouyinDeepVerifications(runId: string) {
   return candidates.length;
 }
 
+async function queueViralCoverEnrichments(runId: string) {
+  const candidates = await listViralCoverEnrichmentCandidates(runId, 30);
+  await Promise.all(candidates.map((candidate, index) => enqueueLocalAgentTask({
+    taskType: "source.inspect",
+    payload: {
+      url: candidate.source_url,
+      userId: "local-agent",
+      purpose: "viral_cover",
+      viralContentId: candidate.id,
+      platform: candidate.platform,
+    },
+    dedupeKey: `viral-cover:${candidate.id}`,
+    priority: 70 - index,
+    maxAttempts: 2,
+  })));
+  return candidates.length;
+}
+
 export function deduplicatePreparedItems(items: Awaited<ReturnType<typeof discoverPlatformViralExamples>>) {
   const seen = new Set<string>();
   const perPlatform = new Map<string, number>();
@@ -101,7 +121,8 @@ export function deduplicatePreparedItems(items: Awaited<ReturnType<typeof discov
     })
     .filter(({ item, identity }) => {
       const count = perPlatform.get(item.platform) ?? 0;
-      if (!identity || seen.has(identity) || count >= 3) return false;
+      const platformLimit = item.platform === "抖音" ? 100 : 3;
+      if (!identity || seen.has(identity) || count >= platformLimit) return false;
       seen.add(identity);
       perPlatform.set(item.platform, count + 1);
       return true;

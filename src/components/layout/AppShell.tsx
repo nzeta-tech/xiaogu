@@ -21,6 +21,7 @@ const adminNavItem = { id: "admin", href: "/admin", label: "管理后台", short
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const embedded = searchParams.get("embedded") === "workbuddy";
   const navigationSource = searchParams.get("from");
   const [role, setRole] = useState("broker");
   const [userName, setUserName] = useState("创作者");
@@ -105,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const visiblePlatformNavItems = role === "admin" ? [...platformNavItems, ...customUserNavItems, adminNavItem] : [...platformNavItems, ...customUserNavItems];
   const mobileNavItems = role === "admin" ? [...platformNavItems, adminNavItem] : platformNavItems;
   return (
-    <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""} ${sidebarCollapsed ? "sidebarCollapsed" : ""}`}>
+    <div className={`shell xiaoguLightTheme ${isCreationSurface ? "creationShell" : ""} ${sidebarCollapsed ? "sidebarCollapsed" : ""} ${embedded ? "workbuddyEmbeddedShell" : ""}`}>
       <aside className="appSidebar">
         <div className="appSidebarInner">
           <div className="sidebarBrandRow">

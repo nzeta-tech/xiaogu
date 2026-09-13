@@ -4,14 +4,13 @@ import type {
   AvatarMemoryItem,
   AvatarMemorySource,
   AvatarPrivacySettings,
-  AvatarTrainingRun,
   AvatarVersion,
-  AvatarCreatorSkill,
 } from "@/lib/avatar/types";
 import { listAvatarVisualAssets } from "@/lib/avatar/visual-assets";
+import { listDigitalHumanAssets } from "@/lib/digital-human/store";
 
-export async function getAvatarWorkspace(userId: string, skillScope: "personal" | "platform" = "personal", trainingPurpose: "content" | "lead-coach" = "content") {
-  const [memories, sources, proposals, versions, privacy, usage, photos, trainingRuns, skills, skillVersions] = await Promise.all([
+export async function getAvatarWorkspace(userId: string) {
+  const [memories, sources, proposals, versions, privacy, usage, photos, digitalHumans] = await Promise.all([
     query<AvatarMemoryItem>(
       `select id, category, title, content, source_id, origin, status, confidence, sensitivity, usage_scope, metadata_json, created_at, updated_at
        from avatar_memory_items where user_id = $1 order by status desc, updated_at desc limit 200`,
@@ -42,27 +41,7 @@ export async function getAvatarWorkspace(userId: string, skillScope: "personal" 
       [userId],
     ),
     listAvatarVisualAssets(userId),
-    query<AvatarTrainingRun>(
-      `select id, source_id, training_type, status, phase, total_count, completed_count, successful_count, error_message, details_json, created_at, updated_at
-       from avatar_training_runs where user_id = $1 order by created_at desc limit 20`,
-      [userId],
-    ),
-    query<Omit<AvatarCreatorSkill, "versions">>(
-      `select id, name, creator_name, status, skill_scope, training_purpose, latest_version, identity_card, identity_card_draft, created_at, updated_at
-         from avatar_creator_skills
-        where skill_scope = $2 and training_purpose = $3 and ($2 = 'platform' or user_id = $1)
-        order by updated_at desc`,
-      [userId, skillScope, trainingPurpose],
-    ),
-    query<AvatarCreatorSkill["versions"][number] & { skill_id: string }>(
-      `select v.id, v.skill_id, v.version, v.training_run_id, v.status, v.source_links, v.sample_count,
-              v.skill_prompt, v.change_summary, v.created_at
-         from avatar_creator_skill_versions v
-         join avatar_creator_skills s on s.id=v.skill_id
-        where s.skill_scope=$2 and s.training_purpose=$3 and ($2='platform' or s.user_id=$1)
-        order by v.version desc`,
-      [userId, skillScope, trainingPurpose],
-    ),
+    listDigitalHumanAssets(userId),
   ]);
 
   return {
@@ -78,8 +57,7 @@ export async function getAvatarWorkspace(userId: string, skillScope: "personal" 
       visual_creation_enabled: true,
     },
     photos,
-    trainingRuns: trainingRuns.rows,
-    creatorSkills: skills.rows.map((skill) => ({ ...skill, versions: skillVersions.rows.filter((version) => version.skill_id === skill.id) })),
+    digitalHumans,
     usage: {
       count: Number(usage.rows[0]?.usage_count ?? 0),
       lastUsedAt: usage.rows[0]?.last_used_at ?? null,

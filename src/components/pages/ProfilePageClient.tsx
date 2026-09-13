@@ -1,7 +1,6 @@
 "use client";
 
-import { FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
@@ -10,22 +9,19 @@ import type {
   AvatarMemoryCategory,
   AvatarMemoryItem,
   AvatarMemorySource,
-  AvatarTrainingRun,
   AvatarPrivacySettings,
   AvatarVisualAsset,
   AvatarVisualAssetRole,
   AvatarVersion,
-  AvatarCoachConversation,
-  AvatarCoachMessage,
   AvatarContactCard,
-  AvatarCreatorSkill,
 } from "@/lib/avatar/types";
 import type { ThinkingProfileSnapshot, ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
+import type { DigitalHumanAsset, DigitalHumanProvider, DigitalHumanTemplate, DigitalHumanVoice } from "@/lib/digital-human/types";
+import { chanjingCreationReferenceSamples } from "@/lib/digital-human/creation-reference-samples";
 
 type AvatarWorkspace = {
   memories: AvatarMemoryItem[];
   sources: AvatarMemorySource[];
-  trainingRuns: AvatarTrainingRun[];
   proposals: AvatarEvolutionProposal[];
   versions: AvatarVersion[];
   privacy: AvatarPrivacySettings;
@@ -39,20 +35,14 @@ type AvatarWorkspace = {
   } | null;
   questionnaire: { completionPercent: number; updatedAt: string } | null;
   contactCard: AvatarContactCard;
-  creatorSkills: AvatarCreatorSkill[];
 };
 
-type AvatarTab = "coach" | "overview" | "memory" | "visual" | "contact" | "evolution" | "lab" | "sources" | "versions";
-type CoachNextStep = { title: string; description: string; href: string };
-type CoachCourse = { id: string; title: string; summary: string; modules: Array<{ key: string; title: string; objective: string; practice: string }>; completed_keys: string[]; matchScore: number; matchReasons: string[] };
-type WechatChannelCandidate = { id: string; title: string; authorName: string; publishedAt: string | null; durationSeconds: number | null; coverUrl: string; likeCount: number | null; commentCount: number | null; forwardCount: number | null; trainingToken: string };
+type AvatarTab = "overview" | "memory" | "visual" | "contact" | "evolution" | "sources" | "versions";
 
 const tabs: Array<{ id: AvatarTab; label: string; description: string }> = [
-  { id: "lab", label: "数字分身实验室", description: "训练、保存并对比分身 Skill" },
-  { id: "coach", label: "小谷精灵", description: "和懂你的创作教练聊聊" },
   { id: "overview", label: "分身主页", description: "成熟度与当前状态" },
   { id: "memory", label: "我的记忆", description: "查看和管理长期记忆" },
-  { id: "visual", label: "形象资产", description: "管理可复用的本人照片" },
+  { id: "visual", label: "形象资产", description: "照片、数字人模板与声音库" },
   { id: "contact", label: "联系名片", description: "二维码与发布署名" },
   { id: "evolution", label: "进化中心", description: "确认分身如何改变" },
   { id: "sources", label: "学习资料", description: "文章、录音与故事来源" },
@@ -77,14 +67,14 @@ const emptyPrivacy: AvatarPrivacySettings = {
   visual_creation_enabled: true,
 };
 
-export function ProfilePageClient({ skillScope = "personal", trainingOnly = false, trainingPurpose = "content" }: { skillScope?: "personal" | "platform"; trainingOnly?: boolean; trainingPurpose?: "content" | "lead-coach" } = {}) {
+export function ProfilePageClient() {
   const [workspace, setWorkspace] = useState<AvatarWorkspace | null>(null);
   const [activeTab, setActiveTab] = useState<AvatarTab>(() => {
-    if (typeof window === "undefined") return "lab";
+    if (typeof window === "undefined") return "overview";
     const params = new URLSearchParams(window.location.search);
     const requestedTab = params.get("tab");
     if (requestedTab && tabs.some((tab) => tab.id === requestedTab)) return requestedTab as AvatarTab;
-    return "lab";
+    return "overview";
   });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -95,33 +85,12 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
   const [sourceFilter, setSourceFilter] = useState("all"); const [sourceSearch, setSourceSearch] = useState("");
   const [memoryDraft, setMemoryDraft] = useState<{ category: AvatarMemoryCategory; title: string; content: string; sourceLabel: string; memoryScope: string }>({ category: "identity", title: "", content: "", sourceLabel: "手动录入", memoryScope: "global" });
   const [sourceDraft, setSourceDraft] = useState({ sourceType: "article", title: "", content: "", sourceLabel: "手动录入", memoryScope: "global" });
-  const [videoChannelDraft, setVideoChannelDraft] = useState({ shareLinks: "", authorized: false });
-  const [labPrompt, setLabPrompt] = useState("");
-  const [labCandidates, setLabCandidates] = useState(["avatar", "baseline"]);
-  const [labResultTab, setLabResultTab] = useState(0);
-  const [creatorSkillDraft, setCreatorSkillDraft] = useState({ skillId: "", name: "", creatorName: "", shareLinks: "", authorized: false });
-  const [wechatChannelDraft, setWechatChannelDraft] = useState({ channelId: "", previousChannelId: "", limit: "all" as "all" });
-  const [wechatCandidates, setWechatCandidates] = useState<WechatChannelCandidate[]>([]);
-  const [selectedWechatWorkIds, setSelectedWechatWorkIds] = useState<Set<string>>(new Set());
-  const [wechatDiscoveryError, setWechatDiscoveryError] = useState("");
-  const [labResult, setLabResult] = useState<Array<{ text: string; label: string; done: boolean }> | null>(null);
-  const [coachConversations, setCoachConversations] = useState<AvatarCoachConversation[]>([]);
-  const [coachConversationId, setCoachConversationId] = useState("");
-  const [coachMessages, setCoachMessages] = useState<AvatarCoachMessage[]>([]);
-  const [coachInput, setCoachInput] = useState("");
-  const [coachNextSteps, setCoachNextSteps] = useState<CoachNextStep[]>([]);
-  const [coachProfilePrompt, setCoachProfilePrompt] = useState(false);
-  const [coachThinkingStep, setCoachThinkingStep] = useState(-1);
-  const [coachStreamingContent, setCoachStreamingContent] = useState("");
-  const [coachCourses, setCoachCourses] = useState<CoachCourse[]>([]);
-  const [coachCoursesLoading, setCoachCoursesLoading] = useState(false);
   const [contactDraft, setContactDraft] = useState({ displayName: "", organization: "", callToAction: "扫码联系我", serviceMotto: "保险不是推销，是长期的守护", phone: "", email: "", businessCardStyle: "classic" as "classic" | "emerald" | "editorial" | "ivory" | "garden" | "lavender", defaultQrCodeId: null as string | null });
-  const coachInputRef = useRef<HTMLTextAreaElement | null>(null);
   usePageMeta({ title: "数字分身 · 人设与表达", description: `数字分身 / ${tabs.find((tab) => tab.id === activeTab)?.label ?? "分身主页"}` });
 
   async function loadAvatar(signal?: AbortSignal) {
     try {
-      const response = await fetch(apiPath(`/api/avatar${skillScope === "platform" ? `?scope=platform&purpose=${trainingPurpose}` : ""}`), { signal });
+      const response = await fetch(apiPath("/api/avatar"), { signal });
       const payload = await response.json() as { avatar?: AvatarWorkspace; error?: string };
       if (!response.ok || !payload.avatar) {
         setError(payload.error ?? "数字分身暂时无法加载");
@@ -143,27 +112,6 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
     return () => controller.abort();
   }, []);
 
-  useEffect(() => {
-    if (activeTab !== "coach") return;
-    void fetch(apiPath("/api/avatar/chat")).then(async (response) => response.ok ? response.json() : null).then((payload: { conversations?: AvatarCoachConversation[] } | null) => {
-      if (payload?.conversations) setCoachConversations(payload.conversations);
-    }).catch(() => undefined);
-    void Promise.resolve().then(() => { setCoachCoursesLoading(true); return fetch(apiPath("/api/avatar/coach-program")); }).then(async (response) => response.ok ? response.json() : null).then((payload: { courses?: CoachCourse[] } | null) => setCoachCourses(payload?.courses ?? [])).catch(() => setCoachCourses([])).finally(() => setCoachCoursesLoading(false));
-  }, [activeTab]);
-
-  async function updateCourseProgress(courseId: string, moduleKey: string, status: "started" | "completed") {
-    const response = await fetch(apiPath("/api/avatar/coach-program"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ courseId, moduleKey, status }) });
-    if (!response.ok) { setError("学习进度保存失败，请稍后重试"); return; }
-    setCoachCourses((current) => current.map((course) => course.id !== courseId ? course : { ...course, completed_keys: status === "completed" ? [...new Set([...course.completed_keys, moduleKey])] : course.completed_keys.filter((key) => key !== moduleKey) }));
-  }
-
-  const latestTrainingId = workspace?.trainingRuns.find((run) => run.status === "running")?.id ?? "";
-  const latestTrainingStatus = latestTrainingId ? "running" : "";
-  useEffect(() => {
-    if (!latestTrainingId || latestTrainingStatus !== "running") return;
-    const refreshTimer = window.setInterval(() => { void loadAvatar(); }, 2_000);
-    return () => window.clearInterval(refreshTimer);
-  }, [latestTrainingId, latestTrainingStatus]);
 
   const maturity = useMemo(() => calculateMaturity(workspace), [workspace]);
   const activeMemories = workspace?.memories.filter((item) => item.status === "active") ?? [];
@@ -208,112 +156,6 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
     event.preventDefault();
     const ok = await performAction({ action: "add-source", ...sourceDraft, sensitivity: "normal" }, "学习资料已添加。");
     if (ok) setSourceDraft((current) => ({ ...current, title: "", content: "" }));
-  }
-
-  async function trainVideoChannel(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const links = parseTrainingLinks(videoChannelDraft.shareLinks);
-    const ok = await performAction({ action: "train-video-channel-links", links, authorized: videoChannelDraft.authorized }, "训练任务已开始。你可以离开页面，小谷会在后台继续解析和转写。");
-    if (ok) setVideoChannelDraft((current) => ({ ...current, authorized: false }));
-  }
-
-  async function runLab(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy("lab");
-    setError("");
-    const labelFor = (value: string) => value === "avatar" ? "我的数字分身" : value === "baseline" ? "默认版本" : (workspace?.creatorSkills ?? []).flatMap((skill) => skill.versions.map((version) => version.id === value ? `${skill.name} · V${version.version}` : "")).find(Boolean) || "已选 Skill";
-    setLabResultTab(0);
-    setLabResult(labCandidates.map((value) => ({ text: "", label: labelFor(value), done: false })));
-    try {
-      const response = await fetch(apiPath("/api/avatar/lab"), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: labPrompt, candidates: labCandidates, skillScope }),
-      });
-      if (!response.ok || !response.body) { const payload = await response.json() as { error?: string }; setError(payload.error ?? "试写失败"); return; }
-      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
-      while (true) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const events = buffer.split("\n\n"); buffer = events.pop() ?? ""; for (const raw of events) { const line = raw.split("\n").find((item) => item.startsWith("data: ")); if (!line) continue; const item = JSON.parse(line.slice(6)) as { type: string; index?: number; content?: string; labels?: string[]; message?: string }; if (item.type === "start" && item.labels) setLabResult(item.labels.map((label) => ({ text: "", label, done: false }))); if ((item.type === "chunk" || item.type === "done") && typeof item.index === "number") setLabResult((current) => current?.map((result, index) => index === item.index ? { ...result, text: item.type === "chunk" ? `${result.text}${item.content ?? ""}` : result.text, done: item.type === "done" } : result) ?? null); if (item.type === "error") setError(item.message ?? "对比生成失败"); } }
-    } catch {
-      setError("网络连接异常，请稍后重试");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function trainCreatorSkill(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const links = parseTrainingLinks(creatorSkillDraft.shareLinks);
-    const wechatWorkTokens = wechatCandidates.filter((work) => selectedWechatWorkIds.has(work.id)).map((work) => work.trainingToken);
-    const ok = await performAction({ action: "create-creator-skill", skillId: creatorSkillDraft.skillId || undefined, skillScope, trainingPurpose, name: creatorSkillDraft.name, creatorName: creatorSkillDraft.creatorName, links, wechatWorkTokens, authorized: creatorSkillDraft.authorized }, `${trainingPurpose === "lead-coach" ? "获客教练" : "内容创作"} Skill 训练已开始；完成后会生成一个可选用的新版本。`);
-    if (ok) { setCreatorSkillDraft((current) => ({ ...current, shareLinks: "", authorized: false })); setWechatCandidates([]); setSelectedWechatWorkIds(new Set()); }
-  }
-
-  async function discoverWechatChannelWorks() {
-    if (!/^sph[A-Za-z0-9_-]+$/.test(wechatChannelDraft.channelId.trim())) {
-      setWechatDiscoveryError("请输入以 sph 开头的视频号 ID，例如 sph5bGYfAn6yQFY");
-      return;
-    }
-    setBusy("discover-wechat-channel"); setError(""); setWechatDiscoveryError(""); setNotice("");
-    try {
-      const response = await fetch(apiPath("/api/avatar/wechat-channel/discover"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channelId: wechatChannelDraft.channelId, previousChannelId: wechatChannelDraft.previousChannelId || undefined, limit: "all" }) });
-      const payload = await response.json() as { candidates?: WechatChannelCandidate[]; authorName?: string; requestCount?: number; pageCount?: number; cacheHitCount?: number; providerRequestCount?: number; reachedTrainingLimit?: boolean; maxTrainingWorks?: number; error?: string };
-      if (!response.ok || !payload.candidates) { setWechatDiscoveryError(payload.error || "获取视频号作品失败"); return; }
-      setWechatCandidates(payload.candidates); setSelectedWechatWorkIds(new Set(payload.candidates.map((work) => work.id)));
-      setNotice(`已导入${payload.authorName ? `「${payload.authorName}」` : "该视频号"}全部可训练作品 ${payload.candidates.length} 条${payload.reachedTrainingLimit ? `（达到单次 ${payload.maxTrainingWorks} 条训练上限）` : ""}；共 ${payload.pageCount ?? payload.requestCount ?? 0} 页，缓存命中 ${payload.cacheHitCount ?? 0} 项，TikHub 实际调用 ${payload.providerRequestCount ?? 0} 次。`);
-    } catch { setWechatDiscoveryError("获取视频号作品失败，请稍后重试"); } finally { setBusy(""); }
-  }
-
-  const creatorTrainingCount = parseTrainingLinks(creatorSkillDraft.shareLinks).length + selectedWechatWorkIds.size;
-
-  async function submitCoach(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await sendCoachMessage(coachInput);
-  }
-
-  async function sendCoachMessage(rawMessage: string) {
-    const message = rawMessage.trim();
-    if (message.length < 2) return;
-    const localUserMessage: AvatarCoachMessage = { id: `local-${Date.now()}`, role: "user", content: message, created_at: new Date().toISOString() };
-    setCoachMessages((current) => [...current, localUserMessage]);
-    setCoachInput(""); setBusy("coach"); setError(""); setCoachNextSteps([]); setCoachProfilePrompt(false);
-    setCoachStreamingContent("");
-    setCoachThinkingStep(0);
-    const contextTimer = window.setTimeout(() => setCoachThinkingStep(1), 350);
-    const planTimer = window.setTimeout(() => setCoachThinkingStep(2), 900);
-    try {
-      const response = await fetch(apiPath("/api/avatar/chat"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: coachConversationId || undefined, message }) });
-      if (!response.ok || !response.body) throw new Error("咨询失败，请稍后重试");
-      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let event = "message"; let received = false; let streamedAnswer = "";
-      const consume = (block: string) => {
-        const lines = block.split("\n"); const eventLine = lines.find((line) => line.startsWith("event:")); const dataLine = lines.find((line) => line.startsWith("data:"));
-        if (!dataLine) return;
-        const payload = JSON.parse(dataLine.slice(5).trim()) as { conversationId?: string; content?: string; nextSteps?: CoachNextStep[]; profilePrompt?: boolean; proposalCreated?: boolean; error?: string };
-        event = eventLine?.slice(6).trim() ?? "message";
-        if (event === "meta" && payload.conversationId) setCoachConversationId(payload.conversationId);
-        if (event === "delta" && payload.content) { received = true; streamedAnswer += payload.content; setCoachThinkingStep(2); setCoachStreamingContent(streamedAnswer); }
-        if (event === "done") { setCoachNextSteps(payload.nextSteps ?? []); setCoachProfilePrompt(Boolean(payload.profilePrompt)); if (payload.proposalCreated) { setNotice("小谷识别到一项长期偏好，已生成待确认的进化建议。"); void loadAvatar(); } }
-        if (event === "error") throw new Error(payload.error ?? "咨询失败，请稍后重试");
-      };
-      while (true) { const { value, done } = await reader.read(); buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }); let boundary; while ((boundary = buffer.indexOf("\n\n")) >= 0) { consume(buffer.slice(0, boundary)); buffer = buffer.slice(boundary + 2); } if (done) break; }
-      if (!received) throw new Error("小谷暂时没有生成结果，请稍后重试");
-      setCoachMessages((current) => [...current, { id: `assistant-${Date.now()}`, role: "assistant", content: streamedAnswer, created_at: new Date().toISOString() }]);
-      setCoachStreamingContent("");
-      const history = await fetch(apiPath("/api/avatar/chat"));
-      if (history.ok) { const data = await history.json() as { conversations?: AvatarCoachConversation[] }; if (data.conversations) setCoachConversations(data.conversations); }
-    } catch (cause) {
-      setCoachMessages((current) => current.filter((item) => item.id !== localUserMessage.id));
-      setError(cause instanceof Error ? cause.message : "咨询失败，请稍后重试");
-    } finally { window.clearTimeout(contextTimer); window.clearTimeout(planTimer); setCoachThinkingStep(-1); setBusy(""); }
-  }
-
-  async function openCoachConversation(id: string) {
-    setBusy("coach-history");
-    try {
-      const response = await fetch(apiPath(`/api/avatar/chat?conversationId=${encodeURIComponent(id)}`));
-      const payload = await response.json() as { conversation?: { messages?: AvatarCoachMessage[] }; error?: string };
-      if (!response.ok || !payload.conversation) throw new Error(payload.error ?? "记录无法加载");
-      setCoachConversationId(id); setCoachMessages(payload.conversation.messages ?? []); setCoachNextSteps([]); setCoachProfilePrompt(false);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "记录无法加载"); } finally { setBusy(""); }
   }
 
   async function uploadPhotos(fileList: FileList | null) {
@@ -393,22 +235,18 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
   async function deleteContactQr(id: string) { if (!window.confirm("确认删除这个联系二维码？")) return; setBusy("contact-qr"); try { const response = await fetch(apiPath(`/api/avatar/contact-card?id=${encodeURIComponent(id)}`), { method: "DELETE" }); const payload = await response.json() as { error?: string }; if (!response.ok) { setError(payload.error ?? "二维码删除失败"); return; } setNotice("二维码已删除。"); await loadAvatar(); } catch { setError("二维码删除失败，请检查网络后重试"); } finally { setBusy(""); } }
 
   return (
-    <div className={`avatarConsolePage ${activeTab === "coach" ? "coachActive" : ""}`}>
+    <div className="avatarConsolePage">
       {error ? <div className="alertPanel">{error}</div> : null}
       {notice ? <div className="successPanel">{notice}</div> : null}
 
-      {!trainingOnly ? <nav className="avatarConsoleTabs" aria-label="数字分身功能">
+      <nav className="avatarConsoleTabs" aria-label="数字分身功能">
         {tabs.map((tab) => (
           <button className={activeTab === tab.id ? "active" : ""} key={tab.id} onClick={() => setActiveTab(tab.id)} type="button">
             <strong>{tab.label}</strong><span>{tab.description}</span>
             {tab.id === "evolution" && pendingProposals.length > 0 ? <em>{pendingProposals.length}</em> : null}
           </button>
         ))}
-      </nav> : null}
-
-      {activeTab === "coach" ? (
-        <><CoachProgramPanel courses={coachCourses} loading={coachCoursesLoading} onProgress={updateCourseProgress} /><AvatarCoachView busy={busy} thinkingStep={coachThinkingStep} streamingContent={coachStreamingContent} conversations={coachConversations} messages={coachMessages} input={coachInput} nextSteps={coachNextSteps} profilePrompt={coachProfilePrompt} inputRef={coachInputRef} onChangeInput={setCoachInput} onSubmit={submitCoach} onPrompt={(prompt) => void sendCoachMessage(prompt)} onOpenConversation={openCoachConversation} onOpenProfile={() => setActiveTab("memory")} onNew={() => { setCoachConversationId(""); setCoachMessages([]); setCoachStreamingContent(""); setCoachNextSteps([]); setCoachProfilePrompt(false); }} /></>
-      ) : null}
+      </nav>
 
       {activeTab === "overview" ? <>
         <section className="avatarConsoleHero">
@@ -428,7 +266,7 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
             </div>
           </div>
           <div className="avatarHeroStats"><div><strong>{maturity.overall}%</strong><span>分身成熟度</span></div><div><strong>{activeMemories.length}</strong><span>长期记忆</span></div><div><strong>{workspace?.usage.count ?? 0}</strong><span>应用次数</span></div></div>
-          <div className="avatarHeroActions"><button className="primaryButton" onClick={() => { setActiveTab("coach"); window.requestAnimationFrame(() => document.getElementById("avatar-coach")?.scrollIntoView({ behavior: "smooth", block: "center" })); }} type="button">和小谷聊聊</button><div className="avatarHeroSecondaryActions"><button onClick={() => setActiveTab("memory")} type="button">完善记忆</button><i>·</i><button onClick={() => setActiveTab("lab")} type="button">试试像不像我</button></div></div>
+          <div className="avatarHeroActions"><a className="primaryButton" href={appPath("/workbuddy")}>交给 Workbuddy</a><div className="avatarHeroSecondaryActions"><button onClick={() => setActiveTab("memory")} type="button">完善记忆</button><i>·</i><button onClick={() => setActiveTab("sources")} type="button">补充学习资料</button></div></div>
           <p className="avatarHeroContext">小谷已参考：{activeMemories.length ? `${activeMemories.length} 条长期记忆、你的表达偏好与目标客户` : "待完善的个人画像"}<button onClick={() => setActiveTab("memory")} type="button">查看画像</button></p>
         </section>
         <OverviewView maturity={maturity} workspace={workspace} onOpenTab={setActiveTab} />
@@ -519,36 +357,6 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
         </section>
       ) : null}
 
-      {activeTab === "lab" ? (
-        <section className="avatarLabView">
-          <div className="avatarSectionHeader"><div><span>{skillScope === "platform" ? trainingPurpose === "lead-coach" ? "获客教练分身" : "平台分身生产" : "数字分身实验室"}</span><h2>{trainingPurpose === "lead-coach" ? "把大 V 的获客方法蒸馏为可复用教练 Skill" : "把创作者的创作方式蒸馏为可复用 Skill"}</h2><p>{trainingPurpose === "lead-coach" ? "综合抖音、视频号和公众号内容，学习用户洞察、获客诊断、策略拆解、行动辅导与转化边界。" : skillScope === "platform" ? "这里生产的平台分身与管理员个人分身隔离，仅管理员可管理。" : "训练使用与学习资料相同的解析、转写链路；仅可提交本人作品或已获授权的作品。"}</p></div></div>
-          <div className="creatorSkillGrid">
-            <form className="avatarSideForm avatarVideoTrainingForm" onSubmit={trainCreatorSkill}>
-              <div><span>创建 / 继续训练</span><h2>{trainingPurpose === "lead-coach" ? "训练大 V 获客教练" : "模仿创作者的创作方式"}</h2></div>
-              <label>训练对象<select value={creatorSkillDraft.skillId} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, skillId: event.target.value }))}><option value="">新建一个命名分身</option>{(workspace?.creatorSkills ?? []).map((skill) => <option key={skill.id} value={skill.id}>继续训练：{skill.name} · V{skill.latest_version}{skill.status === "archived" ? "（已下架）" : ""}</option>)}</select></label>
-              {!creatorSkillDraft.skillId ? <><label>分身名称<input value={creatorSkillDraft.name} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：小红书理性科普分身" required /></label><label>创作者名称（可选）<input value={creatorSkillDraft.creatorName} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, creatorName: event.target.value }))} placeholder="仅用于你自己识别" /></label></> : <p>新作品会沉淀为该分身的下一版本，可在下方回滚；下架状态不影响继续训练。</p>}
-              <fieldset className="wechatChannelPicker"><legend>通过视频号 ID 导入全部作品</legend><div className="wechatChannelDiscovery"><input value={wechatChannelDraft.channelId} onChange={(event) => { setWechatChannelDraft((current) => ({ ...current, channelId: event.target.value })); setWechatDiscoveryError(""); }} placeholder="视频号 ID，例如 sph5bGYfAn6yQFY" /><button className="secondaryButton" disabled={busy === "discover-wechat-channel"} onClick={() => void discoverWechatChannelWorks()} type="button">{busy === "discover-wechat-channel" ? "正在导入…" : "导入全部作品"}</button></div>{skillScope === "platform" ? <input value={wechatChannelDraft.previousChannelId} onChange={(event) => setWechatChannelDraft((current) => ({ ...current, previousChannelId: event.target.value }))} placeholder="管理员可填旧视频号 ID，复用其历史作品缓存" /> : null}<small>自动拉取并勾选该账号全部可训练作品；确认授权后点击下方按钮开始训练。最新列表每周更新一次，发现新作品后会和历史索引合并，不会重新请求全部旧页。</small>
-              {wechatDiscoveryError ? <div className="wechatDiscoveryError" role="alert">{wechatDiscoveryError}</div> : null}
-              {wechatCandidates.length ? <div className="wechatCandidateToolbar"><span>已自动纳入 {selectedWechatWorkIds.size}/{wechatCandidates.length} 条作品训练</span><button onClick={() => { setWechatCandidates([]); setSelectedWechatWorkIds(new Set()); }} type="button">移除本次导入</button></div> : null}</fieldset>
-              <label>授权作品链接<textarea value={creatorSkillDraft.shareLinks} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, shareLinks: event.target.value }))} placeholder="粘贴抖音、视频号或公众号单篇内容链接，每行一条；也可结合上方视频号作品" /></label>
-              <p className="avatarTrainingCount">合计选择 {creatorTrainingCount} 条作品，抖音、视频号和公众号素材可混合训练。</p>
-              <label className="avatarConsent"><input checked={creatorSkillDraft.authorized} onChange={(event) => setCreatorSkillDraft((current) => ({ ...current, authorized: event.target.checked }))} type="checkbox" />我确认拥有这些作品，或已获得创作者授权用于风格训练</label>
-              <button className="primaryButton" disabled={busy === "create-creator-skill" || (!creatorSkillDraft.skillId && !creatorSkillDraft.name.trim()) || !creatorSkillDraft.authorized || creatorTrainingCount < 3}>{busy === "create-creator-skill" ? "正在创建任务..." : creatorSkillDraft.skillId ? "继续训练并创建新版本" : trainingPurpose === "lead-coach" ? "开始训练获客教练" : "开始训练 Skill"}</button><small>至少 3 条已授权素材；建议混合不同平台与内容长度。训练完成后先对比验收，再手动上架。</small>
-            </form>
-            <div className="creatorSkillLibrary"><div><span>{skillScope === "platform" ? "平台分身库" : "我的分身库"}</span><strong>{workspace?.creatorSkills.length ?? 0} 个已命名分身</strong></div>{(workspace?.creatorSkills ?? []).map((skill) => <CreatorSkillCard key={skill.id} skill={skill} runs={workspace?.trainingRuns ?? []} selectedVersionId={labCandidates.find((id) => skill.versions.some((version) => version.id === id)) ?? ""} onSelect={(id) => setLabCandidates((current) => current.includes(id) ? current : current.length < 3 ? [...current, id] : [...current.slice(0, 2), id])} onRestore={(versionId, version) => void performAction({ action: "restore-creator-skill-version", skillId: skill.id, versionId }, `已恢复 ${skill.name} V${version}。`)} onIdentitySave={(card) => performAction({ action: "update-creator-skill-identity", skillId: skill.id, ...card }, `${skill.name} 的身份卡已更新。`)} onStatus={(status) => void performAction({ action: "set-creator-skill-status", skillId: skill.id, status }, status === "active" ? `${skill.name} 已上架，创作页现在可以选用。` : `${skill.name} 已下架，创作页将不再展示。`)} />)}{!(workspace?.creatorSkills.length) ? <p>训练完成的创作 Skill 会保存在这里；以同名分身再次训练，会生成新版本。</p> : null}</div>
-          </div>
-          {!trainingOnly ? <div className="avatarVisualLabStrip">
-            <div><strong>视觉分身准备度</strong><span>{workspace?.photos.length ? `已有 ${workspace.photos.length} 张形象照，可在做图和个性名片中调用。` : "还没有形象照，图片创作只能使用临时上传。"}</span></div>
-            <button onClick={() => setActiveTab("visual")} type="button">{workspace?.photos.length ? "管理形象" : "添加形象"}</button>
-          </div> : null}
-          <div className="avatarSectionHeader avatarCompareHeader"><div><span>效果验收</span><h2>分身版本对比</h2><p>选择 2-3 个版本，以同一主题流式生成，确认风格效果后再上架。</p></div></div>
-          <form className="avatarLabComposer avatarCompareComposer" onSubmit={runLab}><textarea value={labPrompt} onChange={(event) => setLabPrompt(event.target.value)} placeholder="例如：写一段关于中年家庭为什么要先保障收入支柱的朋友圈" /><div className="avatarCompareSelectors">{labCandidates.map((candidate, index) => <label key={`${index}-${candidate}`}>版本 {index + 1}<LabCandidateSelect value={candidate} onChange={(value) => setLabCandidates((current) => current.map((item, itemIndex) => itemIndex === index ? value : item))} skills={workspace?.creatorSkills ?? []} />{labCandidates.length > 2 ? <button onClick={() => setLabCandidates((current) => current.filter((_, itemIndex) => itemIndex !== index))} type="button">移除</button> : null}</label>)}{labCandidates.length < 3 ? <button onClick={() => { const options = ["avatar", "baseline", ...(workspace?.creatorSkills ?? []).flatMap((skill) => skill.versions.filter((version) => version.status === "active" || version.status === "restored").map((version) => version.id))]; const next = options.find((option) => !labCandidates.includes(option)); if (next) setLabCandidates((current) => [...current, next]); }} type="button">＋ 添加对比版本</button> : null}</div><button className="primaryButton" disabled={busy === "lab" || labPrompt.trim().length < 5 || new Set(labCandidates).size !== labCandidates.length}>{busy === "lab" ? "正在流式生成" : `生成 ${labCandidates.length} 个版本`}</button>{new Set(labCandidates).size !== labCandidates.length ? <small>不能重复选择同一版本。</small> : null}</form>
-          {labResult ? (
-            <div className="avatarLabTabbedResults"><nav>{labResult.map((result, index) => <button className={labResultTab === index ? "active" : ""} key={`${result.label}-${index}`} onClick={() => setLabResultTab(index)} type="button"><span>{result.label}</span><small>{result.done ? `${result.text.length} 字` : "生成中…"}</small></button>)}</nav>{labResult[labResultTab] ? <article><div><span>{labResult[labResultTab].label}</span><strong>{labResult[labResultTab].done ? `${labResult[labResultTab].text.length} 字 · 已完成` : `${labResult[labResultTab].text.length} 字 · 正在生成…`}</strong></div><LabOutput content={labResult[labResultTab].text} done={labResult[labResultTab].done} /><FeedbackActions onFeedback={(eventType) => void performAction({ action: "feedback", eventType, beforeText: labResult[labResultTab].text, feedbackText: labPrompt }, "反馈已记录，稳定模式会进入进化中心。")}/></article> : null}</div>
-          ) : <div className="avatarLabPlaceholder"><strong>输入一个你经常创作的真实主题</strong><p>建议选择你熟悉、能够判断“像不像自己”的内容。</p></div>}
-        </section>
-      ) : null}
-
       {activeTab === "sources" ? (
         <section className="avatarViewLayout">
           <div className="avatarViewMain avatarSinglePanel">
@@ -560,15 +368,6 @@ export function ProfilePageClient({ skillScope = "personal", trainingOnly = fals
             </div>
           </div>
           <aside className="avatarViewAside">
-            <form className="avatarSideForm avatarVideoTrainingForm" onSubmit={trainVideoChannel}>
-              <div><span>短视频风格训练</span><h2>让小谷学习你的作品</h2></div>
-              <p>粘贴你自己的视频号或抖音单条作品分享链接，小谷会通过爆款二创的同一条链路提取标题和口播转写稿。</p>
-              <label>作品分享链接<textarea maxLength={24000} onChange={(event) => setVideoChannelDraft((current) => ({ ...current, shareLinks: event.target.value }))} placeholder={"粘贴作品分享链接，可换行或用空格分隔，至少 3 条，最多 20 条\nhttps://weixin.qq.com/sph/...\nhttps://v.douyin.com/..."} required value={videoChannelDraft.shareLinks} /></label>
-              <label className="avatarConsent"><input checked={videoChannelDraft.authorized} onChange={(event) => setVideoChannelDraft((current) => ({ ...current, authorized: event.target.checked }))} type="checkbox" />我确认这些是我的作品，或已获得创作者授权用于个人风格训练</label>
-              <button className="primaryButton" disabled={busy === "train-video-channel-links" || videoChannelDraft.shareLinks.trim().length < 20 || !videoChannelDraft.authorized} type="submit">{busy === "train-video-channel-links" ? "正在创建任务..." : "开始风格训练"}</button>
-              <small>仅使用标题和口播转写稿训练；任务会在后台持续执行，服务重启后也可恢复。候选记忆确认前不会参与内容生成。</small>
-              <VideoTrainingStatus run={workspace?.trainingRuns[0] ?? null} />
-            </form>
             <form className="avatarSideForm" onSubmit={addSource}><div><span>手动添加</span><h2>补充你的原文</h2></div><label>资料类型<select value={sourceDraft.sourceType} onChange={(event) => setSourceDraft((current) => ({ ...current, sourceType: event.target.value }))}><option value="article">文章</option><option value="moments">朋友圈</option><option value="transcript">录音整理稿</option><option value="story">个人故事</option><option value="douyin">抖音作品资料</option><option value="manual">其他资料</option></select></label><label>来源<input value={sourceDraft.sourceLabel} onChange={(event) => setSourceDraft((current) => ({ ...current, sourceLabel: event.target.value }))} /></label><label>作用域<MemoryScopeSelect value={sourceDraft.memoryScope} onChange={(memoryScope) => setSourceDraft((current) => ({ ...current, memoryScope }))} /></label><label>标题<input value={sourceDraft.title} onChange={(event) => setSourceDraft((current) => ({ ...current, title: event.target.value }))} required /></label><label>正文<textarea value={sourceDraft.content} onChange={(event) => setSourceDraft((current) => ({ ...current, content: event.target.value }))} placeholder="至少 20 个字" required /></label><button className="primaryButton" disabled={busy === "add-source" || sourceDraft.content.trim().length < 20}>添加学习资料</button></form>
           </aside>
         </section>
@@ -686,22 +485,28 @@ function VisualAssetsView({
   onDelete: (assetId: string) => Promise<void>;
   onUpdatePrivacy: (enabled: boolean) => Promise<boolean>;
 }) {
+  const [assetSection, setAssetSection] = useState<"photos" | "digital-humans">(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("asset") === "digital-humans" ? "digital-humans" : "photos");
   return (
     <section className="avatarVisualView">
       <div className="avatarVisualHeader">
-        <div><span>视觉身份</span><h2>我的形象资产</h2><p>保存本人已授权的照片，在需要人物出镜的图片应用中按次选择。</p></div>
-        <label className="avatarVisualUploadButton">
+        <div><span>视觉身份</span><h2>我的形象资产</h2><p>{assetSection === "photos" ? "保存本人已授权的照片，在图片应用中按次选择。" : "管理用于口播视频的小谷数字分身。"}</p></div>
+        {assetSection === "photos" ? <label className="avatarVisualUploadButton">
           {busy === "upload-photos" ? "处理中..." : "上传形象照"}
           <input accept="image/jpeg,image/png,image/webp" disabled={busy === "upload-photos" || photos.length >= 8} multiple onChange={(event) => { void onUpload(event.target.files); event.currentTarget.value = ""; }} type="file" />
-        </label>
+        </label> : null}
       </div>
 
-      <div className="avatarVisualPrivacyBar">
-        <div><strong>允许图片创作调用形象照</strong><span>关闭后照片仍保留，但所有新图片任务都不会读取。</span></div>
-        <input checked={privacyEnabled} onChange={(event) => void onUpdatePrivacy(event.target.checked)} type="checkbox" />
+      <div className="avatarAssetSectionTabs" role="tablist" aria-label="形象资产类型">
+        <button aria-selected={assetSection === "photos"} className={assetSection === "photos" ? "active" : ""} onClick={() => setAssetSection("photos")} role="tab" type="button"><strong>形象照片</strong><span>{photos.length} 张 · 用于图片创作</span></button>
+        <button aria-selected={assetSection === "digital-humans"} className={assetSection === "digital-humans" ? "active" : ""} onClick={() => setAssetSection("digital-humans")} role="tab" type="button"><strong>视频数字人</strong><span>我的数字分身 · 用于口播视频</span></button>
       </div>
 
-      {photos.length ? (
+      {assetSection === "photos" ? <>
+        <div className="avatarVisualPrivacyBar">
+          <div><strong>允许图片创作调用形象照</strong><span>关闭后照片仍保留，但所有新图片任务都不会读取。</span></div>
+          <input checked={privacyEnabled} onChange={(event) => void onUpdatePrivacy(event.target.checked)} type="checkbox" />
+        </div>
+        {photos.length ? (
         <div className="avatarVisualGrid">
           {photos.map((photo) => {
             const photoBusy = busy === `photo-${photo.id}`;
@@ -737,9 +542,174 @@ function VisualAssetsView({
       ) : (
         <div className="avatarVisualEmpty"><strong>还没有形象照</strong><p>建议先上传 1 张正面照、1 张职业半身照和 1 张自然生活照。</p></div>
       )}
-      <p className="avatarVisualFootnote">最多保存 8 张。上传时会统一方向、移除 EXIF，并限制为安全尺寸；不会根据面部推断年龄、性格、职业或健康信息。</p>
+        <p className="avatarVisualFootnote">最多保存 8 张。上传时会统一方向、移除 EXIF，并限制为安全尺寸；不会根据面部推断年龄、性格、职业或健康信息。</p>
+      </> : <DigitalHumanAssetsPanel />}
     </section>
   );
+}
+
+function DigitalHumanAssetsPanel() {
+  const [assets, setAssets] = useState<DigitalHumanAsset[]>([]);
+  const [providers, setProviders] = useState<Record<DigitalHumanProvider, boolean>>({ heygen: false, chanjing: false });
+  const [provider, setProvider] = useState<DigitalHumanProvider>("chanjing"); const [name, setName] = useState(""); const [file, setFile] = useState<File | null>(null); const [consent, setConsent] = useState(false);
+  const [replaceBackground, setReplaceBackground] = useState(true); const [quality, setQuality] = useState<"standard" | "high">("standard"); const [trainType, setTrainType] = useState<"figure" | "both">("both"); const [language, setLanguage] = useState<"cn" | "en">("cn"); const [continueWithoutVoice, setContinueWithoutVoice] = useState(false);
+  const [manageMode, setManageMode] = useState<"new" | "voices" | "templates" | null>(() => {
+    if (typeof window === "undefined") return "new";
+    const requested = new URLSearchParams(window.location.search).get("digitalHumanTab");
+    return requested === "templates" ? "templates" : requested === "voices" ? "voices" : "new";
+  });
+  const [creationLane, setCreationLane] = useState<"mine" | "public">("mine");
+  const [generatedPhotoMode, setGeneratedPhotoMode] = useState(false);
+  const [upgradeIdentityId,setUpgradeIdentityId]=useState("");
+  const [busy, setBusy] = useState(""); const [message, setMessage] = useState(""); const [error, setError] = useState("");
+  const [previewAsset, setPreviewAsset] = useState<DigitalHumanAsset | null>(null);
+  const [looksAsset, setLooksAsset] = useState<DigitalHumanAsset | null>(null);
+  async function load() { try { const response = await fetch(apiPath("/api/avatar/digital-humans")); const text = await response.text(); const payload = text ? JSON.parse(text) as { assets?: DigitalHumanAsset[]; providers?: Record<DigitalHumanProvider, boolean> } : null; if (response.ok && payload) { setAssets(payload.assets ?? []); setProviders(payload.providers ?? { heygen: false, chanjing: false }); } else if (!response.ok) setError("数字人资产暂时无法加载"); } catch { setError("数字人资产服务返回异常，请稍后重试"); } }
+  useEffect(() => { void Promise.resolve().then(() => load()); }, []);
+  useEffect(()=>{const id=new URLSearchParams(window.location.search).get("upgrade")||"";if(id){setUpgradeIdentityId(id);setProvider("heygen");setManageMode("new");setCreationLane("mine");}},[]);
+  useEffect(()=>{if(upgradeIdentityId&&!name){const identity=assets.find(asset=>asset.id===upgradeIdentityId);if(identity)setName(identity.name);}},[assets,upgradeIdentityId,name]);
+  useEffect(() => { const timer = window.setInterval(() => { if (assets.some((asset) => asset.status === "creating")) void load(); }, 8000); return () => window.clearInterval(timer); }, [assets]);
+  async function create(event: FormEvent) { event.preventDefault(); if (!file) return; setBusy("create"); setError(""); setMessage(""); const form = new FormData(); form.append("name", name || assets.find(asset=>asset.id===upgradeIdentityId)?.name || "我的数字人"); form.append("consent", String(consent)); form.append("file", file); if(upgradeIdentityId)form.append("identityId",upgradeIdentityId); form.append("replaceBackground", String(replaceBackground)); form.append("quality", quality); form.append("trainType", trainType); form.append("language", language); form.append("continueWithoutVoice", String(continueWithoutVoice)); try { const response = await fetch(apiPath("/api/avatar/digital-humans"), { method: "POST", body: form }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "数字人创建失败"); setMessage(upgradeIdentityId?"Pro 版创建任务已提交，完成后会显示在同一个数字人下。":"创建任务已提交。系统会自动准备所选形象与声音能力。"); setName(""); setFile(null); setConsent(false); setUpgradeIdentityId(""); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "数字人创建失败"); } finally { setBusy(""); } }
+  async function syncExisting() { setBusy("sync"); setError(""); setMessage(""); try { const response=await fetch(apiPath("/api/avatar/digital-humans/sync"),{method:"POST"}); const payload=await response.json() as {count?:number;error?:string}; if(!response.ok)throw new Error(payload.error||"同步失败"); setMessage(`已同步 ${payload.count||0} 个已有数字人。`); await load(); } catch(cause){setError(cause instanceof Error?cause.message:"同步失败");} finally{setBusy("");} }
+  async function action(asset: DigitalHumanAsset, actionName: "refresh" | "retry" | "toggle" | "delete") { if (actionName === "delete" && !window.confirm(`删除「${asset.name}」？相关生成能力也会同步停用。`)) return; setBusy(asset.id); setError(""); try { const response = await fetch(apiPath(`/api/avatar/digital-humans${actionName === "delete" ? `?id=${asset.id}` : ""}`), { method: actionName === "delete" ? "DELETE" : "PATCH", headers: actionName === "delete" ? undefined : { "content-type": "application/json" }, body: actionName === "delete" ? undefined : JSON.stringify({ id: asset.id, action: actionName }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "操作失败"); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "操作失败"); } finally { setBusy(""); } }
+  return <section className="digitalHumanAssetsPanel"><div className="digitalHumanAssetsHeading"><div><span>视频身份资产</span><h3>{manageMode === "new" ? "我的数字人" : manageMode === "templates" ? "我的视频模板" : "声音库"}</h3><p>{manageMode === "new" ? "管理自己的数字分身和公共角色。" : manageMode === "templates" ? "管理已收藏的成片风格与内容结构。" : "查看数字人绑定声音，并管理克隆声音、收藏声音和公共声音。"}</p></div><a href={appPath("/apps/digital-human-video")}>去生成视频</a></div>
+    <div className="digitalHumanAssetTabs" role="tablist"><button className={manageMode === "new" ? "active" : ""} onClick={() => setManageMode("new")} type="button">我的数字人</button><button className={manageMode === "templates" ? "active" : ""} onClick={() => setManageMode("templates")} type="button">视频模板</button><button className={manageMode === "voices" ? "active" : ""} onClick={() => setManageMode("voices")} type="button">声音库</button></div>
+    {error ? <div className="alertPanel">{error}</div> : null}{message ? <div className="successPanel">{message}</div> : null}
+    {upgradeIdentityId ? <div className="digitalHumanUpgradeNotice"><div><strong>升级数字人 Pro</strong><span>为「{assets.find(asset=>asset.id===upgradeIdentityId)?.name||"当前数字人"}」补充 Pro 版；上传清晰正面照片后，新版本仍归入同一个数字人身份。</span></div><button onClick={()=>setUpgradeIdentityId("")} type="button">取消升级</button></div>:null}
+    {manageMode === "new" && assets.length ? <DigitalHumanEditionStrip assets={assets} /> : null}
+    {manageMode === "new" ? <div className="digitalHumanAssetList">{assets.length ? assets.map((asset) => <article key={asset.id}>{asset.preview_image_url ? <button aria-label={`播放${asset.name}训练预览`} className="digitalHumanPreviewCover" disabled={!asset.preview_video_url} onClick={() => setPreviewAsset(asset)} type="button"><img alt={asset.name} src={asset.preview_image_url} />{asset.preview_video_url ? <span>▶ 训练预览</span> : null}</button> : <div className="digitalHumanAvatarFallback">{asset.name.slice(0, 1)}</div>}<section><span>{asset.metadata_json?.source === "chanjing_generated_photo" ? "文字生成数字人" : asset.source_type === "photo" ? "上传照片创建" : "视频高还原创建"}</span><strong>{asset.name}</strong><small>{asset.status === "ready" ? (asset.source_type === "video" ? "训练已完成；换背景效果请在生成视频时查看" : "已就绪") : asset.status === "creating" ? "正在准备形象能力" : asset.status === "disabled" ? "已停用" : asset.error_message || "创建失败"}</small></section><div>{asset.status === "ready" ? <button onClick={() => setLooksAsset(asset)} type="button">形象与声音</button> : null}{asset.preview_video_url ? <button onClick={() => setPreviewAsset(asset)} type="button">{asset.source_type === "video" ? "训练预览" : "形象预览"}</button> : asset.status === "failed" ? <button disabled={busy === asset.id} onClick={() => void action(asset, "retry")} type="button">重新创建</button> : <button disabled={busy === asset.id} onClick={() => void action(asset, "refresh")} type="button">刷新</button>}{["ready", "disabled"].includes(asset.status) ? <button disabled={busy === asset.id} onClick={() => void action(asset, "toggle")} type="button">{asset.status === "disabled" ? "启用" : "停用"}</button> : null}<button className="danger" disabled={busy === asset.id} onClick={() => void action(asset, "delete")} type="button">删除</button></div></article>) : <div className="avatarVisualEmpty"><strong>还没有数字人</strong><p>上传已授权的照片或视频，创建完成后即可反复生成口播视频。</p></div>}</div> : null}
+    {looksAsset ? <DigitalHumanLookManager asset={looksAsset} onClose={() => setLooksAsset(null)} /> : null}
+    {previewAsset?.preview_video_url ? <div className="digitalHumanPreviewModal" onClick={() => setPreviewAsset(null)} role="dialog" aria-modal="true" aria-label={`${previewAsset.name}形象预览`}><div onClick={(event) => event.stopPropagation()}><header><div><strong>{previewAsset.name}</strong><span>{previewAsset.metadata_json?.supports_remove_background === true ? "处理后的形象预览；透明或纯色背景表示人物已具备独立合成能力" : "当前形象的训练素材预览，可能与上传原片相同"}</span></div><button aria-label="关闭预览" onClick={() => setPreviewAsset(null)} type="button">×</button></header><video autoPlay controls playsInline preload="metadata" poster={previewAsset.preview_image_url || undefined} src={previewAsset.preview_video_url} /><footer><span>这里不是最终口播成片；数字人效果需用一段新文案生成后验证。</span></footer></div></div> : null}
+    <div className="digitalHumanLibraryActions"><button className={manageMode === "new" ? "active" : ""} onClick={() => setManageMode((mode) => mode === "new" ? null : "new")} type="button">＋ 新增数字人</button><button className={manageMode === "templates" ? "active" : ""} onClick={() => setManageMode((mode) => mode === "templates" ? null : "templates")} type="button">管理视频模板</button><button className={manageMode === "voices" ? "active" : ""} onClick={() => setManageMode((mode) => mode === "voices" ? null : "voices")} type="button">管理声音库</button></div>
+    {manageMode ? <div className="digitalHumanManageDrawer">{manageMode === "new" ? <><div className="digitalHumanCreationTabs" role="tablist"><button className={creationLane === "mine" ? "active" : ""} onClick={() => setCreationLane("mine")} type="button"><strong>创建我的数字人</strong><span>使用本人照片或视频创建可复用分身</span></button><button className={creationLane === "public" ? "active" : ""} onClick={() => setCreationLane("public")} type="button"><strong>选择公共数字人</strong><span>从现成角色库直接加入我的资产</span></button></div>{creationLane === "mine" ? <><div className="digitalHumanCreateIntro"><div><strong>选择创建方式</strong><span>不确定素材怎么拍？独立指南包含示范、检查表、录制文稿和提词器。</span></div><a href={appPath("/avatar/digital-human-guide")}>查看创建指南 →</a></div><div className="digitalHumanProviderTabs digitalHumanProviderChooser">{(["chanjing", "heygen"] as DigitalHumanProvider[]).map((item) => <button className={!generatedPhotoMode && provider === item ? "active" : ""} disabled={!providers[item]} key={item} onClick={() => { setGeneratedPhotoMode(false); setProvider(item); setFile(null); }} type="button"><strong>{item === "heygen" ? "上传照片创建" : "视频高还原创建"}</strong><span>{providers[item] ? (item === "heygen" ? "一张照片创建人物身份，后续可增加不同造型" : "真人视频训练高还原形象，可选择是否同步声音") : item === "heygen" ? "当前功能不可用" : "当前功能不可用"}</span></button>)}<button className={generatedPhotoMode ? "active" : ""} disabled={!providers.chanjing} onClick={() => { setGeneratedPhotoMode(true); setFile(null); }} type="button"><strong>文字生成数字人</strong><span>{providers.chanjing ? "按文字描述创建数字人形象，可继续制作动态视频" : "当前功能不可用"}</span></button></div>{generatedPhotoMode ? <ChanjingGeneratedPhotoForm onCreated={load} /> : <form className="digitalHumanCreateForm" onSubmit={create}><label>数字人名称<input maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="例如：我的专业口播形象" required value={name} /></label><label className="digitalHumanSourceUpload"><strong>{provider === "heygen" ? "上传正面照片" : "上传真人训练视频"}</strong><span>{file?.name || (provider === "heygen" ? "JPG / PNG / WebP，清晰正面半身照" : "MP4 / MOV / WebM，建议 30 秒至 5 分钟")}</span><input accept={provider === "heygen" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm"} onChange={(event) => setFile(event.target.files?.[0] ?? null)} required type="file" /></label>{provider === "chanjing" ? <fieldset className="digitalHumanCreationOptions"><legend>创建能力</legend><label><span>训练内容</span><select onChange={(event)=>setTrainType(event.target.value as "figure"|"both")} value={trainType}><option value="both">形象 + 本人声音</option><option value="figure">仅训练形象</option></select></label>{trainType === "both" ? <label><span>素材语言</span><select onChange={(event)=>setLanguage(event.target.value as "cn"|"en")} value={language}><option value="cn">中文</option><option value="en">英文</option></select></label> : null}<label><span>清晰度</span><select onChange={(event)=>setQuality(event.target.value as "standard"|"high")} value={quality}><option value="standard">1080p（推荐）</option><option value="high">4K（需 4K 素材）</option></select></label><label className="digitalHumanOptionCheck"><input checked={replaceBackground} onChange={(event)=>setReplaceBackground(event.target.checked)} type="checkbox" /><span>准备背景移除能力</span></label>{trainType === "both" ? <label className="digitalHumanOptionCheck"><input checked={continueWithoutVoice} onChange={(event)=>setContinueWithoutVoice(event.target.checked)} type="checkbox" /><span>声音训练失败时仍保留形象</span></label> : null}</fieldset> : <div className="digitalHumanCreationSummary"><strong>创建结果</strong><span>创建人物身份与首个造型；完成后可为同一人物继续增加服装、姿态或画幅造型。</span></div>}<label className="digitalHumanConsent"><input checked={consent} onChange={(event) => setConsent(event.target.checked)} required type="checkbox" /><span>我确认素材为本人或已取得本人明确授权，并同意用于创建数字人{provider === "chanjing" && trainType === "both" ? "和声音" : ""}。</span></label><button disabled={busy === "create" || !providers[provider]} type="submit">{busy === "create" ? "正在上传并创建…" : "创建我的数字人"}</button></form>}{providers.chanjing ? <button className="digitalHumanSyncButton" disabled={busy === "sync"} onClick={()=>void syncExisting()} type="button">{busy === "sync" ? "正在同步…" : "同步账号中已有的数字人"}</button> : null}</> : <DigitalHumanResourceManager key="public-avatars" mode="public-avatars" provider="chanjing" onTemplateActivated={() => void load()} />}</> : manageMode === "templates" ? <DigitalHumanTemplateFavoritesManager /> : <DigitalHumanResourceManager assets={assets} key={`voices-${provider}`} mode="voices" provider={provider} onTemplateActivated={() => void load()} />}</div> : null}
+  </section>;
+}
+
+function DigitalHumanEditionStrip({assets}:{assets:DigitalHumanAsset[]}){
+  const standard=assets.filter(asset=>asset.editions?.some(item=>item.edition==="standard"&&item.status==="ready"&&item.reviewStatus==="approved")).length;
+  const pro=assets.filter(asset=>asset.editions?.some(item=>item.edition==="pro"&&item.status==="ready"&&item.reviewStatus==="approved")).length;
+  return <div className="digitalHumanEditionStrip"><div><span>标准版</span><strong>{standard} 个已启用</strong><small>适合高频日常口播，生成稳定</small></div><div><span>Pro 版</span><strong>{pro} 个已启用</strong><small>支持更精细表现与多造型能力</small></div><p>每条视频会锁定一个版本；没有经过启用确认的版本不会参与自动生成。</p></div>;
+}
+
+function ChanjingGeneratedPhotoForm({ onCreated }: { onCreated: () => Promise<void> }) {
+  const [name,setName]=useState(""); const [detail,setDetail]=useState(""); const [background,setBackground]=useState(""); const [age,setAge]=useState<"Young adult"|"Adult"|"Teenager"|"Elderly">("Adult"); const [gender,setGender]=useState<"Male"|"Female">("Female"); const [aspectRatio,setAspectRatio]=useState<"9:16"|"16:9">("9:16"); const [consent,setConsent]=useState(false); const [busy,setBusy]=useState(false); const [error,setError]=useState("");
+  async function submit(event:FormEvent){event.preventDefault();setBusy(true);setError("");try{const response=await fetch(apiPath("/api/avatar/generated-digital-humans"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name,detail,background,age,gender,aspectRatio,talkingPose:"上半身正面口播构图，目视镜头",consent})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"文字生成数字人创建失败");setName("");setDetail("");setBackground("");setConsent(false);await onCreated();}catch(cause){setError(cause instanceof Error?cause.message:"文字生成数字人创建失败");}finally{setBusy(false);}}
+  return <form className="digitalHumanCreateForm" onSubmit={submit}><div className="digitalHumanCreationSummary"><strong>文字生成数字人</strong><span>根据人物描述生成数字人形象图；这是生成式形象，不等同于真人高还原克隆。</span></div><label>形象名称<input maxLength={80} onChange={event=>setName(event.target.value)} placeholder="例如：专业保险顾问" required value={name}/></label><label>人物描述<textarea maxLength={1500} onChange={event=>setDetail(event.target.value)} placeholder="例如：亲和专业的亚洲女性保险顾问，深色职业套装，正面半身" required value={detail}/></label><label>年龄感<select onChange={event=>setAge(event.target.value as typeof age)} value={age}><option value="Young adult">青年</option><option value="Adult">成年</option><option value="Teenager">少年</option><option value="Elderly">长者</option></select></label><label>人物性别<select onChange={event=>setGender(event.target.value as typeof gender)} value={gender}><option value="Female">女性</option><option value="Male">男性</option></select></label><label>画幅<select onChange={event=>setAspectRatio(event.target.value as typeof aspectRatio)} value={aspectRatio}><option value="9:16">竖屏 9:16</option><option value="16:9">横屏 16:9</option></select></label><label>背景描述<input maxLength={1500} onChange={event=>setBackground(event.target.value)} placeholder="例如：明亮整洁的专业咨询室" value={background}/></label><label className="digitalHumanConsent"><input checked={consent} onChange={event=>setConsent(event.target.checked)} required type="checkbox"/><span>我确认描述和参考方向不侵犯他人肖像、著作权或其他权益。</span></label>{error?<div className="alertPanel">{error}</div>:null}<button disabled={busy||!consent} type="submit">{busy?"正在提交生成…":"文字生成数字人"}</button></form>;
+}
+
+type DigitalHumanLook = { id: string; name: string; status: string; previewImageUrl: string; previewVideoUrl: string; width?: number; height?: number };
+function DigitalHumanLookManager({ asset, onClose }: { asset: DigitalHumanAsset; onClose: () => void }) {
+  const [looks, setLooks] = useState<DigitalHumanLook[]>([]); const [name, setName] = useState(""); const [file, setFile] = useState<File | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState(typeof asset.metadata_json?.voice_preview_url === "string" ? asset.metadata_json.voice_preview_url : ""); const [voicePreviewBusy, setVoicePreviewBusy] = useState(false);
+  const canAddLooks = asset.provider === "heygen" && Boolean(asset.provider_group_id);
+  async function load() { if (!canAddLooks) return; setError(""); try { const response = await fetch(apiPath(`/api/avatar/digital-human-looks?assetId=${encodeURIComponent(asset.id)}`)); const payload = await response.json() as { looks?: DigitalHumanLook[]; error?: string }; if (!response.ok) throw new Error(payload.error || "造型加载失败"); setLooks(payload.looks ?? []); } catch (cause) { setError(cause instanceof Error ? cause.message : "造型加载失败"); } }
+  useEffect(() => { void Promise.resolve().then(() => load()); }, []);
+  async function submit(event: FormEvent) { event.preventDefault(); if (!file) return; setBusy(true); setError(""); const form = new FormData(); form.append("assetId", asset.id); form.append("name", name); form.append("file", file); try { const response = await fetch(apiPath("/api/avatar/digital-human-looks"), { method: "POST", body: form }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "新增造型失败"); setName(""); setFile(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "新增造型失败"); } finally { setBusy(false); } }
+  async function previewVoice() { setVoicePreviewBusy(true); setError(""); try { const response = await fetch(apiPath("/api/avatar/digital-human-voice-preview"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assetId: asset.id }) }); const payload = await response.json() as { url?: string; error?: string }; if (!response.ok || !payload.url) throw new Error(payload.error || "声音试听生成失败"); setVoicePreviewUrl(payload.url); } catch (cause) { setError(cause instanceof Error ? cause.message : "声音试听生成失败"); } finally { setVoicePreviewBusy(false); } }
+  const visibleLooks = looks.length ? looks : [{ id: asset.provider_avatar_id || asset.id, name: "当前形象", status: "completed", previewImageUrl: asset.preview_image_url || "", previewVideoUrl: asset.preview_video_url || "" }];
+  return <div className="digitalHumanLookModal" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${asset.name}形象与声音管理`}><div onClick={(event) => event.stopPropagation()}><header><div><strong>{asset.name}的形象与声音</strong><span>查看这个数字人当前可用的形象版本和绑定声音</span></div><button onClick={onClose} type="button">×</button></header>{error ? <div className="alertPanel">{error}</div> : null}<div className="digitalHumanIdentityManager"><section><div className="digitalHumanIdentitySectionTitle"><strong>我的造型</strong><span>{canAddLooks ? "可继续增加服装、姿态和画幅造型" : "当前形象由一次完整训练生成"}</span></div><div className="digitalHumanLookGrid">{visibleLooks.map((look) => <article key={look.id}>{look.previewImageUrl ? <img alt={look.name} src={look.previewImageUrl} /> : <div className="digitalHumanAvatarFallback">{asset.name.slice(0, 1)}</div>}<strong>{look.name}</strong><small>{look.status === "completed" ? "已就绪" : "正在生成"}{look.width && look.height ? ` · ${look.width}×${look.height}` : ""}</small></article>)}</div></section><section><div className="digitalHumanIdentitySectionTitle"><strong>我的声音</strong><span>生成口播时会自动使用，也可在成片页切换其他声音</span></div><article className="digitalHumanBoundVoice"><span>声音</span><div><strong>{asset.provider_voice_id ? `${asset.name}的绑定声音` : asset.metadata_json?.source === "public" ? "默认声音" : "声音正在准备"}</strong><small>{asset.provider_voice_id ? "已与当前数字人绑定" : "当前使用随形象准备的默认声音"}</small></div><i>{asset.provider_voice_id ? "已就绪" : "默认"}</i></article>{voicePreviewUrl ? <audio className="digitalHumanBoundVoiceAudio" controls autoPlay preload="metadata" src={voicePreviewUrl} /> : asset.provider_voice_id ? <button className="digitalHumanVoicePreviewButton" disabled={voicePreviewBusy} onClick={() => void previewVoice()} type="button">{voicePreviewBusy ? "正在准备试听…" : "▶ 试听声音"}</button> : null}</section></div>{canAddLooks ? <form onSubmit={submit}><div><strong>增加一个新造型</strong><span>上传同一人物的新照片，可改变服装、姿态或横竖构图，但保持人物身份。</span></div><label>造型名称<input maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="例如：职业西装·竖版" required value={name} /></label><label>造型参考照片<input accept="image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} required type="file" /></label><button disabled={busy || !file} type="submit">{busy ? "正在创建造型…" : "增加造型"}</button></form> : <div className="digitalHumanChannelNotice"><strong>需要另一个造型？</strong><span>当前形象由一段完整训练素材生成。如需更换服装、姿态或构图，请使用同一人物的新训练视频新增一个形象，小谷会继续统一管理和自动选择可用能力。</span></div>}</div></div>;
+}
+
+type FavoriteVideoTemplate = { id: string; collection: "expressive" | "production"; name: string; category: string; categories: string[]; aspectRatio: "9:16" | "16:9"; width: number; height: number; durationSeconds: number | null; structure: string[]; coverUrl: string; previewUrl: string };
+function DigitalHumanTemplateFavoritesManager() {
+  const [showLibrary, setShowLibrary] = useState(false); const [templates, setTemplates] = useState<FavoriteVideoTemplate[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [busy, setBusy] = useState("");
+  async function load() { setLoading(true); setError(""); try { const response = await fetch(apiPath("/api/digital-human-template-favorites")); const payload = await response.json() as { templates?: FavoriteVideoTemplate[]; error?: string }; if (!response.ok) throw new Error(payload.error || "收藏模板加载失败"); setTemplates(payload.templates ?? []); } catch (cause) { setError(cause instanceof Error ? cause.message : "收藏模板加载失败"); } finally { setLoading(false); } }
+  useEffect(() => { if (!showLibrary) void Promise.resolve().then(() => load()); }, [showLibrary]);
+  async function remove(template: FavoriteVideoTemplate) { setBusy(template.id); try { const response = await fetch(apiPath(`/api/digital-human-template-favorites?collection=${template.collection}&id=${encodeURIComponent(template.id)}`), { method: "DELETE" }); if (!response.ok) throw new Error("取消收藏失败"); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "取消收藏失败"); } finally { setBusy(""); } }
+  if (showLibrary) return <><button className="digitalHumanBackToFavorites" onClick={() => setShowLibrary(false)} type="button">← 返回我的收藏</button><DigitalHumanTemplateLibraryBrowser /></>;
+  return <section className="digitalHumanFavoriteTemplateManager"><header><div><span>我的常用资产</span><h4>我收藏的模板</h4><p>生成数字人视频时，只会从这里选择模板。</p></div><button className="digitalHumanBrowseLibrary" onClick={() => setShowLibrary(true)} type="button">＋ 浏览模板库</button></header>{error ? <div className="alertPanel">{error}</div> : null}{loading ? <div className="digitalHumanEmpty">正在加载收藏模板…</div> : templates.length ? <div className="digitalHumanFavoriteTemplateGrid">{templates.map((template) => <article key={`${template.collection}:${template.id}`}><button className="preview" disabled={!template.previewUrl} type="button">{template.coverUrl ? <img alt={template.name} src={template.coverUrl} /> : <span>暂无封面</span>}</button><strong>{template.name}</strong><small>{template.category} · {template.aspectRatio}</small><button disabled={busy === template.id} onClick={() => void remove(template)} type="button">{busy === template.id ? "处理中…" : "取消收藏"}</button></article>)}</div> : <div className="digitalHumanEmpty"><strong>还没有收藏模板</strong><p>进入精简模板库，收藏常用成片模板。</p><button onClick={() => setShowLibrary(true)} type="button">浏览模板库</button></div>}</section>;
+}
+function DigitalHumanTemplateLibraryBrowser() {
+  const [collection, setCollection] = useState<"expressive" | "production">("expressive"); const [category, setCategory] = useState("全部"); const [page, setPage] = useState(1); const [templates, setTemplates] = useState<FavoriteVideoTemplate[]>([]); const [categories, setCategories] = useState<string[]>([]); const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]); const [preview, setPreview] = useState<FavoriteVideoTemplate | null>(null); const [busy, setBusy] = useState(""); const [error, setError] = useState("");
+  async function loadFavorites() { const response = await fetch(apiPath("/api/digital-human-template-favorites")); const payload = await response.json() as { keys?: string[] }; if (response.ok) setFavoriteKeys(payload.keys ?? []); }
+  async function loadLibrary() { setError(""); try { const query = new URLSearchParams({ collection, category, page: String(page), pageSize: "12" }); const response = await fetch(apiPath(`/api/digital-human-template-library?${query}`)); const payload = await response.json() as { templates?: FavoriteVideoTemplate[]; categories?: string[]; error?: string }; if (!response.ok) throw new Error(payload.error || "模板库加载失败"); setTemplates(payload.templates ?? []); setCategories(payload.categories ?? []); } catch (cause) { setError(cause instanceof Error ? cause.message : "模板库加载失败"); } }
+  // Changing a library filter intentionally hydrates a fresh result page.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void Promise.all([loadLibrary(), loadFavorites()]); }, [collection, category, page]);
+  async function toggle(template: FavoriteVideoTemplate) { const key = `${template.collection}:${template.id}`; const saved = favoriteKeys.includes(key); setBusy(key); setError(""); try { const response = await fetch(apiPath(`/api/digital-human-template-favorites${saved ? `?collection=${template.collection}&id=${encodeURIComponent(template.id)}` : ""}`), saved ? { method: "DELETE" } : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(template) }); if (!response.ok) { const payload = await response.json() as { error?: string }; throw new Error(payload.error || "模板收藏失败"); } await loadFavorites(); } catch (cause) { setError(cause instanceof Error ? cause.message : "模板收藏失败"); } finally { setBusy(""); } }
+  const allowed = collection === "expressive" ? ["全部", "IP打造", "教育培训", "营销带货"] : ["全部", "知识口播", "情感口播", "法律科普"].filter((item) => item === "全部" || categories.includes(item));
+  return <section className="digitalHumanFavoriteTemplateManager"><header><div><span>我的常用资产</span><h4>收藏视频模板</h4><p>在这里发现和收藏；生成视频时只展示你收藏的模板。</p></div><strong>已收藏 {favoriteKeys.length} 个</strong></header><div className="digitalHumanResourceTabs"><button className={collection === "expressive" ? "active" : ""} onClick={() => { setCollection("expressive"); setCategory("全部"); setPage(1); }} type="button">AI 模板</button><button className={collection === "production" ? "active" : ""} onClick={() => { setCollection("production"); setCategory("全部"); setPage(1); }} type="button">模板库</button></div><div className="digitalHumanFavoriteCategories">{allowed.map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => { setCategory(item); setPage(1); }} type="button">{item === "全部" ? "推荐" : item}</button>)}</div>{error ? <div className="alertPanel">{error}</div> : null}<div className="digitalHumanFavoriteTemplateGrid">{templates.map((template) => { const key = `${template.collection}:${template.id}`; const saved = favoriteKeys.includes(key); return <article key={key}><button className="preview" disabled={!template.previewUrl} onClick={() => setPreview(template)} type="button">{template.coverUrl ? <img alt={template.name} src={template.coverUrl} /> : <span>暂无封面</span>}{template.previewUrl ? <i>▶ 预览</i> : null}</button><strong>{template.name}</strong><small>{template.category} · {template.aspectRatio}</small><button className={saved ? "saved" : ""} disabled={busy === key} onClick={() => void toggle(template)} type="button">{busy === key ? "处理中…" : saved ? "已收藏 · 取消" : "收藏到我的模板"}</button></article>; })}</div>{preview?.previewUrl ? <div className="digitalHumanTemplateModal" onClick={() => setPreview(null)} role="dialog" aria-modal="true"><div onClick={(event) => event.stopPropagation()}><header><strong>{preview.name}</strong><button onClick={() => setPreview(null)} type="button">×</button></header><video autoPlay controls playsInline poster={preview.coverUrl} src={preview.previewUrl} /></div></div> : null}</section>;
+}
+
+function DigitalHumanResourceManager({ provider, onTemplateActivated, mode, assets = [] }: { provider: DigitalHumanProvider; onTemplateActivated: () => void; mode: "public-avatars" | "voices"; assets?: DigitalHumanAsset[] }) {
+  const [tab, setTab] = useState<"templates" | "voices" | "clone">(mode === "public-avatars" ? "templates" : "clone");
+  const [templates, setTemplates] = useState<DigitalHumanTemplate[]>([]); const [voices, setVoices] = useState<DigitalHumanVoice[]>([]);
+  const [name, setName] = useState(""); const [referenceUrl, setReferenceUrl] = useState(""); const [consent, setConsent] = useState(false); const [busy, setBusy] = useState(""); const [message, setMessage] = useState(""); const [error, setError] = useState("");
+  const [previewTemplate, setPreviewTemplate] = useState<DigitalHumanTemplate | null>(null);
+  const [figureChoices, setFigureChoices] = useState<Record<string, string>>({});
+  async function loadResources() { try { const response = await fetch(apiPath("/api/digital-human-resources")); const text = await response.text(); const payload = text ? JSON.parse(text) as { templates?: DigitalHumanTemplate[]; voices?: DigitalHumanVoice[]; error?: string } : null; if (!response.ok || !payload) throw new Error(payload?.error || "资源库加载失败"); setTemplates((payload.templates ?? []).filter((item) => item.provider === provider)); setVoices((payload.voices ?? []).filter((item) => item.provider === provider)); } catch (cause) { setError(cause instanceof Error ? cause.message : "资源库加载失败"); } }
+  useEffect(() => { void Promise.resolve().then(() => loadResources()); }, [provider]);
+  async function activate(template: DigitalHumanTemplate) { setBusy(`template:${template.id}:${template.figure_type}`); setError(""); try { const response = await fetch(apiPath("/api/digital-human-resources"), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ personId: template.id, name: template.name, figureType: template.figure_type, voiceId: template.voice_id, coverUrl: template.cover_url, previewUrl: template.preview_url, width: template.width, height: template.height }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "模板启用失败"); setMessage(`已把「${template.name}」加入我的数字人。`); onTemplateActivated(); } catch (cause) { setError(cause instanceof Error ? cause.message : "模板启用失败"); } finally { setBusy(""); } }
+  async function cloneVoice() { if (!name.trim() || !referenceUrl.trim() || !consent) return; setBusy("clone"); setError(""); try { const response = await fetch(apiPath("/api/digital-human-resources"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, referenceUrl, consent }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "声音克隆提交失败"); setName(""); setReferenceUrl(""); setConsent(false); setMessage("声音克隆任务已提交，通常需要几分钟完成。"); await loadResources(); } catch (cause) { setError(cause instanceof Error ? cause.message : "声音克隆提交失败"); } finally { setBusy(""); } }
+  async function refreshVoice(id: string) { setBusy(id); try { const response = await fetch(apiPath("/api/digital-human-resources"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "声音状态刷新失败"); await loadResources(); } catch (cause) { setError(cause instanceof Error ? cause.message : "声音状态刷新失败"); } finally { setBusy(""); } }
+  async function saveVoice(voice: DigitalHumanVoice) { setBusy(`voice:${voice.id}`); setError(""); try { const response = await fetch(apiPath("/api/digital-human-resources"), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save-public-voice", provider: voice.provider, name: voice.name, voiceId: voice.provider_voice_id, previewUrl: voice.preview_audio_url }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "声音收藏失败"); setMessage(`已把「${voice.name}」收藏到我的声音。`); await loadResources(); } catch (cause) { setError(cause instanceof Error ? cause.message : "声音收藏失败"); } finally { setBusy(""); } }
+  async function removeVoice(voice: DigitalHumanVoice) { setBusy(`remove:${voice.id}`); setError(""); try { const response = await fetch(apiPath(`/api/digital-human-resources?id=${encodeURIComponent(voice.id)}`), { method: "DELETE" }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "取消收藏失败"); setMessage(`已取消收藏「${voice.name}」。`); await loadResources(); } catch (cause) { setError(cause instanceof Error ? cause.message : "取消收藏失败"); } finally { setBusy(""); } }
+  const publicVoices = voices.filter((voice) => voice.source === "public"); const creatorVoices = voices.filter((voice) => voice.source === "creator");
+  const boundVoiceAssets = assets.filter((asset) => asset.status === "ready" && Boolean(asset.provider_voice_id));
+  const templateGroups = useMemo(() => Array.from(templates.reduce((groups, template) => {
+    const variants = groups.get(template.id) ?? new Map<string, DigitalHumanTemplate>();
+    const figureType = normalizeFigureType(template.figure_type);
+    const normalizedTemplate = { ...template, figure_type: figureType };
+    const current = variants.get(figureType);
+    if (!current || (!current.cover_url && template.cover_url) || (!current.preview_url && template.preview_url)) variants.set(figureType, normalizedTemplate);
+    groups.set(template.id, variants);
+    return groups;
+  }, new Map<string, Map<string, DigitalHumanTemplate>>()).values()).map((variants) => Array.from(variants.values()).sort((left, right) => figureTypePriority(left.figure_type) - figureTypePriority(right.figure_type))), [templates]);
+  return <section className="digitalHumanProfileResources"><header><div><span>{mode === "public-avatars" ? "金融保险顾问角色库" : "声音资产"}</span><h4>{mode === "public-avatars" ? "选择现成数字人" : "声音库"}</h4><p>{mode === "public-avatars" ? `已按官方“金融保险顾问”标签筛选全部 ${templateGroups.length} 位角色；预览后可加入我的数字人。` : "查看数字人绑定声音，并管理独立克隆或收藏的声音。"}</p></div></header>{mode === "voices" ? <div className="digitalHumanResourceTabs"><button className={tab === "voices" ? "active" : ""} onClick={() => setTab("voices")} type="button">公共声音</button><button className={tab === "clone" ? "active" : ""} onClick={() => setTab("clone")} type="button">我的可用声音</button></div> : null}{error ? <div className="alertPanel">{error}</div> : null}{message ? <div className="successPanel">{message}</div> : null}
+    {tab === "templates" ? provider === "chanjing" ? <><div className="digitalHumanTemplateGrid">{templateGroups.map((figures) => { const uniqueFigures = uniqueFigureVariants(figures); const selected = uniqueFigures.find((item) => item.figure_type === figureChoices[uniqueFigures[0].id]) ?? uniqueFigures[0]; return <article key={selected.id}><button aria-label={`预览${selected.name}`} className="digitalHumanTemplateCover" disabled={!selected.preview_url} onClick={() => setPreviewTemplate(selected)} type="button">{selected.cover_url ? <img alt={`${selected.name}完整形象封面`} src={selected.cover_url} /> : <span className="digitalHumanAvatarFallback">{selected.name.slice(0, 1)}</span>}{selected.preview_url ? <i>▶ 预览</i> : null}</button><div className="digitalHumanTemplateInfo"><strong>{selected.name}</strong><span>{selected.voice_name || "平台默认声音"}</span></div>{uniqueFigures.length > 1 ? <div className="digitalHumanFigureChoices" aria-label="选择人物构图"><small>可选构图</small><div>{uniqueFigures.map((figure) => <button className={selected.figure_type === figure.figure_type ? "active" : ""} key={figure.figure_type} onClick={() => setFigureChoices((current) => ({ ...current, [selected.id]: figure.figure_type }))} type="button">{figureTypeLabel(figure.figure_type)}</button>)}</div></div> : null}<small className="digitalHumanTemplateMeta">{figureTypeLabel(selected.figure_type)} · {selected.width}×{selected.height}</small><button className="digitalHumanTemplateAdd" disabled={Boolean(busy)} onClick={() => void activate(selected)} type="button">{busy === `template:${selected.id}:${selected.figure_type}` ? "正在添加…" : "加入我的数字人"}</button></article>})}</div>{previewTemplate?.preview_url ? <div className="digitalHumanTemplateModal" onClick={() => setPreviewTemplate(null)} role="dialog" aria-modal="true" aria-label={`${previewTemplate.name}完整预览`}><div onClick={(event) => event.stopPropagation()}><header><div><strong>{previewTemplate.name}</strong><span>{figureTypeLabel(previewTemplate.figure_type)} · {previewTemplate.width}×{previewTemplate.height} · {previewTemplate.voice_name || "默认声音"}</span></div><button onClick={() => setPreviewTemplate(null)} type="button">×</button></header><video autoPlay controls loop muted playsInline poster={previewTemplate.cover_url || undefined} src={previewTemplate.preview_url} /></div></div> : null}</> : <div className="digitalHumanEmpty"><strong>快速形象模板正在准备</strong><p>你仍可上传一张清晰正面照创建自己的数字分身。</p></div> : null}
+    {tab === "voices" ? <><div className="digitalHumanVoiceUsageHint"><strong>公共声音怎么用？</strong><span>先试听，喜欢后收藏到“我的声音”；真正选择和使用声音在数字人视频创作页完成。</span></div><div className="digitalHumanVoiceGrid">{publicVoices.map((voice) => { const saved = creatorVoices.some((item) => item.provider === voice.provider && item.provider_voice_id === voice.provider_voice_id); return <article key={voice.id}><div><strong>{voice.name}</strong><small>精选声音 · {voice.gender || voice.language || "中文"}</small></div>{voice.preview_audio_url ? <audio controls preload="none" src={voice.preview_audio_url} /> : null}<button className="digitalHumanUseVoice" disabled={saved || busy === `voice:${voice.id}`} onClick={() => void saveVoice(voice)} type="button">{saved ? "已收藏到我的声音" : busy === `voice:${voice.id}` ? "正在收藏…" : "收藏到我的声音"}</button></article>})}{!publicVoices.length ? <div className="digitalHumanEmpty">当前暂未返回公共声音。</div> : null}</div></> : null}
+    {tab === "clone" ? <div className="digitalHumanCreatorVoiceManager"><div className="digitalHumanVoiceUsageHint"><strong>数字人绑定声音</strong><span>随数字人训练或启用，只用于对应数字人；生成视频时会自动使用。</span></div><div className="digitalHumanVoiceGrid">{boundVoiceAssets.map((asset) => <article key={`bound:${asset.id}`}><div><strong>{asset.name}的绑定声音</strong><small>数字人声音 · 仅用于「{asset.name}」</small></div><span className="digitalHumanVoiceStatus">已就绪</span></article>)}</div>{!boundVoiceAssets.length ? <div className="digitalHumanEmpty">当前没有已就绪的数字人绑定声音。</div> : null}<div className="digitalHumanVoiceUsageHint"><strong>独立声音</strong><span>克隆或收藏后，可在生成视频时按需切换。</span></div><div className="digitalHumanVoiceGrid">{creatorVoices.map((voice) => <article key={voice.id}><div><strong>{voice.name}</strong><small>{voice.is_favorite ? "收藏的公共声音" : voice.status === "ready" ? "我的克隆声音 · 已就绪" : voice.status === "failed" ? voice.error_message || "训练失败" : "正在训练"}</small></div>{voice.preview_audio_url ? <audio controls preload="none" src={voice.preview_audio_url} /> : null}{voice.is_favorite ? <button disabled={busy === `remove:${voice.id}`} onClick={() => void removeVoice(voice)} type="button">{busy === `remove:${voice.id}` ? "处理中…" : "取消收藏"}</button> : voice.status === "creating" ? <button disabled={busy === voice.id} onClick={() => void refreshVoice(voice.id)} type="button">刷新状态</button> : null}</article>)}</div>{!creatorVoices.length ? <div className="digitalHumanEmpty">还没有收藏或创建声音。可切换到“公共声音”收藏，或在下方克隆自己的声音。</div> : null}{provider === "chanjing" ? <div className="digitalHumanVoiceCloneForm"><div><strong>克隆我的声音</strong><span>使用 30 秒–5 分钟干净人声，参考音频需为 HTTPS 公网地址。</span></div><label>声音名称<input maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="例如：我的专业讲解声" value={name} /></label><label>参考音频地址<input onChange={(event) => setReferenceUrl(event.target.value)} placeholder="https://…/voice.mp3" type="url" value={referenceUrl} /></label><label className="digitalHumanConsent"><input checked={consent} onChange={(event) => setConsent(event.target.checked)} type="checkbox" /><span>我确认这是本人声音或已获得明确的声音克隆授权。</span></label><button disabled={busy === "clone" || !name.trim() || !referenceUrl.trim() || !consent} onClick={() => void cloneVoice()} type="button">{busy === "clone" ? "正在提交…" : "开始克隆声音"}</button></div> : <div className="digitalHumanEmpty">该创建方式默认跟随数字人声音，无需单独录入。</div>}</div> : null}
+  </section>;
+}
+
+function figureTypeLabel(value: string) { return value === "sit_body" ? "坐姿半身" : value === "whole_body" ? "全身站姿" : value === "circle_view" ? "圆形近景" : value; }
+function figureTypePriority(value: string) { return value === "whole_body" ? 0 : value === "sit_body" ? 1 : value === "circle_view" ? 2 : 3; }
+function normalizeFigureType(value: string) { return value.trim().toLowerCase(); }
+function uniqueFigureVariants(figures: DigitalHumanTemplate[]) { return Array.from(new Map(figures.map((figure) => [normalizeFigureType(figure.figure_type), { ...figure, figure_type: normalizeFigureType(figure.figure_type) }])).values()); }
+
+const digitalHumanRecordingScript = [
+  "大家好，我是【你的名字】。很高兴通过这段视频认识你。接下来，我会用自然、清楚的方式，分享一些我在工作和生活中的思考。",
+  "我平时主要关注家庭保障、风险管理和长期规划。面对每一个问题，我都会先了解真实需求，再解释相关规则、适用范围和需要注意的边界，而不是急着给出结论。",
+  "举个简单的例子。当一个家庭开始做保障规划时，我通常会先梳理家庭成员、收入支出和已有保障，再分清哪些风险更需要优先处理。信息越完整，沟通就越有效，选择也会更从容。",
+  "我希望自己的表达专业但不生硬，清晰但不夸张。遇到不确定的信息，我会如实说明；涉及具体产品、条款或个人情况时，也会提醒大家以正式资料和实际需求为准。",
+  "对我来说，一次好的沟通，不只是回答当下的问题，更是帮助对方建立判断方法。感谢你耐心听完这段介绍。以后我也会继续分享简单、实用、容易理解的内容。我们下次见。",
+];
+
+export function DigitalHumanRecordingGuide({ provider, tutorial }: { provider: DigitalHumanProvider; tutorial: { title: string; summary: string; requirements: string[]; steps: string[]; url: string; videoUrl: string; linkLabel: string } }) {
+  const [copied, setCopied] = useState(false);
+  const [teleprompterOpen, setTeleprompterOpen] = useState(false);
+  const [paragraph, setParagraph] = useState(0);
+  const script = `[开始前保持安静并看镜头 3 秒]\n\n${digitalHumanRecordingScript.join("\n\n")}\n\n[说完后保持微笑并看镜头 2 秒]`;
+  async function copyScript() {
+    await navigator.clipboard.writeText(script);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+  function openTeleprompter() { setParagraph(0); setTeleprompterOpen(true); }
+  return <article className="digitalHumanOfficialGuide">
+    <header><div><span>小谷录制准备中心</span><h4>{tutorial.title}</h4><p>{tutorial.summary}</p></div>{tutorial.url ? <a href={tutorial.url} rel="noreferrer" target="_blank">{tutorial.linkLabel} ↗</a> : null}</header>
+    {provider === "heygen" ? <div className="digitalHumanGuideNotice"><strong>先看清创建方式</strong><span>当前选择的是上传照片创建，下方只需上传一张清晰正面照片；如需更自然的动作与声音，请切换到视频高还原创建。</span></div> : null}
+    <div className="digitalHumanLearningGrid">
+      <section className="digitalHumanDemoCard">
+        <div className="digitalHumanGuideSectionTitle"><span>01</span><div><strong>先看官方示范</strong><small>{provider === "heygen" ? "照片数字人逐步参考" : "真人录制正确 / 错误案例和示例视频"}</small></div></div>
+        {tutorial.videoUrl ? <iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen src={tutorial.videoUrl} title="数字人录制教程" /> : tutorial.url ? <a className="digitalHumanTutorialPoster" href={tutorial.url} rel="noreferrer" target="_blank"><span>小谷拍摄教程</span><strong>查看录制准备与常见错误</strong><small>点击查看完整视频与操作演示 ↗</small></a> : <div className="digitalHumanTutorialPoster"><span>小谷拍摄教程</span><strong>按照右侧检查表准备素材</strong><small>保持正面、清晰、稳定，减少返工</small></div>}
+      </section>
+      <section className="digitalHumanChecklistCard">
+        <div className="digitalHumanGuideSectionTitle"><span>02</span><div><strong>照着检查再开拍</strong><small>少返工，一次录对</small></div></div>
+        <ul>{tutorial.requirements.map((item) => <li key={item}><i>✓</i><span>{item}</span></li>)}</ul>
+        {provider === "heygen" ? <p>快速测试可录约 30 秒；正式训练建议连续录制至少 2 分钟。如需授权视频，请使用创建页面给出的原文，不能用下方口播稿代替。</p> : <p>先完成训练素材，再按创建页面提示单独完成人脸授权；授权声明请逐字照读创建页面原文。</p>}
+      </section>
+    </div>
+    {provider === "chanjing" ? <section className="digitalHumanReferenceSamples"><div className="digitalHumanGuideSectionTitle"><span>03</span><div><strong>参考这些成品形象来拍</strong><small>来自官方公共数字人展示素材；只用于理解机位、构图、服装和动作，不是让你照着选择角色</small></div></div><div>{chanjingCreationReferenceSamples.map((sample) => <article key={sample.id}><video controls playsInline poster={sample.coverUrl} preload="none" src={sample.videoUrl} /><section><strong>{sample.name}</strong><small>{sample.pose}</small><div>{sample.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></section></article>)}</div><p>参考重点：人物始终清晰、相机固定、正面看镜头、动作幅度适中。样例人物与声音归原平台或权利人所有，仅作为拍摄参考。</p></section> : null}
+    <section className="digitalHumanScriptCard">
+      <div className="digitalHumanGuideSectionTitle"><span>{provider === "chanjing" ? "04" : "03"}</span><div><strong>直接照读的录制文稿</strong><small>约 2 分钟 · 已加入自然停顿和合规表达</small></div></div>
+      <div className="digitalHumanScriptPreview"><em>开场保持安静 3 秒</em>{digitalHumanRecordingScript.slice(0, 2).map((item) => <p key={item}>{item}</p>)}<span>……完整文稿共 {digitalHumanRecordingScript.length} 段</span></div>
+      <div className="digitalHumanScriptActions"><button onClick={() => void copyScript()} type="button">{copied ? "已复制到剪贴板 ✓" : "复制完整文稿"}</button><button onClick={openTeleprompter} type="button">打开大字提词器</button></div>
+    </section>
+    <div className="digitalHumanCreateSteps"><strong>录好以后</strong><ol>{tutorial.steps.map((item) => <li key={item}>{item}</li>)}</ol></div>
+    <p className="digitalHumanGuideNote">教程入口来自拍摄参考中心；服务规格可能调整，请以打开后的最新说明为准。训练文稿由小谷提供，不代替创建流程要求的授权声明。</p>
+    {teleprompterOpen ? <div className="digitalHumanTeleprompter" role="dialog" aria-modal="true" aria-label="数字人录制提词器"><div><header><span>录制提词器 · {paragraph + 1}/{digitalHumanRecordingScript.length}</span><button aria-label="关闭提词器" onClick={() => setTeleprompterOpen(false)} type="button">×</button></header><p>{digitalHumanRecordingScript[paragraph]}</p><footer><button disabled={paragraph === 0} onClick={() => setParagraph((value) => value - 1)} type="button">上一段</button><span>{paragraph === 0 ? "先看镜头静默 3 秒，再开始朗读" : paragraph === digitalHumanRecordingScript.length - 1 ? "读完后保持微笑 2 秒" : "自然停顿一下，再进入下一段"}</span><button disabled={paragraph === digitalHumanRecordingScript.length - 1} onClick={() => setParagraph((value) => value + 1)} type="button">下一段</button></footer></div></div> : null}
+  </article>;
 }
 
 function OverviewView({ workspace, maturity, onOpenTab }: { workspace: AvatarWorkspace | null; maturity: ReturnType<typeof calculateMaturity>; onOpenTab: (tab: AvatarTab) => void }) {
@@ -790,65 +760,6 @@ function VersionsView({ versions, privacy, onAction }: { versions: AvatarVersion
 
 function PrivacyToggle({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange: (value: boolean) => void }) {
   return <label className="avatarPrivacyToggle"><span><strong>{label}</strong><small>{detail}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>;
-}
-
-function FeedbackActions({ onFeedback }: { onFeedback: (eventType: string) => void }) {
-  return <div className="avatarFeedbackActions"><span>反馈会记录到分身进化中心；同类反馈累计 3 次后才会生成待确认建议，不会立即改写当前内容。</span><div><button onClick={() => onFeedback("more-like-me")} title="提高当前表达方式的使用权重">更像我</button><button onClick={() => onFeedback("too-salesy")} title="建议减少直接成交和催促表达">太销售</button><button onClick={() => onFeedback("too-formal")} title="建议增加生活化、易懂的表达">太正式</button><button onClick={() => onFeedback("remember-style")} title="建议将本次表达特征加入长期表达记忆">记住这种表达</button></div></div>;
-}
-
-function CoachProgramPanel({ courses, loading, onProgress }: { courses: CoachCourse[]; loading: boolean; onProgress: (courseId: string, moduleKey: string, status: "started" | "completed") => Promise<void> }) {
-  if (loading) return <section className="coachProgramPanel"><span>教练匹配中心</span><p>正在根据你的数字分身匹配教练与课程…</p></section>;
-  if (!courses.length) return <section className="coachProgramPanel empty"><span>教练匹配中心</span><h2>还没有可匹配的获客教练</h2><p>平台完成“获客教练分身”训练并上架后，小谷会按你的客群、表达偏好与增长卡点推荐课程路径。</p></section>;
-  return <section className="coachProgramPanel"><div className="coachProgramHeading"><div><span>教练匹配中心</span><h2>为你推荐的 AI 教练与课程</h2><p>推荐依据你的数字分身画像；你也可以按需要选择其他教练。</p></div></div><div className="coachProgramGrid">{courses.slice(0, 3).map((course, index) => { const next = course.modules.find((module) => !course.completed_keys.includes(module.key)) ?? course.modules[0]; const completed = course.completed_keys.length; return <article className={index === 0 ? "recommended" : ""} key={course.id}><div className="coachCourseTop"><span>{index === 0 ? "最匹配" : "备选教练"}</span><strong>{course.matchScore}% 匹配</strong></div><h3>{course.title}</h3><p>{course.summary}</p><small>{course.matchReasons.join(" · ")}</small><div className="coachCourseProgress"><span>课程进度 {completed}/{course.modules.length}</span><i><b style={{ width: `${course.modules.length ? completed / course.modules.length * 100 : 0}%` }} /></i></div>{next ? <div className="coachCourseNext"><b>{next.title}</b><span>{next.objective}</span><em>练习：{next.practice}</em><button className="primaryButton" onClick={() => void onProgress(course.id, next.key, "completed")} type="button">{course.completed_keys.includes(next.key) ? "已完成" : "完成本课练习"}</button></div> : null}</article>; })}</div></section>;
-}
-
-function AvatarCoachView({
-  busy, thinkingStep, streamingContent, conversations, messages, input, nextSteps, profilePrompt, inputRef, onChangeInput, onSubmit, onPrompt, onOpenConversation, onOpenProfile, onNew,
-}: {
-  busy: string; thinkingStep: number; streamingContent: string; conversations: AvatarCoachConversation[]; messages: AvatarCoachMessage[]; input: string; nextSteps: CoachNextStep[]; profilePrompt: boolean; inputRef: RefObject<HTMLTextAreaElement | null>;
-  onChangeInput: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>; onPrompt: (prompt: string) => void; onOpenConversation: (id: string) => Promise<void>; onOpenProfile: () => void; onNew: () => void;
-}) {
-  const quickPrompts = [
-    { label: "帮我判断当前增长卡点", text: "请结合我的数字分身，帮我判断当前最可能的内容增长卡点，并告诉我本周最值得先做的一步。" },
-    { label: "给我本周创作计划", text: "根据我的定位和目标客户，帮我安排本周可执行的内容计划。" },
-    { label: "找 6 个获客选题", text: "根据我的目标客户，给我 6 个兼顾信任与有效咨询的选题方向。" },
-    { label: "设计获客承接", text: "我想让内容带来更多有效咨询，请帮我设计一条合规、自然的评论和私信承接路径。" },
-  ];
-  return <section className="avatarCoachView" id="avatar-coach">
-    <aside className="avatarCoachSidebar">
-      <div className="avatarCoachMentor" aria-hidden="true"><div className="avatarCoachFairy"><Image alt="" height={162} priority src="/avatars/xiaogu-fairy.png" width={108} /></div><i>加油噢！</i></div>
-      <div><span>小谷精灵 · 创作教练</span><h2>今天，先做最重要的一步</h2><p>小谷会结合你的分身画像、内容目标与已确认偏好，给出有依据的建议。</p></div>
-      <div className="avatarCoachHistory"><div><strong>最近咨询</strong>{messages.length ? <button className="avatarCoachNewChat" onClick={onNew} type="button"><i>＋</i>开启新咨询</button> : null}</div>{conversations.length ? conversations.slice(0, 4).map((item) => <button key={item.id} onClick={() => void onOpenConversation(item.id)} type="button"><b>{item.title.replace("分身咨询｜", "")}</b><span>{formatDate(item.updated_at)} · {item.message_count} 条消息</span></button>) : <p>从一次真实困惑开始，小谷会持续理解你的创作方式。</p>}</div>
-    </aside>
-    <div className="avatarCoachMain">
-      {messages.length === 0 ? <div className="avatarCoachWelcome"><strong>不必选功能，直接告诉我你现在遇到的真实问题</strong><p>例如“内容有收藏但没有咨询”“我不知道这周该写什么”或“以后不要用焦虑营销”。</p><div>{quickPrompts.map((prompt) => <button key={prompt.label} onClick={() => onPrompt(prompt.text)} type="button">{prompt.label}</button>)}</div></div> : <div className="avatarCoachMessages">{messages.map((item) => <CoachMessage key={item.id} message={item} />)}{busy === "coach" ? <CoachThinkingIndicator step={thinkingStep} /> : null}{streamingContent ? <CoachMessage message={{ id: "streaming", role: "assistant", content: streamingContent, created_at: "" }} /> : null}</div>}
-      {nextSteps.length ? <div className="avatarCoachFollowups"><strong>教练建议 · 下一步直接做</strong><div>{nextSteps.map((step) => <a href={appPath(step.href)} key={step.href}><span><b>{step.title}</b><small>{step.description}</small></span><em>去完成 →</em></a>)}</div>{profilePrompt ? <p>想让后续建议更贴近你的实际业务？<button onClick={onOpenProfile} type="button">补充一条客户问题</button></p> : null}</div> : null}
-      <form className="avatarCoachComposer" onSubmit={(event) => void onSubmit(event)}>
-        <textarea ref={inputRef} value={input} onChange={(event) => onChangeInput(event.target.value)} placeholder="直接说你的真实情况。小谷会自动判断你需要选题、复盘、获客建议还是更新分身。" />
-        <button className="primaryButton" disabled={busy === "coach" || input.trim().length < 2} type="submit">{busy === "coach" ? "小谷思考中" : "发送咨询"}</button>
-      </form>
-      <p className="avatarCoachSafety">请勿输入客户身份证件、联系方式、健康资料或完整保单号。小谷不会自动发送内容或修改你的长期画像。</p>
-    </div>
-  </section>;
-}
-
-function CoachThinkingIndicator({ step }: { step: number }) {
-  const steps = ["梳理你当前遇到的内容或业务症状", "对照你的定位、目标客户和表达习惯", "判断最值得优先尝试的增长动作"];
-  return <article className="assistant coachThinking"><span>小谷精灵正在分析</span><div>{steps.map((item, index) => <p className={index <= step ? "active" : ""} key={item}><i>{index < step ? "✓" : index === step ? "·" : ""}</i>{item}</p>)}</div></article>;
-}
-
-function CoachMessage({ message }: { message: AvatarCoachMessage }) {
-  if (message.role === "user") return <article className="user"><span>你</span><p>{message.content}</p></article>;
-  const sections = parseCoachResponse(message.content);
-  return <article className="assistant coachAnswer"><span>小谷精灵</span><div className="coachAnswerBody">{sections.map((section) => <section key={`${section.title}-${section.content}`}><h3>{section.title}</h3><ReactMarkdown>{section.content}</ReactMarkdown></section>)}</div></article>;
-}
-
-function parseCoachResponse(content: string) {
-  const titles = ["我的判断", "为什么这样判断", "下一步行动"];
-  const matcher = new RegExp(`【(${titles.join("|")})】`, "g");
-  const matches = [...content.matchAll(matcher)];
-  if (matches.length === 0) return [{ title: "小谷的建议", content }];
-  return matches.map((match, index) => ({ title: match[1], content: content.slice((match.index ?? 0) + match[0].length, matches[index + 1]?.index).trim() || "—" }));
 }
 
 function MbtiProfilePanel({ profile }: { profile: NonNullable<ThinkingProfileSnapshot["mbti_profile"]> }) {
@@ -902,7 +813,7 @@ function buildMaturityTips(workspace: AvatarWorkspace | null, maturity: ReturnTy
     tips.push({
       title: "先试写 1 个常用主题",
       description: "去“分身试验室”跑一次对比生成，最容易判断它目前像不像你。",
-      tab: "lab",
+      tab: "memory",
     });
   }
 
@@ -938,8 +849,8 @@ function buildMaturityTips(workspace: AvatarWorkspace | null, maturity: ReturnTy
   if (tips.length < 3) {
     tips.push({
       title: "持续使用并反馈",
-      description: "每次用完在试验室或作品里判断“更像我/太销售/太正式”，系统才会持续进化。",
-      tab: "lab",
+      description: "持续补充真实经历、表达偏好和边界，系统会据此完善个人上下文。",
+      tab: "memory",
     });
   }
 
@@ -956,68 +867,6 @@ function originLabel(origin: AvatarMemoryItem["origin"]) {
 
 function sourceTypeLabel(type: string) {
   return ({ article: "文章", moments: "朋友圈", transcript: "短视频/录音稿", story: "个人故事", manual: "手动资料", video_channel: "视频号风格训练", douyin: "抖音风格训练" } as Record<string, string>)[type] ?? type;
-}
-
-function VideoTrainingStatus({ run }: { run: AvatarTrainingRun | null }) {
-  if (!run) return null;
-  const label = run.status === "failed"
-    ? "本次训练失败"
-    : run.status === "succeeded"
-      ? "训练完成，等待确认"
-      : ({ queued: "作品已进入后台队列", validating: "正在校验作品链接", parsing: "正在解析作品信息", transcribing: "正在下载音频并转写", "generating-report": "正在生成候选记忆" } as Record<string, string>)[run.phase] ?? "正在准备训练";
-  const progress = run.total_count > 0 ? Math.min(100, Math.round(run.completed_count / run.total_count * 100)) : 0;
-  const attempts = Array.isArray(run.details_json.attempts)
-    ? run.details_json.attempts.filter((item): item is { link: string; title?: string; platform?: string; status: "queued" | "running" | "succeeded" | "failed"; stage: string; message: string } => Boolean(item) && typeof item === "object" && typeof (item as Record<string, unknown>).link === "string" && typeof (item as Record<string, unknown>).message === "string")
-    : [];
-  const analysis = run.details_json.analysis && typeof run.details_json.analysis === "object" ? run.details_json.analysis as Record<string, unknown> : null;
-  const analysisProgress = run.details_json.analysisProgress && typeof run.details_json.analysisProgress === "object" ? run.details_json.analysisProgress as Record<string, unknown> : null;
-  return <div className={`avatarTrainingStatus ${run.status}`}>
-    <strong>{label}</strong>
-    {run.status === "running" ? <><span>已处理 {run.completed_count}/{run.total_count} 条，成功转写 {run.successful_count} 条；可以离开页面，后台会继续执行</span><i><b style={{ width: `${progress}%` }} /></i></> : null}
-    {run.status === "running" && run.phase === "generating-report" && analysisProgress ? <span>正在分批提炼：已完成 {Number(analysisProgress.completedBatches ?? 0)}/{Number(analysisProgress.batchCount ?? 0)} 批。</span> : null}
-    {run.status === "succeeded" ? <span>已成功转写 {run.successful_count} 条作品；实际分析 {Number(analysis?.analyzedWorkCount ?? run.successful_count)} 条，{analysis?.mode === "batched" ? `分 ${Number(analysis.batchCount ?? 1)} 批提炼并合并` : "直接分析"}{analysis?.truncated ? "，最终合并材料达到输入上限" : "，没有遗漏作品"}。请前往“进化中心”确认风格报告。</span> : null}
-    {run.status === "failed" ? <span>失败原因：{run.error_message || "暂未返回具体原因"}</span> : null}
-    {attempts.length ? <div className="avatarTrainingAttemptList">{attempts.map((attempt, index) => <div className={attempt.status} key={`${attempt.link}-${index}`}><b>{attempt.status === "succeeded" ? "已完成" : attempt.status === "running" ? "处理中" : attempt.status === "queued" ? "排队中" : stageLabel(attempt.stage)}</b><span title={attempt.link}>{attempt.title || trainingLinkLabel(attempt.link)}</span><small>{attempt.platform === "douyin" ? "抖音 · " : attempt.platform === "video_channel" ? "视频号 · " : ""}{attempt.message}</small></div>)}</div> : null}
-  </div>;
-}
-
-function CreatorSkillCard({ skill, runs, selectedVersionId, onSelect, onRestore, onStatus, onIdentitySave }: { skill: AvatarCreatorSkill; runs: AvatarTrainingRun[]; selectedVersionId: string; onSelect: (id: string) => void; onRestore: (id: string, version: number) => void; onStatus?: (status: "active" | "archived") => void; onIdentitySave: (card: AvatarCreatorSkill["identity_card"]) => Promise<boolean> }) {
-  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(skill.versions.find((version) => version.status === "training")?.id ?? null);
-  const [editingIdentity, setEditingIdentity] = useState(false);
-  const hasIdentityDraft = Boolean("title" in skill.identity_card_draft && skill.identity_card_draft.title);
-  const [identity, setIdentity] = useState(hasIdentityDraft ? skill.identity_card_draft as AvatarCreatorSkill["identity_card"] : skill.identity_card);
-  const list = (value: string) => value.split(/[,，、]/).map((item) => item.trim()).filter(Boolean).slice(0, 5);
-  return <article className="creatorSkillCard"><div className="creatorSkillCardHeading"><div><strong>{skill.name}</strong><small>{skill.creator_name || "自定义创作 Skill"} · 当前 V{skill.latest_version || "训练中"}</small></div>{onStatus ? <div className="creatorSkillPublish"><span className={skill.status}>{skill.status === "active" ? "已上架" : "已下架"}</span><button onClick={() => setEditingIdentity((value) => !value)} type="button">{editingIdentity ? "取消编辑" : "编辑身份卡"}</button><button className={skill.status === "active" ? "secondaryButton" : "primaryButton"} onClick={() => onStatus(skill.status === "active" ? "archived" : "active")} type="button">{skill.status === "active" ? "下架" : "上架"}</button></div> : null}</div>{identity?.title ? <div className="creatorSkillIdentityPreview"><strong>{identity.title}</strong><p>{identity.summary}</p><span>{identity.styleTags?.join(" · ")}</span><small>适合：{identity.scenarios?.join("、")}</small></div> : null}{editingIdentity ? <form className="creatorSkillIdentityEditor" onSubmit={(event) => { event.preventDefault(); void onIdentitySave(identity).then((ok) => { if (ok) setEditingIdentity(false); }); }}><label>能力定位<input maxLength={36} required value={identity.title || ""} onChange={(event) => setIdentity((current) => ({ ...current, title: event.target.value }))} /></label><label>一句话说明<textarea maxLength={140} required value={identity.summary || ""} onChange={(event) => setIdentity((current) => ({ ...current, summary: event.target.value }))} /></label><label>风格标签<input value={identity.styleTags?.join("、") || ""} onChange={(event) => setIdentity((current) => ({ ...current, styleTags: list(event.target.value) }))} /></label><label>适合场景<input value={identity.scenarios?.join("、") || ""} onChange={(event) => setIdentity((current) => ({ ...current, scenarios: list(event.target.value) }))} /></label><label>推荐给<textarea maxLength={100} required value={identity.bestFor || ""} onChange={(event) => setIdentity((current) => ({ ...current, bestFor: event.target.value }))} /></label><button className="primaryButton" type="submit">保存身份卡</button></form> : null}{skill.versions.map((version) => {
-    const run = version.training_run_id ? runs.find((item) => item.id === version.training_run_id) ?? null : null;
-    const expanded = expandedVersionId === version.id;
-    return <section className={`creatorSkillVersion ${version.status}`} key={version.id}><div><button className={selectedVersionId === version.id ? "active" : ""} disabled={version.status === "training" || version.status === "failed"} onClick={() => onSelect(version.id)} type="button">V{version.version} {version.status === "training" ? "训练中" : version.status === "restored" ? "已回滚" : "选用"}</button>{version.status !== "active" && version.status !== "training" && version.status !== "failed" ? <button onClick={() => onRestore(version.id, version.version)} type="button">回滚到此版本</button> : null}{run || version.skill_prompt ? <button onClick={() => setExpandedVersionId(expanded ? null : version.id)} type="button">{expanded ? "收起详情" : version.status === "training" ? "查看进度" : "查看训练结果"}</button> : null}</div>{expanded && run ? <VideoTrainingStatus run={run} /> : null}{expanded && (version.status === "active" || version.status === "restored") ? <div className="creatorSkillResult"><span>训练结果 · {version.sample_count} 条有效作品</span><p>{version.change_summary || "已完成创作方式蒸馏"}</p><pre>{version.skill_prompt || "训练结果正在同步，请稍后刷新。"}</pre></div> : null}{version.status === "failed" ? <p className="creatorSkillFailure">本版本训练失败，请补充可访问的授权作品后重新训练。</p> : null}</section>;
-  })}</article>;
-}
-
-function LabCandidateSelect({ value, onChange, skills }: { value: string; onChange: (value: string) => void; skills: AvatarCreatorSkill[] }) {
-  return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="avatar">我的数字分身</option><option value="baseline">默认版本</option>{skills.flatMap((skill) => skill.versions.filter((version) => version.status === "active" || version.status === "restored").map((version) => <option key={version.id} value={version.id}>{skill.name} · V{version.version}</option>))}</select>;
-}
-
-function LabOutput({ content, done }: { content: string; done: boolean }) {
-  if (!content) return <div className="avatarLabReading empty"><i /><i /><i /><span>正在等待模型输出…</span></div>;
-  return <div className="avatarLabReading"><ReactMarkdown>{normalizeLabMarkdown(content)}</ReactMarkdown>{!done ? <b className="avatarLabCaret" aria-label="正在输出" /> : null}</div>;
-}
-
-function normalizeLabMarkdown(content: string) {
-  return content
-    .replace(/([^\n])(#{2,3}\s)/g, "$1\n\n$2")
-    .replace(/###\s*(核心判断|为什么|怎么做|评论互动)\s*/g, "### $1\n\n")
-    .replace(/(?<!\n)(\d+\.\s)/g, "\n$1")
-    .replace(/([。！？；])\s*-\s+(?=\*\*)/g, "$1\n\n- ")
-    .trim();
-}
-
-function stageLabel(stage: string) { return ({ parsing: "链接解析失败", media: "音频获取失败", transcribing: "口播转写失败" } as Record<string, string>)[stage] ?? "处理失败"; }
-function trainingLinkLabel(link: string) { try { const url = new URL(link); return `${url.hostname}${url.pathname.slice(0, 42)}${url.pathname.length > 42 ? "…" : ""}`; } catch { return link.slice(0, 60); } }
-
-function parseTrainingLinks(value: string) {
-  const urls = value.match(/https?:\/\/[^\s,，]+/gi) ?? [];
-  return urls.map((url) => url.replace(/[。；;！!、)）\]】}>》]+$/g, ""));
 }
 
 function formatDate(value?: string | null) {

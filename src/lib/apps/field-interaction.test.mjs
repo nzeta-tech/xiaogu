@@ -20,3 +20,9 @@ test("data and inactive branch fields never appear or leak into submitted values
   assert.equal(isCreationFieldVisible(fields[3], values), false);
   assert.deepEqual(pruneHiddenCreationValues(fields, values), { mode: "text", text: "正文", parser_payload: "trusted" });
 });
+
+test("a dependent field can follow one selected item in a multi-value field", () => {
+  const coach = { id: "coach-for-topic-2", required: false, visibleWhen: [{ fieldId: "selected_topics", equals: "topic-2" }] };
+  assert.equal(isCreationFieldVisible(coach, { selected_topics: ["topic-1"] }), false);
+  assert.equal(isCreationFieldVisible(coach, { selected_topics: ["topic-1", "topic-2"] }), true);
+});

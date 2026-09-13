@@ -75,6 +75,16 @@ export type TrafficTopicChallenge = {
   identityCredibility: string;
 };
 
+export type TrafficTopicCoachCard = {
+  id: string;
+  label: string;
+  title: string;
+  summary: string;
+  scenarios: string[];
+  styleTags: string[];
+  bestFor: string;
+};
+
 // Kept as an alias so existing callers and stored work data remain readable.
 export type TrafficTopicNewsroomInsight = TrafficTopicMaterialInsight;
 
@@ -197,6 +207,116 @@ export function buildTrafficTopicDecisionPrompt(input: { source: string; insight
     "对第6题额外留下定位依据：creatorEvidence只能摘取系统实际提供的创作者身份、受众、专业、经历或边界，不得补写；whyThisCreator回答为什么这题由她讲更成立；ipMemoryOutcome回答发布后希望观众记住她的什么能力。前5题也可以填写定位连接，但不得为了适配而扭曲题眼。",
     "严格JSON，不要Markdown：{topics:[{id,title,angleType,audience,audienceAssumption,expectationViolation,answerPayoff,topicSpecificity,humanTension,centralCharacter,coreQuestion,unresolvedQuestion,workingThesis,hookPromise,recommendationReason,coachContribution,coachFit:string[],recommendedCoachId,recommendedCoachLabel,riskBoundary,revealedByTitle,remainingQuestions:string[],curiosityDirection:'increased'|'maintained'|'ended',editorialVerdict,professionalLens,professionalMechanism,professionalValue,professionalConnectionStrength:'strong'|'medium'|'weak'|'none',householdDecisionImpact,creatorPositioningConnection,creatorEvidence:string[],whyThisCreator,ipMemoryOutcome,clientSignal,creatorFit:'high'|'medium'|'low'|'none',selectionRole:'arena'|'positioning_wildcard',score:0到100,badge}]}。必须正好6项，定位保送题必须放在最后。",
   ].join("\n\n");
+}
+
+export function buildTrafficTopicFastDecisionPrompt(input: { source: string; research: string }) {
+  return [
+    "你是短视频选题主编。一次完成素材理解、候选发散、反方筛选和最终决选，不展示中间过程，不写正文。",
+    "输出正好6个彼此不同且可以兑现的选题：前5个只按素材价值、传播潜力、问题深度和专业增量排列，不考虑任何创作教练；第6个结合系统提供的创作者长期画像生成定位保送题。不要为了显得专业而把社会话题硬转成保险销售。",
+    "每题必须保留具体人物、产品、数字、事件或机制，标题之后仍应有值得听的答案。至少一个题提供真实的财经、家庭决策或风险机制增量。",
+    "本阶段不要推荐、分配或模仿任何教练。用户选定题目后，才会另行选择教练完成正文。recommendedCoachId固定为default，recommendedCoachLabel固定为小谷教练，coachContribution留空。",
+    `【用户素材】\n${input.source}`,
+    input.research ? `【去重后的搜索摘要】\n${input.research.slice(0, 6500)}` : "",
+    "只返回JSON：{topics:[{title,audience,humanTension,coreQuestion,workingThesis,hookPromise,recommendationReason,professionalLens,professionalMechanism,professionalValue,professionalConnectionStrength:'strong'|'medium'|'weak'|'none',householdDecisionImpact,recommendedCoachId,recommendedCoachLabel,creatorPositioningConnection,creatorEvidence:string[],whyThisCreator,ipMemoryOutcome,clientSignal,creatorFit:'high'|'medium'|'low'|'none',selectionRole:'arena'|'positioning_wildcard',score,badge}]}。前5题selectionRole为arena，第6题为positioning_wildcard且badge为定位保送。",
+  ].filter(Boolean).join("\n\n");
+}
+
+export function buildTrafficTopicCoachRecommendationPrompt(input: { topics: TrafficTopicCandidate[]; coaches: TrafficTopicCoachCard[] }) {
+  const topics = input.topics.map((topic) => ({
+    id: topic.id,
+    title: topic.title,
+    audience: topic.audience,
+    humanTension: topic.humanTension,
+    coreQuestion: topic.coreQuestion,
+    workingThesis: topic.workingThesis,
+    professionalLens: topic.professionalLens,
+    professionalMechanism: topic.professionalMechanism,
+    selectionRole: topic.selectionRole,
+  }));
+  return [
+    "你是创作任务分配编辑。选题已经完成，不得修改、重排或重新评价选题；你只负责为每个题选择最适合完成正文的创作教练。",
+    `【已确认的6个选题】\n${JSON.stringify(topics)}`,
+    `【可用教练轻量能力卡】\n${JSON.stringify(input.coaches)}`,
+    "根据题材、目标受众、内容任务、专业机制和表达方式匹配。小谷教练是通用兜底，不享受默认加分；有更明确适配的专业教练时应优先选择专业教练。",
+    "允许多个题选择同一位教练，但分数接近时优先分散，避免所有题机械分给同一人。只能使用能力卡中真实存在的coachId。",
+    "严格JSON，不要Markdown：{assignments:[{topicId,coachId,reason,confidence:0到100}]}。每个选题恰好一项，reason只写一句具体匹配理由。",
+  ].join("\n\n");
+}
+
+export function applyTrafficTopicCoachRecommendations(
+  topics: TrafficTopicCandidate[],
+  raw: string,
+  coaches: TrafficTopicCoachCard[],
+) {
+  const coachById = new Map(coaches.map((coach) => [coach.id, coach]));
+  try {
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    const value = JSON.parse(fenced ?? raw.slice(start, end + 1)) as { assignments?: unknown[] };
+    const assignmentByTopic = new Map((Array.isArray(value.assignments) ? value.assignments : []).flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const assignment = item as Record<string, unknown>;
+      const topicId = text(assignment.topicId, 40);
+      const coachId = text(assignment.coachId, 80);
+      if (!topicId || !coachById.has(coachId)) return [];
+      return [[topicId, { coachId, reason:text(assignment.reason, 300) }] as const];
+    }));
+    return topics.map((topic) => {
+      const assignment = assignmentByTopic.get(topic.id);
+      const coach = assignment ? coachById.get(assignment.coachId) : undefined;
+      if (!assignment || !coach) return topic;
+      return {
+        ...topic,
+        recommendedCoachId: coach.id,
+        recommendedCoachLabel: coach.label,
+        assignedCoachId: coach.id,
+        assignedCoachLabel: coach.label,
+        coachContribution: assignment.reason,
+      };
+    });
+  } catch {
+    return topics;
+  }
+}
+
+const LOCAL_COACH_MATCH_TERMS = [
+  "人工智能","家庭现金流","资产配置","财富传承","风险隔离","家庭保障","知识产权","不正当竞争",
+  "AI","保险","保障","家庭","现金流","教育","孩子","女性","职场","组织","管理","规则","风险",
+  "财富","资产","养老","传承","跨境","香港","创业","企业","品牌","法律","合规","消费","医疗",
+  "健康","获客","内容","团队","关系","情绪","成长","投资","收益","房产","信托","经营",
+] as const;
+
+export function applyLocalTrafficTopicCoachRecommendations(
+  topics: TrafficTopicCandidate[],
+  coaches: TrafficTopicCoachCard[],
+) {
+  const specialistCoaches = coaches.filter((coach) => coach.id !== "default");
+  if (!specialistCoaches.length) return topics;
+  const usage = new Map<string, number>();
+  return topics.map((topic) => {
+    const topicText = [topic.title,topic.audience,topic.humanTension,topic.coreQuestion,topic.workingThesis,topic.professionalLens,topic.professionalMechanism,topic.householdDecisionImpact].join(" ");
+    const topicTerms = LOCAL_COACH_MATCH_TERMS.filter((term) => topicText.includes(term));
+    const ranked = specialistCoaches.map((coach) => {
+      const coachText = [coach.title,coach.summary,coach.bestFor,...coach.scenarios,...coach.styleTags].join(" ");
+      const matched = topicTerms.filter((term) => coachText.includes(term));
+      const specificity = matched.reduce((score, term) => score + Math.min(6, [...term].length), 0);
+      const repeatPenalty = (usage.get(coach.id) ?? 0) * 4;
+      return { coach, matched, score:specificity-repeatPenalty };
+    }).sort((left,right)=>right.score-left.score || left.coach.label.localeCompare(right.coach.label,"zh-CN"));
+    const best = ranked[0];
+    if (!best || best.score <= 0 || !best.matched.length) return topic;
+    usage.set(best.coach.id,(usage.get(best.coach.id)??0)+1);
+    const reason = `快速匹配：擅长${best.matched.slice(0,3).join("、")}相关内容，与本题任务更接近。`;
+    return {
+      ...topic,
+      recommendedCoachId:best.coach.id,
+      recommendedCoachLabel:best.coach.label,
+      assignedCoachId:best.coach.id,
+      assignedCoachLabel:best.coach.label,
+      coachContribution:reason,
+    };
+  });
 }
 
 // Compatibility for older imports; new code should use proposal + independent review.

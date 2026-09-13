@@ -182,7 +182,8 @@ const isStructuredTopicInput = (source: string) => /(?:^|\n)Tab[：:]\s*[^\n]+/.
 const sourceFocus = (source: string) => source.match(/(?:^|\n)标题[：:]\s*([^\n]+)/)?.[1]?.trim()
   || source.match(/(?:^|\n)原作品标题[：:]\s*([^\n]+)/)?.[1]?.trim()
   || source.match(/(?:^|\n)已知事实[：:]\s*([^\n]+)/)?.[1]?.trim()
-  || source.split(/[。！？\n]/).map((item) => item.trim()).find((item) => item && !/^【.*】$/.test(item))
+  || [...source.matchAll(/《([^》]{2,40})》/g)].at(-1)?.[0]
+  || source.split(/[。！？\n]/).map((item) => item.trim()).find((item) => item && !/^【.*】$/.test(item) && !/^(?:基于|根据|结合|请|帮我|生成|制作|执行|补充资料)/.test(item))
   || "输入主题";
 
 export function authorityForTrafficTask(mode: TrafficTaskMode): TrafficAuthority {

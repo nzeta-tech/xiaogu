@@ -18,7 +18,7 @@ export type ViralScoreBreakdown = {
   dataConfidence: number;
 };
 
-const insuranceFinancePattern = /保险|理赔|投保|保单|核保|健康告知|重疾(?:险)?|医疗险|寿险|年金险|车险|意外险|养老金|养老规划|退休金|资产配置|家庭保障|财务规划|社保|医保/;
+const insuranceFinancePattern = /保险|理赔|投保|保单|核保|健康告知|重疾(?:险)?|医疗险|寿险|年金险|车险|意外险|养老金|养老规划|退休金|资产配置|家庭保障|财务规划|社保|医保|财经|金融|理财|投资|基金|股票|股市|A股|美股|ETF|债券|财务自由/iu;
 
 export function isInsuranceFinanceRelevant(input: { title: string; category?: string; tags?: string[] }) {
   return insuranceFinancePattern.test(`${input.title} ${input.category ?? ""} ${(input.tags ?? []).join(" ")}`);

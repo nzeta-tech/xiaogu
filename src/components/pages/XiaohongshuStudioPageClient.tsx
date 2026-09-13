@@ -46,6 +46,7 @@ const coverTypes = [
 
 export function XiaohongshuStudioPageClient({ app, initialWork = null }: { app: CreationApp; initialWork?: StudioBootstrapWork | null }) {
   const searchParams = useSearchParams();
+  const embeddedInWorkbuddy = searchParams.get("embedded") === "workbuddy";
   const enteringFromRemix = searchParams.get("from") === "link-remix";
   const defaults = getRemixCapabilityDefaults("xiaohongshu-studio");
   const initialState = initialWork?.content_json?.xiaohongshuStudioState;
@@ -69,7 +70,7 @@ export function XiaohongshuStudioPageClient({ app, initialWork = null }: { app: 
   const [avatarPhotos, setAvatarPhotos] = useState<AvatarVisualAsset[]>([]);
   const [avatarPhotosLoading, setAvatarPhotosLoading] = useState(true);
   const [selectedAvatarId, setSelectedAvatarId] = useState("");
-  const [tab, setTab] = useState<Tab>(() => initialRunActive ? "note" : ["write", "note", "cards", "preview"].includes(String(initialState?.tab)) ? initialState?.tab as Tab : initialContent ? "note" : "write");
+  const [tab, setTab] = useState<Tab>(() => embeddedInWorkbuddy && initialContent ? "cards" : initialRunActive ? "note" : ["write", "note", "cards", "preview"].includes(String(initialState?.tab)) ? initialState?.tab as Tab : initialContent ? "note" : "write");
   const [loading, setLoading] = useState<"note" | "cards" | "">(initialRunActive ? "note" : "");
   const [message, setMessage] = useState(initialRunActive ? "正在继续生成小红书笔记…" : "");
   const [workId, setWorkId] = useState(initialWork?.id ?? "");

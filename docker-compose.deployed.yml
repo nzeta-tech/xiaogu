@@ -13,6 +13,7 @@ services:
         condition: service_started
     environment:
       NODE_ENV: production
+      APP_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
       FONTCONFIG_FILE: /app/public/fonts/fonts.conf
@@ -21,9 +22,13 @@ services:
       DATABASE_QUERY_TIMEOUT_MS: ${DATABASE_QUERY_TIMEOUT_MS:-15000}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     volumes:
-      - ./runtime:/app:ro
+      - ./current:/app:ro
+      - next_image_cache:/app/.next/cache
       - ./data/creation-diagnostics:/var/log/xiaogu/creation-diagnostics
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+
+volumes:
+  next_image_cache:

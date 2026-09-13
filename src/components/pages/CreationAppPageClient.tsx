@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getCreationAppFamily,
@@ -28,6 +29,8 @@ import { remixCapabilityLabel } from "@/lib/creation/capabilities";
 import { getRemixCapabilityDefaults, getRemixCapabilitySettings } from "@/lib/creation/remix-capability-registry";
 import { resolveTrafficCoverSource } from "@/lib/creation/traffic-cover-source";
 import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
+import { buildTrafficGenerationValues, buildTrafficTopicAnalysisValues } from "@/lib/creation/traffic-workflow-contract";
+import { createCreationAppInitialValues } from "@/lib/creation/app-input-values";
 
 type FieldValue = string | string[];
 type CreativeCoachOption = { id: string; name: string; version: number; coach_scope: "personal" | "platform"; capabilities: string[]; identity_card: CreativeCoachIdentityCard };
@@ -109,8 +112,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   const promptField = pageApp.fields.find((field) => field.type === "textarea" || field.type === "text" || field.type === "text_or_file");
   const promptFieldId = promptField?.id;
   const [values, setValues] = useState<Record<string, FieldValue>>(() => {
-    const from = searchParams.get("from");
-    const initialValues = createInitialValues(pageApp, from === "workspace" || from === "create");
+    const initialValues = createCreationAppInitialValues(pageApp);
     const sourceUrl = searchParams.get("source_url")?.trim();
     const sourceTitle = searchParams.get("source_title")?.trim();
     const sourcePlatform = searchParams.get("source_platform")?.trim();
@@ -540,7 +542,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
       response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), {
         method: "POST",
         headers: { "content-type": "application/json", "x-creation-trace-id": traceId },
-        body: JSON.stringify({ values: { ...values, ...(usesTrafficWorkflow ? { traffic_topic_only:"no",...(trafficTopicWorkId ? { traffic_existing_work_id:trafficTopicWorkId } : {}),creative_coach_version_ids:[...new Set(trafficTopics.filter((topic)=>selectedTrafficTopicIds.includes(topic.id)).map((topic)=>topic.assignedCoachId||"default"))],traffic_selected_topics: trafficTopics.filter((topic) => selectedTrafficTopicIds.includes(topic.id)).map((topic) => JSON.stringify(topic)),traffic_shared_research:trafficSharedResearch,traffic_shared_evidence_pack:trafficSharedEvidencePack,traffic_topic_process:trafficTopicProcess } : {}), app_entry: workspaceEntry || "", ...(trafficParentWorkId ? { traffic_parent_work_id:trafficParentWorkId } : {}) } }),
+        body: JSON.stringify({ values: usesTrafficWorkflow ? buildTrafficGenerationValues({ base:{...values,...(trafficParentWorkId?{traffic_parent_work_id:trafficParentWorkId}:{})}, topicWorkId:trafficTopicWorkId, topics:trafficTopics, selectedTopicIds:selectedTrafficTopicIds, research:trafficSharedResearch, evidencePack:trafficSharedEvidencePack, topicProcess:trafficTopicProcess, appEntry:workspaceEntry||app.slug }) : { ...values, app_entry:workspaceEntry||"", ...(trafficParentWorkId?{traffic_parent_work_id:trafficParentWorkId}:{}) } }),
         signal: controller.signal,
       });
     } catch (requestError) {
@@ -583,8 +585,7 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
     setTrafficTopicsLoading(true);
     setError("");
     try {
-      const arenaCoachIds=["default",...creativeCoachOptions.map((coach)=>coach.id)].slice(0,8);
-      const response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ values:{...values,traffic_topic_only:"yes",traffic_arena_coach_version_ids:arenaCoachIds,app_entry:workspaceEntry||""} }) });
+      const response = await fetch(apiPath(`/api/creation/apps/${app.slug}/prepare`), { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ values:buildTrafficTopicAnalysisValues(values,workspaceEntry||app.slug) }) });
       const payload = await response.json().catch(() => ({})) as { error?:string;work?:{id?:string} };
       if (!response.ok || !payload.work?.id) throw new Error(payload.error || "选题任务创建失败，请稍后重试");
       router.push(`${appPath(`/apps/${app.slug}?topicWorkId=${payload.work.id}&entry=${workspaceEntry||app.slug}`)}#traffic-topic-arena`);
@@ -1858,13 +1859,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           ) : null}
 
           {usesTrafficWorkflow && trafficTopicWorkId && trafficTopicsLoading && !trafficTopics.length ? <section className="trafficTopicProgressPage" id="traffic-topic-arena">
-            <header><div><span>选题工作台</span><h3>正在分析并形成5+1个选题</h3><p>5个竞技场胜出题，加1个基于数字分身个人定位的保送题；任务进度会保存在当前作品。</p></div><i aria-hidden="true"/></header>
+            <header><div><span>选题工作台</span><h3>正在生成5+1个选题</h3><p>根据素材生成5个内容方向，并结合数字分身生成1个IP定位题。</p></div><i aria-hidden="true"/></header>
             <ol>{[
-              ["topic_research","补充素材","搜索背景、人物、争议和结果"],
-              ["topic_understanding","理解素材","寻找表面答案之外的问题"],
-              ["topic_proposals","提出12个方向","由独立提案编辑发散"],
-              ["topic_challenge","反方盲审","淘汰空泛、可猜和无法兑现的题"],
-              ["topic_decision","决选5+1个题","5个竞技场胜出题，加1个个人定位保送题"],
+              ["topic_research","搜索并补充素材","搜索背景、人物、争议和结果"],
+              ["topic_generation","生成5+1个选题","5个素材型选题，加1个IP定位题"],
+              ["coach_recommendation","匹配创作教练","选题完成后，根据每题任务自动推荐正文教练"],
             ].map(([phase,label,detail])=>{const progress=trafficTopicProgress.find((item)=>item.phase===phase);const done=progress?.status==="completed";const active=progress?.status==="active";return <li className={done?"done":active?"active":""} key={phase}><b>{done?"✓":active?"•":""}</b><div><strong>{progress?.label||label}</strong><span>{progress?.detail||detail}</span></div></li>;})}</ol>
           </section>:null}
 
@@ -1878,11 +1877,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
                   <div className="trafficTopicSignals"><span>{topic.professionalLens||"通用视角"}</span><span>专业连接：{formatTopicConnection(topic.professionalConnectionStrength)}</span><span>定位适配：{formatTopicCreatorFit(topic.creatorFit)}</span></div>
                   <details className="trafficTopicReason"><summary>查看推荐理由与选题分析</summary><p>{topic.recommendationReason}</p>{topic.editorialVerdict?<p><strong>反方评审：</strong>{topic.editorialVerdict}</p>:null}<dl>{topic.professionalLens?<div><dt>专业角度</dt><dd>{topic.professionalLens}</dd></div>:null}{topic.professionalMechanism?<div><dt>专业机制</dt><dd>{topic.professionalMechanism}</dd></div>:null}{topic.professionalValue?<div><dt>专业价值</dt><dd>{topic.professionalValue}</dd></div>:null}{topic.householdDecisionImpact?<div><dt>家庭决策</dt><dd>{topic.householdDecisionImpact}</dd></div>:null}{topic.creatorPositioningConnection?<div><dt>定位连接</dt><dd>{topic.creatorPositioningConnection}</dd></div>:null}{topic.creatorEvidence?.length?<div><dt>分身依据</dt><dd>{topic.creatorEvidence.join("；")}</dd></div>:null}{topic.whyThisCreator?<div><dt>为什么是你</dt><dd>{topic.whyThisCreator}</dd></div>:null}{topic.ipMemoryOutcome?<div><dt>IP沉淀</dt><dd>{topic.ipMemoryOutcome}</dd></div>:null}{topic.clientSignal?<div><dt>客户识别</dt><dd>{topic.clientSignal}</dd></div>:null}{topic.audienceAssumption?<div><dt>观众原有认知</dt><dd>{topic.audienceAssumption}</dd></div>:null}{topic.expectationViolation?<div><dt>现实反差</dt><dd>{topic.expectationViolation}</dd></div>:null}{topic.answerPayoff?<div><dt>答案回报</dt><dd>{topic.answerPayoff}</dd></div>:null}<div><dt>人性矛盾</dt><dd>{topic.humanTension}</dd></div>{topic.remainingQuestions?.length?<div><dt>标题之后</dt><dd>{topic.remainingQuestions.join("；")}</dd></div>:null}</dl></details>
                   <dl><div><dt>目标人群</dt><dd><input maxLength={180} onChange={(event)=>updateTrafficTopic(topic.id,{audience:event.target.value})} value={topic.audience}/></dd></div></dl>
-                  <TrafficTopicCoachCard coach={creativeCoachOptions.find((coach)=>coach.id===(topic.assignedCoachId||topic.recommendedCoachId))} coachId={topic.assignedCoachId||topic.recommendedCoachId||"default"} contribution={topic.coachContribution} isRecommended={(topic.assignedCoachId||topic.recommendedCoachId)===(topic.recommendedCoachId||"default")} onChoose={()=>setTrafficCoachPickerTopicId(topic.id)}/>
+                  <TrafficTopicCoachCard coach={creativeCoachOptions.find((coach)=>coach.id===(topic.assignedCoachId||topic.recommendedCoachId))} coachId={topic.assignedCoachId||topic.recommendedCoachId||"default"} contribution={topic.coachContribution} onChoose={()=>setTrafficCoachPickerTopicId(topic.id)}/>
                   <button aria-pressed={active} className="trafficTopicSelect" onClick={()=>toggleTrafficTopic(topic.id)} type="button">{active?"✓ 已选择":"选择这个题"}</button>
                 </article>;})}
               </div>
-              <footer><button className="secondaryButton" onClick={()=>void analyzeTrafficTopics()} type="button">重新推荐一批</button><span>修改素材或教练后，需要重新分析选题。</span></footer>
+              <footer><button className="secondaryButton" onClick={()=>void analyzeTrafficTopics()} type="button">重新推荐一批</button><span>修改素材后需要重新分析；创作教练在选题确定后单独选择。</span></footer>
             </section>
           ) : null}
 
@@ -1959,7 +1958,6 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
 
       {trafficCoachPickerTopicId ? <TrafficCoachPicker
         coaches={creativeCoachOptions}
-        recommendedCoachId={trafficTopics.find((topic)=>topic.id===trafficCoachPickerTopicId)?.recommendedCoachId||"default"}
         selectedCoachId={trafficTopics.find((topic)=>topic.id===trafficCoachPickerTopicId)?.assignedCoachId||"default"}
         onClose={()=>setTrafficCoachPickerTopicId(null)}
         onSelect={(coachId)=>assignTrafficTopicCoach(trafficCoachPickerTopicId,coachId)}
@@ -1969,11 +1967,11 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
   );
 }
 
-function TrafficTopicCoachCard({ coach, coachId, contribution, isRecommended, onChoose }:{ coach?:CreativeCoachOption;coachId:string;contribution:string;isRecommended:boolean;onChoose:()=>void }) {
+function TrafficTopicCoachCard({ coach, coachId, contribution, onChoose }:{ coach?:CreativeCoachOption;coachId:string;contribution:string;onChoose:()=>void }) {
   const card=coach?.identity_card??{};
   const tags=coach ? readCoachFeatureTags(card) : ["通用判断","内容结构","自然表达"];
   return <section className="trafficTopicCoachCard">
-    <header><div><span>{isRecommended?"推荐教练":"已选教练"}</span><strong>{coachId==="default"?"小谷教练":coach?.name||"小谷教练"}</strong></div><em>{coachId==="default"?"系统内置":coach?.coach_scope==="platform"?"平台教练":"我的教练"}</em></header>
+    <header><div><span>正文创作教练</span><strong>{coachId==="default"?"小谷教练":coach?.name||"小谷教练"}</strong></div><em>{coachId==="default"?"系统内置":coach?.coach_scope==="platform"?"平台教练":"我的教练"}</em></header>
     <b>{coachId==="default"?"专业内容基础教练":card.title||"创作教练"}</b>
     <p>{card.summary||contribution||"结合素材与目标受众，帮助确定内容入口、结构和表达方式。"}</p>
     {tags.length?<span className="trafficTopicCoachTags">{tags.map((tag)=><i key={tag}>{tag}</i>)}</span>:null}
@@ -1981,20 +1979,20 @@ function TrafficTopicCoachCard({ coach, coachId, contribution, isRecommended, on
   </section>;
 }
 
-function TrafficCoachPicker({ coaches, recommendedCoachId, selectedCoachId, onClose, onSelect }:{ coaches:CreativeCoachOption[];recommendedCoachId:string;selectedCoachId:string;onClose:()=>void;onSelect:(coachId:string)=>void }) {
+function TrafficCoachPicker({ coaches, selectedCoachId, onClose, onSelect }:{ coaches:CreativeCoachOption[];selectedCoachId:string;onClose:()=>void;onSelect:(coachId:string)=>void }) {
   const options:[string,CreativeCoachOption|undefined][]=[["default",undefined],...coaches.map((coach)=>[coach.id,coach] as [string,CreativeCoachOption])];
-  return <div className="trafficCoachPickerBackdrop" onClick={onClose} role="presentation">
+  return createPortal(<div className="trafficCoachPickerBackdrop" onClick={onClose} role="presentation">
     <section aria-label="选择创作教练" aria-modal="true" className="trafficCoachPicker" onClick={(event)=>event.stopPropagation()} role="dialog">
-      <header><div><span>创作教练</span><h2>选择谁来完成这个选题</h2><p>推荐只是参考，你可以根据账号定位和表达偏好重新选择。</p></div><button aria-label="关闭教练选择" onClick={onClose} type="button">×</button></header>
+      <header><div><span>创作教练</span><h2>选择谁来完成这个选题</h2><p>选题阶段不受教练影响；请根据账号定位和表达偏好选择正文创作教练。</p></div><button aria-label="关闭教练选择" onClick={onClose} type="button">×</button></header>
       <div className="trafficCoachPickerGrid">{options.map(([id,coach])=>{const card=coach?.identity_card??{};const tags=coach?readCoachFeatureTags(card):["通用判断","内容结构","自然表达"];const selected=id===selectedCoachId;return <button aria-pressed={selected} className={selected?"trafficCoachPickerCard active":"trafficCoachPickerCard"} key={id} onClick={()=>onSelect(id)} type="button">
-        <span className="trafficCoachPickerCardHead"><strong>{id==="default"?"小谷教练":coach?.name}</strong><em>{id===recommendedCoachId?"系统推荐":selected?"当前选择":id==="default"?"系统内置":coach?.coach_scope==="platform"?"平台教练":"我的教练"}</em></span>
+        <span className="trafficCoachPickerCardHead"><strong>{id==="default"?"小谷教练":coach?.name}</strong><em>{selected?"当前选择":id==="default"?"系统内置":coach?.coach_scope==="platform"?"平台教练":"我的教练"}</em></span>
         <b>{id==="default"?"专业内容基础教练":card.title||"创作教练"}</b>
         <small>{card.summary||"结合素材和目标受众，完成内容判断与表达。"}</small>
         {tags.length?<span>{tags.map((tag)=><i key={tag}>{tag}</i>)}</span>:null}
         {selected?<u>✓ 已选择</u>:null}
       </button>;})}</div>
     </section>
-  </div>;
+  </div>, document.body);
 }
 
 function formatTopicConnection(value: TrafficTopicCandidate["professionalConnectionStrength"]) {
@@ -2161,99 +2159,6 @@ function getRemixExtractedBody(values: Record<string, FieldValue>) {
   return isWechatArticle
     ? { body: sourceText || transcript, isWechatArticle: true, panelLabel: "公众号文章正文", documentLabel: "公众号正文" }
     : { body: transcript || sourceText, isWechatArticle: false, panelLabel: "视频转写正文", documentLabel: "视频转写" };
-}
-
-function createInitialValues(app: CreationApp, fromWorkspace: boolean) {
-  const base = Object.fromEntries(app.fields.map((field) => [field.id, field.type === "multiselect" ? [] : ""])) as Record<string, FieldValue>;
-  if (app.slug === "policy-renewal-card") {
-    return {
-      ...base,
-      style: "renewal-handwritten",
-      currency: "人民币",
-      privacy_mode: "masked",
-      contact_text: "",
-      portrait_treatment: "soft-illustration",
-      ratio: "3:4",
-      avatar_visual_mode: "no",
-      avatar_visual_asset_ids: [],
-    };
-  }
-  if (app.slug === "image-card") {
-    return {
-      ...base,
-      creation_mode: "text_to_card",
-      draw_portrait: "no",
-      ratio: "3:4",
-      avatar_visual_asset_ids: [],
-    };
-  }
-  if (app.slug === "traffic-copy") {
-    return { ...base, creative_coach_version_ids: ["default"] };
-  }
-  if (app.slug === "video-cover") {
-    return {
-      ...base,
-      platform: "wechat_video",
-      style: "video-bold-opinion",
-      ratio: "9:16",
-      avatar_visual_mode: "no",
-      avatar_visual_asset_ids: [],
-    };
-  }
-  if (app.slug === "write-copy") {
-    return {
-      ...base,
-      tone: "self",
-      source: buildWriteCopySourceSeed(fromWorkspace),
-      targets: ["video_script", "xiaohongshu", "wechat_article", "moments"],
-    };
-  }
-  if (app.slug === "link-remix") {
-    return {
-      ...base,
-      remix_target: "traffic-copy",
-      ...getRemixCapabilityDefaults("traffic-copy"),
-    };
-  }
-  if (app.slug === "wechat-images") {
-    return {
-      ...base,
-      style: "documentary",
-      avatar_visual_mode: "no",
-      avatar_visual_asset_ids: [],
-    };
-  }
-  if (app.slug === "general-content") {
-    return {
-      ...base,
-      targets: ["video_script", "wechat_article"],
-    };
-  }
-  if (app.slug === "letter") {
-    return {
-      ...base,
-      theme: "",
-      targets: ["wechat_article"],
-    };
-  }
-  if (app.slug === "wechat-article-polish") {
-    return {
-      ...base,
-      target: ["wechat_article"],
-    };
-  }
-  if (app.slug === "ip-positioning" && app.name === "个性名片") {
-    return { ...base, style: "professional", ratio: "3:4", avatar_visual_mode: "yes", avatar_visual_asset_ids: [] };
-  }
-  if (app.slug !== "image-card" || !fromWorkspace) return base;
-
-  return {
-    ...base,
-    style: "illustration",
-    source: "",
-    draw_portrait: "no",
-    ratio: "3:4",
-  };
 }
 
 type WechatArticleAnalysis = {
@@ -2985,11 +2890,6 @@ function getSpeechRecognitionConstructor() {
     webkitSpeechRecognition?: SpeechRecognitionConstructor;
   };
   return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
-}
-
-function buildWriteCopySourceSeed(fromWorkspace?: boolean) {
-  if (!fromWorkspace) return "";
-  return "";
 }
 
 function describeWriteCopyTarget(value: string) {

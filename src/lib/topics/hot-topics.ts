@@ -165,8 +165,8 @@ export async function getHotTopics(options: { refresh?: boolean; topicPreference
   throw new Error("话题来源暂不可用，请检查热榜或搜索服务配置");
 }
 
-export function rankHotTopicCandidates(candidates: HotTopic[], topicPreference = "") {
-  return rankAndDiversifyTopics(dedupeTopics(candidates).map(enrichHotTopicDomains), topicPreference);
+export function rankHotTopicCandidates(candidates: HotTopic[], topicPreference = "", limit = 12) {
+  return rankAndDiversifyTopics(dedupeTopics(candidates).map(enrichHotTopicDomains), topicPreference, limit);
 }
 
 async function fetchRebangTopics(options: { refresh?: boolean }) {
@@ -435,7 +435,8 @@ function dedupeTopics(topics: HotTopic[]) {
   });
 }
 
-function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "") {
+function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "", requestedLimit = 12) {
+  const limit = Math.max(1, Math.min(60, Math.floor(requestedLimit)));
   const ranked = [...topics].sort((a, b) => topicScore(b, topicPreference) - topicScore(a, topicPreference));
   const selected: HotTopic[] = [];
   const categoryCount = new Map<string, number>();
@@ -445,7 +446,7 @@ function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "") {
     const categoryUsed = categoryCount.get(topic.category) ?? 0;
     const sourceKey = topic.source.split("·")[0]?.trim() || topic.source;
     const sourceUsed = sourceCount.get(sourceKey) ?? 0;
-    if (selected.length >= 12) break;
+    if (selected.length >= limit) break;
     if (selected.length >= 4 && categoryUsed >= 3) continue;
     if (selected.length >= 4 && sourceUsed >= 4) continue;
     selected.push(topic);
@@ -454,13 +455,13 @@ function rankAndDiversifyTopics(topics: HotTopic[], topicPreference = "") {
   }
 
   for (const topic of ranked) {
-    if (selected.length >= 12) break;
+    if (selected.length >= limit) break;
     if (!selected.some((item) => item.title === topic.title)) selected.push(topic);
   }
 
-  const result = [...selected, ...ranked].slice(0, 12);
+  const result = [...selected, ...ranked].slice(0, limit);
   return /财经|金融|市场|股票|利率|汇率|黄金|美股|港股/.test(topicPreference)
-    ? ensureInternationalFinanceCoverage(result, 12)
+    ? ensureInternationalFinanceCoverage(result, limit)
     : result;
 }
 
@@ -470,17 +471,17 @@ function scoreInsuranceRelevance(title: string): HotTopic["insuranceRelevance"] 
 
 function topicScore(topic: HotTopic, topicPreference = "") {
   const domainPeak = topic.domainScores ? Math.max(...Object.values(topic.domainScores)) : relevanceRank(topic.insuranceRelevance) * 20;
-  let score = domainPeak * 0.6 + (topic.contentValue ?? 0) * 0.4;
-  if (topic.heat === "高") score += 10;
-  if (/谁能想到|首次|突然|暴涨|暴跌|崩了|没了|罕见|冲上热搜|全网|紧急|官宣|新规|调整|回应|通报|热议/.test(topic.title)) score += 14;
-  if (/涨价|降价|裁员|倒闭|破产|停产|罢工|事故|赔偿|补偿|医保|养老金|退休|医院|药|癌|暴雨|台风|地震|火灾|车祸|生育|教育|房贷|物价|暴雷|危机/.test(topic.title)) score += 14;
-  if (/家庭|父母|孩子|老人|年轻人|打工人|普通人|中年|收入|房贷|学校|实体店|航空|车企/.test(topic.title)) score += 9;
-  if (/特斯拉|三星|日本车企|廉价航空|造车新势力|手机店|学校禁止|汛情|灾情/.test(topic.title)) score += 10;
-  if (topic.category === "国际财经") score += 6;
-  if (/报告|研究|白皮书|论文|指数|论坛|会议/.test(topic.title)) score -= 14;
-  if (matchesPreference(topic, topicPreference)) score += 18;
-  if (topic.evidence || topic.sourceUrl) score += 4;
-  score += freshnessScore(topic.sourcePublishedAt);
+  // Keep discovery domain-neutral. Earlier scoring hard-coded family,
+  // insurance and finance nouns, which silently removed high-interest legal,
+  // creator and public-affairs stories before the user ever saw them.
+  let score = (topic.contentValue ?? 0) * 0.35 + domainPeak * 0.1;
+  if (topic.heat === "高") score += 18;
+  else if (topic.heat === "中") score += 8;
+  if (matchesPreference(topic, topicPreference)) score += 24;
+  if (topic.evidence) score += 7;
+  else if (topic.sourceUrl) score += 4;
+  if (topic.summary && topic.summary.length >= 40) score += 3;
+  score += freshnessScore(topic.sourcePublishedAt) * 1.25;
   if (topic.discoverySource === "search") score += 3;
   return score;
 }

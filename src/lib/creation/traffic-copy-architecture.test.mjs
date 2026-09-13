@@ -41,6 +41,11 @@ test("structured hotspot envelope cannot be mistaken for a source transcript", (
   assert.equal(blueprint.originalThesis, "某款量产车下线");
 });
 
+test("traffic blueprint fallback skips harness instructions and keeps the named entity", () => {
+  const blueprint = fallbackTrafficSourceBlueprint("基于已讨论的电视剧《早春晴朗》观点，执行目标应用并生成口播。\n【补充资料】\n真实素材");
+  assert.equal(blueprint.originalThesis, "《早春晴朗》");
+});
+
 test("topic creation leaves researched material open to coach judgment", () => {
   const blueprintPrompt = buildTrafficSourceBlueprintPrompt("梅艳芳今天很火，帮我找一个角度写", "创作方向：围绕遗产信托安排展开\n必须实质解释的主题锚点：遗产信托、按规则使用");
   assert.match(blueprintPrompt, /研究后的编辑材料是创作参考/);
