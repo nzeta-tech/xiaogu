@@ -42,6 +42,18 @@ test("broader searches cannot weaken the original visual relevance requirement",
   assert.equal(accepted.source,"https://example.com/relevant");
 });
 
+test("a generated repair is reused without discarded extra image calls",async()=>{
+  let resolved=0,reviews=0;
+  const result=await renderWithCodexReview({segments:[{id:"s1",text:"整理资料",query:"document folders",visual:"资料分类"}],materials:[{source:"xiaogu-generated-visual",title:"资料分类",file:"old.jpg"}],
+    resolveMaterial:async()=>{resolved++;return {source:"xiaogu-generated-visual",title:"资料分类",file:"new.jpg"};},
+    generateVisual:async()=>{throw Error("unnecessary paid generation");},
+  },{
+    finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
+    review:async()=>({pass:++reviews===2,issues:[],searchQueries:{s1:["document folder","organized paperwork","file cabinet"]}}),
+  });
+  assert.equal(resolved,1);assert.equal(reviews,2);assert.equal(result.materials[0].file,"new.jpg");
+});
+
 test("diagram suggestions cannot invent template numbers or reporting periods",()=>{
   for(const points of [["M2发生变化。"],["居民贷款减少，需要结合原因分析。"]]){
     const result=JSON.stringify(knowledgeCardSpec(points,"家庭资金流",0,"双轨与储蓄池"));

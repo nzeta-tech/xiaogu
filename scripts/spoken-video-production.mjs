@@ -620,7 +620,7 @@ export class VideoQualityError extends Error {
 export async function renderWithCodexReview({master,segments,materials,subtitleUrl,script,dir,title,aspectRatio,references=[],onProgress=async()=>{},generateVisual:generateVisualForReview=null,initialOptions={},resolveMaterial=null},dependencies={}){
   const finalizeVideo=dependencies.finalize||finalize,checkVideo=dependencies.check||checkedFinalVideo,reviewVideo=dependencies.review||codexReview,createSheet=dependencies.sheet||createReviewSheet;
   let currentMaterials=[...materials],currentSegments=segments.map(segment=>({...segment})),options={...initialOptions};
-  const reviewHistory=[],rejectedSearches=new Set();let generatedCount=0;
+  const reviewHistory=[],rejectedSearches=new Set();
   for(let attempt=1;attempt<=3;attempt++){
     await onProgress(`正在进行第 ${attempt} 轮本地混剪与质量验收`,Math.min(90,72+attempt*5));
     const final=await finalizeVideo(master,currentSegments,currentMaterials,subtitleUrl,script,dir,title,aspectRatio,options);
@@ -650,21 +650,17 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
       if(rejectedSearches.has(id)&&generateVisualForReview){
         const revised={...currentSegments[index],query:queries[0].trim().slice(0,90)};
         currentMaterials[index]=await generateVisualForReview(revised,index);
-        currentSegments[index]=revised;generatedCount++;changed=true;continue;
+        currentSegments[index]=revised;changed=true;continue;
       }
       rejectedSearches.add(id);
       let revised=currentSegments[index],replacement=null;
-      for(const query of queries){revised={...currentSegments[index],query:query.trim().slice(0,90),...(options.timelineMode==="semantic"&&currentSegments[index].layout==="presenter"?{layout:"presenter-pip",intent:"scene"}:{})};replacement=resolveMaterial?await resolveMaterial(revised,index):await materialFor(revised,dir,index);if(!replacement.source.startsWith("xiaogu-"))break;}
+      for(const query of queries){revised={...currentSegments[index],query:query.trim().slice(0,90),...(options.timelineMode==="semantic"&&currentSegments[index].layout==="presenter"?{layout:"presenter-pip",intent:"scene"}:{})};replacement=resolveMaterial?await resolveMaterial(revised,index):await materialFor(revised,dir,index);if(!replacement.source.startsWith("xiaogu-")||["xiaogu-generated-visual","xiaogu-ai-knowledge-card"].includes(replacement.source))break;}
       if(!replacement)continue;
-      if(replacement.source===currentMaterials[index].source&&replacement.title===currentMaterials[index].title){
+      if(replacement.source===currentMaterials[index].source&&replacement.title===currentMaterials[index].title&&replacement.file===currentMaterials[index].file){
         revised={...currentSegments[index],forceCard:true};
         replacement=resolveMaterial?await resolveMaterial(revised,index):await createKnowledgeCard(revised,dir,index);
       }
-      if(replacement.source.startsWith("xiaogu-")&&!replacement.source.includes("knowledge-card")&&generateVisualForReview&&generatedCount<currentSegments.length){
-        replacement=await generateVisualForReview(revised,index);
-        generatedCount++;
-      }
-      if(replacement.source!==currentMaterials[index].source||replacement.title!==currentMaterials[index].title||JSON.stringify(replacement.points||[])!==JSON.stringify(currentMaterials[index].points||[])||(!replacement.source.startsWith("xiaogu-")&&replacement.file!==currentMaterials[index].file)){currentSegments[index]=revised;currentMaterials[index]=replacement;changed=true;}
+      if(replacement.source!==currentMaterials[index].source||replacement.title!==currentMaterials[index].title||JSON.stringify(replacement.points||[])!==JSON.stringify(currentMaterials[index].points||[])||replacement.file!==currentMaterials[index].file){currentSegments[index]=revised;currentMaterials[index]=replacement;changed=true;}
     }
     const currentShare=Number.isFinite(options.presenterShare)?options.presenterShare:.4;
     const presenterTooSmall=review.issues.some(issue=>/讲述者|出镜|头像/.test(issue)&&/少|低|小|不足/.test(issue));
