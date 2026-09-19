@@ -36,7 +36,10 @@
     "avatar:retrain-platform-coaches": "node --env-file=.env scripts/retrain-platform-coaches-progressive.mjs",
     "avatar:seed-xiaogu-coach": "node --env-file=.env scripts/seed-xiaogu-coach.mjs",
     "model:check": "node --env-file-if-exists=.env scripts/check-model.mjs",
-    "typecheck": "tsc --noEmit"
+    "test:paid-access": "node --experimental-strip-types --test src/lib/billing/paid-access.test.mjs src/lib/billing/paid-access.integration.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:media-node": "node --experimental-strip-types --test scripts/media-node/server.test.mjs src/lib/digital-human/media-node.integration.test.mjs",
+    "test:provider-retirement": "node --experimental-strip-types --test src/lib/digital-human/retirement.test.mjs scripts/spoken-video-production.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1089.0",

@@ -94,6 +94,7 @@ COPY docker/start-app.sh /xiaogu/start-app.sh
 COPY docker/local-agent-healthcheck.sh /xiaogu/local-agent-healthcheck.sh
 COPY docker/wechat-sogou/app.py /xiaogu/wechat_sogou_api.py
 COPY scripts/local-agent.mjs /xiaogu/scripts/local-agent.mjs
+COPY scripts/spoken-*.mjs /xiaogu/scripts/
 COPY scripts/retrain-creative-coach-progressive-skills.mjs /xiaogu/scripts/retrain-creative-coach-progressive-skills.mjs
 COPY scripts/viral-cover-cache.mjs /xiaogu/scripts/viral-cover-cache.mjs
 # Next's standalone output preserves Sharp but can omit its optional

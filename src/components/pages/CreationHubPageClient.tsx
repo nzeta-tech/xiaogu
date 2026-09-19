@@ -58,7 +58,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
   {
     slug: "digital-human-video",
     appSlug: "digital-human-video",
-    name: "数字人视频",
+    name: "口播视频生成",
     emoji: "🎭",
     pointsLabel: "12",
     badge: "新",
@@ -520,6 +520,7 @@ export function CreationHubPageClient() {
         <div className="workspaceFrequentGrid">
           {frequentCards.map((card) => {
             const unavailable = isWorkspaceCardUnavailable(card, hubData);
+            const paidOnly = hubData?.apps.find(app => app.slug === card.appSlug)?.accessPolicy === "paid_customer";
             const content = <>
               <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true"><WorkspaceIcon card={card} /></span>
               <div>
@@ -561,11 +562,13 @@ export function CreationHubPageClient() {
         <div className="workspaceHubGrid">
           {filteredCards.map((card) => {
             const unavailable = isWorkspaceCardUnavailable(card, hubData);
+            const paidOnly = hubData?.apps.find(app => app.slug === card.appSlug)?.accessPolicy === "paid_customer";
             return <article className={`workspaceHubCard workspaceCard-${getWorkspaceCategory(card)} ${getCardThemeClass(card.badge)} ${unavailable ? "workspaceHubCardUnavailable" : ""}`} key={card.slug}>
               <div className="workspaceHubCardHeader">
                 <span className="workspaceHubCardIcon" aria-hidden="true"><WorkspaceIcon card={card} /></span>
                 <div>
                   <span className="workspaceCardCategory">{getWorkspaceCategoryLabel(card)}</span>
+                  {paidOnly ? <em>充值用户专享</em> : null}
                   {card.badge ? <em>{card.badge.replace("！", "")}</em> : null}
                   {getUsageCount(card, usageByApp) > 0 ? <small>使用过 {getUsageCount(card, usageByApp)} 次</small> : null}
                 </div>

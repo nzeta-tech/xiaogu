@@ -112,7 +112,7 @@ export function DigitalHumanVideoPageClient() {
   );
   const loadingJobsRef = useRef(false);
   usePageMeta({
-    title: "数字人视频 · 创作广场",
+    title: "口播视频生成 · 创作广场",
     description: "选择数字人，把口播文案生成视频",
   });
   async function load(silent = false) {
@@ -122,12 +122,12 @@ export function DigitalHumanVideoPageClient() {
     try {
       const response = await fetch(apiPath("/api/digital-human-videos"));
       const data = await json<Payload>(response, "数字人服务");
-      if (!response.ok) throw new Error(data.error || "数字人视频暂时无法加载");
+      if (!response.ok) throw new Error(data.error || "口播视频生成暂时无法加载");
       setPayload(data);
     } catch (cause) {
       if (!silent)
         setError(
-          cause instanceof Error ? cause.message : "数字人视频暂时无法加载",
+          cause instanceof Error ? cause.message : "口播视频生成暂时无法加载",
         );
     } finally {
       loadingJobsRef.current = false;
@@ -354,7 +354,7 @@ export function DigitalHumanVideoPageClient() {
       <header className="digitalHumanHero">
         <div>
           <span>创作广场 · 短视频</span>
-          <h1>数字人视频</h1>
+          <h1>口播视频生成</h1>
           <p>
             选择你的数字分身，将口播文案生成视频；形象、声音与任务调度由小谷自动处理。
           </p>
@@ -374,7 +374,7 @@ export function DigitalHumanVideoPageClient() {
             <button className={creationMode === "smart" ? "active" : ""} onClick={() => { setCreationMode("smart"); setCreativePlan(null); }} role="tab" type="button">
               <strong>智能创作</strong><span>锁定原文，自动设计分镜与画面节奏</span>
             </button>
-            <a href={appPath(`/workbuddy?mode=video&objective=${encodeURIComponent(title || "把我的定稿口播文案制作成数字人视频，原文逐字不变")}`)}>在 WorkBuddy 中创作 →</a>
+            <a href={appPath(`/workbuddy?mode=video&objective=${encodeURIComponent(title || "把我的定稿口播文案制作成口播视频，原文逐字不变")}`)}>在 WorkBuddy 中创作 →</a>
           </div>
           {creationMode === "smart" ? <div className="digitalHumanLockedCopyNotice"><strong>口播文案已启用锁定保护</strong><span>生成服务先完成人物、声音、字幕与背景；小谷再追加知识卡、分镜节奏和视觉包装，不会改写口播原文。</span></div> : <div className="digitalHumanLockedCopyNotice"><strong>直接生成数字人口播成片</strong><span>人物、声音、字幕、背景和画幅由当前生成通道原生完成，不经过小谷二次视觉合成。</span></div>}
           {creationMode === "smart" ? <section>
@@ -649,7 +649,7 @@ export function DigitalHumanVideoPageClient() {
             }
             type="submit"
           >
-            {busy ? "正在提交…" : creationMode === "smart" ? "按分镜生成视频" : "生成数字人视频"}
+            {busy ? "正在提交…" : creationMode === "smart" ? "按分镜生成视频" : "生成口播视频"}
           </button>
         </form>
         <aside className="digitalHumanJobs">

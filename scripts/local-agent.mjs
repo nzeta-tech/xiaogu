@@ -33,8 +33,9 @@ let activeTaskCount = 0;
 let stopping = false;
 let readyForTasks = false;
 let availableCapabilityNames = [];
+let lastHeygenAuthSuccessAt = 0;
 
-const needsExecutor = capabilities.some((capability) => !["ppt.generate", "heygen.video.generate", "xiaogu.video.compose", "openchatcut.edit"].includes(capability));
+const needsExecutor = capabilities.some((capability) => !["ppt.generate", "heygen.video.generate", "xiaogu.video.compose", "openchatcut.edit", "digital-human.video.produce", "spoken.voice.clone"].includes(capability));
 if (needsExecutor) await waitForExecutor();
 await sendPresenceHeartbeat().catch((error) => console.error(`[local-agent] initial presence heartbeat failed: ${messageOf(error)}`));
 const presenceTimer = setInterval(() => sendPresenceHeartbeat().catch((error) => console.error(`[local-agent] presence heartbeat failed: ${messageOf(error)}`)), heartbeatIntervalMs);
@@ -96,6 +97,14 @@ async function executeTask(task, leaseToken) {
   if (task.taskType === "ppt.generate") return executePresentationTask(task, leaseToken);
   if (task.taskType === "heygen.video.generate") return executeHeygenVideoTask(task, leaseToken);
   if (task.taskType === "xiaogu.video.compose") return executeXiaoguVideoComposeTask(task, leaseToken);
+  if (task.taskType === "spoken.voice.clone") {
+    const { executeSpokenVoiceClone } = await import("./spoken-voice-clone.mjs");
+    return executeSpokenVoiceClone(task, leaseToken, { remoteBase, token, remote, agentId });
+  }
+  if (task.taskType === "digital-human.video.produce") {
+    const { executeSpokenVideoProduction } = await import("./spoken-video-production.mjs");
+    return executeSpokenVideoProduction(task, leaseToken, { remoteBase, token, remote, agentId, publishTaskEvent, updateDigitalHumanProgress });
+  }
   if (task.taskType === "openchatcut.edit") return executeOpenChatCutTask(task, leaseToken);
   if (task.taskType !== "source.inspect") throw new Error(`unsupported task type: ${task.taskType}`);
   if (task.payload?.sourceType === "wechat_channels_media") return inspectWechatChannelMedia(task, leaseToken);
@@ -544,6 +553,7 @@ async function sendPresenceHeartbeat(forcedStatus) {
   // the Web completion endpoint; it does not need the container executor.
   const pptReady = health.codexCli === "healthy";
   const heygenReady = health.codexCli === "healthy" && health.heygenCli === "healthy";
+  const spokenVideoReady = heygenReady && health.ffmpeg === "healthy";
   const videoComposeReady = health.ffmpeg === "healthy";
   const openChatCutReady = health.codexCli === "healthy" && health.openChatCut === "healthy";
   availableCapabilityNames = [
@@ -553,6 +563,8 @@ async function sendPresenceHeartbeat(forcedStatus) {
     ...(capabilities.includes("heygen.video.generate") && heygenReady ? ["heygen.video.generate"] : []),
     ...(capabilities.includes("xiaogu.video.compose") && videoComposeReady ? ["xiaogu.video.compose"] : []),
     ...(capabilities.includes("openchatcut.edit") && openChatCutReady ? ["openchatcut.edit"] : []),
+    ...(capabilities.includes("spoken.voice.clone") && health.heygenCli === "healthy" && health.ffmpeg === "healthy" ? ["spoken.voice.clone"] : []),
+    ...(capabilities.includes("digital-human.video.produce") && spokenVideoReady ? ["digital-human.video.produce"] : []),
   ];
   const ready = availableCapabilityNames.length > 0;
   readyForTasks = ready;
@@ -568,6 +580,8 @@ async function sendPresenceHeartbeat(forcedStatus) {
       "heygen.video.generate": heygenReady && capabilities.includes("heygen.video.generate"),
       "xiaogu.video.compose": videoComposeReady && capabilities.includes("xiaogu.video.compose"),
       "openchatcut.edit": openChatCutReady && capabilities.includes("openchatcut.edit"),
+      "spoken.voice.clone": health.heygenCli === "healthy" && health.ffmpeg === "healthy" && capabilities.includes("spoken.voice.clone"),
+      "digital-human.video.produce": spokenVideoReady && capabilities.includes("digital-human.video.produce"),
     },
     health,
     activeTaskCount,
@@ -588,9 +602,9 @@ async function collectHealth() {
     nativeDouyinVerifierBase ? httpHealth(`${nativeDouyinVerifierBase}/health`) : Promise.resolve("disabled"),
     // A concurrent `codex --version` can contend with an active ChatGPT-backed
     // Codex execution and incorrectly mark this dedicated host as unhealthy.
-    capabilities.some((item) => item === "ppt.generate" || item === "heygen.video.generate" || item === "openchatcut.edit") ? executableHealth(process.env.CODEX_CLI_BIN || "codex") : Promise.resolve("disabled"),
-    capabilities.includes("heygen.video.generate") ? (activeTaskCount > 0 ? Promise.resolve("healthy") : execHealth(process.env.HEYGEN_CLI_BIN || "heygen", ["auth", "status"], { HEYGEN_API_KEY: undefined })) : Promise.resolve("disabled"),
-    capabilities.includes("xiaogu.video.compose") ? execHealth("ffmpeg", ["-version"]) : Promise.resolve("disabled"),
+    capabilities.some((item) => item === "ppt.generate" || item === "heygen.video.generate" || item === "openchatcut.edit" || item === "digital-human.video.produce") ? executableHealth(process.env.CODEX_CLI_BIN || "codex") : Promise.resolve("disabled"),
+    capabilities.some((item) => item === "heygen.video.generate" || item === "digital-human.video.produce" || item === "spoken.voice.clone") ? (activeTaskCount > 0 ? Promise.resolve("healthy") : heygenAuthHealth()) : Promise.resolve("disabled"),
+    capabilities.some((item) => item === "xiaogu.video.compose" || item === "digital-human.video.produce" || item === "spoken.voice.clone") ? execHealth("ffmpeg", ["-version"]) : Promise.resolve("disabled"),
     capabilities.includes("openchatcut.edit") ? openChatCutHealth() : Promise.resolve("disabled"),
   ]);
   return { executor, transcriber, chromium, wechatChannel, ytDlp, xiaohongshu, werss, wechatSogou, douyinNative, codexCli, heygenCli, ffmpeg, openChatCut };
@@ -632,6 +646,25 @@ async function execHealth(command, args, envPatch = {}) {
     await execFileAsync(command, args, { timeout: 5000, env });
     return "healthy";
   } catch { return "unhealthy"; }
+}
+
+async function heygenAuthHealth() {
+  const env = { ...process.env };
+  delete env.HEYGEN_API_KEY;
+  try {
+    await execFileAsync(process.env.HEYGEN_CLI_BIN || "heygen", ["auth", "status"], { timeout: 8000, env });
+    lastHeygenAuthSuccessAt = Date.now();
+    return "healthy";
+  } catch (error) {
+    const output = `${error?.stdout || ""} ${error?.stderr || ""}`;
+    // A brief network or TLS timeout should not hide a recently verified Agent.
+    // Explicit authentication failures must remove the capability immediately.
+    if (/auth_error|expired|unauthorized|invalid.token/i.test(output)) {
+      lastHeygenAuthSuccessAt = 0;
+      return "unhealthy";
+    }
+    return Date.now() - lastHeygenAuthSuccessAt < 120_000 ? "healthy" : "unhealthy";
+  }
 }
 
 async function executableHealth(command) {

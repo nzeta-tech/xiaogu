@@ -1,10 +1,15 @@
+import { requireAppAccess } from "./paid-access";
 import { getQuotaBalance } from "./openmeter";
 import { getQuotaCost, type QuotaAction } from "./quota";
 import type { SessionUser } from "@/lib/auth/session";
 import { tryExpireStaleAppRuns, tryGetSystemSettings } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
 
-export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number, options: { skipConcurrentCreationLimit?: boolean } = {}) {
+export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number, options: { skipConcurrentCreationLimit?: boolean; appSlug?: string } = {}) {
+  if (options.appSlug) {
+    const denied = await requireAppAccess(user.id, options.appSlug);
+    if (denied) return { ok: false as const, response: denied, quotaCost: 0, balance: null };
+  }
   const settings = await tryGetSystemSettings();
   if (action === "write_script" && !options.skipConcurrentCreationLimit) {
     await tryExpireStaleAppRuns(user.id);

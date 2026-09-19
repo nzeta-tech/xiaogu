@@ -88,8 +88,8 @@ const appCapabilities: WorkbuddyCapability[] = [
     operations: ["create", "regenerate", "transform"], buildInput: () => ({}),
   },
   {
-    id: "app.digital-human-video", kind: "app", name: "数字人视频", appSlug: "digital-human-video", nativeType: "digital-human-handoff",
-    description: "把已选定的口播文案完整带入数字人视频工作台，由用户确认人物、声音和画幅后提交生成。", riskLevel: "generate", executionMode: "sync", outputTypes: ["data"], autoInvoke: true,
+    id: "app.digital-human-video", kind: "app", name: "口播视频生成", appSlug: "digital-human-video", nativeType: "digital-human-handoff",
+    description: "把已选定的口播文案完整带入口播视频生成工作台，由用户确认人物、声音和画幅后提交生成。", riskLevel: "generate", executionMode: "sync", outputTypes: ["data"], autoInvoke: true,
     operations: ["create", "regenerate", "transform"], buildInput: () => ({}),
   },
   {

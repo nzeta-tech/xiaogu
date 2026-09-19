@@ -1,0 +1,38 @@
+# Run only on the designated media host. Bind an existing private interface.
+# MEDIA_CODE_DIR must be an immutable release directory containing server.mjs.
+services:
+  media-node:
+    image: node:22-alpine
+    init: true
+    restart: unless-stopped
+    user: "${MEDIA_UID:-1000}:${MEDIA_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, /opt/media/server.mjs]
+    env_file: [.env.media]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3400
+      MEDIA_NODE_ROOT: /data/media
+      MEDIA_MAX_BYTES: 524288000
+      MEDIA_MAX_UPLOADS: 2
+    ports:
+      - "${MEDIA_BIND_IP:?Set the private IP of the media host}:3400:3400"
+    volumes:
+      - type: bind
+        source: ${MEDIA_DATA_DIR:?Set an existing persistent media data directory}
+        target: /data/media
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MEDIA_CODE_DIR:?Set the immutable media service code directory}
+        target: /opt/media
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3400/health',{headers:{authorization:'Bearer '+process.env.MEDIA_NODE_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

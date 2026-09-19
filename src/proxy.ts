@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * 404 avoids advertising an unavailable surface and also blocks direct API use.
  */
 export function proxy(request: NextRequest) {
+  if (process.env.NODE_ENV === "development") return NextResponse.next();
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
@@ -19,6 +20,9 @@ export const config = {
     "/api/digital-human-template-favorites/:path*",
     "/api/digital-human-template-library/:path*",
     "/api/digital-human-videos/:path*",
+    "/api/spoken-photos/:path*",
+    "/api/spoken-photo-templates/:path*",
+    "/api/spoken-voices/:path*",
     "/api/avatar/digital-human-looks/:path*",
     "/api/avatar/digital-human-voice-preview/:path*",
     "/api/avatar/digital-humans/:path*",

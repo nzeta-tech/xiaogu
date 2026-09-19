@@ -24,7 +24,7 @@ export type DigitalHumanAsset = {
 
 export type DigitalHumanVideoJob = {
   id: string;
-  asset_id: string;
+  asset_id: string | null;
   provider: DigitalHumanProvider;
   edition: DigitalHumanEdition;
   title: string;

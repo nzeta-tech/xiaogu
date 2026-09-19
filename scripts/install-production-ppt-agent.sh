@@ -11,7 +11,8 @@ service="gui/$(id -u)/ai.nzeta.xiaogu-ppt-agent"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.xiaogu-agent/logs" "$agent_bin"
 launchctl bootout "$service" 2>/dev/null || true
 install -m 755 "$repo_path/scripts/run-production-ppt-agent.sh" "$agent_bin/run-production-ppt-agent.sh"
-install -m 644 "$repo_path/scripts/local-agent.mjs" "$agent_bin/ppt-local-agent.mjs"
+[[ -f "$HOME/.xiaogu-agent/current/host-worker/manifest.sha256" ]] || { echo "Immutable host worker is not prepared" >&2; exit 1; }
+(cd "$HOME/.xiaogu-agent/current/host-worker" && shasum -a 256 -c manifest.sha256 >/dev/null)
 install -m 644 "$plist_source" "$plist_target"
 if ! launchctl bootstrap "gui/$(id -u)" "$plist_target"; then
   sleep 2

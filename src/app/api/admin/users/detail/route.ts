@@ -1,3 +1,4 @@
+import { getPaidCustomerStatus } from "@/lib/billing/paid-access";
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { tryGetAdminUserDetail } from "@/lib/db/repositories";
@@ -14,5 +15,6 @@ export async function GET(request: Request) {
   const detail = await tryGetAdminUserDetail(userId);
   if (!detail) return Response.json({ error: "用户详情不存在" }, { status: 404 });
 
-  return Response.json({ detail, mode: "server" });
+  const paidAccess = await getPaidCustomerStatus(userId);
+  return Response.json({ detail: { ...detail, paidAccess }, mode: "server" });
 }

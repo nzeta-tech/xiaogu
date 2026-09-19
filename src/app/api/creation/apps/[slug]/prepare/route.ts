@@ -57,7 +57,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
   }
 
-  const quota = await requireQuota(user, "write_script", app.points);
+  const quota = await requireQuota(user, "write_script", app.points, { appSlug: app.slug });
   if (!quota.ok) return quota.response;
 
   if (app.slug === "link-remix" && !isSupportedLinkRemixUrl(typeof values.source_url === "string" ? values.source_url : "")) {

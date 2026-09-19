@@ -1,114 +1,23 @@
 #!/usr/bin/env node
-import assert from "node:assert/strict";
-
-const [repoPath, releaseSha, baseUrl] = process.argv.slice(2);
-void repoPath;
-void releaseSha;
-
-if (!baseUrl) throw new Error("Usage: production-real-source-runner.mjs <repo-path> <release-sha> <base-url> <agent-env>");
-
-const base = new URL(baseUrl).origin;
-const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-const email = `xiaogu-release-${suffix}@example.invalid`;
-const password = `Release-${crypto.randomUUID()}-A1`;
-let cookie = "";
-
-function headers(extra = {}) {
-  return { accept: "application/json", ...(cookie ? { cookie } : {}), ...extra };
+import {readFile} from 'node:fs/promises';import{spawnSync}from'node:child_process';import assert from'node:assert/strict';import path from'node:path';
+const[repo,sha,base]=process.argv.slice(2);if(!repo||!base)throw Error('release runner arguments required');
+const fixtureCode=await readFile(path.join(repo,'scripts/production-regression-fixture.cjs'));
+function fixture(action,id=''){
+ const r=spawnSync('ssh',['-o','BatchMode=yes','-i',process.env.XIAOGU_SSH_KEY||'/Users/a2251/Downloads/router.pem',process.env.XIAOGU_PRIMARY_SSH||'ubuntu@16.176.34.69',`docker exec -i -w /app insurance-content-agent-app-1 node - ${action} ${id}`],{input:fixtureCode,encoding:'utf8',timeout:60000});
+ if(r.status!==0)throw Error(`Fixture ${action} failed`);return JSON.parse(r.stdout);
 }
-
-function redactError(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replaceAll(base, "<base-url>").slice(0, 500);
-}
-
-async function json(path, init = {}) {
-  const response = await fetch(`${base}${path}`, { ...init, headers: headers(init.headers) });
-  const payload = await response.json().catch(() => ({}));
-  return { response, payload };
-}
-
-async function register() {
-  const { response, payload } = await json("/api/auth/register", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.72" },
-    body: JSON.stringify({ name: "发布回归", email, password, acceptedTerms: true }),
-  });
-  if (!response.ok) throw new Error(`temporary regression registration failed (${response.status}): ${String(payload.error ?? "unknown")}`);
-  const cookies = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [response.headers.get("set-cookie") ?? ""];
-  cookie = cookies.map((value) => value.split(";")[0]).filter(Boolean).join("; ");
-  if (!cookie) throw new Error("temporary regression registration did not establish a session");
-}
-
-function supportedSource(items) {
-  return items.find((item) => {
-    if (!item || typeof item.sourceUrl !== "string") return false;
-    try {
-      const host = new URL(item.sourceUrl).hostname;
-      return /(^|\.)(douyin\.com|weixin\.qq\.com|channels\.weixin\.qq\.com)$/i.test(host);
-    } catch {
-      return false;
-    }
-  })?.sourceUrl;
-}
-
-async function readEvents(taskId) {
-  const response = await fetch(`${base}/api/creation/link-remix/inspect/${encodeURIComponent(taskId)}/events?after=0`, { headers: headers() });
-  if (!response.ok) throw new Error(`SSE endpoint failed (${response.status})`);
-  const raw = await response.text();
-  const events = raw.split("\n\n").filter(Boolean);
-  let deltas = 0;
-  let deltaCharacters = 0;
-  let done = false;
-  for (const event of events) {
-    const name = event.match(/^event: (.+)$/m)?.[1];
-    const data = event.match(/^data: (.+)$/m)?.[1];
-    if (name === "done") done = true;
-    if (!data) continue;
-    const payload = JSON.parse(data);
-    if (payload.type === "delta" && typeof payload.content === "string") {
-      deltas += 1;
-      deltaCharacters += payload.content.length;
-    }
-  }
-  return { deltas, deltaCharacters, done };
-}
-
-async function waitForTask(taskId) {
-  const deadline = Date.now() + 10 * 60 * 1000;
-  while (Date.now() < deadline) {
-    const { response, payload } = await json(`/api/creation/link-remix/inspect/${encodeURIComponent(taskId)}`);
-    if (!response.ok) throw new Error(`task status failed (${response.status}): ${String(payload.error ?? "unknown")}`);
-    if (payload.status === "succeeded") return payload.result;
-    if (payload.status === "failed" || payload.status === "cancelled") throw new Error(`task ${payload.status}: ${String(payload.error ?? "unknown")}`);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  throw new Error("task timed out after 10 minutes");
-}
-
-try {
-  await register();
-  const { response: examplesResponse, payload: examples } = await json("/api/viral-examples");
-  if (!examplesResponse.ok) throw new Error(`viral examples request failed (${examplesResponse.status})`);
-  const sourceUrl = process.env.XIAOGU_REAL_SOURCE_URL?.trim() || supportedSource(examples.items ?? []);
-  if (!sourceUrl) throw new Error("no supported public Douyin or Video Channels source is available for release validation");
-
-  const { response: inspectResponse, payload: inspect } = await json("/api/creation/link-remix/inspect", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: sourceUrl }),
-  });
-  if (inspectResponse.status !== 202 || !inspect.taskId) throw new Error(`source inspection did not queue a local Agent task (${inspectResponse.status})`);
-
-  const result = await waitForTask(inspect.taskId);
-  const events = await readEvents(inspect.taskId);
-  const transcript = typeof result?.fields?.source_transcript === "string" ? result.fields.source_transcript.trim() : "";
-  assert(transcript.length > 0, "completed task has no source transcript");
-  assert(events.deltas > 0, "task emitted no SSE transcript deltas");
-  assert(events.done, "task SSE stream did not finish with done");
-  assert(!result?.mediaUrl && !result?.mediaDecryptKey, "sensitive media fields leaked in task result");
-  console.log(JSON.stringify({ taskId: inspect.taskId, status: "succeeded", sseDeltas: events.deltas, sseDeltaCharacters: events.deltaCharacters, transcriptCharacters: transcript.length, mediaUrlPresent: false, mediaDecryptKeyPresent: false }));
-} catch (error) {
-  console.error(JSON.stringify({ status: "failed", error: redactError(error) }));
-  process.exitCode = 1;
-}
+const f=fixture('create');const headers={cookie:f.cookie,'content-type':'application/json'};let count=0;
+try{
+ assert(f.source,'supported real source unavailable');
+ const source=new URL(f.source);source.searchParams.set('xiaogu_release_probe',sha+'-'+Date.now());
+ const r=await fetch(base+'/api/creation/link-remix/inspect',{method:'POST',headers,body:JSON.stringify({url:String(source)}),signal:AbortSignal.timeout(60000)});const body=await r.json();assert.equal(r.status,202);assert(body.taskId);
+ let result;
+ for(let i=0;i<180;i++){
+  const rr=await fetch(base+'/api/creation/link-remix/inspect/'+body.taskId,{headers,signal:AbortSignal.timeout(30000)});assert(rr.ok);const d=await rr.json();if(d.status==='succeeded'){result=d.result;break;}assert(!['failed','cancelled'].includes(d.status),'real-source task failed');await new Promise(r=>setTimeout(r,5000));
+ }
+ assert(result,'real-source task timed out');const transcript=result.fields?.source_transcript||'';assert(transcript.length>0);assert(!result.mediaUrl&&!result.mediaDecryptKey);
+ const events=await fetch(base+'/api/creation/link-remix/inspect/'+body.taskId+'/events?after=0',{headers,signal:AbortSignal.timeout(60000)});assert(events.ok);const raw=await events.text();let chars=0,done=false;
+ for(const event of raw.split('\n\n')){const name=event.match(/^event: (.+)$/m)?.[1],data=event.match(/^data: (.+)$/m)?.[1];if(name==='done')done=true;if(data){const d=JSON.parse(data);if(d.type==='delta'&&typeof d.content==='string'){count++;chars+=d.content.length;}}}
+ assert(done&&count>0);assert.equal(chars,transcript.length);
+ console.log(JSON.stringify({passed:true,taskId:body.taskId,release:sha,sseDeltas:count,transcriptCharacters:transcript.length,sensitiveFieldsPresent:false}));
+}finally{fixture('cleanup',f.id);}

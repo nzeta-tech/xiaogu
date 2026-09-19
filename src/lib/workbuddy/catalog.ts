@@ -12,7 +12,7 @@ export const workbuddyExperts = [
 export type WorkbuddyScenario = "content" | "video" | "customer" | "product" | "team" | "research" | "general";
 
 export const workbuddyTemplates: Array<{ scenario: WorkbuddyScenario; title: string; description: string; prompt: string; accent: string }> = [
-  { scenario: "video", title: "视频创作", description: "锁定口播原文，规划数字人分镜并进入视频制作", prompt: "把我提供的定稿口播文案制作成数字人视频。口播原文逐字不变，只设计语义分段、画面节奏、字幕重点和辅助画面；需要选择数字人或声音时引导我进入数字人视频应用继续。", accent: "teal" },
+  { scenario: "video", title: "视频创作", description: "锁定口播原文，规划数字人分镜并进入视频制作", prompt: "把我提供的定稿口播文案制作成口播视频。口播原文逐字不变，只设计语义分段、画面节奏、字幕重点和辅助画面；需要选择数字人或声音时引导我进入口播视频生成应用继续。", accent: "teal" },
   { scenario: "content", title: "内容获客", description: "选题、内容日历、多平台成稿与合规复核", prompt: "结合我的数字分身和目标客户，制定未来一周内容获客计划，给出选题日历，并产出口播、小红书、公众号和朋友圈内容，最后完成事实与合规复核。", accent: "teal" },
   { scenario: "customer", title: "客户跟进", description: "从会谈信息形成纪要、需求、异议和下一步", prompt: "根据我提供的客户会谈内容，整理客户需求和顾虑，区分已确认事实与待核验信息，生成会谈纪要、跟进消息和下一次行动计划；验收后再保存脱敏客户摘要。", accent: "blue" },
   { scenario: "product", title: "资料分析", description: "分析保单或产品资料并生成双版本讲解", prompt: "根据我提供的保单或产品资料，逐份提取责任、限制、等待期、免责和待核验信息，形成对比表、内部分析版与客户易懂版。", accent: "amber" },
@@ -32,7 +32,7 @@ export function buildWorkbuddyPlan(scenario: WorkbuddyScenario): PlanStep[] {
     video: [
       { title: "锁定口播原文", description: "确认定稿文案边界，不改写、不扩写、不重排口播。", expertKey: "orchestrator", skillKey: "lock_video_copy" },
       { title: "设计视频分镜", description: "按原文语义切段，规划数字人、字幕重点、辅助画面和节奏。", expertKey: "visual", skillKey: "plan_video_scenes" },
-      { title: "进入视频制作", description: "整理选择数字人、声音和画幅所需信息，并进入数字人视频应用。", expertKey: "visual", skillKey: "prepare_digital_human_video" },
+      { title: "进入视频制作", description: "整理选择数字人、声音和画幅所需信息，并进入口播视频生成应用。", expertKey: "visual", skillKey: "prepare_digital_human_video" },
       ...sharedFinish,
     ],
     content: [

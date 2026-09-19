@@ -25,7 +25,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   const isStudioAssetChild = (studioParent === "wechat-studio" || studioParent === "xiaohongshu-studio")
     && (app.slug === "wechat-images" || app.slug === "wechat-cover")
     && Boolean(workId);
-  const quota = await requireQuota(user, "write_script", app.points, { skipConcurrentCreationLimit: isStudioAssetChild });
+  const quota = await requireQuota(user, "write_script", app.points, { skipConcurrentCreationLimit: isStudioAssetChild, appSlug: app.slug });
   if (!quota.ok) return quota.response;
 
   const encoder = new TextEncoder();

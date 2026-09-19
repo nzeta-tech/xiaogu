@@ -3,8 +3,8 @@ set -euo pipefail
 
 env_file=${XIAOGU_AGENT_ENV_FILE:-"$HOME/.config/xiaogu-agent/prod.env"}
 node_bin=${NODE_BIN:-/usr/local/bin/node}
-codex_bin=${CODEX_CLI_BIN:-/Applications/ChatGPT.app/Contents/Resources/codex}
-agent_script=${PPT_AGENT_SCRIPT_PATH:-"$HOME/.xiaogu-agent/bin/ppt-local-agent.mjs"}
+codex_bin=${CODEX_CLI_BIN:-"$HOME/.local/bin/codex"}
+agent_script=${PPT_AGENT_SCRIPT_PATH:-"$HOME/.xiaogu-agent/current/host-worker/scripts/local-agent.mjs"}
 
 [[ -f "$env_file" ]] || { echo "[xiaogu-ppt-agent] production env is missing: $env_file" >&2; exit 1; }
 [[ -x "$node_bin" ]] || { echo "[xiaogu-ppt-agent] Node.js is unavailable: $node_bin" >&2; exit 1; }
@@ -20,7 +20,9 @@ export LOCAL_AGENT_ID=${PPT_AGENT_ID:-macbook-ppt}
 current_release=$(readlink "$HOME/.xiaogu-agent/current")
 current_version=${current_release##*/}
 export LOCAL_AGENT_VERSION=${PPT_AGENT_VERSION:-$current_version}
-export LOCAL_AGENT_CAPABILITIES=ppt.generate
+export LOCAL_AGENT_CAPABILITIES=ppt.generate,digital-human.video.produce,spoken.voice.clone
+export HEYGEN_CLI_BIN=${HEYGEN_CLI_BIN:-"$HOME/.local/bin/heygen"}
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 export LOCAL_AGENT_EXECUTOR_URL=${LOCAL_AGENT_EXECUTOR_URL:-$LOCAL_AGENT_BASE_URL}
 export CODEX_CLI_BIN="$codex_bin"
 # Codex invokes the companion `rg` binary while working. The ChatGPT.app
