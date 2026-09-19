@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle } from "./spoken-video-production.mjs";
+import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
 import { researchSegmentsWithCodex } from "./spoken-video-web-research.mjs";
 
 test("stock relevance requires meaningful whole-word matches, not generic people or substrings",()=>{
@@ -30,6 +30,16 @@ test("repeated rejected stock escalates to an original scene and still requires 
     else await assert.rejects(work,/成片质检未通过/);
     assert.equal(searches,1);assert.equal(generated,1);assert.equal(reviews,3);
   }
+});
+
+test("broader searches cannot weaken the original visual relevance requirement",async()=>{
+  const query="labeled paper file folders",seen=[];
+  const rejected=await materialFor({query},"unused",0,{providers:[async(search,dir,index,relevanceQuery)=>{
+    seen.push(relevanceQuery);return search===query?null:{title:"File:Weather on Exoplanet labeled 1080.webm",source:"https://example.com/wrong"};
+  }],card:async()=>({source:"xiaogu-knowledge-card"})});
+  assert.equal(rejected.source,"xiaogu-knowledge-card");assert.equal(seen.length,3);assert(seen.every(value=>value===query));
+  const accepted=await materialFor({query},"unused",0,{providers:[async()=>({title:"Paper file folders",source:"https://example.com/relevant"})]});
+  assert.equal(accepted.source,"https://example.com/relevant");
 });
 
 test("diagram suggestions cannot invent template numbers or reporting periods",()=>{

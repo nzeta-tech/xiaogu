@@ -123,7 +123,7 @@ export function relevantAssetTitle(title,query){
   const matches=words.filter(word=>names.has(word)).length;
   return words.length>0&&matches>=Math.min(2,words.length)&&matches/words.length>=.35;
 }
-async function commonsAsset(query,dir,index) {
+async function commonsAsset(query,dir,index,relevanceQuery=query) {
   if(Date.now()<commonsUnavailableUntil)return null;
   for(const kind of ["video","image"]){
     try {
@@ -131,7 +131,7 @@ async function commonsAsset(query,dir,index) {
       for(const [k,v] of Object.entries({action:"query",format:"json",generator:"search",gsrsearch:`filetype:${kind} ${query}`,gsrnamespace:"6",gsrlimit:"10",prop:"imageinfo",iiprop:"url|mime|size|extmetadata",iiurlwidth:"1280"}))search.searchParams.set(k,v);
       const data=await externalJson(search);const pages=Object.values(item(item(data.query).pages));
       for(const page of pages){const info=Array.isArray(page.imageinfo)?page.imageinfo[0]:null;if(!info)continue;
-        if(!relevantAssetTitle(safe(page.title),query))continue;
+        if(!relevantAssetTitle(safe(page.title),relevanceQuery))continue;
         const mime=safe(info.mime);const license=safe(info.extmetadata?.LicenseShortName?.value||info.extmetadata?.License?.value);
         const rights=reusableLicense(license);if(!rights)continue;
         if(kind==="video"&&!mime.startsWith("video/"))continue;
@@ -157,7 +157,7 @@ async function commonsAsset(query,dir,index) {
   return null;
 }
 
-async function openverseAsset(query,dir,index){
+async function openverseAsset(query,dir,index,relevanceQuery=query){
   try{
     const url=new URL("https://api.openverse.org/v1/images/");
     for(const [key,value] of Object.entries({q:query,license:"cc0,by",page_size:"20"}))url.searchParams.set(key,value);
@@ -165,7 +165,7 @@ async function openverseAsset(query,dir,index){
     if(!Array.isArray(results))return null;
     for(const result of results){
       const title=safe(result.title).replace(/<[^>]*>/g,"");
-      if(!relevantAssetTitle(title,query)||/\b(?:rate|statistics|history|chart|graph|logo|icon)\b/i.test(title))continue;
+      if(!relevantAssetTitle(title,relevanceQuery)||/\b(?:rate|statistics|history|chart|graph|logo|icon)\b/i.test(title))continue;
       const slug=safe(result.license).toLowerCase();
       const version=safe(result.license_version)||"4.0";
       const rights=reusableLicense(slug==="by"?`CC BY ${version}`:slug==="cc0"?"CC0":slug);
@@ -193,7 +193,7 @@ async function stockFile(url,dir,index,provider,kind){
   return file;
 }
 
-async function pexelsAsset(query,dir,index){
+async function pexelsAsset(query,dir,index,relevanceQuery=query){
   const key=safe(process.env.PEXELS_API_KEY);if(!key)return null;
   try{
     const headers={Authorization:key};
@@ -201,7 +201,7 @@ async function pexelsAsset(query,dir,index){
     for(const [name,value] of Object.entries({query,per_page:"8"}))videos.searchParams.set(name,value);
     const videoResults=(await externalJson(videos,18000,headers))?.videos;
     for(const video of Array.isArray(videoResults)?videoResults:[]){
-      if(!relevantAssetTitle(safe(video.url).split("/").filter(Boolean).at(-1)?.replaceAll("-"," ")||"",query))continue;
+      if(!relevantAssetTitle(safe(video.url).split("/").filter(Boolean).at(-1)?.replaceAll("-"," ")||"",relevanceQuery))continue;
       const files=Array.isArray(video.video_files)?video.video_files:[];
       const playable=files.filter(file=>file.file_type==="video/mp4"&&Number(file.width)>=720&&Number(file.height)>=720&&safe(file.link).startsWith("https://")).sort((a,b)=>Number(a.width)*Number(a.height)-Number(b.width)*Number(b.height))[0];
       if(!playable||!safe(video.url).startsWith("https://www.pexels.com/"))continue;
@@ -212,7 +212,7 @@ async function pexelsAsset(query,dir,index){
     for(const [name,value] of Object.entries({query,per_page:"12"}))photos.searchParams.set(name,value);
     const photoResults=(await externalJson(photos,18000,headers))?.photos;
     for(const photo of Array.isArray(photoResults)?photoResults:[]){
-      if(!relevantAssetTitle(safe(photo.alt),query))continue;
+      if(!relevantAssetTitle(safe(photo.alt),relevanceQuery))continue;
       if(Number(photo.width)<900||Number(photo.height)<900||!safe(photo.url).startsWith("https://www.pexels.com/"))continue;
       const file=await stockFile(photo.src?.large2x||photo.src?.original,dir,index,"pexels","image").catch(()=>null);if(!file)continue;
       return {kind:"image",file,source:photo.url,license:"Pexels License",licenseUrl:"https://www.pexels.com/license/",credit:safe(photo.photographer).slice(0,160),changes:"裁剪并用于视频混剪",title:safe(photo.alt)||query,query};
@@ -221,14 +221,14 @@ async function pexelsAsset(query,dir,index){
   return null;
 }
 
-async function pixabayAsset(query,dir,index){
+async function pixabayAsset(query,dir,index,relevanceQuery=query){
   const key=safe(process.env.PIXABAY_API_KEY);if(!key)return null;
   try{
     const videos=new URL("https://pixabay.com/api/videos/");
     for(const [name,value] of Object.entries({key,q:query,per_page:"8",safesearch:"true"}))videos.searchParams.set(name,value);
     const videoResults=(await pixabayJson(videos))?.hits;
     for(const video of Array.isArray(videoResults)?videoResults:[]){
-      if(!relevantAssetTitle(safe(video.tags),query))continue;
+      if(!relevantAssetTitle(safe(video.tags),relevanceQuery))continue;
       const media=video.videos?.medium||video.videos?.small;
       if(!media||Number(media.width)<720||Number(media.height)<720||Number(media.size)>45*1024*1024||!safe(video.pageURL).startsWith("https://pixabay.com/"))continue;
       const file=await stockFile(media.url,dir,index,"pixabay","video").catch(()=>null);if(!file)continue;
@@ -238,7 +238,7 @@ async function pixabayAsset(query,dir,index){
     for(const [name,value] of Object.entries({key,q:query,per_page:"12",image_type:"photo",safesearch:"true"}))images.searchParams.set(name,value);
     const imageResults=(await pixabayJson(images))?.hits;
     for(const photo of Array.isArray(imageResults)?imageResults:[]){
-      if(!relevantAssetTitle(safe(photo.tags),query))continue;
+      if(!relevantAssetTitle(safe(photo.tags),relevanceQuery))continue;
       if(Number(photo.imageWidth)<900||Number(photo.imageHeight)<900||!safe(photo.pageURL).startsWith("https://pixabay.com/"))continue;
       const file=await stockFile(photo.largeImageURL||photo.webformatURL,dir,index,"pixabay","image").catch(()=>null);if(!file)continue;
       return {kind:"image",file,source:photo.pageURL,license:"Pixabay Content License",licenseUrl:"https://pixabay.com/service/license-summary/",credit:safe(photo.user).slice(0,160),changes:"裁剪并用于视频混剪",title:safe(photo.tags)||query,query};
@@ -289,13 +289,16 @@ export function materialSearchQueries(value){
   return [...new Set([query,terms.slice(0,2).join(" "),terms[0]].filter(Boolean))].slice(0,3);
 }
 
-export async function materialFor(segment,dir,index){
+export async function materialFor(segment,dir,index,dependencies={}){
   const query=safe(segment.query)||"family";
+  const providers=dependencies.providers||[pexelsAsset,pixabayAsset,commonsAsset,openverseAsset];
   for(const search of materialSearchQueries(query)){
-    const found=await pexelsAsset(search,dir,index)||await pixabayAsset(search,dir,index)||await commonsAsset(search,dir,index)||await openverseAsset(search,dir,index);
-    if(found)return {...found,query};
+    for(const provider of providers){
+      const found=await provider(search,dir,index,query);
+      if(found&&relevantAssetTitle(found.title,query))return {...found,query};
+    }
   }
-  return createKnowledgeCard(segment,dir,index);
+  return (dependencies.card||createKnowledgeCard)(segment,dir,index);
 }
 
 export function shouldUseExplainerCard(segment){
