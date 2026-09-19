@@ -14,6 +14,15 @@ const remoteBase = required("LOCAL_AGENT_BASE_URL").replace(/\/$/, "");
 const executorBase = (process.env.LOCAL_AGENT_EXECUTOR_URL || "http://127.0.0.1:3000").replace(/\/$/, "");
 const executorHealthUrl = process.env.LOCAL_AGENT_EXECUTOR_HEALTH_URL?.trim() || `${executorBase}/api/internal/local-agent/executor-health`;
 const token = required("LOCAL_AGENT_TOKEN");
+// Once environment management is installed, raw development workers must not
+// overwrite the managed worker heartbeat or duplicate its job consumers.
+const managedDevelopmentConfig = path.join(os.homedir(), ".config/xiaogu-agent/development-media.json");
+const managedDevelopmentInstalled = await access(managedDevelopmentConfig).then(() => true, () => false);
+if (["localhost", "127.0.0.1", "[::1]"].includes(new URL(remoteBase).hostname)
+    && managedDevelopmentInstalled && process.env.LOCAL_AGENT_MANAGED_ENV !== "development") {
+  throw new Error("Development Agent is managed. Use: python3 scripts/host-agentctl.py start --env development");
+}
+
 // A Compose-scaled worker must have a distinct node identity. Without this,
 // replicas overwrite each other's heartbeat and make a two-worker pool look
 // like one unstable agent to the scheduler.

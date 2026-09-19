@@ -9,7 +9,7 @@ if [[ -f "$worker_dir/manifest.sha256" ]]; then
   exit 0
 fi
 mkdir -p "$worker_dir/scripts"
-cp "$repo_path/scripts/local-agent.mjs" "$repo_path"/scripts/spoken-*.mjs "$worker_dir/scripts/"
+cp "$repo_path/scripts/local-agent.mjs" "$repo_path/scripts/host-agent-runtime.mjs" "$repo_path"/scripts/spoken-*.mjs "$worker_dir/scripts/"
 printf '{"private":true,"dependencies":{"sharp":"0.34.5"}}\n' > "$worker_dir/package.json"
 npm install --prefix "$worker_dir" --omit=dev --no-audit --no-fund >/dev/null
 (cd "$worker_dir" && node -e 'require("sharp")' && find . -type f ! -name manifest.sha256 -exec shasum -a 256 {} + > manifest.sha256)

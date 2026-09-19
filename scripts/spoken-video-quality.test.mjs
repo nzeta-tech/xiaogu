@@ -13,3 +13,14 @@ test("quality contact sheet samples every material section and the presenter", (
   assert.ok(times.some(time=>time>24&&time<28));
   assert.ok(times.some(time=>time>44&&time<48));
 });
+
+test("semantic timeline quality sampling follows ordered beat midpoints", () => {
+  const times=reviewFrameTimes([
+    {text:"开场观点",intent:"anchor",layout:"presenter"},
+    {text:"数据证据",intent:"evidence",layout:"presenter-pip"},
+    {text:"生活场景",intent:"scene",layout:"fullscreen"},
+  ],30,.6);
+  assert.equal(times.length,3);
+  assert.ok(times[0]<times[1]&&times[1]<times[2]);
+  assert.ok(times.every(time=>time>0&&time<30));
+});

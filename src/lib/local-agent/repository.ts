@@ -4,6 +4,7 @@ import { getPool, query } from "@/lib/db/client";
 import { LOCAL_AGENT_PROTOCOL_VERSION, type LinkRemixAvailability, type LocalAgentHeartbeat, type LocalAgentTask, type LocalAgentTaskEvent, type LocalAgentTaskEventType, type LocalAgentTaskType } from "@/lib/local-agent/contracts";
 import { buildDouyinDeepVerificationResult, isDouyinDeepVerificationResult } from "@/lib/douyin-deep-verification";
 import { saveLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
+import { spokenVideoCompletion } from "@/lib/local-agent/video-completion";
 
 type TaskRow = {
   id: string; task_type: LocalAgentTaskType; status: LocalAgentTask["status"]; priority: number;
@@ -320,8 +321,9 @@ export async function completeLocalAgentTask(id: string, agentId: string, leaseT
     }
     if(task.task_type==="digital-human.video.produce"){
       const jobId=String(task.payload.jobId||"");if(!jobId)throw new Error("Spoken video task has no job");
-      const completed=resultPayload.status==="completed"&&typeof resultPayload.videoUrl==="string"&&resultPayload.videoUrl;
-      await client.query(`update digital_human_video_jobs set status=$2,progress=$3,video_url=$4,preview_image_url=$5,duration_seconds=$6,error_message=$7,request_json=request_json||$8::jsonb,updated_at=now(),completed_at=case when $2='completed' then now() else completed_at end where id=$1`,[jobId,completed?"completed":"failed",completed?100:0,String(resultPayload.videoUrl||"")||null,String(resultPayload.coverUrl||"")||null,Number(resultPayload.durationSeconds)||null,completed?null:String(resultPayload.error||"口播视频生成失败"),{stage:completed?"completed":"failed",material_plan:resultPayload.materialPlan||null,subtitle_srt:typeof resultPayload.subtitleSrt==="string"?resultPayload.subtitleSrt:"",edit_options:resultPayload.editOptions||{},quality_review:Array.isArray(resultPayload.qualityReview)?resultPayload.qualityReview.slice(0,3):[],creative_summary:Array.isArray(resultPayload.creativeSummary)?resultPayload.creativeSummary:[]}]);
+      const {completed,error,reviews}=spokenVideoCompletion(resultPayload);
+      await client.query(`update digital_human_video_jobs set status=$2,progress=$3,video_url=$4,preview_image_url=$5,duration_seconds=$6,error_message=$7,request_json=request_json||$8::jsonb,updated_at=now(),completed_at=case when $2='completed' then now() else null end where id=$1`,[jobId,completed?"completed":"failed",completed?100:0,completed?String(resultPayload.videoUrl):null,completed?String(resultPayload.coverUrl||"")||null:null,completed?Number(resultPayload.durationSeconds)||null:null,error,{stage:completed?"completed":"failed",material_plan:resultPayload.materialPlan||null,subtitle_srt:typeof resultPayload.subtitleSrt==="string"?resultPayload.subtitleSrt:"",edit_options:resultPayload.editOptions||{},quality_review:reviews,delivery_notes:Array.isArray(resultPayload.deliveryNotes)?resultPayload.deliveryNotes.filter(value=>typeof value==="string").slice(0,8):[],creative_summary:Array.isArray(resultPayload.creativeSummary)?resultPayload.creativeSummary:[]}]);
+      if(!completed)await client.query("update local_agent_tasks set status='failed',error_message=$2 where id=$1",[id,error]);
     }
     const cacheableSourceUrl = typeof task.payload.url === "string" ? task.payload.url : typeof task.payload.sourceUrl === "string" ? task.payload.sourceUrl : "";
     if (task.task_type === "source.inspect" && ["link_remix", "avatar_training"].includes(String(task.payload.purpose)) && cacheableSourceUrl) {

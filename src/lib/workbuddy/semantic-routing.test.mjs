@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchNamedCapability, normalizeResearchDepth, normalizeSemanticRouteCandidate, reconcileSemanticRoute } from "./semantic-route.ts";
+import { matchNamedCapability, normalizeConversationEvidence, normalizeResearchDepth, normalizeSemanticRouteCandidate, reconcileSemanticRoute } from "./semantic-route.ts";
 
 const capability = (id, format) => ({
   id,
@@ -128,4 +128,39 @@ test("structured deep-research reasons preserve deep research", () => {
   });
   assert.equal(route.mode, "deep-research");
   assert.equal(route.targetCapabilityId, "agent.deep-research");
+});
+
+const discussionRoute = {
+  mode: "chat", operation: "chat",
+  intent: "聊聊这个热点：陈建州病房众人齐聚拍照 医院回应",
+  targetCapabilityId: null, requiresFreshInformation: false,
+  evidenceRequirement: "current", rationale: "基于热榜摘要讨论",
+  deliverable: { required: false, kind: null, format: null, count: 1, sourceRelation: "conversation" },
+};
+
+test("hot topic discussion verifies current facts even when freshness flag is false", () => {
+  const route = normalizeConversationEvidence(discussionRoute);
+  assert.equal(route.mode, "fast-research");
+  assert.equal(route.operation, "verify");
+  assert.equal(route.targetCapabilityId, "agent.fast-research");
+  assert.equal(route.requiresFreshInformation, true);
+  assert.equal(route.deliverable.required, false);
+  assert.equal(route.intent, discussionRoute.intent);
+});
+
+test("freshness alone triggers research for chat and direct answers", () => {
+  for (const mode of ["chat", "direct"]) {
+    const route = normalizeConversationEvidence({ ...discussionRoute, mode, evidenceRequirement: "none", requiresFreshInformation: true });
+    assert.equal(route.mode, "fast-research");
+    assert.equal(route.evidenceRequirement, "current");
+  }
+});
+
+test("ordinary chat and existing capability plans remain intact", () => {
+  for (const route of [
+    { ...discussionRoute, intent: "你好", evidenceRequirement: "none" },
+    { ...discussionRoute, mode: "direct", evidenceRequirement: "none" },
+    { ...discussionRoute, mode: "capability", targetCapabilityId: "app.traffic-copy" },
+    { ...discussionRoute, mode: "deep-research" },
+  ]) assert.deepEqual(normalizeConversationEvidence(route), route);
 });

@@ -12,5 +12,10 @@ test('real FFmpeg recut reuses archived master and visuals without calling a gen
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const updates=[];
   const result=await executeSpokenVideoProduction({payload:{mode:'recut',jobId:'fixture'}},'lease',{remoteBase:`http://127.0.0.1:${server.address().port}`,token:'test',updateDigitalHumanProgress:async(_id,v)=>updates.push(v),publishTaskEvent:async()=>{}});
   assert.equal(result.status,'completed');assert.ok(Math.abs(result.durationSeconds-6)<.3);assert.equal(result.materialPlan[0].material.mediaId,'existing-image');assert.equal(result.editOptions.subtitleFontSize,14);assert.ok(uploads.get('output')?.length>20000);assert.ok(uploads.get('cover')?.length>1000);assert.equal(uploads.has('presenter_master'),false);assert.equal(uploads.has('material'),false);assert.equal(requests.some(r=>r.includes('/visual')),false);assert.ok(updates.some(v=>v.stage==='planning_revision'));assert.deepEqual(await readFile(master),media);
+  const exported=path.join(dir,'exported.mp4');await writeFile(exported,uploads.get('output'));
+  const decoded=await exec('ffmpeg',['-hide_banner','-i',exported,'-f','null','-']);
+  assert.match(decoded.stderr,/Video: h264/);assert.match(decoded.stderr,/Audio: aac/);
+  const frame=await exec('ffmpeg',['-v','error','-ss','1','-i',exported,'-frames:v','1','-f','image2pipe','-vcodec','png','-'],{encoding:'buffer',maxBuffer:8*1024*1024});
+  const pixels=await sharp(frame.stdout).stats();assert.ok(pixels.channels.some(channel=>channel.stdev>10),'rendered frame contains visible title/subtitle content');
  }finally{if(server)await new Promise(resolve=>server.close(resolve));if(previous===undefined)delete process.env.CODEX_CLI_BIN;else process.env.CODEX_CLI_BIN=previous;await rm(dir,{recursive:true,force:true});}
 });
