@@ -1,6 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reviewFrameTimes } from "./spoken-video-quality.mjs";
+import { reviewFrameTimes, codexReview, reviewScopeRules } from "./spoken-video-quality.mjs";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+test("review stays within the locked source scope without overriding an explicit failure",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-review-scope-"));
+  try{
+    const result=await codexReview({dir,contactSheet:"fixture.jpg",title:"文件整理",script:"给文件起一个清楚的名字。",segments:[],materials:[],attempt:1,presenterShare:.4},async(command,args)=>{
+      assert(args.at(-1).startsWith(reviewScopeRules));
+      assert.match(args.at(-1),/Never require extra examples/);
+      assert.match(args.at(-1),/Still reject unrelated or misleading visuals/);
+      await writeFile(path.join(dir,"qa-review-1.json"),JSON.stringify({pass:false,issues:["无关素材和字幕遮挡"]}));
+    });
+    assert.equal(result.pass,false);assert.deepEqual(result.issues,["无关素材和字幕遮挡"]);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
 
 test("quality contact sheet samples every material section and the presenter", () => {
   const times=reviewFrameTimes([{text:"甲".repeat(40)},{text:"乙".repeat(40)},{text:"丙".repeat(40)}],60,.6);
