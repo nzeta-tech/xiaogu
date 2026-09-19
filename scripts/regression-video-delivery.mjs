@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
+import {createRequire} from 'node:module';
 const production=process.argv.includes('--production');
 const base=production?'https://xiaogu.nzeta.ai':'http://127.0.0.1:3119';
 if(!production){const u=new URL(process.env.DATABASE_URL);assert.equal(u.hostname,'127.0.0.1');assert.equal(u.pathname,'/paid_access_test');}
@@ -13,6 +14,7 @@ function fixture(action,id=''){
 let count=0;const check=(v,label)=>{assert.ok(v,label);count++;};
 const f=fixture('create');
 try{
+  fixture('grant',f.id);
   for(const mode of ['failed-quality','missing-report','passed']){
     const task=fixture('quality-create',f.id);
     const review=[{attempt:1,pass:mode==='passed',issues:mode==='passed'?[]:['字幕遮挡']}];
@@ -28,6 +30,19 @@ try{
     check(row.charges===(passed?1:0),'quality gate controls real charge trigger');
     if(!passed)check(row.error_message.includes('质检未通过'),'visible failure persisted');
     if(mode==='failed-quality')check(row.reviews[0].issues[0]==='字幕遮挡','quality history persisted');
+    if(mode==='failed-quality'){
+      const {chromium}=createRequire(import.meta.url)('playwright-core');
+      const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+      try{
+        const context=await browser.newContext();await context.addCookies([{name:'ica_session',value:f.cookie.slice('ica_session='.length),url:base}]);
+        const page=await context.newPage();await page.goto(base+'/apps/digital-human-video');
+        await page.getByRole('button',{name:/我的作品/}).click();
+        await page.getByRole('alert').filter({hasText:'字幕遮挡'}).waitFor();
+        check(true,'actual spoken version page displays quality failure');
+        await page.reload();await page.getByRole('button',{name:/我的作品/}).click();
+        await page.getByRole('alert').filter({hasText:'字幕遮挡'}).waitFor();check(true,'quality reason survives reload');
+      }finally{await browser.close();}
+    }
   }
   console.log(JSON.stringify({passed:true,production,assertions:count,paidProviderCalls:0}));
 }finally{fixture('cleanup',f.id);}

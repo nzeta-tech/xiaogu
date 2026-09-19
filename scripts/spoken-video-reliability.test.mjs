@@ -4,8 +4,17 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview } from "./spoken-video-production.mjs";
+import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec } from "./spoken-video-production.mjs";
 import { researchSegmentsWithCodex } from "./spoken-video-web-research.mjs";
+
+test("diagram suggestions cannot invent template numbers or reporting periods",()=>{
+  for(const points of [["M2发生变化。"],["居民贷款减少，需要结合原因分析。"]]){
+    const result=JSON.stringify(knowledgeCardSpec(points,"家庭资金流",0,"双轨与储蓄池"));
+    assert.doesNotMatch(result,/600亿|1.03万亿|前8个月/);
+  }
+  const spec=knowledgeCardSpec(["居民贷款去年减少了2亿元。","家庭主动还贷。"],"家庭资金流",0);
+  assert.equal(spec.claim,"居民贷款去年减少了2亿元。");
+});
 
 test("stage retries transient failures but not credentials or permanent errors",async()=>{
   for(const error of [new VideoStageOutputError("invalid output"),Object.assign(new Error("fetch failed"),{status:503})]){

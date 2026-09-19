@@ -442,6 +442,9 @@ export function WorkbuddyPageClient() {
           ) {
             openedTaskId = streamEvent.taskId;
             executingTaskIdRef.current = streamEvent.taskId;
+            const taskUrl = new URL(window.location.href);
+            taskUrl.searchParams.set("task", streamEvent.taskId);
+            window.history.replaceState(null, "", taskUrl);
             setObjective("");
             setContextItems([]);
             setSelectedSkill(null);

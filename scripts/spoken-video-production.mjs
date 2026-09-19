@@ -310,12 +310,13 @@ export function knowledgeCardSpec(points,title,index,style=""){
   const direction=`${title} ${style}`;
   if(/投资.*(?:提前)?还贷|决策分叉|两条路径/.test(`${joined} ${direction}`))return {kind:"decisionFork",note:"余钱先不急着做单一选择"};
   if(/M2|600\s*亿|新增贷款|双轨/.test(`${joined} ${direction}`)){
-    const loan=joined.match(/(?:新增贷款[^。；，]*?)(\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿))/)?.[1]||"600亿";
-    return {kind:"moneyDivergence",loan,m2:/M2/.test(joined)?"M2 仍增长":"货币总量增长",note:"贷款投放与货币总量要分开看"};
+    const loan=joined.match(/(?:新增贷款[^。；，]*?)(\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿))/)?.[1];
+    const m2=joined.match(/M2[^。；，]*?(?:增长|下降|减少|上升)[^。；，]*/)?.[0];
+    if(loan&&m2)return {kind:"moneyDivergence",loan,m2,note:"贷款投放与货币总量要分开看"};
   }
   if(/1\.03\s*万亿|居民贷款.*减少|储蓄池|负债收缩|资金流/.test(`${joined} ${direction}`)){
-    const reduction=joined.match(/\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿)/)?.[0]||"1.03万亿";
-    return {kind:"debtFlow",reduction,note:"钱未消失，家庭负债在收缩"};
+    const claim=points.find(point=>/居民贷款[^。；]*减少[^。；]*\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿)/.test(point));
+    if(claim&&/还贷|还款|主动.*减债/.test(joined))return {kind:"debtFlow",claim,note:"家庭负债变化与还款行为"};
   }
   if(/居民没钱.*悲观|没钱了.*悲观|快速结论气泡/.test(`${joined} ${direction}`))return {kind:"quickConclusion",note:"单一贷款指标还不足以下结论"};
   if(/只对一半|贷款(?:下降|减少).*没钱|不等于.*没钱|两类家庭/.test(`${joined} ${direction}`))return {kind:"halfTruth",note:"少借钱，不等于没有钱"};

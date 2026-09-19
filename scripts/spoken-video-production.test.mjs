@@ -79,8 +79,8 @@ test("smart financial scenes become original explanatory cards with legible data
   assert.equal(shouldUseExplainerCard({text:"新增贷款600亿，但居民贷款减少1.03万亿元"}),true);
   assert.equal(shouldUseExplainerCard({text:"两个人走进餐厅"}),false);
   const spec=knowledgeCardSpec(["新增贷款只有600亿。","居民贷款减少1.03万亿元。"],"信贷数据怎么读",0);
-  assert.equal(spec.kind,"moneyDivergence");
-  assert.equal(spec.loan,"600亿");
+  assert.equal(spec.kind,"metrics");
+  assert.equal(spec.metrics[0].value,"600亿");
   assert.equal(knowledgeCardSpec(["投资回报和资产价格都有波动，但月供和利息不会等你。","收入一波动，它就是现金流压力。"],"确定月供与现金流压力",3).kind,"cashflow");
   assert.equal(knowledgeCardSpec(["“买了就能涨”的确定性已经没那么强了。","房子有居住价值、地段价值。"],"房产价值与上涨预期",2).kind,"houseExpectation");
   assert.equal(knowledgeCardSpec(["从“赌未来上涨”变成“降低确定性压力”。"],"从赌上涨到降压力",5).kind,"shift");
@@ -88,7 +88,7 @@ test("smart financial scenes become original explanatory cards with legible data
 
 test("quality-card directions produce distinct relationship diagrams instead of repeated text lists",()=>{
   assert.equal(knowledgeCardSpec(["新增贷款只有600亿，但M2还在增长。"],"两个口径",0,"双轨走势").kind,"moneyDivergence");
-  assert.equal(knowledgeCardSpec(["居民贷款前8个月减少了1.03万亿。"],"家庭资金流",1,"储蓄池与负债收缩").kind,"debtFlow");
+  assert.equal(knowledgeCardSpec(["居民贷款前8个月减少了1.03万亿。","家庭主动还贷。"],"家庭资金流",1,"储蓄池与负债收缩").kind,"debtFlow");
   assert.equal(knowledgeCardSpec(["这个判断只对了一半。"],"别急着下结论",2,"贷款下降不等于没钱").kind,"halfTruth");
   assert.equal(knowledgeCardSpec(["我还有没有选择权？"],"安全感",3,"应急现金缓冲").kind,"safetyBuffer");
   assert.equal(knowledgeCardSpec(["从先扩大资产变成先守住现金流。"],"资产负债表",4,"家庭去杠杆").kind,"balanceShift");
