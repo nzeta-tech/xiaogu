@@ -4,9 +4,6 @@
  * through natural language while it is unavailable in the plaza.
  */
 export const hiddenWorkspaceCardSlugs = new Set([
-  // Release deferred: keep the application out of both Creation Plaza and
-  // Workbuddy until the digital-human production channel is approved.
-  ...(process.env.NODE_ENV === "development" ? [] : ["digital-human-video"]),
   "write-copy",
   "lead-copy",
   "wechat-article-polish",
