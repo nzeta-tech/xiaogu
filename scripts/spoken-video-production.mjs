@@ -115,10 +115,13 @@ export function reusableLicense(value){
   const by=license.match(/^CC BY (\d(?:\.\d)?)$/i);
   return by?{license:`CC BY ${by[1]}`,licenseUrl:`https://creativecommons.org/licenses/by/${by[1]}/`,requiresCredit:true}:null;
 }
-function relevantAssetTitle(title,query){
-  const words=query.toLowerCase().split(/[^a-z]+/).filter(word=>word.length>=4&&!new Set(["family","couple","china","chinese","household","people","person","financial","planning"]).has(word));
-  const name=title.toLowerCase().replace(/^file:/,"");
-  return words.length>0&&words.some(word=>name.includes(word.replace(/s$/, "")));
+export function relevantAssetTitle(title,query){
+  const generic=new Set(["family","couple","china","chinese","household","people","person","financial","planning","woman","women","man","men","hands","hand","close","up","view","photo","photograph","video","image","footage","scene","home","office","quickly"]);
+  const stem=word=>word.replace(/(?:ing|s)$/,""),tokens=value=>value.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const words=[...new Set(tokens(query).filter(word=>word.length>=4&&!generic.has(word)).map(stem))];
+  const names=new Set(tokens(title.replace(/^file:/i,"")).map(stem));
+  const matches=words.filter(word=>names.has(word)).length;
+  return words.length>0&&matches>=Math.min(2,words.length)&&matches/words.length>=.35;
 }
 async function commonsAsset(query,dir,index) {
   if(Date.now()<commonsUnavailableUntil)return null;
@@ -198,6 +201,7 @@ async function pexelsAsset(query,dir,index){
     for(const [name,value] of Object.entries({query,per_page:"8"}))videos.searchParams.set(name,value);
     const videoResults=(await externalJson(videos,18000,headers))?.videos;
     for(const video of Array.isArray(videoResults)?videoResults:[]){
+      if(!relevantAssetTitle(safe(video.url).split("/").filter(Boolean).at(-1)?.replaceAll("-"," ")||"",query))continue;
       const files=Array.isArray(video.video_files)?video.video_files:[];
       const playable=files.filter(file=>file.file_type==="video/mp4"&&Number(file.width)>=720&&Number(file.height)>=720&&safe(file.link).startsWith("https://")).sort((a,b)=>Number(a.width)*Number(a.height)-Number(b.width)*Number(b.height))[0];
       if(!playable||!safe(video.url).startsWith("https://www.pexels.com/"))continue;
@@ -208,6 +212,7 @@ async function pexelsAsset(query,dir,index){
     for(const [name,value] of Object.entries({query,per_page:"12"}))photos.searchParams.set(name,value);
     const photoResults=(await externalJson(photos,18000,headers))?.photos;
     for(const photo of Array.isArray(photoResults)?photoResults:[]){
+      if(!relevantAssetTitle(safe(photo.alt),query))continue;
       if(Number(photo.width)<900||Number(photo.height)<900||!safe(photo.url).startsWith("https://www.pexels.com/"))continue;
       const file=await stockFile(photo.src?.large2x||photo.src?.original,dir,index,"pexels","image").catch(()=>null);if(!file)continue;
       return {kind:"image",file,source:photo.url,license:"Pexels License",licenseUrl:"https://www.pexels.com/license/",credit:safe(photo.photographer).slice(0,160),changes:"裁剪并用于视频混剪",title:safe(photo.alt)||query,query};
@@ -223,6 +228,7 @@ async function pixabayAsset(query,dir,index){
     for(const [name,value] of Object.entries({key,q:query,per_page:"8",safesearch:"true"}))videos.searchParams.set(name,value);
     const videoResults=(await pixabayJson(videos))?.hits;
     for(const video of Array.isArray(videoResults)?videoResults:[]){
+      if(!relevantAssetTitle(safe(video.tags),query))continue;
       const media=video.videos?.medium||video.videos?.small;
       if(!media||Number(media.width)<720||Number(media.height)<720||Number(media.size)>45*1024*1024||!safe(video.pageURL).startsWith("https://pixabay.com/"))continue;
       const file=await stockFile(media.url,dir,index,"pixabay","video").catch(()=>null);if(!file)continue;
@@ -232,6 +238,7 @@ async function pixabayAsset(query,dir,index){
     for(const [name,value] of Object.entries({key,q:query,per_page:"12",image_type:"photo",safesearch:"true"}))images.searchParams.set(name,value);
     const imageResults=(await pixabayJson(images))?.hits;
     for(const photo of Array.isArray(imageResults)?imageResults:[]){
+      if(!relevantAssetTitle(safe(photo.tags),query))continue;
       if(Number(photo.imageWidth)<900||Number(photo.imageHeight)<900||!safe(photo.pageURL).startsWith("https://pixabay.com/"))continue;
       const file=await stockFile(photo.largeImageURL||photo.webformatURL,dir,index,"pixabay","image").catch(()=>null);if(!file)continue;
       return {kind:"image",file,source:photo.pageURL,license:"Pixabay Content License",licenseUrl:"https://pixabay.com/service/license-summary/",credit:safe(photo.user).slice(0,160),changes:"裁剪并用于视频混剪",title:safe(photo.tags)||query,query};
@@ -610,7 +617,7 @@ export class VideoQualityError extends Error {
 export async function renderWithCodexReview({master,segments,materials,subtitleUrl,script,dir,title,aspectRatio,references=[],onProgress=async()=>{},generateVisual:generateVisualForReview=null,initialOptions={},resolveMaterial=null},dependencies={}){
   const finalizeVideo=dependencies.finalize||finalize,checkVideo=dependencies.check||checkedFinalVideo,reviewVideo=dependencies.review||codexReview,createSheet=dependencies.sheet||createReviewSheet;
   let currentMaterials=[...materials],currentSegments=segments.map(segment=>({...segment})),options={...initialOptions};
-  const reviewHistory=[];let generatedCount=0;
+  const reviewHistory=[],rejectedSearches=new Set();let generatedCount=0;
   for(let attempt=1;attempt<=3;attempt++){
     await onProgress(`正在进行第 ${attempt} 轮本地混剪与质量验收`,Math.min(90,72+attempt*5));
     const final=await finalizeVideo(master,currentSegments,currentMaterials,subtitleUrl,script,dir,title,aspectRatio,options);
@@ -637,6 +644,12 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
       if(index>=0&&Object.hasOwn(cardFixes,id))continue;
       const queries=(Array.isArray(queryValue)?queryValue:[queryValue]).filter(query=>typeof query==="string"&&query.trim()).slice(0,3);
       if(index<0||!queries.length)continue;
+      if(rejectedSearches.has(id)&&generateVisualForReview){
+        const revised={...currentSegments[index],query:queries[0].trim().slice(0,90)};
+        currentMaterials[index]=await generateVisualForReview(revised,index);
+        currentSegments[index]=revised;generatedCount++;changed=true;continue;
+      }
+      rejectedSearches.add(id);
       let revised=currentSegments[index],replacement=null;
       for(const query of queries){revised={...currentSegments[index],query:query.trim().slice(0,90),...(options.timelineMode==="semantic"&&currentSegments[index].layout==="presenter"?{layout:"presenter-pip",intent:"scene"}:{})};replacement=resolveMaterial?await resolveMaterial(revised,index):await materialFor(revised,dir,index);if(!replacement.source.startsWith("xiaogu-"))break;}
       if(!replacement)continue;

@@ -4,8 +4,33 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec } from "./spoken-video-production.mjs";
+import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle } from "./spoken-video-production.mjs";
 import { researchSegmentsWithCodex } from "./spoken-video-web-research.mjs";
+
+test("stock relevance requires meaningful whole-word matches, not generic people or substrings",()=>{
+  assert.equal(relevantAssetTitle("File:Woman stopped by police.webm","woman quickly finding labeled document folder in home office"),false);
+  assert.equal(relevantAssetTitle("Woman with a hat oil painting","woman searching household documents"),false);
+  assert.equal(relevantAssetTitle("Profile of a protest","file folders"),false);
+  assert.equal(relevantAssetTitle("Hands at a protest","close up hands sorting household documents into labeled file folders"),false);
+  assert.equal(relevantAssetTitle("File:Sorting documents into file folders.webm","close up hands sorting household documents into labeled file folders"),true);
+  assert.equal(relevantAssetTitle("Monthly budget spreadsheet","family budget"),true);
+});
+
+test("repeated rejected stock escalates to an original scene and still requires final QA",async()=>{
+  for(const finalPass of [true,false]){
+    let searches=0,generated=0,reviews=0;
+    const work=renderWithCodexReview({segments:[{id:"s1",text:"整理资料",query:"document folders",visual:"资料分类",intent:"scene",layout:"fullscreen"}],materials:[{source:"https://example.com/old",title:"Old",kind:"video"}],
+      resolveMaterial:async()=>{searches++;return {source:"https://example.com/replacement",title:"Replacement",kind:"video"};},
+      generateVisual:async()=>{generated++;return {source:"xiaogu-generated-visual",title:"资料分类",kind:"image"};},
+    },{
+      finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
+      review:async()=>({pass:++reviews===3&&finalPass,issues:reviews===3&&finalPass?[]:["s1画面无关"],searchQueries:{s1:["organizing document folders"]}}),
+    });
+    if(finalPass){const result=await work;assert.deepEqual(result.reviewHistory.map(r=>r.pass),[false,false,true]);assert.equal(result.materials[0].source,"xiaogu-generated-visual");}
+    else await assert.rejects(work,/成片质检未通过/);
+    assert.equal(searches,1);assert.equal(generated,1);assert.equal(reviews,3);
+  }
+});
 
 test("diagram suggestions cannot invent template numbers or reporting periods",()=>{
   for(const points of [["M2发生变化。"],["居民贷款减少，需要结合原因分析。"]]){
