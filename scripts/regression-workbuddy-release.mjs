@@ -33,7 +33,7 @@ try{
   await page.goto(base+'/');await page.waitForURL('**/workbuddy');
   const input=page.getByPlaceholder('输入你的想法，支持粘贴图片或添加文件…');await input.waitFor();
   check(await input.isVisible(),'root opens Workbuddy composer');
-  await page.getByRole('button',{name:'家庭资料整理方法'}).click();
+  await page.getByRole('button',{name:'家庭资料整理方法',exact:true}).click();
   // Hot-topic click must create a persisted conversation, not navigate to an app form.
   await page.waitForURL(/task=/,{timeout:120000});
   const taskId=new URL(page.url()).searchParams.get('task');check(Boolean(taskId),'topic opens a task');
@@ -42,8 +42,10 @@ try{
   const taskResponse=await context.request.get(base+'/api/workbuddy/tasks/'+taskId);
   check(taskResponse.ok(),'persisted task can be fetched');
   check(JSON.stringify(await taskResponse.json()).includes('家庭资料整理方法'),'persisted task contains source context');
+  const cancelled=await context.request.patch(base+'/api/workbuddy/tasks/'+taskId,{data:{action:'cancel-task'}});
+  check(cancelled.ok(),'isolated conversation cancelled before cleanup');
   await page.goto(base+'/workbuddy');await input.waitFor();
-  await input.fill('保留已有草稿');await page.getByRole('button',{name:'家庭资料整理方法'}).click();
+  await input.fill('保留已有草稿');await page.getByRole('button',{name:'家庭资料整理方法',exact:true}).click();
   check(await input.inputValue()==='保留已有草稿','topic selection preserves draft');
   await page.getByLabel('已引用资料').waitFor();check(true,'topic attached to existing draft');
   let uploads=0;
@@ -60,6 +62,7 @@ try{
   for(const [name,width,height] of [['desktop',1440,1000],['mobile',390,844]]){
     await page.setViewportSize({width,height});
     check(await input.isVisible(),name+' composer visible');
+    check(await page.getByRole('button',{name:/小红书笔记创作/}).evaluate(element=>parseFloat(getComputedStyle(element).fontSize)>=11),name+' readable skill labels');
     check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),name+' no horizontal overflow');
     await page.screenshot({path:`tmp/release-ui/workbuddy-${name}.png`,fullPage:true});
   }
