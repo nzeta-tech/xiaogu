@@ -12,9 +12,11 @@ test("review stays within the locked source scope without overriding an explicit
       assert(args.at(-1).startsWith(reviewScopeRules));
       assert.match(args.at(-1),/Never require extra examples/);
       assert.match(args.at(-1),/Still reject unrelated or misleading visuals/);
-      await writeFile(path.join(dir,"qa-review-1.json"),JSON.stringify({pass:false,issues:["无关素材和字幕遮挡"]}));
+      assert.match(args.at(-1),/layout-only defect must use layoutFixes/);
+      await writeFile(path.join(dir,"qa-review-1.json"),JSON.stringify({pass:false,issues:["无关素材和字幕遮挡"],layoutFixes:{s1:"fullscreen",s2:"invalid"}}));
     });
     assert.equal(result.pass,false);assert.deepEqual(result.issues,["无关素材和字幕遮挡"]);
+    assert.deepEqual(result.layoutFixes,{s1:"fullscreen"});
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

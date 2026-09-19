@@ -128,6 +128,28 @@ test("transient QA failure retries review without re-rendering",async()=>{
   assert.equal(renders,1);assert.equal(reviews,2);assert.equal(result.acceptedWithNotes,false);
 });
 
+test("layout-only quality repairs reuse visuals and remain fullscreen in later rounds",async()=>{
+  let rounds=0;const layouts=[];
+  const material={kind:"image",file:"original.jpg",source:"fixture"};
+  const result=await renderWithCodexReview({segments:[{id:"s1",text:"画面",intent:"scene",layout:"presenter-pip"}],materials:[material],initialOptions:{timelineMode:"semantic"},resolveMaterial:async()=>{throw Error("must not regenerate a layout-only repair");}},{
+    finalize:async(_master,segments)=>{layouts.push(segments[0].layout);return {output:"test.mp4",durationSeconds:6};},check:async()=>{},sheet:async()=>"sheet.jpg",
+    review:async()=>{rounds++;return rounds===1?{pass:false,issues:["s1 人像PIP与字幕相叠"],layoutFixes:{s1:"fullscreen"}}:rounds===2?{pass:false,issues:["头像出镜不足"],subtitleMaxChars:12}:{pass:true,issues:[]};},
+  });
+  assert.deepEqual(layouts,["presenter-pip","fullscreen","fullscreen"]);assert.equal(result.materials[0],material);assert.equal(rounds,3);
+});
+
+test("long financial timelines repair only the rejected beat and preserve locked narration",async()=>{
+  const segments=Array.from({length:18},(_,index)=>({id:`s${index+1}`,text:`第${index+1}段：贷款利率与现金流需要结合条件判断。`,intent:index%3?"explain":"anchor",layout:index%3?"presenter-pip":"presenter"}));
+  const materials=segments.map(s=>({kind:s.intent==="anchor"?"presenter":"image",source:"fixture",file:s.id+".jpg"}));
+  const calls=[];let rounds=0;
+  const result=await renderWithCodexReview({segments,materials,initialOptions:{timelineMode:"semantic"},resolveMaterial:async(segment,index)=>{calls.push(index);assert.equal(segment.text,segments[index].text);assert.equal(segment.layout,"fullscreen");return {...materials[index],file:"repair.jpg"};}},{
+    finalize:async(_master,current)=>{assert.deepEqual(current.map(s=>s.text),segments.map(s=>s.text));assert(current.filter(s=>s.intent==="explain").every(s=>s.layout==="fullscreen"));return {output:"test.mp4",durationSeconds:240};},check:async()=>{},sheet:async()=>"sheet.jpg",
+    review:async()=>++rounds===1?{pass:false,issues:["s5现金流机制不清楚"],cardFixes:{s5:{style:"按原文条件展示资金流向，不增加数字"}}}:{pass:true,issues:[]},
+  });
+  assert.deepEqual(calls,[4]);assert.equal(result.segments.length,18);
+  for(let i=0;i<18;i++)if(i!==4)assert.equal(result.materials[i],materials[i]);
+});
+
 test("failed quality cannot become successful delivery at retry limit or review-only",async()=>{
   for(const reviewOnly of [false,true]){
     let reviews=0;

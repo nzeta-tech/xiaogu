@@ -16,7 +16,7 @@ export async function createVideoVersion(userId: string, baseId: string, instruc
     if (!root) throw new VideoVersionError("原作品不存在", 404);
     const duplicate = (await db.query<DigitalHumanVideoJob>("select * from digital_human_video_jobs where user_id=$1 and request_json->>'root_job_id'=$2 and request_json->>'revision_request_id'=$3", [userId, rootId, requestId])).rows[0];
     if (duplicate) { await db.query("commit"); return duplicate; }
-    if (base.status !== "completed" || !base.video_url) throw new VideoVersionError("请选择一个已完成的版本作为修改起点");
+    if (base.status !== "failed" && (base.status !== "completed" || !base.video_url)) throw new VideoVersionError("请选择已完成的版本，或已有母片的失败任务作为修改起点");
     const active = await db.query("select id from digital_human_video_jobs where user_id=$1 and request_json->>'root_job_id'=$2 and status in ('queued','processing')", [userId, rootId]);
     if (active.rowCount) throw new VideoVersionError("这条作品已有修改正在制作，请完成后再提交", 409);
     const master = await db.query("select id from digital_human_media_assets where video_job_id=$1 and user_id=$2 and kind='presenter_master'", [rootId, userId]);

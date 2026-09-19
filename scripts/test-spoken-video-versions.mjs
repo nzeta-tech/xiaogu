@@ -30,6 +30,16 @@ try{
  const original=(await db.query('select * from digital_human_video_jobs where id=$1',[root])).rows[0];assert.equal(original.status,'completed');assert.equal(original.video_url,'/fixture/v1');assert.equal(original.request_json.selected_version_id,v2);
  const usage=await db.query('select id from usage_logs where user_id=$1',[uid]);assert.equal(usage.rowCount,0);
  const list=await fetch(base+'/api/digital-human-videos',{headers:{cookie:`ica_session=${token}`}});const data=await list.json();assert.equal(data.jobs.filter(j=>j.id===root||j.request_json?.root_job_id===root).length,3);
+ // A failed delivery can be recut only when its immutable master is still owned.
+ await db.query("update digital_human_video_jobs set status='failed',video_url=null,request_json=request_json||'{\"material_plan\":null}'::jsonb where id=$1",[root]);
+ const recoveryBody={instructions:'复用母片重新混剪，修复字幕遮挡',requestId:randomUUID()};
+ const recovery=await call(root,'POST',recoveryBody);assert.equal(recovery.status,202,JSON.stringify(recovery.data));assert.equal(recovery.data.job.quota_cost,0);
+ assert.equal((await call(root,'POST',recoveryBody)).data.job.id,recovery.data.job.id);
+ const recoveredInput=await fetch(base+'/api/internal/local-agent/digital-human/input?'+new URLSearchParams({jobId:recovery.data.job.id,kind:'recut'}),{headers:{authorization:'Bearer '+process.env.LOCAL_AGENT_TOKEN}});
+ assert.equal(recoveredInput.status,200);assert.deepEqual((await recoveredInput.json()).materialPlan,[]);
+ const retained=(await db.query('select status,video_url from digital_human_video_jobs where id=$1',[root])).rows[0];assert.equal(retained.status,'failed');assert.equal(retained.video_url,null);
+ const missing=randomUUID();await db.query("insert into digital_human_video_jobs(id,user_id,provider,edition,title,script,aspect_ratio,status,request_json) values($1,$2,'heygen','pro','无母片测试','原文保持不变。','9:16','failed','{\"workflow\":\"spoken_video_v1\"}')",[missing,uid]);
+ assert.equal((await call(missing,'POST',{...recoveryBody,requestId:randomUUID()})).status,409);
  console.log('PASS: ownership, locked inputs, idempotency, concurrent edits, pending selection, V1→V2→V3, saved selection, failure isolation, immutable original, no double charge, grouped listing');
 }finally{
  await db.query('delete from local_agent_tasks where owner_user_id=any($1::uuid[])',[fixtureIds]);await db.query('delete from digital_human_media_assets where user_id=any($1::uuid[])',[fixtureIds]);await db.query('delete from digital_human_video_jobs where user_id=any($1::uuid[])',[fixtureIds]);await db.query('delete from users where id=any($1::uuid[])',[fixtureIds]);await db.end();if(paused&&!resumed){process.kill(paused,'SIGCONT');resumed=true;}

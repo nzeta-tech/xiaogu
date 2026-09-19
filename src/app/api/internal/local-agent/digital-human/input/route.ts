@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const root=(await query<{id:string;title:string;script:string;aspect_ratio:string;provider_job_id:string|null;request_json:Record<string,unknown>}>("select id,title,script,aspect_ratio,provider_job_id,request_json from digital_human_video_jobs where id=$1 and user_id=$2",[rootId,job.user_id])).rows[0];
     if(!root)return Response.json({error:"original_not_found"},{status:404});
     if(kind==="recut") {
-      const base=(await query<{request_json:Record<string,unknown>}>("select request_json from digital_human_video_jobs where id=$1 and user_id=$2 and status='completed' and (id=$3 or request_json->>'root_job_id'=$3::text)",[String(job.request_json.base_version_id||rootId),job.user_id,rootId])).rows[0];
+      const base=(await query<{request_json:Record<string,unknown>}>("select request_json from digital_human_video_jobs where id=$1 and user_id=$2 and status in ('completed','failed') and (id=$3 or request_json->>'root_job_id'=$3::text)",[String(job.request_json.base_version_id||rootId),job.user_id,rootId])).rows[0];
       if(!base)return Response.json({error:"base_version_not_found"},{status:404});
       return Response.json({title:root.title,script:root.script,aspectRatio:root.aspect_ratio,productionMode:job.request_json.production_mode==="smart"?"smart":"basic",baseProductionMode:base.request_json.production_mode==="smart"?"smart":"basic",providerJobId:root.provider_job_id,subtitleSrt:base.request_json.subtitle_srt||root.request_json.subtitle_srt||"",materialPlan:base.request_json.material_plan||[],options:base.request_json.edit_options||{},instructions:String(job.request_json.edit_instructions||"")});
     }

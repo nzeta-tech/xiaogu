@@ -17,6 +17,8 @@ import { mapVideoWork } from "./spoken-video-concurrency.mjs";
 import { buildSpokenPresenterRequest } from "./spoken-video-motion.mjs";
 import { retryVideoStage, VideoStageOutputError, isRetryableVideoStageError } from "./spoken-video-stage.mjs";
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
+import { videoSafeLayout, safeSemanticLayout } from "./spoken-video-layout.mjs";
+import { mediaFingerprint, cachedVideoShot } from "./spoken-video-render-cache.mjs";
 
 const exec = promisify(execFile);
 const safe = (value) => typeof value === "string" ? value.trim() : "";
@@ -423,18 +425,16 @@ async function fitMaterialImage(file,out,width,height){
   await sharp(background).composite([{input:foreground.data,left:Math.floor((width-foreground.info.width)/2),top:Math.floor((height-foreground.info.height)/2)}]).jpeg({quality:88}).toFile(out);
 }
 
-async function renderSegment(master,material,maskFile,out,start,length,width,height,pipSize,showMaterial,layout="presenter-pip"){
+async function renderSegment(master,material,maskFile,out,start,length,width,height,pipSize,showMaterial,layout="presenter-pip",safeLayout=videoSafeLayout(width,height)){
   const args=["-y","-ss",start.toFixed(3),"-t",length.toFixed(3),"-i",master];
   if(showMaterial){
     if(material.kind==="video")args.push("-stream_loop","-1","-t",length.toFixed(3),"-i",material.file);
     else args.push("-framerate","30","-loop","1","-t",length.toFixed(3),"-i",material.file);
-    if(layout==="fullscreen"){
+    if(layout==="fullscreen"||!safeLayout.pipFits){
       args.push("-filter_complex",`[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v]`,"-map","[v]");
     }else{
       args.push("-framerate","30","-loop","1","-t",length.toFixed(3),"-i",maskFile);
-      // Keep the presenter near the familiar lower-right position while reserving
-      // enough room for two-line subtitles and the mobile player controls.
-      const y=height-pipSize-(height>width?220:160);
+      const y=safeLayout.pip.y;
       const filters=`[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[bg];[0:v]scale=${pipSize}:${pipSize}:force_original_aspect_ratio=increase,crop=${pipSize}:${pipSize},setsar=1[pip];[2:v]format=gray[mask];[pip][mask]alphamerge[round];[bg][round]overlay=${width-pipSize-34}:${y}:shortest=1[v]`;
       args.push("-filter_complex",filters,"-map","[v]");
     }
@@ -552,6 +552,8 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   try{if(options.subtitleFile){await writeFile(srt,await readFile(options.subtitleFile));}else{if(!subtitleUrl.startsWith("https://"))throw new Error("missing");await download(subtitleUrl,srt);}hasTimedSubtitles=true;}catch{await writeFile(srt,fallbackSrt(script,total));}
   const compact=compactSrt(await readFile(srt,"utf8"),Number.isInteger(options.subtitleMaxChars)?Math.min(14,Math.max(10,options.subtitleMaxChars)):14);validateVideoSubtitles(compact);await writeFile(srt,compact);
   const width=aspectRatio==="16:9"?1920:1080,height=aspectRatio==="16:9"?1080:1920,pipSize=aspectRatio==="16:9"?300:340;
+  const safeLayout=videoSafeLayout(width,height,options.subtitleFontSize||(aspectRatio==="16:9"?18:12));
+  const masterFingerprint=await mediaFingerprint(master);
   const maskFile=path.join(dir,"circle-mask.png");await mask(maskFile,pipSize);
   const preparedMaterials=await Promise.all(materials.map(async(material,index)=>{
     if(material.kind!=="image")return material;
@@ -569,22 +571,22 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
     const presenterLength=Math.min(len,Math.max(4,len*share));
     const shots=semantic
       ? [{start:cursor,length:len,showMaterial,layout}]
-      : [{start:cursor,length:presenterLength,showMaterial:false,layout:"presenter"},{start:cursor+presenterLength,length:len-presenterLength,showMaterial:true,layout:"presenter-pip"}].filter(shot=>shot.length>=.5);
+      : [{start:cursor,length:presenterLength,showMaterial:false,layout:"presenter"},{start:cursor+presenterLength,length:len-presenterLength,showMaterial:true,layout:options.materialLayout==="fullscreen"||/knowledge-card|script-card/.test(materials[i]?.source||"")?"fullscreen":"presenter-pip"}].filter(shot=>shot.length>=.5);
     for(const shot of shots)plannedShots.push({...shot,material:preparedMaterials[i]});
     cursor+=len;
   }
   const timedShots=hasTimedSubtitles&&options.snapCutsToCaptions!==false?snapCutsToCaptions(plannedShots,compact,total):plannedShots;
   for(const [index,shot] of timedShots.entries()){
     const lead=index?transitionSeconds/2:0,tail=index<plannedShots.length-1?transitionSeconds/2:0;
-    const output=path.join(dir,`segment-${index}.mp4`);
-    await renderSegment(master,shot.material,maskFile,output,shot.start-lead,shot.length+lead+tail,width,height,pipSize,shot.showMaterial,shot.layout);
+    const identity={version:1,master:masterFingerprint,material:shot.showMaterial?await mediaFingerprint(shot.material.file):null,kind:shot.material.kind,start:shot.start-lead,length:shot.length+lead+tail,width,height,pipSize,showMaterial:shot.showMaterial,layout:shot.layout,safeLayout};
+    const output=await cachedVideoShot(dir,identity,file=>renderSegment(master,shot.material,maskFile,file,identity.start,identity.length,width,height,pipSize,shot.showMaterial,shot.layout,safeLayout));
     pieces.push(output);
   }
   const list=path.join(dir,"concat.txt");await writeFile(list,pieces.map(file=>`file '${file.replaceAll("'","'\\''")}'`).join("\n"));
   const stitched=path.join(dir,"stitched.mp4");
   const output=path.join(dir,"final.mp4");
   const titleCard=await createTitleCard(options.titleText||title,dir,width,height);
-  const subtitleFilter=`subtitles=${srt}:force_style='FontName=PingFang SC,FontSize=${options.subtitleFontSize||(aspectRatio==="16:9"?18:12)},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HFF000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=${aspectRatio==="16:9"?55:90}'`;
+  const subtitleFilter=`subtitles=${srt}:force_style='FontName=PingFang SC,FontSize=${safeLayout.fontSize},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HFF000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=${safeLayout.marginV}'`;
   const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:options.titleDuration??4.5})'[titled];[titled]${subtitleFilter}[v]`;
   if(transitionSeconds&&pieces.length>1){
     const lengths=await Promise.all(pieces.map(duration));
@@ -620,7 +622,9 @@ export class VideoQualityError extends Error {
 export async function renderWithCodexReview({master,segments,materials,subtitleUrl,script,dir,title,aspectRatio,references=[],onProgress=async()=>{},generateVisual:generateVisualForReview=null,initialOptions={},resolveMaterial=null},dependencies={}){
   const finalizeVideo=dependencies.finalize||finalize,checkVideo=dependencies.check||checkedFinalVideo,reviewVideo=dependencies.review||codexReview,createSheet=dependencies.sheet||createReviewSheet;
   let currentMaterials=[...materials],currentSegments=segments.map(segment=>({...segment})),options={...initialOptions};
+  if(options.timelineMode==="semantic")currentSegments=currentSegments.map((segment,index)=>({...segment,layout:safeSemanticLayout(segment,currentMaterials[index])}));
   const reviewHistory=[],rejectedSearches=new Set();
+  const layoutLocked=new Set();
   for(let attempt=1;attempt<=3;attempt++){
     await onProgress(`正在进行第 ${attempt} 轮本地混剪与质量验收`,Math.min(90,72+attempt*5));
     const final=await finalizeVideo(master,currentSegments,currentMaterials,subtitleUrl,script,dir,title,aspectRatio,options);
@@ -636,8 +640,7 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
       const index=currentSegments.findIndex(segment=>segment.id===id);
       if(index<0)continue;
       const style=safe(item(fixValue).style).slice(0,500);
-      const previousLayout=currentSegments[index-1]?.layout;
-      const semanticLayout=previousLayout==="presenter-pip"||index%3===0?"fullscreen":"presenter-pip";
+      const semanticLayout="fullscreen";
       const revised={...currentSegments[index],forceCard:true,cardStyle:style,...(options.timelineMode==="semantic"?{layout:semanticLayout,intent:"explain"}:{})};
       const replacement=resolveMaterial?await resolveMaterial(revised,index):await createKnowledgeCard(revised,dir,index);
       currentSegments[index]=revised;currentMaterials[index]=replacement;changed=true;
@@ -666,7 +669,19 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
     const presenterTooSmall=review.issues.some(issue=>/讲述者|出镜|头像/.test(issue)&&/少|低|小|不足/.test(issue));
     if(options.timelineMode==="semantic"&&presenterTooSmall){
       const fullScreen=currentSegments.map((segment,index)=>({segment,index})).filter(entry=>entry.segment.layout==="fullscreen");
-      for(const entry of fullScreen.filter((_,index)=>index%2===0)){currentSegments[entry.index]={...entry.segment,layout:"presenter-pip"};changed=true;}
+      for(const entry of fullScreen.filter(entry=>!layoutLocked.has(entry.segment.id)&&!["evidence","explain"].includes(entry.segment.intent)).filter((_,index)=>index%2===0)){currentSegments[entry.index]={...entry.segment,layout:"presenter-pip"};changed=true;}
+    }
+    const layoutFixes=item(review.layoutFixes);
+    const overlap=review.issues.some(issue=>/字幕/.test(issue)&&/PIP|人像|画中画|小窗/i.test(issue)&&/重叠|相叠|遮挡/.test(issue));
+    if(options.timelineMode!=="semantic"&&(overlap||currentSegments.some(segment=>layoutFixes[segment.id]==="fullscreen"))&&options.materialLayout!=="fullscreen"){
+      options.materialLayout="fullscreen";changed=true;
+    }
+    for(const [index,segment] of currentSegments.entries()){
+      if(currentMaterials[index]?.kind==="presenter")continue;
+      if(layoutFixes[segment.id]==="fullscreen"||(overlap&&segment.layout==="presenter-pip")){
+        layoutLocked.add(segment.id);
+        if(segment.layout!=="fullscreen"){currentSegments[index]={...segment,layout:"fullscreen"};changed=true;}
+      }
     }
     const requestedShare=presenterTooSmall?Math.max(Number(review.presenterShare)||0,currentShare+.1,.6):Number(review.presenterShare);
     if(options.timelineMode!=="semantic"&&Number.isFinite(requestedShare)&&requestedShare>=.3&&requestedShare<=.8&&requestedShare!==options.presenterShare){options.presenterShare=requestedShare;changed=true;}
@@ -810,6 +825,11 @@ export async function executeSpokenVideoRecut(task,leaseToken,ctx){
     if(!response.ok)throw new Error("无法读取原版本，请稍后重试");
     const input=await response.json();
     const productionMode=input.productionMode==="smart"?"smart":"basic";
+    // Failed final QA may leave only the archived master. Rebuild visuals, never narration.
+    if(!Array.isArray(input.materialPlan)||!input.materialPlan.length){
+      const planned=await planMaterials(dir,input.script,null);
+      input.materialPlan=(productionMode==="smart"?smartTimelineSegments(planned):planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
+    }
     const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
     await report(ctx,task,leaseToken,jobId,"planning_revision",8,"正在整理你的修改要求");
     const plan=preserveMaterials

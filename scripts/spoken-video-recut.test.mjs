@@ -1,5 +1,15 @@
 import{test}from'node:test';import assert from'node:assert/strict';import{mkdtemp,writeFile,readFile,rm,chmod}from'node:fs/promises';import os from'node:os';import path from'node:path';import{execFile}from'node:child_process';import{promisify}from'node:util';import http from'node:http';import sharp from'sharp';import{executeSpokenVideoProduction}from'./spoken-video-production.mjs';
 const exec=promisify(execFile);
+test('failed QA with no saved plan rebuilds only visuals and still requires the archived master',{timeout:30000},async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'failed-recut-'));let server;const previous=process.env.CODEX_CLI_BIN;
+ try{
+  const shim=path.join(dir,'test-codex');await writeFile(shim,`#!/usr/bin/env node\nconst fs=require('fs');if(fs.existsSync('recut-input.json')){const i=JSON.parse(fs.readFileSync('recut-input.json'));fs.writeFileSync('recut-plan.json',JSON.stringify({segments:i.segments.map(s=>({...s,regenerate:true})),options:{}}));}else{const i=JSON.parse(fs.readFileSync('research-input.json'));fs.writeFileSync('material-plan.json',JSON.stringify({segments:i.segments.map(s=>({...s,query:'cash flow',visual:'现金流'}))}));}\n`);await chmod(shim,0o700);process.env.CODEX_CLI_BIN=shim;
+  const requests=[];server=http.createServer((req,res)=>{const kind=new URL(req.url,'http://test').searchParams.get('kind');requests.push(kind);if(kind==='recut'){res.setHeader('content-type','application/json');res.end(JSON.stringify({title:'现金流',script:'家庭现金流需要结合支出和收入判断。',aspectRatio:'9:16',productionMode:'smart',baseProductionMode:'smart',materialPlan:null,instructions:'重新混剪图解',options:{}}));}else{res.writeHead(404);res.end('missing master');}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  await assert.rejects(executeSpokenVideoProduction({payload:{mode:'recut',jobId:'fixture'}},'lease',{remoteBase:`http://127.0.0.1:${server.address().port}`,token:'test',updateDigitalHumanProgress:async()=>{},publishTaskEvent:async()=>{}}));
+  assert.deepEqual(requests,['recut','master']);
+ }finally{if(server)await new Promise(resolve=>server.close(resolve));if(previous===undefined)delete process.env.CODEX_CLI_BIN;else process.env.CODEX_CLI_BIN=previous;await rm(dir,{recursive:true,force:true});}
+});
 test('real FFmpeg recut reuses archived master and visuals without calling a generation provider',{timeout:120000},async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'recut-regression-'));let server;const previous=process.env.CODEX_CLI_BIN;
  try{
