@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {readFile} from 'node:fs/promises';import{spawnSync}from'node:child_process';import assert from'node:assert/strict';import path from'node:path';
 const[repo,sha,base]=process.argv.slice(2);if(!repo||!base)throw Error('release runner arguments required');
-const fixtureCode=await readFile(path.join(repo,'scripts/production-regression-fixture.cjs'));
+const fixtureCode=await readFile(new URL('./production-regression-fixture.cjs',import.meta.url));
 function fixture(action,id=''){
  const r=spawnSync('ssh',['-o','BatchMode=yes','-i',process.env.XIAOGU_SSH_KEY||'/Users/a2251/Downloads/router.pem',process.env.XIAOGU_PRIMARY_SSH||'ubuntu@16.176.34.69',`docker exec -i -w /app insurance-content-agent-app-1 node - ${action} ${id}`],{input:fixtureCode,encoding:'utf8',timeout:60000});
  if(r.status!==0)throw Error(`Fixture ${action} failed`);return JSON.parse(r.stdout);
