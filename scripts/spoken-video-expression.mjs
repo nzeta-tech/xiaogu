@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { videoSafeLayout } from "./spoken-video-layout.mjs";
 
-export const expressionPlanningRules = 'For every segment and every beat optionally add expression:{kind,nodes,evidence}. kind is compare|sequence|timeline|cause|parts|keypoints|presenter, independent of industry. nodes are 2-4 nonempty strings that partition the ENTIRE exact segment/beat text in original order, including all conditions, negations, numbers and punctuation; their concatenation must equal text. evidence is a verbatim span establishing the chosen relationship. Use compare only for an explicit comparison, sequence/timeline only for explicit ordering, cause only for stated causation, parts only for stated composition. When the relationship is uncertain use keypoints or presenter, never invent a diagram, rate, date, quantity, arrow or calculation. Prefer meaningful complete clauses over splitting numbers or qualifications. No need to force a diagram for scene/emotion/anchor beats.';
+export const expressionPlanningRules = 'For every segment and every beat always add expression:{kind,nodes,evidence}. kind is compare|sequence|timeline|cause|parts|keypoints|presenter, independent of industry. For presenter use nodes:[] and evidence:"". For every other kind, nodes are 2-4 nonempty strings that partition the ENTIRE exact segment/beat text in original order, including all conditions, negations, numbers and punctuation; their concatenation must equal text. evidence is a verbatim span establishing the chosen relationship. Use compare only for an explicit comparison, sequence/timeline only for explicit ordering, cause only for stated causation, parts only for stated composition. When the relationship is uncertain use keypoints; use presenter for scene, emotion, transitions, or content that does not benefit from a card. Never invent a diagram, rate, date, quantity, arrow or calculation. Prefer meaningful complete clauses over splitting numbers or qualifications.';
 const kinds=new Set(["compare","sequence","timeline","cause","parts","keypoints","presenter"]);
 const xml=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]));
 
@@ -37,7 +37,7 @@ export function expressionLayout(segment,options={}){
   const spec=expressionSpec(segment);
   if(spec.kind==="presenter")return {spec,width,height,cells:[]};
   const safeLayout=videoSafeLayout(width,height,options.subtitleFontSize||(wide?18:12));
-  const pipSafe=!wide&&spec.nodes.length===2&&spec.nodes.reduce((sum,node)=>sum+Array.from(node).length,0)<=120;
+  const pipSafe=!wide&&spec.nodes.length>=1&&spec.nodes.length<=2&&spec.nodes.reduce((sum,node)=>sum+Array.from(node).length,0)<=120;
   const margin=wide?100:72,top=Math.round(height*.23);
   const bottom=pipSafe?safeLayout.pip.y-56:safeLayout.subtitleTop-56;
   const columns=wide?Math.min(spec.nodes.length,3):spec.kind==="compare"||spec.kind==="parts"?2:1,rows=Math.ceil(spec.nodes.length/columns),gap=wide?36:44;

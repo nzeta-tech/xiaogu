@@ -51,3 +51,8 @@ test("short portrait expression cards reserve a presenter PIP zone",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"expression-pip-"));
   try{const material=await createExpressionMaterial(segment,dir,0,{aspectRatio:"9:16"});assert.match(material.presentation,/:pip-safe$/);}finally{await rm(dir,{recursive:true,force:true});}
 });
+test("short fallback keypoint cards also preserve presenter continuity",()=>{
+  const segment={text:"利率会随市场变动。",visual:"利率随市场变动"};
+  const layout=expressionLayout(segment,{aspectRatio:"9:16",subtitleFontSize:12});
+  assert.equal(layout.spec.kind,"keypoints");assert.equal(layout.spec.nodes.length,1);assert.equal(layout.pipSafe,true);
+});
