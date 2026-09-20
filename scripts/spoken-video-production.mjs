@@ -18,7 +18,7 @@ import { mapVideoWork } from "./spoken-video-concurrency.mjs";
 import { buildSpokenPresenterRequest } from "./spoken-video-motion.mjs";
 import { retryVideoStage, VideoStageOutputError, isRetryableVideoStageError } from "./spoken-video-stage.mjs";
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
-import { videoSafeLayout, safeSemanticLayout } from "./spoken-video-layout.mjs";
+import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration } from "./spoken-video-layout.mjs";
 import { mediaFingerprint, cachedVideoShot } from "./spoken-video-render-cache.mjs";
 
 const exec = promisify(execFile);
@@ -588,7 +588,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   const output=path.join(dir,"final.mp4");
   const titleCard=await createTitleCard(options.titleText||title,dir,width,height);
   const subtitleFilter=`subtitles=${srt}:force_style='FontName=PingFang SC,FontSize=${safeLayout.fontSize},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HFF000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=${safeLayout.marginV}'`;
-  const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:options.titleDuration??4.5})'[titled];[titled]${subtitleFilter}[v]`;
+  const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:expressionSafeTitleDuration(timedShots,options.titleDuration??4.5,transitionSeconds)})'[titled];[titled]${subtitleFilter}[v]`;
   if(transitionSeconds&&pieces.length>1){
     const lengths=await Promise.all(pieces.map(duration));
     const filters=pieces.map((_,index)=>`[${index}:v]fps=30,settb=AVTB,format=yuv420p[v${index}]`);

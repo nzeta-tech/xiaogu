@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {mkdtemp,writeFile,readFile,rm} from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import {videoSafeLayout,safeSemanticLayout} from "./spoken-video-layout.mjs";
+import {videoSafeLayout,safeSemanticLayout,expressionSafeTitleDuration} from "./spoken-video-layout.mjs";
 import {cachedVideoShot,mediaFingerprint} from "./spoken-video-render-cache.mjs";
 
 test("subtitle and PIP safety uses the same ASS coordinate scale for both aspect ratios",()=>{
@@ -18,6 +18,14 @@ test("financial explanation and evidence do not obscure diagrams with a presente
   for(const intent of ["evidence","explain"])assert.equal(safeSemanticLayout({intent,layout:"presenter-pip"},{kind:"image"}),"fullscreen");
   assert.equal(safeSemanticLayout({intent:"explain"},{kind:"presenter"}),"presenter");
   assert.equal(safeSemanticLayout({intent:"scene",layout:"presenter-pip"},{kind:"image"}),"presenter-pip");
+  for(const intent of ["scene","emotion","anchor"])assert.equal(safeSemanticLayout({intent,layout:"presenter-pip"},{kind:"image",source:"xiaogu-knowledge-card-expression"}),"fullscreen");
+});
+
+test("intro title ends before a grounded diagram enters including its transition",()=>{
+  const material={source:"xiaogu-knowledge-card-expression"};
+  assert.equal(expressionSafeTitleDuration([{start:0,showMaterial:true,material}],4.5,.4),0);
+  assert.equal(expressionSafeTitleDuration([{start:3,showMaterial:true,material}],4.5,.4),2.8);
+  assert.equal(expressionSafeTitleDuration([{start:3,showMaterial:false,material}],4.5,.4),4.5);
 });
 
 test("job-local render cache reuses unchanged shots and never reuses partial failures",async()=>{

@@ -10,6 +10,12 @@ export function videoSafeLayout(width,height,fontSize=height>width?12:18){
 
 export function safeSemanticLayout(segment,material){
   if(material?.kind==="presenter")return "presenter";
+  if(material?.source==="xiaogu-knowledge-card-expression")return "fullscreen";
   if(["evidence","explain"].includes(segment.intent))return "fullscreen";
   return segment.layout||"presenter-pip";
+}
+
+export function expressionSafeTitleDuration(shots,requested=4.5,transition=0){
+  const first=shots.find(shot=>shot.showMaterial&&shot.material?.source==="xiaogu-knowledge-card-expression");
+  return first?Math.max(0,Math.min(requested,first.start-transition/2)):requested;
 }
