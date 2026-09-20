@@ -395,6 +395,7 @@ async function personInput(ctx,task,dir){
 function cliData(text){const parsed=JSON.parse(text);return item(parsed.data||parsed);}
 async function heygenCreate(ctx,task,dir,person,leaseToken){
   const p=item(task.payload),jobId=safe(p.jobId),bin=process.env.HEYGEN_CLI_BIN||"heygen";const env={...process.env};delete env.HEYGEN_API_KEY;
+  const proxy=process.env.HEYGEN_CLI_PROXY_URL;if(proxy)Object.assign(env,{HTTP_PROXY:proxy,HTTPS_PROXY:proxy,ALL_PROXY:proxy});
   let assetId;
   if(person.type!=="avatar"){const upload=cliData(await run(bin,["asset","create","--file",person.file],{env,timeout:180000}));assetId=safe(upload.asset_id||upload.id);if(!assetId)throw new Error("HeyGen 未返回照片素材 ID");}
   const request=buildSpokenPresenterRequest({...p,title:safe(p.title)||"口播视频"},person,assetId);
@@ -408,6 +409,7 @@ async function heygenCreate(ctx,task,dir,person,leaseToken){
 
 async function heygenPoll(videoId,bin=process.env.HEYGEN_CLI_BIN||"heygen",env={...process.env}) {
   delete env.HEYGEN_API_KEY;
+  const proxy=process.env.HEYGEN_CLI_PROXY_URL;if(proxy)Object.assign(env,{HTTP_PROXY:proxy,HTTPS_PROXY:proxy,ALL_PROXY:proxy});
   return pollHeygenVideo(videoId,async()=>cliData(await run(bin,["video","get",videoId],{env,timeout:45000})));
 }
 

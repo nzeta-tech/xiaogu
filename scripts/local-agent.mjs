@@ -662,6 +662,8 @@ async function execHealth(command, args, envPatch = {}) {
 async function heygenAuthHealth() {
   const env = { ...process.env };
   delete env.HEYGEN_API_KEY;
+  const proxy = process.env.HEYGEN_CLI_PROXY_URL;
+  if (proxy) Object.assign(env, { HTTP_PROXY: proxy, HTTPS_PROXY: proxy, ALL_PROXY: proxy });
   try {
     await execFileAsync(process.env.HEYGEN_CLI_BIN || "heygen", ["auth", "status"], { timeout: 8000, env });
     lastHeygenAuthSuccessAt = Date.now();

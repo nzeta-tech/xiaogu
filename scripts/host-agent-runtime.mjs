@@ -124,6 +124,7 @@ async function main() {
     LOCAL_AGENT_VIDEO_WORKDIR: path.join(state, 'video'),
     CODEX_CLI_BIN: path.join(home, '.local/bin/codex'),
     HEYGEN_CLI_BIN: path.join(home, '.local/bin/heygen'),
+    HEYGEN_CLI_PROXY_URL: config.codexProxy || 'socks5h://127.0.0.1:7890',
     CODEX_CLI_MODEL: 'gpt-5.6-terra',
     CODEX_CLI_PROXY_URL: config.codexProxy || 'http://127.0.0.1:7890',
     PPT_TASK_TIMEOUT_MS: '1800000',

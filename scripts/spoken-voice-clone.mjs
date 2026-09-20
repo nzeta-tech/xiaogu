@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 const execute=promisify(execFile);
 async function heygen(args){
   const env={...process.env};delete env.HEYGEN_API_KEY;
+  const proxy=process.env.HEYGEN_CLI_PROXY_URL;if(proxy)Object.assign(env,{HTTP_PROXY:proxy,HTTPS_PROXY:proxy,ALL_PROXY:proxy});
   try{const {stdout}=await execute(process.env.HEYGEN_CLI_BIN||'heygen',args,{env,timeout:120000,maxBuffer:4*1024*1024});const data=JSON.parse(stdout);return data.data||data;}
   catch{throw new Error('声音服务调用失败，请稍后重试');}
 }
