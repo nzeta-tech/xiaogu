@@ -6,8 +6,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setDefaultResultOrder } from "node:dns";
 import sharp from "sharp";
 
+setDefaultResultOrder("ipv4first");
 const execFileAsync = promisify(execFile);
 
 const remoteBase = required("LOCAL_AGENT_BASE_URL").replace(/\/$/, "");
