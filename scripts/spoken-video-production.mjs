@@ -1,3 +1,4 @@
+import { uploadVideoToOrigin } from "./spoken-video-upload.mjs";
 import {fitCardSvg,cardContentBounds} from "./spoken-video-svg-preflight.mjs";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
@@ -431,8 +432,13 @@ async function duration(file){
 
 async function upload(ctx,jobId,kind,file,name,contentType){
   const size=(await stat(file)).size;
-  const response=await measureVideoStage("upload",()=>fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/media?${new URLSearchParams({jobId,kind})}`,{method:"PUT",headers:{authorization:`Bearer ${ctx.token}`,"content-type":contentType,"content-length":String(size),"x-xiaogu-filename":encodeURIComponent(name)},body:createReadStream(file),duplex:"half",signal:AbortSignal.timeout(1200000)}));
-  const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(safe(result.error)||`成片上传失败（${response.status}）`);
+  const url=`${ctx.remoteBase}/api/internal/local-agent/digital-human/media?${new URLSearchParams({jobId,kind})}`;
+  let result;
+  if(process.env.LOCAL_AGENT_UPLOAD_ORIGIN)result=await measureVideoStage("upload",()=>uploadVideoToOrigin({url,origin:process.env.LOCAL_AGENT_UPLOAD_ORIGIN,token:ctx.token,file,size,contentType,name}));
+  else {
+  const response=await measureVideoStage("upload",()=>fetch(url,{method:"PUT",headers:{authorization:`Bearer ${ctx.token}`,"content-type":contentType,"content-length":String(size),"x-xiaogu-filename":encodeURIComponent(name)},body:createReadStream(file),duplex:"half",signal:AbortSignal.timeout(1200000)}));
+  result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(safe(result.error)||`成片上传失败（${response.status}）`);
+  }
   if(Number(result.size)!==size)throw new Error(`成片上传不完整：预期 ${size} 字节，实际 ${result.size||0} 字节`);
   return result.url;
 }

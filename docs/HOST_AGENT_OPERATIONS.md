@@ -70,3 +70,7 @@ python3 scripts/host-agentctl.py start --env development --drain-legacy
 KeepAlive 可以拉起退出的进程，不能抵抗显式 bootout/disable；有权限的其他任务仍能绕过本规范，因此本规范不是 OS 权限隔离。机器休眠、断网仍会让线上离线。
 
 目前两环境仍共享同一 Mac 和用户登录下的 Codex/HeyGen 账户。工作目录隔离不等于账户或计算资源隔离。长期生产应迁到独立常在线执行机，或独立 OS 用户并分别登录；不要复制登录令牌来伪造隔离。
+
+## 大文件媒体上传
+
+生产通过 Cloudflare 访问时，500 MiB 源站上限并不代表 CDN 允许同样大小的请求。宿主机可在安装时指定 `--upload-origin <经核验的 ALB DNS 主机名>`；后续安装保留该配置。只有媒体 PUT 使用源站连接，TLS 仍校验 `xiaogu.nzeta.ai`，禁用重定向，令牌通过 curl 标准输入传入。不能关闭 TLS 校验或把令牌放入命令参数。上线前执行 `SPOKEN_UPLOAD_TEST_ORIGIN=<ALB DNS> node scripts/regression-spoken-origin-upload.mjs`，从真实宿主机上传 160 MiB 临时验收文件并清理。
