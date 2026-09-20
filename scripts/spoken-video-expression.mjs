@@ -36,25 +36,37 @@ export function expressionLayout(segment,options={}){
   const wide=options.aspectRatio==="16:9",width=wide?1920:1080,height=wide?1080:1920;
   const spec=expressionSpec(segment);
   if(spec.kind==="presenter")return {spec,width,height,cells:[]};
+  const safeLayout=videoSafeLayout(width,height,options.subtitleFontSize||(wide?18:12));
+  const pipSafe=!wide&&spec.nodes.length===2&&spec.nodes.reduce((sum,node)=>sum+Array.from(node).length,0)<=120;
   const margin=wide?100:72,top=Math.round(height*.23);
-  const bottom=videoSafeLayout(width,height,options.subtitleFontSize||(wide?18:12)).subtitleTop-56;
-  const columns=spec.kind==="compare"||spec.kind==="parts"?2:1,rows=Math.ceil(spec.nodes.length/columns),gap=wide?36:44;
+  const bottom=pipSafe?safeLayout.pip.y-56:safeLayout.subtitleTop-56;
+  const columns=wide?Math.min(spec.nodes.length,3):spec.kind==="compare"||spec.kind==="parts"?2:1,rows=Math.ceil(spec.nodes.length/columns),gap=wide?36:44;
   const cellWidth=(width-margin*2-gap*(columns-1))/columns,cellHeight=(bottom-top-gap*(rows-1))/rows;
-  const font=wide?38:44,lineHeight=Math.ceil(font*1.45),padding=28;
-  const cells=spec.nodes.map((text,i)=>({text,x:margin+(i%columns)*(cellWidth+gap),y:top+Math.floor(i/columns)*(cellHeight+gap),width:cellWidth,height:cellHeight,lines:linesFor(text,cellWidth-padding*2,font)}));
-  if(cells.some(c=>!c.lines||c.lines.length*lineHeight+padding*2>c.height))return {spec:{kind:"presenter",nodes:[],grounding:"overflow-fallback"},width,height,cells:[]};
-  return {spec,width,height,cells,font,lineHeight,padding,bottom};
+  const padding=pipSafe?32:28,initialFont=wide?38:pipSafe?40:44;
+  let font,lineHeight,cells;
+  for(const candidate of [initialFont,initialFont-4,initialFont-8,32]){
+    font=candidate;lineHeight=Math.ceil(font*1.45);
+    cells=spec.nodes.map((text,i)=>({text,x:margin+(i%columns)*(cellWidth+gap),y:top+Math.floor(i/columns)*(cellHeight+gap),width:cellWidth,height:cellHeight,lines:linesFor(text,cellWidth-padding*2,font)}));
+    if(cells.every(c=>c.lines&&112+font+Math.max(0,c.lines.length-1)*lineHeight+padding<=c.height))break;
+    cells=null;
+  }
+  if(!cells)return {spec:{kind:"presenter",nodes:[],grounding:"overflow-fallback"},width,height,cells:[]};
+  return {spec,width,height,cells,font,lineHeight,padding,bottom,pipSafe};
 }
 
 export async function createExpressionMaterial(segment,dir,index,options={}){
-  const layout=expressionLayout(segment,options),{spec,width,height,cells,font,lineHeight,padding}=layout;
+  const layout=expressionLayout(segment,options),{spec,width,height,cells,font,lineHeight,padding,pipSafe}=layout;
   if(spec.kind==="presenter")return {kind:"presenter",source:"xiaogu-presenter-anchor",title:segment.visual||"",query:segment.query||"",presentation:spec.grounding};
-  const colors=["#176b66","#aa3653","#3f5f99","#76602e"];
-  const blocks=cells.map((c,i)=>`<rect x="${c.x}" y="${c.y}" width="${c.width}" height="${c.height}" rx="6" fill="#fff"/><rect x="${c.x}" y="${c.y}" width="7" height="${c.height}" fill="${colors[i%4]}"/>${c.lines.map((line,j)=>`<text x="${c.x+padding}" y="${c.y+padding+font+j*lineHeight}" font-size="${font}" fill="#172a30">${xml(line)}</text>`).join("")}`).join("");
+  const colors=["#138278","#c2604e","#416ca6","#b28a3f"],fills=["#f2faf7","#fff5f0","#f2f6fc","#fbf7eb"];
+  const relationLabels={compare:["对照 A","对照 B"],sequence:["步骤 1","步骤 2","步骤 3","步骤 4"],timeline:["节点 1","节点 2","节点 3","节点 4"],cause:["原因","结果","延伸","结论"],parts:["组成 1","组成 2","组成 3","组成 4"],keypoints:["要点 1","要点 2","要点 3","要点 4"]};
+  const labels=relationLabels[spec.kind]||relationLabels.keypoints;
+  const blocks=cells.map((c,i)=>`<g filter="url(#shadow)"><rect x="${c.x}" y="${c.y}" width="${c.width}" height="${c.height}" rx="22" fill="${fills[i%4]}" stroke="${colors[i%4]}" stroke-width="2"/><rect x="${c.x}" y="${c.y}" width="${c.width}" height="12" rx="6" fill="${colors[i%4]}"/></g><rect x="${c.x+padding}" y="${c.y+30}" width="${Math.max(116,labels[i].length*29)}" height="48" rx="24" fill="${colors[i%4]}"/><text x="${c.x+padding+18}" y="${c.y+64}" font-size="25" font-weight="700" fill="#fff">${labels[i]}</text>${c.lines.map((line,j)=>`<text x="${c.x+padding}" y="${c.y+112+font+j*lineHeight}" font-size="${font}" font-weight="600" fill="#172f38">${xml(line)}</text>`).join("")}`).join("");
   const linked=["sequence","timeline","cause"].includes(spec.kind);
-  const connectors=linked?cells.slice(0,-1).map(c=>{const x=c.x+c.width/2,y=c.y+c.height+6;return `<path d="M${x} ${y}v22m-7-7 7 7 7-7" fill="none" stroke="#176b66" stroke-width="3"/>`;}).join(""):"";
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#eaf0f2"/><g font-family="PingFang SC,Arial">${blocks}${connectors}</g></svg>`;
+  const connectors=linked?cells.slice(0,-1).map((c,i)=>{const next=cells[i+1];if(next.y===c.y){const x=c.x+c.width+8,y=c.y+c.height/2,end=next.x-8;return `<path d="M${x} ${y}H${end-14}m-10-9 10 9-10 9" fill="none" stroke="#138278" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;}const x=c.x+c.width/2,y=c.y+c.height+8,end=Math.max(y+20,next.y-8);return `<path d="M${x} ${y}V${end-12}m-9-10 9 10 9-10" fill="none" stroke="#138278" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;}).join(""):spec.kind==="compare"?`<circle cx="${width/2}" cy="${cells[0].y+cells[0].height/2}" r="42" fill="#122f39"/><text x="${width/2}" y="${cells[0].y+cells[0].height/2+11}" text-anchor="middle" font-size="28" font-weight="800" fill="#fff">VS</text>`:"";
+  const title=xml(segment.visual||({compare:"关键对比",sequence:"执行路径",timeline:"时间轴",cause:"因果关系",parts:"结构拆解",keypoints:"核心要点"}[spec.kind]||"核心要点"));
+  const eyebrow={compare:"关系图解 · COMPARE",sequence:"路径图解 · SEQUENCE",timeline:"进程图解 · TIMELINE",cause:"机制图解 · CAUSE",parts:"结构图解 · PARTS",keypoints:"信息图解 · KEY POINTS"}[spec.kind];
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#17313a" flood-opacity=".12"/></filter></defs><rect width="100%" height="100%" fill="#e9eff0"/><rect width="100%" height="350" fill="#112f39"/><rect x="72" y="92" width="92" height="8" rx="4" fill="#d6ad63"/><text x="72" y="154" font-family="PingFang SC,Arial" font-size="25" font-weight="650" fill="#9ed6cc">${eyebrow}</text><text x="72" y="254" font-family="PingFang SC,Arial" font-size="64" font-weight="800" fill="#fffaf0">${title}</text><g font-family="PingFang SC,Arial">${blocks}${connectors}</g></svg>`;
   const file=path.join(dir,`expression-${index}-${randomUUID()}.jpg`);
   await sharp(Buffer.from(svg)).jpeg({quality:94}).toFile(file);
-  return {kind:"image",file,source:"xiaogu-knowledge-card-expression",license:"project-owned",title:segment.visual||"",query:segment.query||"",points:spec.nodes,presentation:`expression-v1:${spec.kind}:${spec.grounding}`};
+  return {kind:"image",file,source:"xiaogu-knowledge-card-expression",license:"project-owned",title:segment.visual||"",query:segment.query||"",points:spec.nodes,presentation:`expression-v2:${spec.kind}:${spec.grounding}:${pipSafe?"pip-safe":"fullscreen"}`};
 }

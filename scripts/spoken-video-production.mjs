@@ -767,6 +767,9 @@ export function editOptions(value,aspectRatio="9:16"){
 }
 
 async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
+  if(options.forceCard&&!segment.expression&&safe(segment.cardStyle)){
+    return createKnowledgeCard(segment,dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle});
+  }
   if(options.forceCard||["evidence","explain"].includes(segment.intent)||segment.expression?.kind&&segment.expression.kind!=="presenter"){
     return createExpressionMaterial(segment,dir,index,options);
   }

@@ -10,7 +10,7 @@ export function videoSafeLayout(width,height,fontSize=height>width?12:18){
 
 export function safeSemanticLayout(segment,material){
   if(material?.kind==="presenter")return "presenter";
-  if(material?.source==="xiaogu-knowledge-card-expression")return "fullscreen";
+  if(material?.source==="xiaogu-knowledge-card-expression")return material.presentation?.endsWith(":pip-safe")?"presenter-pip":"fullscreen";
   if(["evidence","explain"].includes(segment.intent))return "fullscreen";
   return segment.layout||"presenter-pip";
 }

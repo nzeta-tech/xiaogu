@@ -44,3 +44,10 @@ test("rendered cards are nonblank, correctly sized and leave subtitle zone untou
     const bottom=await sharp(crop).stats();assert.ok(bottom.channels.every(c=>c.stdev<1));
   }}finally{await rm(dir,{recursive:true,force:true});}
 });
+test("short portrait expression cards reserve a presenter PIP zone",async()=>{
+  const segment={text:fixtures[3].nodes.join(""),visual:"降雨与路滑",expression:fixtures[3]};
+  const layout=expressionLayout(segment,{aspectRatio:"9:16",subtitleFontSize:12});
+  assert.equal(layout.pipSafe,true);assert.ok(layout.cells.every(cell=>cell.y+cell.height<videoSafeLayout(1080,1920,12).pip.y));
+  const dir=await mkdtemp(path.join(os.tmpdir(),"expression-pip-"));
+  try{const material=await createExpressionMaterial(segment,dir,0,{aspectRatio:"9:16"});assert.match(material.presentation,/:pip-safe$/);}finally{await rm(dir,{recursive:true,force:true});}
+});
