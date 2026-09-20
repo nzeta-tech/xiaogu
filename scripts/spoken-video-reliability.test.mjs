@@ -5,6 +5,16 @@ import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
 import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
+
+test("advisory-only review delivers once without regenerating artwork",async()=>{
+  let renders=0;
+  const result=await renderWithCodexReview({segments:[],materials:[],resolveMaterial:async()=>{throw Error("advisories must not regenerate materials");}},{
+    finalize:async()=>{renders++;return {output:"fixture.mp4"};},check:async()=>{},sheet:async()=>"fixture.jpg",
+    review:async()=>({pass:true,issues:[],warnings:["模板变化可以更丰富"],cardFixes:{s1:{style:"unused"}}}),
+  });
+  assert.equal(renders,1);assert.equal(result.acceptedWithNotes,false);
+  assert.deepEqual(result.reviewHistory,[{attempt:1,pass:true,issues:[],warnings:["模板变化可以更丰富"]}]);
+});
 import { researchSegmentsWithCodex } from "./spoken-video-web-research.mjs";
 
 test("stock relevance requires meaningful whole-word matches, not generic people or substrings",()=>{

@@ -13,6 +13,8 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
   const chosen=versions.find(v=>v.id===(selected||currentId))||root;
   const preview=chosen.video_url?chosen:versions.find(v=>v.id===chosen.request_json?.base_version_id&&v.video_url)||sorted.find(v=>v.status==="completed"&&v.video_url);
   const running=sorted.find(activeVideo);const anyCompleted=versions.some(v=>v.status==="completed");
+  const reviewRequest=chosen.request_json as (SpokenJob["request_json"] & {quality_review?:Array<{warnings?:string[]}>});
+  const warnings=chosen.status==="completed"?reviewRequest?.quality_review?.at(-1)?.warnings||[]:[];
   async function submit(){
     const text=instructions.trim();if(lock.current||running)return;if(text.length<4){setError("请具体描述希望怎么修改");textRef.current?.focus();return;}
     if(!preview)return;lock.current=true;setBusy(true);setError("");setNotice("");
@@ -34,6 +36,7 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
       </div>
       {running?<div className={styles.revisionProgress} role="status"><strong>{stageLabels[running.request_json?.stage||""]||"正在制作新版本"}</strong><div className={styles.progressRow}><progress aria-label="修改进度" value={running.progress||0} max={100}/><span>{running.progress||0}%</span></div><p>{preview?"当前播放的是已有版本，制作完成后可切换查看。":"你可以离开此页面，稍后回来查看。"}</p></div>:null}
       {chosen.status==="failed"?<div className={styles.revisionFailure} role="alert"><strong>这个版本未能完成</strong><p>{/^(仅支持|成片质检未通过|Codex 质检未通过)/.test(chosen.error_message||"")?chosen.error_message:preview?"已有成片已保留。请调整修改要求后重试，或稍后再试。":"生成未完成，请稍后重试。"}</p>{preview?<button type="button" onClick={()=>{setInstructions(chosen.request_json?.edit_instructions||"");setEditing(true);textRef.current?.focus();}}>重新修改</button>:null}</div>:null}
+      {warnings.length?<details className={styles.sourceDetails}><summary>画面优化建议（不影响交付）</summary>{warnings.map((warning,index)=><p key={index}>{warning}</p>)}</details>:null}
       {error?<p className={styles.error} role="alert">{error}</p>:null}{notice?<p className={styles.notice} role="status">{notice}</p>:null}
       {preview?<><div className={styles.versionActions}><button type="button" disabled={busy||Boolean(running)||!available} onClick={()=>{setEditing(!editing);setError("");}}>调整这个版本</button>{preview.id!==currentId?<button type="button" disabled={busy} onClick={()=>void selectVersion()}>设为当前版本</button>:null}</div>
       {editing?<div className={styles.editPanel}><label htmlFor={`edit-${root.id}`}>基于 V{versionNumber(preview)}，你想怎么调整？</label><textarea id={`edit-${root.id}`} ref={textRef} value={instructions} onChange={e=>setInstructions(e.target.value)} maxLength={1500} rows={4} disabled={busy||Boolean(running)} placeholder="例如：知识卡更精美，用暖色插画；字幕大一点，多展示知识点，减少全屏人物画面。"/><div className={styles.editChips}>{["知识卡更精美，使用有质感的插画","字幕大一点，保持透明背景","多展示知识点，减少全屏人物画面"].map(text=><button type="button" key={text} disabled={busy||Boolean(running)} onClick={()=>setInstructions(value=>value?`${value}；${text}`:text)}>{text}</button>)}</div><p>可调整素材、知识卡、字幕、标题和画面节奏。口播文案、人物和声音保持不变。</p><div className={styles.editFooter}><span>另存为新版本，保留已有视频</span><button type="button" disabled={busy||Boolean(running)||!available||instructions.trim().length<4} onClick={()=>void submit()}>{busy?"正在提交…":"生成修改版 →"}</button></div></div>:null}</>:null}

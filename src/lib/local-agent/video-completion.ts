@@ -1,4 +1,4 @@
-type Review = { attempt: number; pass: boolean; issues: string[] };
+type Review = { attempt: number; pass: boolean; issues: string[]; warnings?: string[] };
 
 export function spokenVideoCompletion(result: Record<string, unknown>) {
   const raw = Array.isArray(result.qualityReview) ? result.qualityReview : [];
@@ -8,9 +8,10 @@ export function spokenVideoCompletion(result: Record<string, unknown>) {
     Array.isArray(value.issues) && value.issues.every((issue: unknown) => typeof issue === "string"));
   const reviews: Review[] = valid ? raw.map(value => ({
     attempt: value.attempt, pass: value.pass, issues: value.issues.slice(0, 8).map((issue: string) => issue.slice(0, 500)),
+    ...(Array.isArray(value.warnings) ? { warnings: value.warnings.filter((warning: unknown) => typeof warning === "string").slice(0, 8).map((warning: string) => warning.slice(0, 500)) } : {}),
   })) : [];
   const final = reviews.at(-1);
-  const qualityPassed = valid && final?.pass === true && result.acceptedWithNotes !== true &&
+  const qualityPassed = valid && final?.pass === true && final.issues.length === 0 && result.acceptedWithNotes !== true &&
     (result.deliveryNotes === undefined || (Array.isArray(result.deliveryNotes) && result.deliveryNotes.length === 0));
   const completed = result.status === "completed" && typeof result.videoUrl === "string" &&
     result.videoUrl.trim().length > 0 && qualityPassed;

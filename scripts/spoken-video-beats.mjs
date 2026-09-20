@@ -110,6 +110,7 @@ function normalizeSuppliedBeats(segment) {
       id: `${segment.id}-b${index + 1}`,
       parentId: segment.id,
       text: beatText,
+      expression: beat.expression,
       visual: text(beat.visual).slice(0, 80) || (index === 0 ? text(segment.visual) : beatText.slice(0, 18)),
       query: text(beat.query).slice(0, 120) || queryFor(segment, intent),
       intent,

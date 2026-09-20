@@ -5,6 +5,13 @@ import { spokenVideoCompletion } from "./video-completion.ts";
 import { VideoQualityError } from "../../../scripts/spoken-video-production.mjs";
 
 const passed = {status:"completed",videoUrl:"https://example.com/video.mp4",qualityReview:[{attempt:1,pass:true,issues:[]}]};
+test("advisories persist without bypassing blocking issues or explicit failures",()=>{
+  const review={attempt:1,pass:true,issues:[],warnings:["s2：模板可以更多样"]};
+  const result=spokenVideoCompletion({...passed,qualityReview:[review]});
+  assert.equal(result.completed,true);assert.deepEqual(result.reviews[0].warnings,review.warnings);
+  assert.equal(spokenVideoCompletion({...passed,qualityReview:[{...review,issues:["字幕遮挡"]}]}).completed,false);
+  assert.equal(spokenVideoCompletion({...passed,qualityReview:[{...review,pass:false}]}).completed,false);
+});
 test("only an explicit final quality pass permits completed status",()=>{
   assert.equal(spokenVideoCompletion(passed).completed,true);
   for(const patch of [

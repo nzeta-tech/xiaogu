@@ -15,32 +15,39 @@ let count=0;const check=(v,label)=>{assert.ok(v,label);count++;};
 const f=fixture('create');
 try{
   fixture('grant',f.id);
-  for(const mode of ['failed-quality','missing-report','passed']){
+  for(const mode of ['failed-quality','missing-report','contradictory-pass','passed','advisory']){
     const task=fixture('quality-create',f.id);
-    const review=[{attempt:1,pass:mode==='passed',issues:mode==='passed'?[]:['字幕遮挡']}];
+    const passed=mode==='passed'||mode==='advisory';
+    const review=[{attempt:1,pass:passed||mode==='contradictory-pass',issues:passed?[]:['字幕遮挡'],...(mode==='advisory'?{warnings:['模板变化可以更丰富']}:{})}];
     const result={status:'completed',videoUrl:'https://example.invalid/synthetic.mp4',...(mode==='missing-report'?{}:{qualityReview:review})};
     const request=()=>fetch(base+`/api/internal/local-agent/tasks/${task.taskId}/complete`,{method:'POST',headers:{authorization:'Bearer '+f.agentToken,'content-type':'application/json'},body:JSON.stringify({...task,result}),signal:AbortSignal.timeout(30000)});
     check((await request()).ok,'completion acknowledged');
     check((await request()).status===409,'duplicate fenced by consumed lease');
     const row=fixture('quality-evidence',f.id).jobs.find(job=>job.id===task.jobId);
-    const passed=mode==='passed';
     check(row.status===(passed?'completed':'failed'),'durable job status');
     check(row.task_status===(passed?'succeeded':'failed'),'durable task status');
     check(row.has_video===passed,'failed delivery exposes no final URL');
     check(row.charges===(passed?1:0),'quality gate controls real charge trigger');
     if(!passed)check(row.error_message.includes('质检未通过'),'visible failure persisted');
     if(mode==='failed-quality')check(row.reviews[0].issues[0]==='字幕遮挡','quality history persisted');
-    if(mode==='failed-quality'){
+    if(mode==='advisory')check(row.reviews[0].warnings[0]==='模板变化可以更丰富','advisories survive durable reload');
+    if(mode==='failed-quality'||mode==='advisory'){
       const {chromium}=createRequire(import.meta.url)('playwright-core');
       const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
       try{
         const context=await browser.newContext();await context.addCookies([{name:'ica_session',value:f.cookie.slice('ica_session='.length),url:base}]);
         const page=await context.newPage();await page.goto(base+'/apps/digital-human-video');
         await page.getByRole('button',{name:/我的作品/}).click();
-        await page.getByRole('alert').filter({hasText:'字幕遮挡'}).waitFor();
+        const target=()=>mode==='advisory'?page.getByText('画面优化建议（不影响交付）'):page.getByRole('alert').filter({hasText:'字幕遮挡'});
+        await target().waitFor();
         check(true,'actual spoken version page displays quality failure');
         await page.reload();await page.getByRole('button',{name:/我的作品/}).click();
-        await page.getByRole('alert').filter({hasText:'字幕遮挡'}).waitFor();check(true,'quality reason survives reload');
+        await target().waitFor();check(true,'quality result survives reload');
+        if(mode==='advisory'){
+          await target().click();await page.getByText('模板变化可以更丰富').waitFor();check(true,'advisory text is visible');
+          await page.setViewportSize({width:390,height:844});
+          check(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'mobile has no horizontal overflow');
+        }
       }finally{await browser.close();}
     }
   }

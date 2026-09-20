@@ -31,5 +31,7 @@ test("real FFmpeg PIP pixels stay above subtitle pixels and unchanged shots are 
       await finalize(...args);
       assert.deepEqual(await Promise.all(clips.map(async f=>[f,(await stat(path.join(dir,f))).mtimeMs])),before);
     }
+    const fallback=await finalize(master,[{id:"s1",text:"SAFE CAPTIONS"}],[{kind:"presenter",source:"xiaogu-presenter-anchor"}],"","SAFE CAPTIONS",dir,"Fixture","9:16",{subtitleFile:srt,showTitle:false,transitionSeconds:0});
+    assert.ok((await stat(fallback.output)).size>20000,"basic-mode presenter fallback needs no material file");
   }finally{await rm(dir,{recursive:true,force:true});}
 });
