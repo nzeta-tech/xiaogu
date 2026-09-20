@@ -5,6 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { setDefaultResultOrder } from 'node:dns';
+
+setDefaultResultOrder('ipv4first');
 
 const productionOrigin = 'https://xiaogu.nzeta.ai';
 export function validateConfig(config) {
@@ -46,7 +49,11 @@ async function main() {
   }
   if (!token) throw new Error('Scoped Agent credential is missing');
   if (mode === '--status') {
-    const response = await fetch(`${config.baseUrl}/api/internal/local-agent/status`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+    let response;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try { response = await fetch(`${config.baseUrl}/api/internal/local-agent/status`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }); break; }
+      catch (error) { if (attempt === 5) throw error; await new Promise(resolve => setTimeout(resolve, attempt * 1000)); }
+    }
     if (!response.ok) throw new Error(`Status endpoint HTTP ${response.status}`);
     const result = summarizeStatus(config, await response.json());
     console.log(JSON.stringify(result));
@@ -131,6 +138,7 @@ async function main() {
     TMPDIR: path.join(state, 'tmp'),
     PATH: `${home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
   });
+  if (config.controlProxy) Object.assign(process.env, { HTTP_PROXY: config.controlProxy, HTTPS_PROXY: config.controlProxy, ALL_PROXY: config.controlProxy, NO_PROXY: '127.0.0.1,localhost,::1' });
   for (const directory of [process.env.TMPDIR, process.env.LOCAL_AGENT_VIDEO_WORKDIR]) fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   process.chdir(config.workerRoot);
   await import(pathToFileURL(path.join(config.workerRoot, 'scripts/local-agent.mjs')).href);

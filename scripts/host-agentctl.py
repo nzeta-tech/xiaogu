@@ -16,10 +16,18 @@ HOME = Path.home()
 ROOT = HOME / '.xiaogu-agent'
 REPO = Path(__file__).resolve().parents[1]
 DOMAIN = f'gui/{os.getuid()}'
+CONTROL_PROXY = 'http://127.0.0.1:7890'
 
 
 def run(args, check=True, **kwargs):
     return subprocess.run([str(a) for a in args], check=check, **kwargs)
+
+
+def node_env():
+    env = os.environ.copy()
+    env.update(NODE_USE_ENV_PROXY='1', HTTP_PROXY=CONTROL_PROXY, HTTPS_PROXY=CONTROL_PROXY,
+               ALL_PROXY=CONTROL_PROXY, NO_PROXY='127.0.0.1,localhost,::1')
+    return env
 
 
 def loaded(label):
@@ -76,12 +84,15 @@ def main():
         config = dict(environment=args.env, baseUrl='https://xiaogu.nzeta.ai' if production else 'http://localhost:3000',
                       agentId=f'xiaogu-{"prod" if production else "dev"}-media', workerRoot=str(worker),
                       stateRoot=str(state), version=worker.parent.name if production else 'development',
-                      envFiles=[str(config_dir / 'prod.env')] if production else [str(REPO / name) for name in ['.env', '.env.local', '.env.development.local']])
+                      envFiles=[str(config_dir / 'prod.env')] if production else [str(REPO / name) for name in ['.env', '.env.local', '.env.development.local']],
+                      controlProxy=CONTROL_PROXY if production else '')
         config_file.write_text(json.dumps(config, indent=2) + '\n')
         config_file.chmod(0o600)
         data = dict(Label=label, ProgramArguments=[node, str(installed), str(config_file), '--run'],
                     RunAtLoad=True, KeepAlive=True, ThrottleInterval=15, ProcessType='Interactive',
-                    EnvironmentVariables={'HOME': str(HOME), 'PATH': '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin'},
+                    EnvironmentVariables={'HOME': str(HOME), 'PATH': '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin',
+                                          'NODE_USE_ENV_PROXY': '1', 'HTTP_PROXY': CONTROL_PROXY, 'HTTPS_PROXY': CONTROL_PROXY,
+                                          'ALL_PROXY': CONTROL_PROXY, 'NO_PROXY': '127.0.0.1,localhost,::1'},
                     StandardOutPath=str(ROOT / 'logs' / args.env / 'media-agent.out.log'),
                     StandardErrorPath=str(ROOT / 'logs' / args.env / 'media-agent.err.log'))
         plist.write_bytes(plistlib.dumps(data)); plist.chmod(0o600)
@@ -89,14 +100,14 @@ def main():
         print(json.dumps({'environment': args.env, 'service': label, 'loaded': loaded(label), 'legacyLoaded': loaded(legacy)}), flush=True)
         if not config_file.exists():
             raise RuntimeError('Environment is not installed')
-        result = run([node, ROOT / 'bin' / f'{args.env}-host-agent-runtime.mjs', config_file, '--status'], check=False)
+        result = run([node, ROOT / 'bin' / f'{args.env}-host-agent-runtime.mjs', config_file, '--status'], check=False, env=node_env())
         return result.returncode
     else:
         if not plist.exists():
             raise RuntimeError('Run install for this environment first')
         if args.action in ['stop', 'restart'] and loaded(label):
             # Fail closed on status errors or active jobs before terminating a worker.
-            result = run([node, ROOT / 'bin' / f'{args.env}-host-agent-runtime.mjs', config_file, '--status'], check=False, capture_output=True, text=True)
+            result = run([node, ROOT / 'bin' / f'{args.env}-host-agent-runtime.mjs', config_file, '--status'], check=False, capture_output=True, text=True, env=node_env())
             if result.returncode not in [0, 2]:
                 raise RuntimeError('Cannot verify active jobs; refusing to stop')
             status = json.loads(result.stdout)
