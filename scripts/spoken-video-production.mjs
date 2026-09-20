@@ -720,7 +720,8 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
       if(index<0)continue;
       const style=safe(item(fixValue).style).slice(0,500);
       const semanticLayout="fullscreen";
-      const revised={...currentSegments[index],forceCard:true,expression:undefined,cardStyle:style,...(options.timelineMode==="semantic"?{layout:semanticLayout,intent:"explain"}:{})};
+      // A QA repair supersedes the original director treatment (including presenter/official-source).
+      const revised={...currentSegments[index],visualTreatment:"motion-card",forceCard:true,expression:undefined,cardStyle:style,...(options.timelineMode==="semantic"?{layout:semanticLayout,intent:"explain"}:{})};
       const replacement=resolveMaterial?await resolveMaterial(revised,index):await createKnowledgeCard(revised,dir,index);
       currentSegments[index]=revised;currentMaterials[index]=replacement;changed=true;
     }

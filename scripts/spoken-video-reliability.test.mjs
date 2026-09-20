@@ -221,3 +221,13 @@ test('unavailable final reviewer releases after three rounds with an explicit us
   });
   assert.equal(renders,1);assert.equal(result.reviewHistory.length,3);assert.equal(result.acceptedWithNotes,true);assert.match(result.reviewHistory.at(-1).issues[0],/未能完成/);
 });
+
+
+test("QA card repairs override presenter and official-source director treatments",async()=>{
+  const segments=["presenter","official-source"].map((visualTreatment,i)=>({id:`s${i}`,text:"原文条件与数字保持不变",visualTreatment,intent:"anchor",layout:"presenter"}));
+  const materials=segments.map(()=>({kind:"presenter",source:"fixture"}));let round=0;const repaired=[];
+  const result=await renderWithCodexReview({segments,materials,initialOptions:{timelineMode:"semantic"},resolveMaterial:async(segment,index)=>{
+    assert.equal(segment.visualTreatment,"motion-card");assert.equal(segment.forceCard,true);assert.equal(segment.intent,"explain");assert.equal(segment.layout,"fullscreen");assert.equal(segment.text,segments[index].text);repaired.push(index);return {kind:"image",source:"repaired"};
+  }},{finalize:async()=>({output:"fixture.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",review:async()=>++round===1?{pass:false,issues:["关系缺少图解"],cardFixes:{s0:{style:"现金流图"},s1:{style:"时间轴"}}}:{pass:true,issues:[]}});
+  assert.deepEqual(repaired,[0,1]);assert.equal(result.acceptedWithNotes,false);assert(result.segments.every(s=>s.visualTreatment==="motion-card"));
+});
