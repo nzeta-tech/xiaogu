@@ -22,10 +22,3 @@ test('status requires the exact environment worker and every production dependen
   assert.equal(check({ health: { ...node.health, heygenCli: 'unhealthy' } }).available, false);
   assert.equal(check({}, false).available, false);
 });
-
-test('origin upload configuration is limited to production ELB hostnames',()=>{
-  assert.throws(()=>validateConfig({...config,uploadOrigin:'fixture.elb.amazonaws.com'}),/media origin/);
-  const production={...config,environment:'production',baseUrl:'https://xiaogu.nzeta.ai',agentId:'xiaogu-prod-media'};
-  for(const origin of ['http://example.com','example.com','fixture.elb.amazonaws.com:80','fixture.elb.amazonaws.com\nheader'])assert.throws(()=>validateConfig({...production,uploadOrigin:origin}),/media origin/);
-  assert.throws(()=>validateConfig({...production,uploadOrigin:'fixture.ap-southeast-2.elb.amazonaws.com'}),/immutable/);
-});

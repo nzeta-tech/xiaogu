@@ -1,6 +1,0 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {originUploadConfig} from './spoken-video-upload.mjs';
-const input={url:'https://xiaogu.nzeta.ai/api/internal/local-agent/digital-human/media?jobId=fixture&kind=output',origin:'fixture.elb.amazonaws.com',token:'private-fixture-token',file:'/tmp/video.mp4',size:160*1024*1024,contentType:'video/mp4',name:'测试.mp4'};
-test('media origin transport retains public TLS hostname and exact upload metadata',()=>{const config=originUploadConfig(input);assert(config.includes('connect-to = "xiaogu.nzeta.ai:443:fixture.elb.amazonaws.com:443"'));assert(config.includes('url = "https://xiaogu.nzeta.ai/'));assert(config.includes('content-length: 167772160'));assert(config.includes('authorization: Bearer private-fixture-token'));assert(!config.includes('insecure'));assert(!config.includes('location ='));});
-test('media origin configuration rejects redirects, non-TLS destinations and header injection',()=>{for(const patch of [{url:'http://xiaogu.nzeta.ai/a'},{url:'https://user:password@xiaogu.nzeta.ai/a'},{origin:'evil.test:80'},{origin:'host\nheader = x'},{token:'x\nurl = "https://evil.test"'},{contentType:'video/mp4\r\nX-Test: 1'}])assert.throws(()=>originUploadConfig({...input,...patch}));});

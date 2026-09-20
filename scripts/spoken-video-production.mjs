@@ -1,4 +1,4 @@
-import { uploadVideoToOrigin } from "./spoken-video-upload.mjs";
+import {uploadVideoParts} from "./spoken-video-multipart-upload.mjs";
 import {fitCardSvg,cardContentBounds} from "./spoken-video-svg-preflight.mjs";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
@@ -434,7 +434,7 @@ async function upload(ctx,jobId,kind,file,name,contentType){
   const size=(await stat(file)).size;
   const url=`${ctx.remoteBase}/api/internal/local-agent/digital-human/media?${new URLSearchParams({jobId,kind})}`;
   let result;
-  if(process.env.LOCAL_AGENT_UPLOAD_ORIGIN)result=await measureVideoStage("upload",()=>uploadVideoToOrigin({url,origin:process.env.LOCAL_AGENT_UPLOAD_ORIGIN,token:ctx.token,file,size,contentType,name}));
+  if(size>16*1024*1024&&["output","presenter_master"].includes(kind))result=await measureVideoStage("upload",()=>uploadVideoParts({base:ctx.remoteBase,token:ctx.token,jobId,kind,file,size,name,contentType,cacheDir:path.join(process.env.LOCAL_AGENT_VIDEO_WORKDIR||os.tmpdir(),"upload-cache")}));
   else {
   const response=await measureVideoStage("upload",()=>fetch(url,{method:"PUT",headers:{authorization:`Bearer ${ctx.token}`,"content-type":contentType,"content-length":String(size),"x-xiaogu-filename":encodeURIComponent(name)},body:createReadStream(file),duplex:"half",signal:AbortSignal.timeout(1200000)}));
   result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(safe(result.error)||`成片上传失败（${response.status}）`);
@@ -992,6 +992,7 @@ async function executeRecut(task,leaseToken,ctx){
       }));for(const item of batch)materials.push(item.material);
     }
     const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
+    await report(ctx,task,leaseToken,jobId,"uploading",94,"正在上传成片并校验完整性");
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${input.title}-封面.jpg`,"image/jpeg");

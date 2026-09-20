@@ -16,7 +16,14 @@ const{createRequire}=require('node:module');const req=createRequire(process.env.
   if(!/^[0-9a-f-]{36}$/.test(id||''))throw Error('invalid fixture id');
   const allowed=await pool.query("select id from users where id=$1 and email=$2",[id,'spoken-release-'+id+'@example.invalid']);if(!allowed.rowCount)throw Error('fixture owner mismatch');
   if(action==='cleanup'){
+   const media=await pool.query('select storage_key from digital_human_media_assets where user_id=$1 and storage_node_id=$2',[id,process.env.MEDIA_NODE_ID]);for(const row of media.rows)if(row.storage_key){const r=await fetch(process.env.MEDIA_NODE_URL+'/objects/'+row.storage_key,{method:'DELETE',headers:{authorization:'Bearer '+process.env.MEDIA_NODE_TOKEN}});if(!r.ok)throw Error('fixture media cleanup failed');}
    await pool.query('delete from local_agent_tasks where owner_user_id=$1',[id]);await pool.query('delete from spoken_photo_assets where user_id=$1',[id]);await pool.query('delete from digital_human_media_assets where user_id=$1',[id]);await pool.query('delete from users where id=$1',[id]);console.log(JSON.stringify({cleaned:true}));
+  }else if(action==='media-renew'){
+   await pool.query("update local_agent_tasks set lease_expires_at=now()+interval '2 hours' where owner_user_id=$1 and status='leased'",[id]);console.log(JSON.stringify({renewed:true}));
+  }else if(action==='media-evidence'){
+   const rows=await pool.query("select id,video_job_id,kind,size_bytes,sha256,metadata_json->>'upload_part' as upload_part from digital_human_media_assets where user_id=$1",[id]);console.log(JSON.stringify({media:rows.rows}));
+  }else if(action==='media-lock'){
+   await pool.query("update digital_human_video_jobs set status='completed' where user_id=$1",[id]);console.log(JSON.stringify({locked:true}));
   }else if(action==='grant'){
    await pool.query("insert into exclusive_app_access_overrides(user_id,mode,reason) values($1,'granted','Production release regression') on conflict(user_id) do update set mode='granted'",[id]);console.log(JSON.stringify({granted:true}));
   }else if(action==='quality-create'){

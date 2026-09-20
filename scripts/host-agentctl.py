@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import plistlib
-import re
 import shutil
 import subprocess
 import sys
@@ -42,12 +41,9 @@ def main():
     parser.add_argument('--confirm-production', action='store_true')
     parser.add_argument('--reason', default='')
     parser.add_argument('--release', help='Production install only: verified immutable release SHA')
-    parser.add_argument('--upload-origin', help='Production media upload origin hostname (TLS retains public service hostname)')
     parser.add_argument('--drain-legacy', action='store_true', help='Development only: wait for legacy tasks before handing over')
     args = parser.parse_args()
     production = args.env == 'production'
-    if args.upload_origin and (not production or args.action != 'install' or not re.fullmatch(r'[a-z0-9][a-z0-9.-]*\.elb\.amazonaws\.com', args.upload_origin)):
-        parser.error('--upload-origin requires a production install and an ELB hostname')
     if args.release and (not production or args.action != 'install' or len(args.release) < 12 or len(args.release) > 40 or any(c not in '0123456789abcdef' for c in args.release)):
         parser.error('--release requires install --env production and a Git SHA')
     if args.drain_legacy and (production or args.action != 'start'):
@@ -89,8 +85,7 @@ def main():
                       agentId=f'xiaogu-{"prod" if production else "dev"}-media', workerRoot=str(worker),
                       stateRoot=str(state), version=worker.parent.name if production else 'development',
                       envFiles=[str(config_dir / 'prod.env')] if production else [str(REPO / name) for name in ['.env', '.env.local', '.env.development.local']],
-                      controlProxy=CONTROL_PROXY if production else '',
-                      uploadOrigin=(args.upload_origin or (json.loads(config_file.read_text()).get('uploadOrigin', '') if config_file.exists() else '')) if production else '')
+                      controlProxy=CONTROL_PROXY if production else '')
         config_file.write_text(json.dumps(config, indent=2) + '\n')
         config_file.chmod(0o600)
         data = dict(Label=label, ProgramArguments=[node, str(installed), str(config_file), '--run'],

@@ -1,4 +1,4 @@
-import { MEDIA_MAX_BYTES, MediaNodeError, mediaNodeConfig, uploadMediaObject, fetchMediaObject } from "./media-node.ts";
+import { MEDIA_MAX_BYTES, MediaNodeError, mediaNodeConfig, uploadMediaObject, fetchMediaObject, removeMediaObject } from "./media-node.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { mkdir, open, rename, stat, statfs, unlink, writeFile } from "node:fs/promises";
@@ -40,10 +40,11 @@ function localKey(userId: string, extension: string) {
   return `${userId}/${new Date().toISOString().slice(0, 7)}/${randomUUID()}.${extension}`;
 }
 
-async function storeOnMediaNode(input: { userId: string; digitalHumanId?: string; videoJobId?: string; kind: MediaKind; contentType: string; fileName: string; sourceUrl?: string }, body: BodyInit, size: number) {
+async function storeOnMediaNode(input: { userId: string; digitalHumanId?: string; videoJobId?: string; kind: MediaKind; contentType: string; fileName: string; sourceUrl?: string; expectedSha256?: string }, body: BodyInit, size: number) {
   const config = mediaNodeConfig()!;
   const key = localKey(input.userId, safeExtension(input.fileName, input.contentType));
   const uploaded = await uploadMediaObject(key, body, size);
+  if(input.expectedSha256 && uploaded.sha256!==input.expectedSha256){await removeMediaObject(key);throw new MediaNodeError("upload_checksum_mismatch",400);}
   try {
     const result = await query<{id:string}>(`insert into digital_human_media_assets(user_id,digital_human_id,video_job_id,kind,storage_provider,storage_key,storage_node_id,content_type,original_filename,size_bytes,sha256,source_url,file_data)
       values($1,$2,$3,$4,'local_disk',$5,$6,$7,$8,$9,$10,$11,null)
@@ -79,7 +80,7 @@ export async function storeDigitalHumanMedia(input: { userId: string; digitalHum
   return row.rows[0].id;
 }
 
-export async function storeDigitalHumanMediaStream(input: { userId: string; digitalHumanId?: string; videoJobId: string; kind: "presenter_master" | "output" | "cover"; body: ReadableStream<Uint8Array>; contentLength: number; contentType: string; fileName: string; sourceUrl?: string }) {
+export async function storeDigitalHumanMediaStream(input: { userId: string; digitalHumanId?: string; videoJobId: string; kind: "presenter_master" | "output" | "cover"; body: ReadableStream<Uint8Array>; contentLength: number; contentType: string; fileName: string; sourceUrl?: string; expectedSha256?:string }) {
   if (input.contentLength > MEDIA_MAX_BYTES) throw new MediaNodeError("媒体文件不能超过 500 MB",413);
   if (mediaNodeConfig()) return storeOnMediaNode(input,input.body,input.contentLength);
   const settings = await tryGetSystemSettings();

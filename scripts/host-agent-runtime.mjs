@@ -19,7 +19,6 @@ export function validateConfig(config) {
   if (!path.isAbsolute(config.workerRoot) || !path.isAbsolute(config.stateRoot)) throw new Error('Absolute runtime and state paths required');
   const expectedId = `xiaogu-${production ? 'prod' : 'dev'}-media`;
   if (config.agentId !== expectedId) throw new Error('Environment and agent identity mismatch');
-  if (config.uploadOrigin && (!production || !/^[a-z0-9][a-z0-9.-]*\.elb\.amazonaws\.com$/.test(config.uploadOrigin))) throw new Error('Invalid production media origin');
   if (config.drainLegacy && production) throw new Error('Legacy drain is only supported for development');
   if (!Array.isArray(config.envFiles) || !config.envFiles.length) throw new Error('Credential source required');
   if (production && !fs.existsSync(path.join(config.workerRoot, 'manifest.sha256'))) throw new Error('Production requires a prepared immutable worker');
@@ -126,7 +125,6 @@ async function main() {
     LOCAL_AGENT_ID: config.agentId,
     LOCAL_AGENT_CAPABILITIES: config.environment === 'production' ? 'ppt.generate,digital-human.video.produce,spoken.voice.clone' : 'heygen.video.generate,digital-human.video.produce,spoken.voice.clone',
     LOCAL_AGENT_VERSION: config.version,
-    LOCAL_AGENT_UPLOAD_ORIGIN: config.uploadOrigin || "",
     LOCAL_AGENT_READY_FILE: path.join(state, 'ready'),
     LOCAL_AGENT_HEYGEN_WORKDIR: path.join(state, 'heygen'),
     LOCAL_AGENT_PPT_WORKDIR: path.join(state, 'ppt'),
