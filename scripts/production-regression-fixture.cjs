@@ -25,7 +25,7 @@ const{createRequire}=require('node:module');const req=createRequire(process.env.
    await pool.query("insert into local_agent_tasks(id,task_type,owner_user_id,payload,status,agent_id,lease_token_hash,lease_expires_at,attempt_count) values($1,'digital-human.video.produce',$2,$3,'leased',$4,$5,now()+interval '5 minutes',1)",[taskId,id,{jobId},agentId,createHash('sha256').update(leaseToken).digest('hex')]);
    console.log(JSON.stringify({jobId,taskId,leaseToken,agentId}));
   }else if(action==='quality-evidence'){
-   const rows=await pool.query("select job.id,job.status,job.error_message,job.video_url is not null as has_video,job.request_json->'quality_review' as reviews,task.status as task_status,(select count(*)::int from usage_logs where metadata->>'digitalHumanVideoJobId'=job.id::text) as charges from digital_human_video_jobs job join local_agent_tasks task on task.payload->>'jobId'=job.id::text where job.user_id=$1",[id]);
+   const rows=await pool.query("select job.id,job.status,job.error_message,job.video_url is not null as has_video,job.request_json->'quality_review' as reviews,job.request_json->'delivery_notes' as delivery_notes,job.request_json->'quality_passed' as quality_passed,task.status as task_status,(select count(*)::int from usage_logs where metadata->>'digitalHumanVideoJobId'=job.id::text) as charges from digital_human_video_jobs job join local_agent_tasks task on task.payload->>'jobId'=job.id::text where job.user_id=$1",[id]);
    console.log(JSON.stringify({jobs:rows.rows}));
   }else if(action==='task-evidence'){
    const tasks=await pool.query("select id,status,task_type,result,attempt_count from local_agent_tasks where owner_user_id=$1 order by created_at desc",[id]);console.log(JSON.stringify({tasks:tasks.rows}));

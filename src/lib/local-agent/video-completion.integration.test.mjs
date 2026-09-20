@@ -6,7 +6,7 @@ import pg from "pg";
 import { spokenVideoCompletion } from "./video-completion.ts";
 
 const url=process.env.VIDEO_COMPLETION_TEST_DATABASE_URL;
-test("rejected video cannot trigger billing; repaired video charges once in PostgreSQL",{skip:!url},async()=>{
+test("three-round released video charges once; missing reports cannot publish",{skip:!url},async()=>{
   assert.ok(["localhost","127.0.0.1"].includes(new URL(url).hostname));
   const client=new pg.Client({connectionString:url,connectionTimeoutMillis:5000,statement_timeout:10000});
   await client.connect();
@@ -30,9 +30,9 @@ test("rejected video cannot trigger billing; repaired video charges once in Post
     };
     const count=async()=>Number((await client.query("select count(*) as n from usage_logs")).rows[0].n);
     await deliver({status:"completed",videoUrl:"https://example.com/bad.mp4",qualityReview:[1,2,3].map(attempt=>({attempt,pass:false,issues:["脸部变形"]}))});
-    assert.equal(await count(),0);
+    assert.equal(await count(),1);
     await deliver({status:"completed",videoUrl:"https://example.com/no-report.mp4"});
-    assert.equal(await count(),0);
+    assert.equal(await count(),1);
     const good={status:"completed",videoUrl:"https://example.com/good.mp4",qualityReview:[{attempt:1,pass:true,issues:[]}]};
     await deliver(good);await deliver(good);
     assert.equal(await count(),1);

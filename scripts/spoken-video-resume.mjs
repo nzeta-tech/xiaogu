@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import {measureVideoStage} from "./spoken-video-performance.mjs";
 
 const TTL = 24 * 60 * 60 * 1000;
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -13,11 +14,11 @@ export function videoResumeCache(root, scope) {
       try {
         const saved = JSON.parse(await readFile(file, "utf8"));
         if (saved.version === 1 && Number.isFinite(saved.savedAt) &&
-            Date.now() >= saved.savedAt && Date.now() - saved.savedAt < TTL && validate(saved.value)) return saved.value;
+            Date.now() >= saved.savedAt && Date.now() - saved.savedAt < TTL && validate(saved.value)) return measureVideoStage(`${stage}_cache_hit`,async()=>saved.value);
       } catch (error) {
         if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
       }
-      const value = await produce();
+      const value = await measureVideoStage(stage,produce);
       if (!validate(value)) throw new Error(`Invalid video checkpoint: ${stage}`);
       await mkdir(dir, { recursive: true, mode: 0o700 });
       const temporary = `${file}.${randomUUID()}.tmp`;

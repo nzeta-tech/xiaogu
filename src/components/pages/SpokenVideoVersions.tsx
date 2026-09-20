@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiPath } from "@/lib/client/url";
 import styles from "./spoken-video.module.css";
 export type SpokenJob = {id:string;title:string;status:string;progress:number;error_message:string|null;video_url:string|null;preview_image_url:string|null;created_at:string;request_json?:{workflow?:string;production_mode?:"basic"|"smart";stage?:string;root_job_id?:string;base_version_id?:string;revision_number?:number;selected_version_id?:string;edit_instructions?:string;postproduction_revision?:string;material_plan?:Array<{id:string;visual:string;researchReferences?:Array<{title:string;url:string;kind:string;excerpt?:string;rights?:string}>;material:{source:string;title:string;license:string;licenseUrl?:string;credit?:string;changes?:string}}>}};
@@ -13,8 +13,13 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
   const chosen=versions.find(v=>v.id===(selected||currentId))||root;
   const preview=chosen.video_url?chosen:versions.find(v=>v.id===chosen.request_json?.base_version_id&&v.video_url)||sorted.find(v=>v.status==="completed"&&v.video_url);
   const running=sorted.find(activeVideo);const anyCompleted=versions.some(v=>v.status==="completed");
-  const reviewRequest=chosen.request_json as (SpokenJob["request_json"] & {quality_review?:Array<{warnings?:string[]}>});
+  const [now,setNow]=useState(0);
+  const runningId=running?.id;
+  useEffect(()=>{if(!runningId)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[runningId]);
+  const waitingSeconds=running&&now?Math.max(0,Math.floor((now-new Date(running.created_at).getTime())/1000)):0;
+  const reviewRequest=chosen.request_json as (SpokenJob["request_json"] & {delivery_notes?:string[];quality_review?:Array<{pass?:boolean;issues?:string[];warnings?:string[]}>});
   const warnings=chosen.status==="completed"?reviewRequest?.quality_review?.at(-1)?.warnings||[]:[];
+  const deliveryNotes=chosen.status==="completed"?reviewRequest?.delivery_notes||[]:[];
   async function submit(){
     const text=instructions.trim();if(lock.current||running)return;if(text.length<4){setError("请具体描述希望怎么修改");textRef.current?.focus();return;}
     if(!preview)return;lock.current=true;setBusy(true);setError("");setNotice("");
@@ -24,7 +29,7 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
   }
   async function selectVersion(){if(!preview||busy)return;setBusy(true);setError("");try{const response=await fetch(apiPath(`/api/digital-human-videos/${root.id}/versions`),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({versionId:preview.id})});const data=await response.json();if(!response.ok)throw new Error(data.error||"选择失败");await onRefresh();setNotice(`已选择 V${versionNumber(preview)} 作为当前版本`);}catch(e){setError(e instanceof Error?e.message:"选择失败");}finally{setBusy(false);}}
   return <article className={styles.workCard}>
-    <header className={styles.workHeader}><div><h3>{root.title}</h3><p>{new Date(root.created_at).toLocaleDateString("zh-CN")} · {versions.length} 个版本{root.request_json?.production_mode?` · ${root.request_json.production_mode==="smart"?"智能版":"基础版"}`:""}</p></div><span className={`${styles.jobStatus} ${running?styles.working:anyCompleted?styles.success:styles.failed}`}>{running?"制作中":anyCompleted?"可预览":"未完成"}</span></header>
+    <header className={styles.workHeader}><div><h3>{root.title}</h3><p>{new Date(root.created_at).toLocaleDateString("zh-CN")} · {versions.length} 个版本{root.request_json?.production_mode?` · ${root.request_json.production_mode==="smart"?"智能版":"基础版"}`:""}</p></div><span className={`${styles.jobStatus} ${running?styles.working:anyCompleted?styles.success:styles.failed}`}>{running?"制作中":anyCompleted?"已发布":"未完成"}</span></header>
     <div className={styles.workBody}><div className={styles.previewPane}>
       {preview?.video_url?<video key={preview.id+preview.video_url} controls playsInline preload="metadata" poster={preview.preview_image_url||undefined} src={preview.video_url} aria-label={`${root.title} V${versionNumber(preview)}`}/>:<div className={styles.videoPlaceholder}><span>▷</span><p>{running?"你的作品正在制作中":"暂时没有可播放的视频"}</p><small>{running?"完成后即可预览和继续修改":"可以重新制作一条视频"}</small></div>}
       {preview?<div className={styles.previewActions}><span>正在预览 V{versionNumber(preview)}{preview.id===currentId?" · 当前版本":""}</span><a href={apiPath(`/api/digital-human-videos/${preview.id}/media?download=1`)}>下载此版本 ↓</a></div>:null}
@@ -32,10 +37,11 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
     </div><div className={styles.versionPane}>
       <div className={styles.versionHeading}><h4>作品版本</h4><span>旧版始终保留</span></div>
       <div className={styles.versionList} role="group" aria-label={`${root.title}的版本`}>
-        {sorted.map(v=><button key={v.id} type="button" className={`${styles.versionOption} ${chosen.id===v.id?styles.chosenVersion:""}`} aria-pressed={chosen.id===v.id} onClick={()=>{setSelected(v.id);setError("");setNotice("");}}><span><strong>V{versionNumber(v)}{v.id===root.id?" · 初版":""}</strong><small>{v.id===currentId?"当前版本":activeVideo(v)?"制作中":v.status==="failed"?"未完成":"可预览"}</small></span><p>{v.request_json?.edit_instructions||"首次生成的完整视频"}</p></button>)}
+        {sorted.map(v=><button key={v.id} type="button" className={`${styles.versionOption} ${chosen.id===v.id?styles.chosenVersion:""}`} aria-pressed={chosen.id===v.id} onClick={()=>{setSelected(v.id);setError("");setNotice("");}}><span><strong>V{versionNumber(v)}{v.id===root.id?" · 初版":""}</strong><small>{v.id===currentId?"当前版本":activeVideo(v)?"制作中":v.status==="failed"?"未完成":"已发布"}</small></span><p>{v.request_json?.edit_instructions||"首次生成的完整视频"}</p></button>)}
       </div>
-      {running?<div className={styles.revisionProgress} role="status"><strong>{stageLabels[running.request_json?.stage||""]||"正在制作新版本"}</strong><div className={styles.progressRow}><progress aria-label="修改进度" value={running.progress||0} max={100}/><span>{running.progress||0}%</span></div><p>{preview?"当前播放的是已有版本，制作完成后可切换查看。":"你可以离开此页面，稍后回来查看。"}</p></div>:null}
+      {running?<div className={styles.revisionProgress} role="status"><strong>{stageLabels[running.request_json?.stage||""]||"正在制作新版本"}</strong><div className={styles.progressRow}><progress aria-label="修改进度" value={running.progress||0} max={100}/><span>{running.progress||0}%</span></div><p>已等待 {Math.floor(waitingSeconds/60)} 分 {waitingSeconds%60} 秒。{preview?"当前播放的是已有版本，制作完成后可切换查看。":"你可以离开此页面，稍后回来查看。"}</p></div>:null}
       {chosen.status==="failed"?<div className={styles.revisionFailure} role="alert"><strong>这个版本未能完成</strong><p>{/^(仅支持|成片质检未通过|Codex 质检未通过)/.test(chosen.error_message||"")?chosen.error_message:preview?"已有成片已保留。请调整修改要求后重试，或稍后再试。":"生成未完成，请稍后重试。"}</p>{preview?<button type="button" onClick={()=>{setInstructions(chosen.request_json?.edit_instructions||"");setEditing(true);textRef.current?.focus();}}>重新修改</button>:null}</div>:null}
+      {deliveryNotes.length?<div className={styles.revisionFailure} role="status"><strong>已发布 · 质检仍有待改进项</strong><p>已完成三轮检查，视频可播放和下载。以下问题尚未通过质检：</p>{deliveryNotes.map((note,index)=><p key={index}>{note}</p>)}</div>:null}
       {warnings.length?<details className={styles.sourceDetails}><summary>画面优化建议（不影响交付）</summary>{warnings.map((warning,index)=><p key={index}>{warning}</p>)}</details>:null}
       {error?<p className={styles.error} role="alert">{error}</p>:null}{notice?<p className={styles.notice} role="status">{notice}</p>:null}
       {preview?<><div className={styles.versionActions}><button type="button" disabled={busy||Boolean(running)||!available} onClick={()=>{setEditing(!editing);setError("");}}>调整这个版本</button>{preview.id!==currentId?<button type="button" disabled={busy} onClick={()=>void selectVersion()}>设为当前版本</button>:null}</div>
