@@ -341,6 +341,12 @@ export function knowledgeCardSpec(points,title,index,style=""){
   if(/上涨预期弱|预期转弱|弱化上行箭头/.test(`${joined} ${direction}`)&&!/居住价值|地段价值/.test(`${joined} ${direction}`))return {kind:"expectationWeakening",note:"从确定上行，转向波动与分化"};
   if(/居住价值|地段价值|必涨|房价预期|上涨预期/.test(`${joined} ${direction}`))return {kind:"houseExpectation",note:"价值仍在，上涨确定性减弱"};
   if(/去杠杆|资产负债表|先扩大资产|守住现金流/.test(`${joined} ${direction}`))return {kind:"balanceShift",note:"家庭资产负债表进入新阶段"};
+  const diagramNodes=points.flatMap(point=>point.split(/(?<=[，；：。])/u).map(value=>value.trim()).filter(value=>value.length>=2)).slice(0,4);
+  const nodes=diagramNodes.length>=2?diagramNodes:points.slice(0,4);
+  if(/时间线|瀑布|阶段|依次/.test(style))return {kind:"timelineDiagram",nodes};
+  if(/对比|对照|并列|条形|左右/.test(style))return {kind:"comparisonDiagram",nodes};
+  if(/公式|等式|计算|乘|减号|H\s*[+＋]|加点/.test(style))return {kind:"formulaDiagram",nodes};
+  if(/流程|箭头|资金流|现金流|回流|递进|因果|关系图|三步|阶梯|连接/.test(style))return {kind:"flowDiagram",nodes};
   const values=points.map(point=>point.match(/\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿|%|％)/)?.[0]||"").filter(Boolean);
   if(values.length>=2&&new Set(values).size>=2){
     const metrics=points.flatMap(point=>{const value=point.match(/\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿|%|％)/)?.[0];return value?[{label:point.replace(value,"").replace(/[，。；：]/g," ").trim().slice(0,22)||"关键数据",value}]:[];}).slice(0,2);

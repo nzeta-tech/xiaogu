@@ -87,6 +87,10 @@ test("smart financial scenes become original explanatory cards with legible data
 });
 
 test("quality-card directions produce distinct relationship diagrams instead of repeated text lists",()=>{
+  assert.equal(knowledgeCardSpec(["已缴保费，","抵押给银行，","获得贷款。"],"保单抵押",0,"三步现金流箭头图").kind,"flowDiagram");
+  assert.equal(knowledgeCardSpec(["退保回款，","偿还本金，","净落袋。"],"第五年",0,"时间线瀑布图").kind,"timelineDiagram");
+  assert.equal(knowledgeCardSpec(["中银P值，","汇丰P值。"],"银行利率",0,"横向并列对比条形图").kind,"comparisonDiagram");
+  assert.equal(knowledgeCardSpec(["借款本金，","年利率，","一年利息。"],"利息测算",0,"乘法等式公式卡").kind,"formulaDiagram");
   assert.equal(knowledgeCardSpec(["新增贷款只有600亿，但M2还在增长。"],"两个口径",0,"双轨走势").kind,"moneyDivergence");
   assert.equal(knowledgeCardSpec(["居民贷款前8个月减少了1.03万亿。","家庭主动还贷。"],"家庭资金流",1,"储蓄池与负债收缩").kind,"debtFlow");
   assert.equal(knowledgeCardSpec(["这个判断只对了一半。"],"别急着下结论",2,"贷款下降不等于没钱").kind,"halfTruth");
