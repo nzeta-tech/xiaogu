@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
+import { compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
 
 test("advisory-only review delivers once without regenerating artwork",async()=>{
   let renders=0;
@@ -113,6 +113,39 @@ test("valid planning output survives CLI timeout without a second model call",as
       throw Object.assign(new Error("timeout"),{killed:true,signal:"SIGTERM"});
     });
     assert.equal(calls,1);assert.ok(result.length);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("valid recut plan survives a nonzero Codex exit without a second model call",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-recut-plan-"));
+  try{
+    let calls=0;
+    const input={aspectRatio:"9:16",options:{subtitleFontSize:12},materialPlan:[{id:"s1",text:"家里有没有足够现金？",visual:"现金储备",query:"family cash reserve",material:{points:["家里有没有足够现金"]}}]};
+    const result=await planRecut(dir,input,async()=>{
+      calls++;
+      const saved=JSON.parse(await readFile(path.join(dir,"recut-input.json"),"utf8"));
+      await writeFile(path.join(dir,"recut-plan.json"),JSON.stringify({segments:saved.segments.map(segment=>({...segment,regenerate:true,forceCard:true,cardPoints:["家里有没有足够现金"]})),options:{subtitleFontSize:14}}));
+      throw new Error("Command failed after writing recut-plan.json");
+    });
+    assert.equal(calls,1);
+    assert.equal(result.segments[0].regenerate,true);
+    assert.equal(result.options.subtitleFontSize,14);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("recut planning retries when Codex exits before producing a plan",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-recut-retry-"));
+  try{
+    let calls=0;
+    const input={aspectRatio:"9:16",options:{},materialPlan:[{id:"s1",text:"先看现金流。",visual:"现金流",query:"cash flow",material:{points:["先看现金流"]}}]};
+    const result=await planRecut(dir,input,async()=>{
+      calls++;
+      if(calls===1)throw new Error("Command failed before output");
+      const saved=JSON.parse(await readFile(path.join(dir,"recut-input.json"),"utf8"));
+      await writeFile(path.join(dir,"recut-plan.json"),JSON.stringify({segments:saved.segments.map(segment=>({...segment,regenerate:false,forceCard:true,cardPoints:["先看现金流"]})),options:{}}));
+    });
+    assert.equal(calls,2);
+    assert.equal(result.segments[0].forceCard,true);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
