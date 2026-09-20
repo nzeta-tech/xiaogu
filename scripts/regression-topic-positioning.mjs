@@ -1,6 +1,7 @@
 // Live prompt replay using synthetic persona/cases. No database reads or writes.
 // Run: node --env-file=.env --env-file-if-exists=.env.local --experimental-strip-types scripts/regression-topic-positioning.mjs
 import assert from "node:assert/strict";
+import { readStructuredModelStream } from "../src/lib/agent/structured-model-stream.ts";
 import { buildTrafficTopicFastDecisionPrompt, parseTrafficTopicArena } from "../src/lib/creation/traffic-topic-arena.ts";
 import { guardPositioningTopic, positioningConstraints, selectTopicStories } from "../src/lib/creation/traffic-topic-positioning.ts";
 import { buildDomainPrompt, inferDomainContext } from "../src/lib/domain/context.ts";
@@ -29,14 +30,11 @@ async function run([name,source]) {
     const system=["你是内容编辑，严格返回JSON。",buildDomainPrompt(inferDomainContext(source)),mode==="topic-positioning"?"合成测试创作者定位：有育儿经历的家庭财务顾问，服务中产家庭，擅长现金流、家庭风险与长期规划，不催单。没有其他可用个人经历。":""].join("\n");
     const response=await fetch(`${process.env.MODEL_API_BASE.replace(/\/$/,"")}/chat/completions`,{
       method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${process.env.MODEL_API_KEY}`},
-      body:JSON.stringify({model:resolveConfiguredTextModel(),messages:[{role:"system",content:system},{role:"user",content:prompt}],temperature:0.6,response_format:{type:"json_object"}}),
+      body:JSON.stringify({model:resolveConfiguredTextModel(),messages:[{role:"system",content:system},{role:"user",content:prompt}],temperature:0.6,stream:true,reasoning_effort:"low",response_format:{type:"json_object"}}),
       signal:AbortSignal.timeout(timeoutSeconds*1000),
     });
     if(!response.ok)throw new Error(`Model HTTP ${response.status}`);
-    const value=await response.json();
-    const content=value.choices?.[0]?.message?.content;
-    if(typeof content!=="string")throw new Error("Missing model text");
-    return content;
+    return readStructuredModelStream(response);
   };
   try {
     const stories=await selectTopicStories(source,memories,model);

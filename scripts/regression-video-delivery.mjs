@@ -37,7 +37,7 @@ try{
       const {chromium}=createRequire(import.meta.url)('playwright-core');
       const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
       try{
-        const context=await browser.newContext();await context.addCookies([{name:'ica_session',value:f.cookie.slice('ica_session='.length),url:base}]);
+        const context=await browser.newContext();context.setDefaultTimeout(30000);await context.addCookies([{name:'ica_session',value:f.cookie.slice('ica_session='.length),url:base}]);
         const page=await context.newPage();await page.goto(base+'/apps/digital-human-video');
         await page.getByRole('button',{name:/我的作品/}).click();
         const target=()=>third?page.getByText('已发布 · 质检仍有待改进项').last():mode==='advisory'?page.getByText('画面优化建议（不影响交付）'):page.getByRole('alert').filter({hasText:'字幕遮挡'});
