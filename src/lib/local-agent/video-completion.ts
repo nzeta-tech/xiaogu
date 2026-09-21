@@ -2,7 +2,7 @@ type Review = { attempt: number; pass: boolean; issues: string[]; warnings?: str
 
 export function spokenVideoCompletion(result: Record<string, unknown>) {
   const raw = Array.isArray(result.qualityReview) ? result.qualityReview : [];
-  const valid = raw.length > 0 && raw.length <= 3 && raw.every((value, index) =>
+  const valid = raw.length > 0 && raw.length <= 2 && raw.every((value, index) =>
     value && typeof value === "object" && typeof value.pass === "boolean" &&
     value.attempt === index + 1 &&
     Array.isArray(value.issues) && value.issues.every((issue: unknown) => typeof issue === "string"));
@@ -13,10 +13,10 @@ export function spokenVideoCompletion(result: Record<string, unknown>) {
   const final = reviews.at(-1);
   const qualityPassed = valid && final?.pass === true && final.issues.length === 0 && result.acceptedWithNotes !== true &&
     (result.deliveryNotes === undefined || (Array.isArray(result.deliveryNotes) && result.deliveryNotes.length === 0));
-  const releasedWithIssues = valid && reviews.length === 3 && !qualityPassed;
+  const releasedWithIssues = valid && reviews.length === 2 && !qualityPassed;
   const deliveryNotes = releasedWithIssues ? [...new Set([...(final?.issues || []),
     ...(Array.isArray(result.deliveryNotes) ? result.deliveryNotes.filter((v): v is string => typeof v === "string") : [])])].slice(0, 8).map(v => v.slice(0, 500)) : [];
-  if(releasedWithIssues && !deliveryNotes.length)deliveryNotes.push("三轮质检已完成，仍有未通过项目，请查看成片后决定是否继续调整。");
+  if(releasedWithIssues && !deliveryNotes.length)deliveryNotes.push("两轮质检已完成，仍有未通过项目，请查看成片后决定是否继续调整。");
   const completed = result.status === "completed" && typeof result.videoUrl === "string" &&
     result.videoUrl.trim().length > 0 && (qualityPassed || releasedWithIssues);
   const error = completed ? null : result.status !== "completed" && typeof result.error === "string" && result.error.trim()

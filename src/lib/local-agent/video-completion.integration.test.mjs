@@ -6,7 +6,7 @@ import pg from "pg";
 import { spokenVideoCompletion } from "./video-completion.ts";
 
 const url=process.env.VIDEO_COMPLETION_TEST_DATABASE_URL;
-test("three-round released video charges once; missing reports cannot publish",{skip:!url},async()=>{
+test("two-round released video charges once; missing reports cannot publish",{skip:!url},async()=>{
   assert.ok(["localhost","127.0.0.1"].includes(new URL(url).hostname));
   const client=new pg.Client({connectionString:url,connectionTimeoutMillis:5000,statement_timeout:10000});
   await client.connect();
@@ -29,7 +29,7 @@ test("three-round released video charges once; missing reports cannot publish",{
       await client.query("update digital_human_video_jobs set status=$2 where id=$1",[job,decision.completed?"completed":"failed"]);
     };
     const count=async()=>Number((await client.query("select count(*) as n from usage_logs")).rows[0].n);
-    await deliver({status:"completed",videoUrl:"https://example.com/bad.mp4",qualityReview:[1,2,3].map(attempt=>({attempt,pass:false,issues:["脸部变形"]}))});
+    await deliver({status:"completed",videoUrl:"https://example.com/bad.mp4",qualityReview:[1,2].map(attempt=>({attempt,pass:false,issues:["脸部变形"]}))});
     assert.equal(await count(),1);
     await deliver({status:"completed",videoUrl:"https://example.com/no-report.mp4"});
     assert.equal(await count(),1);

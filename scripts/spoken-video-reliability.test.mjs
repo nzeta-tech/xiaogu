@@ -34,11 +34,11 @@ test("repeated rejected stock escalates to an original scene and still requires 
       generateVisual:async()=>{generated++;return {source:"xiaogu-generated-visual",title:"资料分类",kind:"image"};},
     },{
       finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
-      review:async()=>({pass:++reviews===3&&finalPass,issues:reviews===3&&finalPass?[]:["s1画面无关"],searchQueries:{s1:["organizing document folders"]}}),
+      review:async()=>({pass:++reviews===2&&finalPass,issues:reviews===2&&finalPass?[]:["s1画面无关"],searchQueries:{s1:["organizing document folders"]}}),
     });
-    if(finalPass){const result=await work;assert.deepEqual(result.reviewHistory.map(r=>r.pass),[false,false,true]);assert.equal(result.materials[0].source,"xiaogu-generated-visual");}
-    else {const result=await work;assert.equal(result.acceptedWithNotes,true);assert.equal(result.reviewHistory.length,3);}
-    assert.equal(searches,1);assert.equal(generated,1);assert.equal(reviews,3);
+    if(finalPass){const result=await work;assert.deepEqual(result.reviewHistory.map(r=>r.pass),[false,true]);assert.equal(result.materials[0].source,"xiaogu-generated-visual");}
+    else {const result=await work;assert.equal(result.acceptedWithNotes,true);assert.equal(result.reviewHistory.length,2);}
+    assert.equal(searches,1);assert.equal(generated,1);assert.equal(reviews,2);
   }
 });
 
@@ -176,9 +176,9 @@ test("layout-only quality repairs reuse visuals and remain fullscreen in later r
   const material={kind:"image",file:"original.jpg",source:"fixture"};
   const result=await renderWithCodexReview({segments:[{id:"s1",text:"画面",intent:"scene",layout:"presenter-pip"}],materials:[material],initialOptions:{timelineMode:"semantic"},resolveMaterial:async()=>{throw Error("must not regenerate a layout-only repair");}},{
     finalize:async(_master,segments)=>{layouts.push(segments[0].layout);return {output:"test.mp4",durationSeconds:6};},check:async()=>{},sheet:async()=>"sheet.jpg",
-    review:async()=>{rounds++;return rounds===1?{pass:false,issues:["s1 人像PIP与字幕相叠"],layoutFixes:{s1:"fullscreen"}}:rounds===2?{pass:false,issues:["头像出镜不足"],subtitleMaxChars:12}:{pass:true,issues:[]};},
+    review:async()=>{rounds++;return rounds===1?{pass:false,issues:["s1 人像PIP与字幕相叠"],layoutFixes:{s1:"fullscreen"}}:{pass:true,issues:[]};},
   });
-  assert.deepEqual(layouts,["presenter-pip","fullscreen","fullscreen"]);assert.equal(result.materials[0],material);assert.equal(rounds,3);
+  assert.deepEqual(layouts,["presenter-pip","fullscreen"]);assert.equal(result.materials[0],material);assert.equal(rounds,2);
 });
 
 test("long financial timelines repair only the rejected beat and preserve locked narration",async()=>{
@@ -193,15 +193,15 @@ test("long financial timelines repair only the rejected beat and preserve locked
   for(let i=0;i<18;i++)if(i!==4)assert.equal(result.materials[i],materials[i]);
 });
 
-test("third review delivers with truthful notes including review-only",async()=>{
+test("second review delivers with truthful notes including review-only",async()=>{
   for(const reviewOnly of [false,true]){
     let reviews=0;
     const result=await renderWithCodexReview({segments:[],materials:[],initialOptions:{reviewOnly}},{
       finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
       review:async()=>({pass:false,issues:["字幕遮挡"],subtitleMaxChars:13-++reviews}),
     });
-    assert.equal(result.acceptedWithNotes,true);assert.equal(result.reviewHistory.length,3);
-    assert.equal(reviews,3);
+    assert.equal(result.acceptedWithNotes,true);assert.equal(result.reviewHistory.length,2);
+    assert.equal(reviews,2);
   }
 });
 

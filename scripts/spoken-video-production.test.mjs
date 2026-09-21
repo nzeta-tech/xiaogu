@@ -56,6 +56,14 @@ test("subtitle breaks preserve decimal numbers and avoid orphan sentence endings
   assert.ok(cues.every(cue => Array.from(cue.replace(/[，。！？；：,.!?;:]/g, "")).length !== 1));
 });
 
+test("subtitle breaks preserve core financial phrases", () => {
+  const input=`1\n00:00:00,000 --> 00:00:06,000\n居民去杠杆不等于全民躺平，家庭资产负债表要先守住现金流。\n`;
+  const output=compactSrt(input,11);
+  assert.doesNotMatch(output,/不\n\n\d+\n[^\n]+\n等于/);
+  assert.doesNotMatch(output,/资产\n\n\d+\n[^\n]+\n负债表/);
+  assert.doesNotMatch(output,/现金\n\n\d+\n[^\n]+\n流/);
+});
+
 test("visual cuts land after complete spoken thoughts without changing total duration", () => {
   const shots=[{start:0,length:8.7},{start:8.7,length:13.2},{start:21.9,length:8.1}];
   const srt="1\n00:00:05,000 --> 00:00:08,300\n要不要先还掉？\n\n2\n00:00:08,300 --> 00:00:09,500\n你看8月的\n\n3\n00:00:19,900 --> 00:00:21,600\n减少了1.03万亿，\n\n4\n00:00:21,600 --> 00:00:22,400\n这个判断只对了一半。\n";

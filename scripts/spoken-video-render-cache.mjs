@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from "node:crypto";
 import {createReadStream} from "node:fs";
-import {stat,rename,rm} from "node:fs/promises";
+import {mkdir,stat,rename,rm} from "node:fs/promises";
 import path from "node:path";
 
 export async function mediaFingerprint(file){
@@ -11,6 +11,7 @@ export async function mediaFingerprint(file){
 
 // Job-local, content-addressed clips are published only after a successful render.
 export async function cachedVideoShot(dir,identity,render){
+  await mkdir(dir,{recursive:true,mode:0o700});
   const key=createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   const file=path.join(dir,`shot-${key}.mp4`);
   try{if((await stat(file)).size>0)return file;}catch(error){if(error.code!=="ENOENT")throw error;}
