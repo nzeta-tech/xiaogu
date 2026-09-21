@@ -54,5 +54,15 @@ try{
       }finally{await browser.close();}
     }
   }
+  for(const mode of ['passed','third-failed','failed-quality']){
+    const task=fixture('quality-version-create',f.id);
+    const successful=mode!=='failed-quality';
+    const qualityReview=mode==='third-failed'?[1,2,3].map(attempt=>({attempt,pass:false,issues:['字幕遮挡']})):[{attempt:1,pass:successful,issues:successful?[]:['字幕遮挡']}];
+    const response=await fetch(base+`/api/internal/local-agent/tasks/${task.taskId}/complete`,{method:'POST',headers:{authorization:'Bearer '+f.agentToken,'content-type':'application/json'},body:JSON.stringify({...task,status:'completed',videoUrl:'https://example.invalid/revision.mp4',qualityReview}),signal:AbortSignal.timeout(30000)});
+    check(response.ok,`${mode} revision completion acknowledged`);
+    const rows=fixture('quality-evidence',f.id).jobs;
+    const root=rows.find(job=>job.id===task.rootJobId);
+    check(root.selected_version_id===(successful?task.jobId:null),`${mode} only delivered version becomes current`);
+  }
   console.log(JSON.stringify({passed:true,production,assertions:count,paidProviderCalls:0}));
 }finally{fixture('cleanup',f.id);}

@@ -45,6 +45,9 @@ test("existing transaction, charging condition and UI are wired to the guarded s
   assert.match(repo,/const \{completed,error,reviews,deliveryNotes,qualityPassed\}=spokenVideoCompletion\(resultPayload\)/);
   assert.match(repo,/quality_review:reviews/);
   assert.match(repo,/if\(!completed\)await client.query\("update local_agent_tasks set status='failed'/);
+  assert.match(repo,/if \(completed\) await selectCompletedSpokenVideoAsCurrent\(client, jobId\)/);
+  assert.match(repo,/delivered\.status='completed'/);
+  assert.match(repo,/delivered\.video_url is not null/);
   assert.match(billing,/if new.status='completed' and new.quota_cost/);
   assert.ok(ui.includes("成片质检未通过|Codex 质检未通过"));
   assert.ok(ui.includes("?chosen.error_message:"));
