@@ -204,3 +204,22 @@ test("third review delivers with truthful notes including review-only",async()=>
     assert.equal(reviews,3);
   }
 });
+
+test("material planning bounds each batch and retries only its failed batch",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-plan-batches-"));
+  try{
+    const script=Array.from({length:8},(_,i)=>`第${i+1}部分的完整说明：需要保留所有限制条件和数值，不能因为简化画面而删除这些内容。`).join("");
+    const calls=[],progress=[];let failed=false;const expected=[];
+    const planned=await planMaterials(dir,script,null,async(bin,args,options)=>{
+      const input=JSON.parse(await readFile(path.join(options.cwd,"research-input.json"),"utf8"));
+      assert(input.segments.length<=2);assert.equal(input.script,script);calls.push(input.segments.map(s=>s.id).join(","));
+      if(calls.length===2&&!failed){failed=true;throw Object.assign(new Error("timeout"),{killed:true,signal:"SIGTERM"});}
+      for(const segment of input.segments)expected.push(segment.id);
+      await writeFile(path.join(options.cwd,"material-plan.json"),JSON.stringify({segments:input.segments.map(s=>({...s,visual:"完整条件",query:"family planning"}))}));
+    },async(batch,total)=>progress.push([batch,total]));
+    assert(calls.length>2);assert.equal(calls[1],calls[2]);assert.equal(calls.filter(c=>c===calls[0]).length,1);
+    assert.deepEqual(planned.map(s=>s.id),expected);assert.equal(planned.map(s=>s.text).join(""),script);
+    assert.deepEqual(JSON.parse(await readFile(path.join(dir,"material-plan.json"),"utf8")).segments,planned);
+    assert.equal(progress.length,calls.length-1);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});

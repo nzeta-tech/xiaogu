@@ -88,10 +88,24 @@ function roughSegments(script) {
   return Array.from({length:Math.ceil(all.length/groupSize)},(_,index)=>all.slice(index*groupSize,(index+1)*groupSize).join("")).map((text,index)=>({id:`s${index+1}`,text,query:/(养老|退休)/.test(text)?"senior retirement family":/(教育|孩子|学校)/.test(text)?"family education children":/(房|住宅|居住)/.test(text)?"family home house":"family financial planning",visual:text.slice(0,16)}));
 }
 
-export async function planMaterials(dir,script,template,runner=run) {
-  const fallback=roughSegments(script);
+export async function planMaterials(dir,script,template,runner=run,onProgress=async()=>{}) {
+  const segments=roughSegments(script),planned=[];
+  const batchCount=Math.ceil(segments.length/2);
+  for(let start=0;start<segments.length;start+=2){
+    const batchIndex=start/2+1;
+    await onProgress(batchIndex,batchCount);
+    const batchDir=batchCount===1?dir:path.join(dir,`material-batch-${batchIndex}`);
+    await mkdir(batchDir,{recursive:true});
+    try{planned.push(...await planMaterialBatch(batchDir,script,template,runner,segments.slice(start,start+2)));}
+    catch(error){throw new Error(`Codex 素材规划失败（第 ${batchIndex}/${batchCount} 批）：${error.message}`,{cause:error});}
+  }
+  await writeFile(path.join(dir,"material-plan.json"),JSON.stringify({segments:planned},null,2));
+  return planned;
+}
+
+async function planMaterialBatch(dir,script,template,runner,fallback) {
   await writeFile(path.join(dir,"research-input.json"),JSON.stringify({script,segments:fallback,template},null,2));
-  const prompt="Read research-input.json. Keep the Chinese spoken script unchanged. Use the selected template's structure as pacing and scene reference when present. Create material-plan.json as JSON with a segments array. Each segment must have id, text, query (2-5 concrete English visual search terms for relevant licensed photos or video), and visual (a concise audience-facing Chinese title of at most 18 characters; never mention 口播, 知识卡, 分镜, 原文, or production workflow in the title). Also provide cardPoints: 2-3 verbatim excerpts from that segment, each 4-72 Chinese characters, preserving complete conditions, negation, comparisons and numbers. Additionally provide beats: 1-4 ordered visual beats whose text values are exact, contiguous excerpts that together reproduce the segment text without rewriting or reordering. Each beat has text, intent (anchor|evidence|explain|scene|emotion), layout (presenter|presenter-pip|fullscreen), query (concrete English media search terms), and visual. Use anchor for presenter-led claims and transitions, evidence for data/documents/news, explain for mechanisms, scene for authentic real-life footage, emotion for human reactions. Prefer presenter-pip for evidence/explain and fullscreen for scene/emotion. Order cardPoints by teaching priority: the first must be the one takeaway a viewer should remember; the others support or explain it. The title must accurately cover those exact cardPoints. Keep the same segment ids and text. Do not invent facts or numbers. Output only the file.";
+  const prompt="Read research-input.json. Plan ONLY the provided segments array (at most two segments); the script is context only. Do not add other segments. Keep the Chinese spoken script unchanged. Use the selected template's structure as pacing and scene reference when present. Create material-plan.json as JSON with a segments array. Each segment must have id, text, query (2-5 concrete English visual search terms for relevant licensed photos or video), and visual (a concise audience-facing Chinese title of at most 18 characters; never mention 口播, 知识卡, 分镜, 原文, or production workflow in the title). Also provide cardPoints: 2-3 verbatim excerpts from that segment, each 4-72 Chinese characters, preserving complete conditions, negation, comparisons and numbers. Additionally provide beats: 1-4 ordered visual beats whose text values are exact, contiguous excerpts that together reproduce the segment text without rewriting or reordering. Each beat has text, intent (anchor|evidence|explain|scene|emotion), layout (presenter|presenter-pip|fullscreen), query (concrete English media search terms), and visual. Use anchor for presenter-led claims and transitions, evidence for data/documents/news, explain for mechanisms, scene for authentic real-life footage, emotion for human reactions. Prefer presenter-pip for evidence/explain and fullscreen for scene/emotion. Order cardPoints by teaching priority: the first must be the one takeaway a viewer should remember; the others support or explain it. The title must accurately cover those exact cardPoints. Keep the same segment ids and text. Do not invent facts or numbers. Output only the file.";
   try {
     const env={...process.env};delete env.HEYGEN_API_KEY;
     const output=path.join(dir,"material-plan.json");
@@ -111,7 +125,11 @@ export async function planMaterials(dir,script,template,runner=run) {
       }
       return readPlan();
     });
-  } catch(error) { throw new Error(`Codex 素材规划失败：${error instanceof Error?error.message:String(error)}`); }
+  } catch(error) {
+    const detail=error?.killed&&error?.signal==="SIGTERM"?"单批规划超过 180 秒，两次尝试均未得到有效方案":error instanceof VideoStageOutputError||error instanceof SyntaxError?error.message:`规划工具执行失败${Number.isInteger(error?.code)?`（退出码 ${error.code}）`:""}`;
+    console.error("[spoken-plan] batch failed",JSON.stringify({code:error?.code,signal:error?.signal,killed:error?.killed,outputError:error instanceof VideoStageOutputError}));
+    throw new Error(detail,{cause:error});
+  }
 }
 
 export function reusableLicense(value){
@@ -854,7 +872,7 @@ export async function executeSpokenVideoRecut(task,leaseToken,ctx){
     const productionMode=input.productionMode==="smart"?"smart":"basic";
     // Failed final QA may leave only the archived master. Rebuild visuals, never narration.
     if(!Array.isArray(input.materialPlan)||!input.materialPlan.length){
-      const planned=await planMaterials(dir,input.script,null);
+      const planned=await planMaterials(dir,input.script,null,run,(batch,total)=>report(ctx,task,leaseToken,jobId,"planning_revision",4,`正在规划画面素材（${batch}/${total} 批）`));
       input.materialPlan=(productionMode==="smart"?smartTimelineSegments(planned):planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
     }
     const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
