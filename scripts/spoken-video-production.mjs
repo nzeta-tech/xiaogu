@@ -1,3 +1,4 @@
+import {downloadPresenterMaster} from "./spoken-video-master-download.mjs";
 import {uploadVideoParts} from "./spoken-video-multipart-upload.mjs";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
@@ -864,7 +865,9 @@ export async function executeSpokenVideoRecut(task,leaseToken,ctx){
     const needsSmartUpgrade=productionMode==="smart"&&(input.baseProductionMode!=="smart"||plan.segments.some(segment=>!segment.intent||!segment.layout));
     if(needsSmartUpgrade)plan.segments=smartTimelineSegments(plan.segments).map(segment=>({...segment,regenerate:true}));
     // Revisions can only download the immutable server-owned master. No HeyGen creation path exists here.
-    const master=path.join(dir,"presenter-master.mp4");await fetchInput(ctx,jobId,"master",master);
+    await report(ctx,task,leaseToken,jobId,"downloading_master",12,"正在下载并校验原口播母片，断开后会从已下载位置恢复");
+    const master=path.join(dir,"presenter-master.mp4");
+    await downloadPresenterMaster({url:`${ctx.remoteBase}/api/internal/local-agent/digital-human/input?${new URLSearchParams({jobId,kind:"master"})}`,headers:{authorization:`Bearer ${ctx.token}`},identity:input.master,cacheDir:path.join(process.env.LOCAL_AGENT_VIDEO_WORKDIR||os.tmpdir(),"master-cache"),file:master});
     const subtitleFile=path.join(dir,"original.srt");let subtitleUrl="";
     if(safe(input.subtitleSrt))await writeFile(subtitleFile,input.subtitleSrt);
     else if(safe(input.providerJobId)){const remote=await heygenPoll(input.providerJobId);subtitleUrl=remote.subtitleUrl||"";}
