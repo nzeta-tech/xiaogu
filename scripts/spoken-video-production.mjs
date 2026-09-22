@@ -902,11 +902,12 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
 
 async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(!ctx.videoCacheScope)return uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options);
-  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:4,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
+  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:5,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
   if(segment.visualTreatment==="official-source")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
+  if(segment.visualTreatment==="motion-card")return createKnowledgeCard({...segment,expression:undefined},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle});
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
   const generateSceneFallback=segment.visualTreatment==="generated-scene"||["scene","emotion"].includes(segment.intent);
   return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:segment.cardStyle||options.cardStyle});
@@ -933,7 +934,7 @@ export function requestsFullDirectorRedesign(value){
 }
 
 export function prepareFullDirectorRedesign(segments){
-  return segments.map(segment=>({...segment,regenerate:true,visualTreatment:undefined,layout:undefined,narrativeRole:undefined,transition:"cut",directorNote:"",evidenceIds:[],cardStyle:""}));
+  return segments.map(segment=>({...segment,regenerate:true,expression:undefined,visualTreatment:undefined,layout:undefined,narrativeRole:undefined,intent:undefined,transition:"cut",directorNote:"",evidenceIds:[],cardStyle:""}));
 }
 
 export async function planRecut(dir,input,runner=run){

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildEvidencePacks, enforceDirectorPlan, fallbackDirectorPlan, groundedOfficialSources, officialSource } from "./spoken-video-director.mjs";
+import { buildEvidencePacks, enforceDirectorPlan, fallbackDirectorPlan, focusedEvidenceExcerpt, groundedOfficialSources, officialSource } from "./spoken-video-director.mjs";
 
 test("director evidence packs bind official sources to the exact locked segment",()=>{
   const segments=[{id:"s1-b1",text:"根据监管文件，等待期为90天。",intent:"evidence",visual:"等待期"}];
@@ -39,9 +39,17 @@ test("official evidence must contain the exact numeric claim",()=>{
   assert.equal(fallbackDirectorPlan([segment],[mismatch])[0].visualTreatment,"motion-card");
 });
 
+test("one official source may ground one fact without repeating every number in the beat",()=>{
+  const segment={id:"s1",text:"租金回报率2.2%，空置率21.3%。",intent:"evidence"};
+  const pack=buildEvidencePacks([segment],[[{title:"报告",url:"https://stats.gov.cn/report",excerpt:"50城住宅平均租金回报率约2.2%。"}]])[0];
+  assert.equal(groundedOfficialSources(pack).length,1);
+  assert.equal(focusedEvidenceExcerpt(segment.text,"背景说明。50城住宅平均租金回报率约2.2%。其他内容。"),"50城住宅平均租金回报率约2.2%。");
+});
+
 test("dense cards are fullscreen and a presenter beat breaks three repeated cards",()=>{
   const plan=enforceDirectorPlan([0,1,2].map(index=>({id:`s${index}`,visualTreatment:"motion-card",layout:"presenter-pip",narrativeRole:"explain"})),[0,1,2].map(index=>({claim:`观点${index}`,sources:[]})));
   assert.equal(plan[0].layout,"fullscreen");
+  assert.equal(plan[0].intent,"explain");
   assert.equal(plan[1].visualTreatment,"presenter");
   assert.equal(plan[1].layout,"presenter");
   assert.equal(plan[2].layout,"fullscreen");

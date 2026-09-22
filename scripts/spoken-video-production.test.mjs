@@ -148,8 +148,8 @@ test('recut plan refuses any narration rewrite or segment reorder', async()=>{
 test('a full visual redo clears inherited director choices',()=>{
  assert.equal(requestsFullDirectorRedesign('完整重做全部分镜，达到专业导演级'),true);
  assert.equal(requestsFullDirectorRedesign('只把字幕调大一点'),false);
- const [segment]=prepareFullDirectorRedesign([{id:'s1',text:'观点',visualTreatment:'motion-card',layout:'presenter-pip',narrativeRole:'explain',cardStyle:'旧模板'}]);
- assert.equal(segment.regenerate,true);assert.equal(segment.visualTreatment,undefined);assert.equal(segment.layout,undefined);assert.equal(segment.narrativeRole,undefined);assert.equal(segment.cardStyle,'');
+ const [segment]=prepareFullDirectorRedesign([{id:'s1',text:'观点',expression:{kind:'keypoints'},intent:'explain',visualTreatment:'motion-card',layout:'presenter-pip',narrativeRole:'explain',cardStyle:'旧模板'}]);
+ assert.equal(segment.regenerate,true);assert.equal(segment.expression,undefined);assert.equal(segment.intent,undefined);assert.equal(segment.visualTreatment,undefined);assert.equal(segment.layout,undefined);assert.equal(segment.narrativeRole,undefined);assert.equal(segment.cardStyle,'');
 });
 
 test('recut dispatch never requires a voice or invokes HeyGen creation',async()=>{

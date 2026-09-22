@@ -18,7 +18,7 @@ test("financial explanation and evidence do not obscure diagrams with a presente
   for(const intent of ["evidence","explain"])assert.equal(safeSemanticLayout({intent,layout:"presenter-pip"},{kind:"image"}),"fullscreen");
   assert.equal(safeSemanticLayout({intent:"explain"},{kind:"presenter"}),"presenter");
   assert.equal(safeSemanticLayout({intent:"scene",layout:"presenter-pip"},{kind:"image"}),"presenter-pip");
-  assert.equal(safeSemanticLayout({intent:"explain",layout:"fullscreen"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:cause:verbatim-partition:pip-safe"}),"presenter-pip");
+  assert.equal(safeSemanticLayout({intent:"explain",layout:"fullscreen",visualTreatment:"motion-card"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:cause:verbatim-partition:pip-safe"}),"fullscreen");
   assert.equal(safeSemanticLayout({intent:"explain",layout:"presenter-pip"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:sequence:verbatim-partition:fullscreen"}),"fullscreen");
 });
 

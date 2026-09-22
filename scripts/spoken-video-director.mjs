@@ -37,7 +37,7 @@ export function groundedOfficialSources(evidencePack){
     if(!source.official||!["webpage","document"].includes(source.kind))return false;
     if(!claims.length)return true;
     const excerpt=String(source.excerpt||"").replaceAll("．",".").replaceAll("％","%").replace(/\s+/g,"");
-    return claims.every(claim=>excerpt.includes(claim));
+    return claims.some(claim=>excerpt.includes(claim));
   });
 }
 
@@ -90,7 +90,8 @@ export function enforceDirectorPlan(plan,evidencePacks){
       visualTreatment="motion-card";evidenceIds=[];
     }
     const dense=visualTreatment==="motion-card"||visualTreatment==="official-source";
-    return {...shot,visualTreatment,evidenceIds,layout:dense?"fullscreen":visualTreatment==="presenter"?"presenter":shot.layout,transition:"cut"};
+    const intent=visualTreatment==="presenter"?"anchor":visualTreatment==="official-source"?"evidence":visualTreatment==="motion-card"?"explain":visualTreatment==="generated-scene"?"scene":shot.intent;
+    return {...shot,visualTreatment,evidenceIds,intent,layout:dense?"fullscreen":visualTreatment==="presenter"?"presenter":shot.layout,transition:"cut"};
   });
   for(let index=2;index<result.length;index++){
     if(result.slice(index-2,index+1).every(shot=>shot.visualTreatment==="motion-card")){
@@ -148,16 +149,27 @@ function wrap(value,limit){
   if(row)rows.push(row);return rows;
 }
 
+export function focusedEvidenceExcerpt(claim,excerpt){
+  const value=text(excerpt),numbers=numericClaims(claim);
+  const sentences=value.split(/(?<=[。！？!?；;])|(?<=[.])\s+/u).map(item=>item.trim()).filter(Boolean);
+  const matched=sentences.filter(sentence=>{
+    const normalized=sentence.replaceAll("．",".").replaceAll("％","%").replace(/\s+/g,"");
+    return numbers.some(number=>normalized.includes(number));
+  });
+  return (matched.length?matched.slice(0,2).join(" "):sentences[0]||value).slice(0,260);
+}
+
 export async function createOfficialEvidenceCard(segment,evidencePack,dir,index,aspectRatio="9:16"){
   const source=evidencePack.sources.find(item=>segment.evidenceIds?.includes(item.id))||evidencePack.sources.find(item=>item.official)||evidencePack.sources[0];
   if(!source)throw new VideoStageOutputError(`${segment.id} 缺少可展示的官网证据`);
   const wide=aspectRatio==="16:9",width=wide?1920:1080,height=wide?1080:1920,pad=wide?120:76;
-  const quote=wrap(source.excerpt,wide?34:19).slice(0,wide?5:8);
+  const excerpt=focusedEvidenceExcerpt(segment.text,source.excerpt);
+  const quote=wrap(excerpt,wide?34:19).slice(0,wide?5:8);
   const title=wrap(segment.visual||"官方资料",wide?26:14).slice(0,2);
   const quoteSvg=quote.map((line,row)=>`<text x="${pad+50}" y="${(wide?405:620)+row*(wide?72:78)}" fill="#183d3d" font-size="${wide?50:48}" font-weight="620">${xml(line)}</text>`).join("");
   const titleSvg=title.map((line,row)=>`<text x="${pad}" y="${(wide?165:220)+row*(wide?82:84)}" fill="#113b3e" font-size="${wide?72:66}" font-weight="760">${xml(line)}</text>`).join("");
   const host=new URL(source.url).hostname.replace(/^www\./,"");
   const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#edf2ef"/><g font-family="PingFang SC,Arial"><rect x="${pad}" y="${wide?68:110}" width="105" height="9" rx="4" fill="#b9975d"/>${titleSvg}<rect x="${pad}" y="${wide?300:455}" width="${width-pad*2}" height="${wide?470:820}" rx="38" fill="#fffdf7" stroke="#c8d7d2" stroke-width="3"/><text x="${pad+50}" y="${wide?360:535}" fill="#8a7046" font-size="${wide?30:31}" font-weight="700">原始资料摘录</text>${quoteSvg}<rect x="${pad}" y="${wide?820:1390}" width="${width-pad*2}" height="${wide?150:270}" rx="28" fill="#173d40"/><text x="${pad+42}" y="${wide?875:1470}" fill="#d9c18e" font-size="${wide?27:29}" font-weight="700">来源</text><text x="${pad+42}" y="${wide?922:1530}" fill="white" font-size="${wide?31:34}" font-weight="650">${xml(wrap(source.title,wide?64:27)[0]||source.title)}</text><text x="${pad+42}" y="${wide?955:1590}" fill="#c9d8d3" font-size="${wide?23:25}">${xml(host)}</text></g></svg>`;
   const file=path.join(dir,`official-evidence-${index}.jpg`);await sharp(Buffer.from(fitCardSvg(svg,width,height))).jpeg({quality:94}).toFile(file);
-  return {kind:"image",file,contentBounds:cardContentBounds(svg,width,height),source:source.url,license:"reference excerpt",licenseUrl:source.url,credit:source.title,changes:"摘录原始资料并重新排版，保留来源",title:segment.visual||source.title,query:segment.query,points:[source.excerpt],presentation:"official-evidence",evidenceId:source.id};
+  return {kind:"image",file,contentBounds:cardContentBounds(svg,width,height),source:source.url,license:"reference excerpt",licenseUrl:source.url,credit:source.title,changes:"摘录与口播事实直接对应的原始资料并重新排版，保留来源",title:segment.visual||source.title,query:segment.query,points:[excerpt],presentation:"official-evidence",evidenceId:source.id};
 }
