@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildEvidencePacks, fallbackDirectorPlan, officialSource } from "./spoken-video-director.mjs";
+import { buildEvidencePacks, enforceDirectorPlan, fallbackDirectorPlan, groundedOfficialSources, officialSource } from "./spoken-video-director.mjs";
 
 test("director evidence packs bind official sources to the exact locked segment",()=>{
   const segments=[{id:"s1-b1",text:"根据监管文件，等待期为90天。",intent:"evidence",visual:"等待期"}];
@@ -28,4 +28,21 @@ test("smart director chooses original evidence for factual beats and keeps gener
 test("official source detection does not treat an arbitrary commercial page as an authority",()=>{
   assert.equal(officialSource("https://www.gov.hk/en/residents/"),true);
   assert.equal(officialSource("https://example.com/article"),false);
+});
+
+test("official evidence must contain the exact numeric claim",()=>{
+  const segment={id:"s1",text:"报告显示增长21.3%。",intent:"evidence"};
+  const exact=buildEvidencePacks([segment],[[{title:"报告",url:"https://stats.gov.cn/report",excerpt:"本期同比增长21.3%。"}]])[0];
+  const mismatch=buildEvidencePacks([segment],[[{title:"报告",url:"https://stats.gov.cn/report",excerpt:"本期同比增长12.3%。"}]])[0];
+  assert.equal(groundedOfficialSources(exact).length,1);
+  assert.equal(groundedOfficialSources(mismatch).length,0);
+  assert.equal(fallbackDirectorPlan([segment],[mismatch])[0].visualTreatment,"motion-card");
+});
+
+test("dense cards are fullscreen and a presenter beat breaks three repeated cards",()=>{
+  const plan=enforceDirectorPlan([0,1,2].map(index=>({id:`s${index}`,visualTreatment:"motion-card",layout:"presenter-pip",narrativeRole:"explain"})),[0,1,2].map(index=>({claim:`观点${index}`,sources:[]})));
+  assert.equal(plan[0].layout,"fullscreen");
+  assert.equal(plan[1].visualTreatment,"presenter");
+  assert.equal(plan[1].layout,"presenter");
+  assert.equal(plan[2].layout,"fullscreen");
 });

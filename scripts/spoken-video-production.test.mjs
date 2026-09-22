@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSrt, knowledgeCardSpec, materialSearchQueries, reusableLicense, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { compactSrt, knowledgeCardSpec, materialSearchQueries, prepareFullDirectorRedesign, requestsFullDirectorRedesign, reusableLicense, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
 
 test("smart production expands a paragraph into exact semantic visual beats", () => {
@@ -143,6 +143,13 @@ test('recut plan refuses any narration rewrite or segment reorder', async()=>{
  assert.throws(()=>validateRecutPlan({segments,unsupportedReason:'更换声音'},segments,'9:16'),/仅支持/);
  const plan=validateRecutPlan({segments,options:{subtitleFontSize:999,presenterShare:-1,script:'bad',voiceId:'bad'}},segments,'9:16');
  assert.equal(plan.options.presenterShare,.3);assert.equal('script' in plan.options,false);assert.equal('voiceId' in plan.options,false);
+});
+
+test('a full visual redo clears inherited director choices',()=>{
+ assert.equal(requestsFullDirectorRedesign('完整重做全部分镜，达到专业导演级'),true);
+ assert.equal(requestsFullDirectorRedesign('只把字幕调大一点'),false);
+ const [segment]=prepareFullDirectorRedesign([{id:'s1',text:'观点',visualTreatment:'motion-card',layout:'presenter-pip',narrativeRole:'explain',cardStyle:'旧模板'}]);
+ assert.equal(segment.regenerate,true);assert.equal(segment.visualTreatment,undefined);assert.equal(segment.layout,undefined);assert.equal(segment.narrativeRole,undefined);assert.equal(segment.cardStyle,'');
 });
 
 test('recut dispatch never requires a voice or invokes HeyGen creation',async()=>{

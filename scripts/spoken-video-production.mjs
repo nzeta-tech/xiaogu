@@ -866,7 +866,7 @@ async function executeProduction(task,leaseToken,ctx){
     const externalCount=final.materials.filter(material=>material.source.startsWith("https://")).length;
     const generatedCount=final.materials.filter(material=>["xiaogu-generated-visual","xiaogu-ai-knowledge-card"].includes(material.source)).length;
     // Retain validated planning/research for scoped cross-version reuse (24h TTL).
-    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?3:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,presenterMasterUrl:masterUrl,materialPlan:finalManifest,acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,p.aspectRatio),creativeSummary:[`画面素材 ${final.materials.length} 段：外部 ${externalCount}、AI 生成 ${generatedCount}、本地 ${final.materials.length-externalCount-generatedCount}`,productionMode==="smart"?`已完成导演镜头脚本与 ${evidencePacks.filter(pack=>pack.sources.length).length} 个知识点证据包`:"已按语义节点完成真实素材、资料画面和人物镜头混剪","已完成一次 HeyGen 口播合成",`已完成 ${final.reviewHistory.length} 轮成片检查与优化`,`已完成混剪、字幕、标题和封面`]};
+    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,presenterMasterUrl:masterUrl,materialPlan:finalManifest,acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,p.aspectRatio),creativeSummary:[`画面素材 ${final.materials.length} 段：外部 ${externalCount}、AI 生成 ${generatedCount}、本地 ${final.materials.length-externalCount-generatedCount}`,productionMode==="smart"?`已完成导演镜头脚本与 ${evidencePacks.filter(pack=>pack.sources.length).length} 个知识点证据包`:"已按语义节点完成真实素材、资料画面和人物镜头混剪","已完成一次 HeyGen 口播合成",`已完成 ${final.reviewHistory.length} 轮成片检查与优化`,`已完成混剪、字幕、标题和封面`]};
   } catch(error){
     if(error instanceof VideoQualityError)return error.result(jobId);
     throw error;
@@ -902,7 +902,7 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
 
 async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(!ctx.videoCacheScope)return uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options);
-  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:3,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
+  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:4,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
@@ -926,6 +926,14 @@ export function validateRecutPlan(parsed,segments,aspectRatio){
   if(!Array.isArray(parsed.segments)||parsed.segments.length!==segments.length||parsed.segments.some((s,i)=>s.id!==segments[i].id||s.text!==segments[i].text))throw new Error("修改方案改变了口播内容，请仅修改画面、字幕或节奏");
   if(parsed.unsupportedReason)throw new Error(`仅支持画面和后期修改：${safe(parsed.unsupportedReason).slice(0,160)}`);
   return {segments:parsed.segments.map((s,i)=>({...segments[i],expression:s.expression,query:safe(s.query)||segments[i].query,visual:safe(s.visual)||segments[i].visual,cardPoints:knowledgePoints(s),regenerate:s.regenerate===true,forceCard:s.forceCard===true})),options:editOptions(parsed.options,aspectRatio)};
+}
+
+export function requestsFullDirectorRedesign(value){
+  return /完整重做|全部分镜.{0,10}(?:重做|重新|优化)|从零.{0,10}(?:设计|规划)|重新规划.{0,10}全部|全片.{0,10}(?:重做|重新导演)/.test(safe(value));
+}
+
+export function prepareFullDirectorRedesign(segments){
+  return segments.map(segment=>({...segment,regenerate:true,visualTreatment:undefined,layout:undefined,narrativeRole:undefined,transition:"cut",directorNote:"",evidenceIds:[],cardStyle:""}));
 }
 
 export async function planRecut(dir,input,runner=run){
@@ -975,10 +983,12 @@ async function executeRecut(task,leaseToken,ctx){
       input.materialPlan=smartTimelineSegments(planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
     }
     const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
+    const fullDirectorRedesign=productionMode==="smart"&&requestsFullDirectorRedesign(input.instructions);
     await report(ctx,task,leaseToken,jobId,"planning_revision",8,"正在整理你的修改要求");
     const plan=preserveMaterials
       ? {segments:input.materialPlan.map((segment,index)=>({id:segment.id||`s${index+1}`,parentId:segment.parentId||segment.id||`s${index+1}`,text:segment.text,expression:segment.expression,visual:segment.visual,query:segment.query||segment.material?.query||"",intent:segment.intent,layout:segment.layout,cardPoints:segment.material?.points||[],material:segment.material,regenerate:false,forceCard:false})),options:editOptions({...input.options,transitionSeconds:.26},input.aspectRatio)}
       : await planRecut(dir,input);
+    if(fullDirectorRedesign)plan.segments=prepareFullDirectorRedesign(plan.segments);
     const needsSemanticUpgrade=plan.segments.some(segment=>!segment.intent||!segment.layout);
     if(needsSemanticUpgrade)plan.segments=plan.segments.map(segment=>({...segment,
       intent:segment.intent||(segment.material?.kind==="presenter"?"anchor":"explain"),
@@ -992,11 +1002,12 @@ async function executeRecut(task,leaseToken,ctx){
     else if(safe(input.providerJobId)){const remote=await heygenPoll(input.providerJobId);subtitleUrl=remote.subtitleUrl||"";}
     const changedSegments=plan.segments.filter(segment=>segment.regenerate);
     const resume=videoResumeCache(process.env.LOCAL_AGENT_VIDEO_WORKDIR||os.tmpdir(),{endpoint:ctx.remoteBase,owner:task.owner_user_id||task.ownerUserId||jobId});
-    const refreshedReferences=changedSegments.length?await researchSegmentsWithCodex(changedSegments,dir,undefined,resume):[];
-    const references=plan.segments.map((segment,index)=>{
-      const changedIndex=changedSegments.findIndex(changed=>changed.id===segment.id);
-      return changedIndex>=0?refreshedReferences[changedIndex]:input.materialPlan[index]?.researchReferences||[];
-    });
+    const references=plan.segments.map((segment,index)=>input.materialPlan[index]?.researchReferences||[]);
+    const missingResearch=plan.segments.map((segment,index)=>({segment,index})).filter(({segment,index})=>segment.regenerate&&!references[index].length);
+    if(missingResearch.length){
+      const researched=await researchSegmentsWithCodex(missingResearch.map(item=>item.segment),dir,undefined,resume);
+      missingResearch.forEach(({index},i)=>{references[index]=researched[i]||[];});
+    }
     const evidencePacks=buildEvidencePacks(plan.segments,references);
     const undirected=plan.segments.map((segment,index)=>({segment,index})).filter(({segment})=>segment.regenerate&&!segment.visualTreatment);
     if(productionMode==="smart"&&undirected.length){
@@ -1021,7 +1032,7 @@ async function executeRecut(task,leaseToken,ctx){
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${input.title}-封面.jpg`,"image/jpeg");
-    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?3:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,input.aspectRatio),materialPlan:final.segments.map((s,i)=>({id:s.id,parentId:s.parentId||s.id,text:s.text,expression:s.expression,visual:s.visual,query:s.query,intent:s.intent||"segment",narrativeRole:s.narrativeRole||null,visualTreatment:s.visualTreatment||null,transition:s.transition||"cut",directorNote:s.directorNote||"",layout:s.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{contentBounds:archived[i].contentBounds,kind:archived[i].kind,title:archived[i].title,source:archived[i].source,license:archived[i].license||"",licenseUrl:archived[i].licenseUrl||"",credit:archived[i].credit||"",changes:archived[i].changes||"",points:archived[i].points||[],mediaId:archived[i].mediaId}})),acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],creativeSummary:["已按修改要求完成新版本","保留原口播与声音","旧版本仍可查看和下载"]};
+    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,input.aspectRatio),materialPlan:final.segments.map((s,i)=>({id:s.id,parentId:s.parentId||s.id,text:s.text,expression:s.expression,visual:s.visual,query:s.query,intent:s.intent||"segment",narrativeRole:s.narrativeRole||null,visualTreatment:s.visualTreatment||null,transition:s.transition||"cut",directorNote:s.directorNote||"",layout:s.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{contentBounds:archived[i].contentBounds,kind:archived[i].kind,title:archived[i].title,source:archived[i].source,license:archived[i].license||"",licenseUrl:archived[i].licenseUrl||"",credit:archived[i].credit||"",changes:archived[i].changes||"",points:archived[i].points||[],mediaId:archived[i].mediaId}})),acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],creativeSummary:["已按修改要求完成新版本","保留原口播与声音","旧版本仍可查看和下载"]};
   }catch(error){
     if(error instanceof VideoQualityError)return error.result(jobId);
     throw error;
