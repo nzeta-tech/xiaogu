@@ -24,6 +24,7 @@ import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-bea
 import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration } from "./spoken-video-layout.mjs";
 import { mediaFingerprint, cachedVideoShot } from "./spoken-video-render-cache.mjs";
 import { buildEvidencePacks, createOfficialEvidenceCard, directSmartVideoWithCodex } from "./spoken-video-director.mjs";
+import {createWorkGate} from "./spoken-video-work-pool.mjs";
 
 import { cachedMaterial, pruneVideoCache } from "./spoken-video-artifact-cache.mjs";
 import { encodeVideo } from "./spoken-video-encoder.mjs";
@@ -36,6 +37,8 @@ const item = (value) => value && typeof value === "object" && !Array.isArray(val
 const escapeXml = (value) => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]));
 const socksProxy = /^socks/i.test(process.env.HTTPS_PROXY||process.env.https_proxy||process.env.ALL_PROXY||process.env.all_proxy||"");
 let commonsUnavailableUntil=0;
+const renderConcurrency=Math.min(2,Math.max(1,Number(process.env.LOCAL_AGENT_VIDEO_RENDER_CONCURRENCY)||1));
+const finalRenderGate=createWorkGate(renderConcurrency);
 
 async function run(bin,args,options={}) {
   const pending=exec(bin,args,{timeout:options.timeout||120000,maxBuffer:8*1024*1024,cwd:options.cwd,env:options.env});
@@ -854,7 +857,7 @@ async function executeProduction(task,leaseToken,ctx){
     const manifest=segments.map((segment,i)=>({id:segment.id,parentId:segment.parentId||segment.id,text:segment.text,expression:segment.expression,visual:segment.visual,intent:segment.intent||"segment",narrativeRole:segment.narrativeRole||null,visualTreatment:segment.visualTreatment||null,transition:segment.transition||"cut",directorNote:segment.directorNote||"",layout:segment.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{kind:materials[i].kind,title:materials[i].title,source:materials[i].source,license:materials[i].license,licenseUrl:materials[i].licenseUrl||"",credit:materials[i].credit||"",changes:materials[i].changes||""}}));
     await report(ctx,task,leaseToken,jobId,"materials_ready",68,productionMode==="smart"?`导演方案已完成，正在组合 ${segments.length} 个证据与叙事镜头`:`已为 ${segments.length} 个语义节点准备多类型画面`,{materialPlan:manifest});
     await report(ctx,task,leaseToken,jobId,"composing",72,"Codex 正在主导混剪，并检查画面与字幕…");
-    const final=await renderWithCodexReview({master,segments,materials,subtitleUrl:created.subtitleUrl,script,dir,title,aspectRatio:p.aspectRatio,references,initialOptions:{renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:.26,snapCutsToCaptions:true,titleDuration:productionMode==="smart"?1.25:4.5},onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message),generateVisual:(segment,index)=>generateVisual(ctx,jobId,segment,dir,index,{purpose:"scene",style:segment.generativePrompt,researchReferences:references[index]}),resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{aspectRatio:p.aspectRatio,researchReferences:references[index]})});
+    const final=await finalRenderGate.run(()=>renderWithCodexReview({master,segments,materials,subtitleUrl:created.subtitleUrl,script,dir,title,aspectRatio:p.aspectRatio,references,initialOptions:{renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:.26,snapCutsToCaptions:true,titleDuration:productionMode==="smart"?1.25:4.5},onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message),generateVisual:(segment,index)=>generateVisual(ctx,jobId,segment,dir,index,{purpose:"scene",style:segment.generativePrompt,researchReferences:references[index]}),resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{aspectRatio:p.aspectRatio,researchReferences:references[index]})}),{onWait:()=>report(ctx,task,leaseToken,jobId,"waiting_render",70,"画面素材已准备完成，正在等待渲染资源…")});
     await report(ctx,task,leaseToken,jobId,"quality_check",96,"成片检查已完成，正在保存文件…");
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${title}.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${title}-封面.jpg`,"image/jpeg");
@@ -1014,7 +1017,7 @@ async function executeRecut(task,leaseToken,ctx){
         return {material};
       }));for(const item of batch)materials.push(item.material);
     }
-    const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
+    const final=await finalRenderGate.run(()=>renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)}),{onWait:()=>report(ctx,task,leaseToken,jobId,"waiting_render",68,"画面素材已准备完成，正在等待渲染资源…")});
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${input.title}-封面.jpg`,"image/jpeg");
