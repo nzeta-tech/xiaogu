@@ -15,11 +15,12 @@ let count=0;const check=(v,label)=>{assert.ok(v,label);count++;};
 const f=fixture('create');
 try{
   fixture('grant',f.id);
-  for(const mode of ['failed-quality','missing-report','contradictory-pass','passed','advisory','third-failed','review-unavailable']){
+  for(const mode of ['missing-report','contradictory-pass','passed','advisory','single-failed','review-unavailable','multi-failed']){
     const task=fixture('quality-create',f.id);
-    const third=mode==='third-failed'||mode==='review-unavailable';
-    const passed=mode==='passed'||mode==='advisory'||third;
-    const review=third?[1,2].map(attempt=>({attempt,pass:false,issues:[mode==='review-unavailable'?'质检服务暂时不可用':'字幕遮挡']})):[{attempt:1,pass:passed||mode==='contradictory-pass',issues:passed?[]:['字幕遮挡'],...(mode==='advisory'?{warnings:['模板变化可以更丰富']}:{})}];
+    const singleIssue=mode==='single-failed'||mode==='review-unavailable';
+    const multiFailed=mode==='multi-failed';
+    const passed=mode==='passed'||mode==='advisory'||singleIssue;
+    const review=multiFailed?[1,2].map(attempt=>({attempt,pass:false,issues:['字幕遮挡']})):[{attempt:1,pass:mode==='passed'||mode==='advisory'||mode==='contradictory-pass',issues:mode==='passed'||mode==='advisory'?[]:[mode==='review-unavailable'?'质检服务暂时不可用':'字幕遮挡'],...(mode==='advisory'?{warnings:['模板变化可以更丰富']}:{})}];
     const result={status:'completed',videoUrl:'https://example.invalid/synthetic.mp4',...(mode==='missing-report'?{}:{qualityReview:review})};
     const request=()=>fetch(base+`/api/internal/local-agent/tasks/${task.taskId}/complete`,{method:'POST',headers:{authorization:'Bearer '+f.agentToken,'content-type':'application/json'},body:JSON.stringify({...task,result}),signal:AbortSignal.timeout(30000)});
     check((await request()).ok,'completion acknowledged');
@@ -30,22 +31,22 @@ try{
     check(row.has_video===passed,'failed delivery exposes no final URL');
     check(row.charges===(passed?1:0),'quality gate controls real charge trigger');
     if(!passed)check(row.error_message.includes('质检未通过'),'visible failure persisted');
-    if(mode==='failed-quality')check(row.reviews[0].issues[0]==='字幕遮挡','quality history persisted');
+    if(mode==='single-failed')check(row.reviews[0].issues[0]==='字幕遮挡','quality history persisted');
     if(mode==='advisory')check(row.reviews[0].warnings[0]==='模板变化可以更丰富','advisories survive durable reload');
-    if(third){check(row.quality_passed===false,'two-round publication does not claim QA pass');check(row.delivery_notes[0]===review[1].issues[0],'unresolved issues persist');}
-    if(mode==='failed-quality'||mode==='advisory'||third){
+    if(singleIssue){check(row.quality_passed===false,'single-review publication does not claim QA pass');check(row.delivery_notes[0]===review[0].issues[0],'unresolved issues persist');}
+    if(mode==='single-failed'||mode==='advisory'||singleIssue){
       const {chromium}=createRequire(import.meta.url)('playwright-core');
       const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
       try{
         const context=await browser.newContext();context.setDefaultTimeout(30000);await context.addCookies([{name:'ica_session',value:f.cookie.slice('ica_session='.length),url:base}]);
         const page=await context.newPage();await page.goto(base+'/apps/digital-human-video');
         await page.getByRole('button',{name:/我的作品/}).click();
-        const target=()=>third?page.getByText('已发布 · 质检仍有待改进项').last():mode==='advisory'?page.getByText('画面优化建议（不影响交付）'):page.getByRole('alert').filter({hasText:'字幕遮挡'});
+        const target=()=>singleIssue?page.getByText('已发布 · 质检仍有待改进项').last():mode==='advisory'?page.getByText('画面优化建议（不影响交付）'):page.getByRole('alert').filter({hasText:'字幕遮挡'});
         await target().waitFor();
         check(true,'actual spoken version page displays quality failure');
         await page.reload();await page.getByRole('button',{name:/我的作品/}).click();
         await target().waitFor();check(true,'quality result survives reload');
-        if(third){await page.getByText(review[1].issues[0],{exact:true}).last().waitFor();check(true,'unresolved QA text visible after reload');}
+        if(singleIssue){await page.getByText(review[0].issues[0],{exact:true}).last().waitFor();check(true,'unresolved QA text visible after reload');}
         if(mode==='advisory'){
           await target().click();await page.getByText('模板变化可以更丰富').waitFor();check(true,'advisory text is visible');
           await page.setViewportSize({width:390,height:844});
@@ -54,10 +55,10 @@ try{
       }finally{await browser.close();}
     }
   }
-  for(const mode of ['passed','third-failed','failed-quality']){
+  for(const mode of ['passed','single-failed','contradictory-pass']){
     const task=fixture('quality-version-create',f.id);
-    const successful=mode!=='failed-quality';
-    const qualityReview=mode==='third-failed'?[1,2].map(attempt=>({attempt,pass:false,issues:['字幕遮挡']})):[{attempt:1,pass:successful,issues:successful?[]:['字幕遮挡']}];
+    const successful=mode!=='contradictory-pass';
+    const qualityReview=[{attempt:1,pass:mode!=='single-failed',issues:mode==='passed'?[]:['字幕遮挡']}];
     const response=await fetch(base+`/api/internal/local-agent/tasks/${task.taskId}/complete`,{method:'POST',headers:{authorization:'Bearer '+f.agentToken,'content-type':'application/json'},body:JSON.stringify({...task,result:{status:'completed',videoUrl:'https://example.invalid/revision.mp4',qualityReview}}),signal:AbortSignal.timeout(30000)});
     check(response.ok,`${mode} revision completion acknowledged`);
     const rows=fixture('quality-evidence',f.id).jobs;
