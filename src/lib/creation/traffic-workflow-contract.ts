@@ -80,6 +80,20 @@ export function readTrafficCoachOverrides(values: Record<string, CreationFieldVa
   }));
 }
 
+const trafficRegenerationKeys = ["traffic_selected_topics", "traffic_shared_research", "traffic_shared_evidence_pack", "traffic_topic_process", "creative_coach_version_ids"] as const;
+
+export function restoreTrafficRegenerationValues(current: Record<string, CreationFieldValue>, previous: Record<string, CreationFieldValue> | null | undefined, request: string) {
+  if (!previous || !Array.isArray(previous.traffic_selected_topics) || previous.traffic_selected_topics.length === 0) return current;
+  const restored = { ...current };
+  for (const key of trafficRegenerationKeys) if (previous[key] !== undefined) restored[key] = previous[key];
+  restored.traffic_topic_only = "no";
+  delete restored.traffic_existing_work_id;
+  delete restored.traffic_selected_topic_ids;
+  const originalSource = typeof previous.source === "string" ? previous.source.trim() : "";
+  if (originalSource) restored.source = [originalSource, request.trim() && `【用户本轮要求】\n${request.trim()}`].filter(Boolean).join("\n\n");
+  return restored;
+}
+
 function stringifyStoredValue(value: unknown, maxLength: number) {
   return (typeof value === "string" ? value : JSON.stringify(value)).slice(0, maxLength);
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTrafficGenerationValues, buildTrafficTopicAnalysisValues, readTrafficCoachOverrides, trafficCoachOverrideFieldId } from "./traffic-workflow-contract.ts";
+import { buildTrafficGenerationValues, buildTrafficTopicAnalysisValues, readTrafficCoachOverrides, restoreTrafficRegenerationValues, trafficCoachOverrideFieldId } from "./traffic-workflow-contract.ts";
 
 test("topic analysis uses the same coach-independent contract for every entry", () => {
   assert.deepEqual(buildTrafficTopicAnalysisValues({ source: "素材", creative_coach_version_ids: ["legacy"] }, "workbuddy"), {
@@ -23,4 +23,15 @@ test("generation resolves selected topics and per-topic coach overrides", () => 
 test("coach override fields have a stable shared name", () => {
   const id = trafficCoachOverrideFieldId("topic-1");
   assert.deepEqual(readTrafficCoachOverrides({ [id]: "coach-a" }, ["topic-1"]), { "topic-1": "coach-a" });
+});
+
+test("multi-topic regeneration preserves selected topics and coaches without reusing a consumed topic work", () => {
+  const previous = { source:"原热点素材", traffic_existing_work_id:"old-work", traffic_selected_topic_ids:["topic-1","topic-6"], traffic_selected_topics:[JSON.stringify({id:"topic-1",assignedCoachId:"coach-a"}),JSON.stringify({id:"topic-6",assignedCoachId:"coach-b"})], creative_coach_version_ids:["coach-a","coach-b"], traffic_shared_research:"研究资料", traffic_topic_process:"{}" };
+  const restored = restoreTrafficRegenerationValues({ source:"两篇旧稿拼接" }, previous, "两篇分别写长一些");
+  assert.equal(restored.traffic_topic_only, "no");
+  assert.equal(restored.traffic_selected_topics.length, 2);
+  assert.deepEqual(restored.creative_coach_version_ids, ["coach-a","coach-b"]);
+  assert.equal(restored.traffic_existing_work_id, undefined);
+  assert.equal(restored.traffic_selected_topic_ids, undefined);
+  assert.match(restored.source, /原热点素材[\s\S]*两篇分别写长一些/);
 });

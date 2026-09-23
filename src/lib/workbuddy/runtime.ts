@@ -5,7 +5,7 @@ import { runInsuranceContentAgent, streamInsuranceContentAgent } from "@/lib/age
 import { checkCompliance } from "@/lib/compliance/check";
 import { startBackgroundWorkRun, subscribeToBackgroundWorkRun } from "@/lib/creation/background-run-registry";
 import { executeCreationAppRun } from "@/lib/creation/execute-app-run";
-import { buildTrafficGenerationValues, buildTrafficTopicAnalysisValues, isTrafficWorkflowRequest, readTrafficCoachOverrides, type TrafficWorkflowArena } from "@/lib/creation/traffic-workflow-contract";
+import { buildTrafficGenerationValues, buildTrafficTopicAnalysisValues, isTrafficWorkflowRequest, readTrafficCoachOverrides, restoreTrafficRegenerationValues, type TrafficWorkflowArena } from "@/lib/creation/traffic-workflow-contract";
 import type { CreationWorkflowStage } from "@/lib/creation/workflow-stage";
 import { getLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
 import { enqueueSourceInspectionTask, SOURCE_INSPECTION_PRIORITIES, standardizeSourceInspection, type StandardizedSourceInspection } from "@/lib/creation/source-inspection";
@@ -73,7 +73,16 @@ export async function invokeWorkbuddyCapability(input: {
     context: stripConversationAppProtocols(input.taskInput.context),
     followup: stripConversationAppProtocols(input.taskInput.followup ?? ""),
   };
-  const values = sanitizeConversationAppValues(mergeConversationAppParameters(capability.buildInput(semanticTaskInput, app), currentParameterText, app.slug), app.slug);
+  let values = sanitizeConversationAppValues(mergeConversationAppParameters(capability.buildInput(semanticTaskInput, app), currentParameterText, app.slug), app.slug);
+  if (app.slug === "traffic-copy" && input.taskInput.operation === "regenerate") {
+    const previousValues = await query<{ values: Record<string, CreationFieldValue> }>(
+      `select input_json->'values' as values from workbuddy_capability_invocations
+        where task_id=$1 and app_slug='traffic-copy' and status='completed'
+          and jsonb_array_length(case when jsonb_typeof(input_json->'values'->'traffic_selected_topics')='array' then input_json->'values'->'traffic_selected_topics' else '[]'::jsonb end)>0
+        order by created_at desc limit 1`, [input.taskId],
+    ).then(result => result.rows[0]?.values ?? null).catch(() => null);
+    values = restoreTrafficRegenerationValues(values, previousValues, semanticTaskInput.followup || semanticTaskInput.objective);
+  }
   const trafficWorkflow = isTrafficWorkflowRequest(app.slug, values);
   const trafficTopicSelection = trafficWorkflow ? await resolveWorkbuddyTrafficTopicSelection(input.user.id, app.slug, values) : null;
   if (trafficTopicSelection) Object.assign(values, trafficTopicSelection.values);

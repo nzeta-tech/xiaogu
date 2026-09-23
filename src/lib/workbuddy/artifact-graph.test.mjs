@@ -13,6 +13,16 @@ test("resolves two structured scripts as two independent artifact references", (
   assert.deepEqual(resolved.nodes.map(item => item.content), ["A正文", "B正文"]);
 });
 
+test("projects traffic-copy batches even when the delivery envelope has nested content json", () => {
+  const graph = buildArtifactGraph([{
+    id:"delivery-2",artifact_type:"delivery",title:"两篇口播",content:"合并展示",
+    content_json:{normalizedDeliverables:[{id:"one",kind:"text",title:"选题一 · 教练A",content:"第一篇独立正文"},{id:"two",kind:"text",title:"选题二 · 教练B",content:"第二篇独立正文"}],contentJson:{batches:[]}},created_at:"2026-09-23T00:00:00Z",
+  }]);
+  const resolved=resolveArtifactReferences("把这两篇分别写长一些",graph);
+  assert.deepEqual(resolved.nodes.map(item=>item.title),["选题一 · 教练A","选题二 · 教练B"]);
+  assert.deepEqual(resolved.nodes.map(item=>item.content),["第一篇独立正文","第二篇独立正文"]);
+});
+
 test("does not inject artifacts for a new unrelated request", () => {
   const graph = buildArtifactGraph([{ id: "a", artifact_type: "text", title: "旧稿", content: "旧内容", created_at: "2026-09-12T00:00:00Z" }]);
   assert.equal(resolveArtifactReferences("今天有什么热点", graph).nodes.length, 0);

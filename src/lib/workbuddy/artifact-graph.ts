@@ -129,9 +129,10 @@ function inferReferenceCount(text: string) {
 }
 
 function extractStructuredChildren(json: Record<string, unknown>) {
-  const nested = isRecord(json.contentJson) ? json.contentJson : json;
+  const roots = [json, isRecord(json.contentJson) ? json.contentJson : null].filter((value): value is Record<string, unknown> => Boolean(value));
+  for (const root of roots) {
   for (const key of ["normalizedDeliverables", "scripts", "images", "items", "deliverables", "outputs"]) {
-    const value = nested[key];
+    const value = root[key];
     if (!Array.isArray(value) || value.length < 2) continue;
     const children = value.flatMap((item, index) => {
       if (typeof item === "string") return [{ content: item, title: `成果 ${index + 1}`, type: key === "images" ? "image" : "text" }];
@@ -141,6 +142,15 @@ function extractStructuredChildren(json: Record<string, unknown>) {
       return [{ content, title: typeof item.title === "string" ? item.title : `成果 ${index + 1}`, type: typeof item.kind === "string" ? item.kind : key === "images" ? "image" : "text" }];
     });
     if (children.length > 1) return children;
+  }
+  const batches = Array.isArray(root.batches) ? root.batches : [];
+  const children = batches.flatMap((batch, batchIndex) => isRecord(batch) && Array.isArray(batch.items)
+    ? batch.items.flatMap((item, itemIndex) => {
+      if (!isRecord(item)) return [];
+      const content = [item.body, item.content, item.text, item.script].find(value => typeof value === "string" && value.trim());
+      return typeof content === "string" ? [{ content, title: typeof item.title === "string" ? item.title : `成果 ${batchIndex + 1}-${itemIndex + 1}`, type: "text" }] : [];
+    }) : []);
+  if (children.length > 1) return children;
   }
   return [];
 }
