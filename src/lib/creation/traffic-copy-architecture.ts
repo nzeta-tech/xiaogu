@@ -427,15 +427,15 @@ export function parseTrafficCopyCreativeBrief(raw: string): TrafficCopyCreativeB
 }
 
 export function normalizeTrafficBriefForSource(brief: TrafficCopyCreativeBrief, source: string, allowedMethodIds?: Iterable<string>) {
-  void source;
-  // Research and topic metadata can be much longer than the publishable idea.
-  // Preserve the editor's content-form judgment while keeping a spoken-video
-  // brief from expanding merely because the shared evidence pack is large.
+  const sourceCharacters = Array.from(source.replace(/\s/g, "")).length;
+  // Source adaptation must retain enough room for the original argument and
+  // evidence. A model-proposed short-video duration is not allowed to collapse
+  // a substantial source into a few hundred characters.
+  const maximumCharacters = Math.min(1800, Math.max(900, Math.round(sourceCharacters * 1.35)));
+  const minimumCharacters = Math.min(maximumCharacters, Math.max(520, Math.round(maximumCharacters * 0.68)));
   const speakingRate = brief.durationBasis.reasoningSteps >= 4 || brief.durationBasis.evidenceUnits >= 4 ? 225 : 250;
-  const minimumSeconds = Math.max(45, Math.min(180, brief.durationRange.preferredSeconds[0]));
-  const maximumSeconds = Math.max(minimumSeconds, Math.min(240, brief.durationRange.preferredSeconds[1]));
-  const minimumCharacters = Math.round(minimumSeconds * speakingRate / 60);
-  const maximumCharacters = Math.round(maximumSeconds * speakingRate / 60);
+  const minimumSeconds = Math.round(minimumCharacters / speakingRate * 60);
+  const maximumSeconds = Math.round(maximumCharacters / speakingRate * 60);
   const allowed = allowedMethodIds ? new Set(allowedMethodIds) : null;
   const selectedMethods = allowed
     ? brief.selectedMethods.filter((item) => allowed.has(item.methodId))
@@ -451,7 +451,7 @@ export function normalizeTrafficBriefForSource(brief: TrafficCopyCreativeBrief, 
     },
     targetCharacters: Math.round((minimumCharacters + maximumCharacters) / 2),
     targetSeconds: Math.round((minimumCharacters + maximumCharacters) / 2 / speakingRate * 60),
-    durationRationale: `根据内容任务确定 ${minimumSeconds}-${maximumSeconds} 秒（约 ${minimumCharacters}-${maximumCharacters} 字）；搜索材料不自动扩大篇幅，完成核心问题后停止。`,
+    durationRationale: `根据原始信息量自动确定 ${minimumCharacters}-${maximumCharacters} 字；先完整覆盖必要内容，再停止，不把长素材压缩成提纲式短稿。`,
   };
 }
 
@@ -478,15 +478,15 @@ export function compileTrafficPublicationContract(blueprint: TrafficSourceBluepr
     position: blueprint.authorPosition || brief.workingThesis,
     intendedMindShift: blueprint.intendedMindShift,
     standaloneContext: { mode:"none",requiredSubjects:[],anonymousRoles:[],eventSummary:blueprint.standaloneContext.eventSummary,eventAnchors:[],openingSentenceWindow:5 },
-    requiredUnits: [],
-    optionalUnits: units.map((item) => ({ meaning:item.meaning,function:item.function })),
+    requiredUnits: units.filter((item) => item.importance === "required").map((item) => ({ meaning:item.meaning,function:item.function })),
+    optionalUnits: units.filter((item) => item.importance !== "required").map((item) => ({ meaning:item.meaning,function:item.function })),
     allowedClaims: blueprint.mustKeepEvidence.map((item) => ({ statement:item.content,purpose:item.purpose,expressionMode:"direct" as const,namedAttribution:null })),
     methodDirectives: brief.selectedMethods.map((item) => ({ method:item.methodId,targetGap:item.targetGap,uniqueContribution:item.uniqueContribution })),
     expressionPlan: brief.expressionPlan,
     voicePlan: brief.voicePlan,
-    stoppingRule: "",
-    structureBudget: { requiredUnits:0,allowedFunctions:[] },
-    forbiddenMoves: [],
+    stoppingRule: brief.stoppingRule,
+    structureBudget: brief.structureBudget,
+    forbiddenMoves: brief.forbiddenMoves,
   };
 }
 
@@ -496,7 +496,8 @@ export function buildTrafficCopyWritingPrompt(input: PromptInput & { brief: Traf
   return [
     "你是所选教练的口播写作者。充分吸收教练决策、用户素材和搜索参考，然后像一个有经验、有个性、有判断的真实创作者一样自由表达。",
     "事实、报道、争议、推测、人物动机和专业机制都可以成为表达材料；根据语境自行选择直接判断、讲故事、设问、推演、归因或情绪表达，不需要主动解释核验过程。",
-    "开头、结构、篇幅、节奏、称谓、案例组织、观点强度和结尾全部由教练声纹与本题内容决定。允许大胆判断、合理推演和有争议的观点，不写成研究报告或合规说明。",
+    "开头、结构、节奏、称谓、案例组织、观点强度和结尾由教练声纹与本题内容决定。允许大胆判断、合理推演和有争议的观点，不写成研究报告或合规说明。",
+    `正文需完整覆盖成稿契约中的requiredUnits，并落在 ${input.brief.durationRange.preferredCharacters[0]}-${input.brief.durationRange.preferredCharacters[1]} 字区间内；低于下限通常意味着机制、论据或必要推理没有展开。不得用重复观点、空泛口号凑字数。`,
     `【成稿契约】\n${JSON.stringify(contract)}`,
     input.context?.length ? `【搜索与创作素材】\n${input.context.join("\n\n")}` : "",
     input.creatorSkill ? `【教练写作声纹与获准方法】\n${input.creatorSkill}` : "【写作方式】使用基础创作方式。",
@@ -569,7 +570,7 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
   const minimumCharacters = options?.brief?.durationRange.preferredCharacters[0];
   const actualCharacters = Array.from(draft.replace(/\s/g, "")).length;
   if (minimumCharacters && actualCharacters < Math.round(minimumCharacters * 0.85)) {
-    issues.push({ severity:"warning",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:`低于参考区间${minimumCharacters}字，但字数本身不能证明事实或推理缺失。`,allowedFix:"仅在确有required资产、核心机制或必要推理缺失时补充；不得为达到字数而添加重复观点或空泛口号。" });
+    issues.push({ severity:"blocking",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:`低于本题信息量下限${minimumCharacters}字，通常表示required资产、核心机制或必要推理没有展开完整。`,allowedFix:`只补足required资产、核心机制和缺失推理，使正文达到至少${minimumCharacters}字；不得用重复观点或空泛口号凑字数。` });
   }
   if (maximumCharacters && actualCharacters > Math.round(maximumCharacters * 1.1)) {
     reductionNeeded = true;

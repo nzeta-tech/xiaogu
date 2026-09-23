@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { continueWorkbuddyTask, editAndContinueWorkbuddyTask, type WorkbuddyExecutionEvent } from "@/lib/workbuddy/store";
+import { startWorkbuddyStreamHeartbeat } from "@/lib/workbuddy/stream-lifecycle";
 
 const inputSchema = z.object({ message: z.string().trim().min(1).max(6000), context: z.string().max(30000).optional().default(""), editMessageId: z.string().uuid().optional(), requestedCapabilityId: z.string().trim().min(3).max(120).optional() });
 
@@ -18,15 +19,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         if (closed) return;
         try { controller.enqueue(encoder.encode(`data: ${JSON.stringify({ ...event, at: new Date().toISOString() })}\n\n`)); } catch { closed = true; }
       };
+      const stopHeartbeat = startWorkbuddyStreamHeartbeat(() => {
+        if (closed) return;
+        try { controller.enqueue(encoder.encode(": heartbeat\n\n")); } catch { closed = true; }
+      });
       try {
         const task = parsed.data.editMessageId
-          ? await editAndContinueWorkbuddyTask(user, id, parsed.data.editMessageId, parsed.data.message, send, request.signal, parsed.data.context, parsed.data.requestedCapabilityId)
-          : await continueWorkbuddyTask(user, id, parsed.data.message, send, request.signal, parsed.data.context, parsed.data.requestedCapabilityId);
+          ? await editAndContinueWorkbuddyTask(user, id, parsed.data.editMessageId, parsed.data.message, send, undefined, parsed.data.context, parsed.data.requestedCapabilityId)
+          : await continueWorkbuddyTask(user, id, parsed.data.message, send, undefined, parsed.data.context, parsed.data.requestedCapabilityId);
         if (!task) throw new Error("任务不存在或继续执行失败");
         send({ type: "done", message: "本轮任务流已完成", taskId: id, data: { task } });
       } catch (error) {
         send({ type: "error", message: error instanceof Error ? error.message : "继续执行失败", taskId: id });
       } finally {
+        stopHeartbeat();
         if (!closed) controller.close();
       }
     },

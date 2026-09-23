@@ -16,11 +16,12 @@ test("portfolio planner gives every selected topic an exclusive assignment",()=>
   ]}),topics);
   assert.equal(plan.units.length,3);
   assert.match(portfolioUnitContext(plan,"topic-2"),/避免与同批次其他篇重复：重新解释公式/);
-  assert.deepEqual(applyPortfolioDuration(fallbackTrafficCopyCreativeBrief("主题"),plan.units[0]).durationRange.preferredSeconds,[45,75]);
+  assert.deepEqual(applyPortfolioDuration(fallbackTrafficCopyCreativeBrief("主题"),plan.units[0]).durationRange.preferredSeconds,[120,165]);
+  assert.ok(applyPortfolioDuration(fallbackTrafficCopyCreativeBrief("主题"),plan.units[0]).durationRange.preferredCharacters[0]>=500);
 });
 
 test("portfolio duration is bounded without using evidence-pack length",()=>{
   const topics=[topic("topic-1","深度题")];
   const plan=parseTrafficPortfolioPlan(JSON.stringify({units:[{topicId:"topic-1",targetSeconds:[300,900]}]}),topics);
-  assert.deepEqual(plan.units[0].targetSeconds,[180,240]);
+  assert.deepEqual(plan.units[0].targetSeconds,[210,240]);
 });

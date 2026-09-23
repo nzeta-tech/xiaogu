@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:workbuddy-acceptance": "node --experimental-strip-types --test src/lib/workbuddy/material-envelope.test.mjs src/lib/workbuddy/queued-turns.test.mjs src/lib/workbuddy/acceptance-harness.test.mjs",
-    "test:workbuddy-runtime-audit": "node --experimental-strip-types --test src/lib/workbuddy/runtime-audit.test.mjs",
+    "test:workbuddy-runtime-audit": "node --experimental-strip-types --test src/lib/workbuddy/runtime-audit.test.mjs src/lib/workbuddy/stream-lifecycle.test.mjs",
     "test:application-workflows": "node --experimental-strip-types --test src/lib/apps/field-config.test.mjs src/lib/apps/field-interaction.test.mjs src/lib/apps/workflow-contract.test.mjs src/lib/workbuddy/app-execution-contract.test.mjs src/lib/creation/app-input-values.test.mjs src/lib/creation/workflow-stage.test.mjs",
     "verify:workbuddy": "npm run test:workbuddy-agent && npm run test:workbuddy-acceptance && npm run test:workbuddy-runtime-audit && npm run test:application-workflows && npm run test:traffic-copy && npm run typecheck",
     "audit:workbuddy": "node --env-file-if-exists=.env --experimental-strip-types scripts/audit-workbuddy-runtime.mjs",
