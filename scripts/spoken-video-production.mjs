@@ -941,6 +941,10 @@ export async function planRecut(dir,input,runner=run){
 export async function executeSpokenVideoRecut(task,leaseToken,ctx){
   return performanceScope(null,async()=>{const result=await executeRecut(task,leaseToken,ctx);return {...result,performance:videoMetrics()};});
 }
+export function shouldPreserveRecutMaterials(instructions) {
+  const value=safe(instructions);
+  return /只调整后期|不更换|保留.{0,12}素材|(?:使用|复用|沿用).{0,16}(?:相同|原有|原版|已有|全部).{0,8}素材|(?:相同|原有|原版|已有|全部).{0,8}素材(?:和|与|、)?.{0,8}模板/.test(value);
+}
 async function executeRecut(task,leaseToken,ctx){
   ctx={...ctx,videoCacheScope:renderCacheDirectory(ctx,task)};
   const jobId=safe(item(task.payload).jobId);if(!jobId)throw new Error("invalid revision job");
@@ -955,7 +959,7 @@ async function executeRecut(task,leaseToken,ctx){
       const planned=await planMaterials(dir,input.script,null);
       input.materialPlan=smartTimelineSegments(planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
     }
-    const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
+    const preserveMaterials=shouldPreserveRecutMaterials(input.instructions);
     await report(ctx,task,leaseToken,jobId,"planning_revision",8,"正在整理你的修改要求");
     const plan=preserveMaterials
       ? {segments:input.materialPlan.map((segment,index)=>({id:segment.id||`s${index+1}`,parentId:segment.parentId||segment.id||`s${index+1}`,text:segment.text,expression:segment.expression,visual:segment.visual,query:segment.query||segment.material?.query||"",intent:segment.intent,layout:segment.layout,cardPoints:segment.material?.points||[],material:segment.material,regenerate:false,forceCard:false})),options:editOptions({...input.options,transitionSeconds:.26},input.aspectRatio)}

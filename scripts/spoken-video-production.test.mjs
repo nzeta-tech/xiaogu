@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSrt, knowledgeCardSpec, materialSearchQueries, reusableLicense, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { compactSrt, knowledgeCardSpec, materialSearchQueries, reusableLicense, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+
+test("same materials and template bypasses recut replanning",()=>{
+  assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
+  assert.equal(shouldPreserveRecutMaterials("复用原有全部素材和模板，只重新渲染成片"),true);
+  assert.equal(shouldPreserveRecutMaterials("知识卡更精美，替换全部画面素材"),false);
+});
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
 
 test("smart production expands a paragraph into exact semantic visual beats", () => {
