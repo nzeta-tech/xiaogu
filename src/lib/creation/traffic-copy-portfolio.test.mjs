@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPortfolioDuration, applyRequestedTrafficDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, requestedTrafficDurationSeconds } from "./traffic-copy-portfolio.ts";
+import { applyPortfolioDuration, applyRequestedTrafficDuration, applyRequestedTrafficPortfolioDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, requestedTrafficDurationSeconds } from "./traffic-copy-portfolio.ts";
 import { fallbackTrafficCopyCreativeBrief } from "./traffic-copy-architecture.ts";
 
 const topic=(id,title,role="arena")=>({id,title,selectionRole:role,answerPayoff:`${title}的答案`,coreQuestion:`${title}的问题`});
@@ -19,10 +19,14 @@ test("portfolio planner gives every selected topic an exclusive assignment",()=>
   assert.deepEqual(applyPortfolioDuration(fallbackTrafficCopyCreativeBrief("主题"),plan.units[0]).durationRange.preferredSeconds,[120,165]);
   assert.ok(applyPortfolioDuration(fallbackTrafficCopyCreativeBrief("主题"),plan.units[0]).durationRange.preferredCharacters[0]>=500);
   assert.equal(requestedTrafficDurationSeconds("基于这两个话题分别生成5分钟的口播文案"),300);
+  assert.equal(requestedTrafficDurationSeconds("【上一轮要求】5分钟\n【用户本轮要求】现在每篇改成3分钟"),180);
   const fiveMinuteBrief=applyRequestedTrafficDuration(fallbackTrafficCopyCreativeBrief("主题"),"每篇分别生成5分钟的口播文案");
   assert.deepEqual(fiveMinuteBrief.durationRange.preferredSeconds,[285,315]);
   assert.equal(fiveMinuteBrief.targetSeconds,300);
   assert.ok(fiveMinuteBrief.targetCharacters>=1125);
+  const fiveMinutePlan=applyRequestedTrafficPortfolioDuration(plan,"每篇分别生成5分钟的口播文案");
+  assert.deepEqual(fiveMinutePlan.units.map(unit=>unit.targetSeconds),[[285,315],[285,315],[285,315]]);
+  assert.match(portfolioUnitContext(fiveMinutePlan,"topic-1"),/285-315秒/);
 });
 
 test("portfolio duration is bounded without using evidence-pack length",()=>{

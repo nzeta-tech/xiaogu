@@ -50,6 +50,7 @@ import { isTrafficCoverParentWork } from "@/lib/creation/traffic-cover-parent";
 import { buildPersistedCreatorStyleText, type CreatorStyleResult } from "@/lib/creation/creator-style-result";
 import {
   authorityForTrafficTask,
+  applyTrafficDeterministicAuditChecks,
   buildTrafficCopyAuditPrompt,
   buildTrafficCopyCreativeBriefPrompt,
   buildTrafficCopyRevisionPrompt,
@@ -75,7 +76,7 @@ import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/c
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 import { parseSelectedTrafficTopics, trafficTopicGenerationContext, type TrafficTopicCandidate } from "@/lib/creation/traffic-topic-arena";
 import { runTrafficTopicAnalysis } from "@/lib/creation/traffic-topic-analysis";
-import { applyPortfolioDuration, applyRequestedTrafficDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, type TrafficPortfolioPlan } from "@/lib/creation/traffic-copy-portfolio";
+import { applyPortfolioDuration, applyRequestedTrafficDuration, applyRequestedTrafficPortfolioDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, requestedTrafficDurationSeconds, type TrafficPortfolioPlan } from "@/lib/creation/traffic-copy-portfolio";
 import { assertVideoCoverMaterial, deriveVideoCoverHeadline, renderVideoCoverHeadlines } from "@/lib/creation/video-cover-contract";
 
 type FieldValue = CreationFieldValue;
@@ -441,6 +442,7 @@ export async function executeCreationAppRun(input: {
         ? parseTrafficTopicProcess(stringifyCreationFieldValue(values.traffic_topic_process))
         : null;
       let trafficPortfolioPlan: TrafficPortfolioPlan | null = null;
+      let explicitTrafficDurationSeconds: number | null = null;
       const trafficBlueprints: TrafficSourceBlueprint[] = [];
       const trafficPromptStyles: typeof creatorStyles = [];
       const trafficPromptTopics: Array<TrafficTopicCandidate | null> = [];
@@ -453,6 +455,7 @@ export async function executeCreationAppRun(input: {
         const source = app.slug === "link-remix"
           ? buildRemixStudioSource(values)
           : stringifyCreationFieldValue(values.source);
+        explicitTrafficDurationSeconds = requestedTrafficDurationSeconds(source);
         if (app.slug === "traffic-copy") {
           await input.onEvent?.({ type:"progress",phase:"task_started",status:"completed",label:"任务准备完成",detail:"素材和所选教练已经就绪。" });
         }
@@ -534,6 +537,7 @@ export async function executeCreationAppRun(input: {
           trafficPortfolioPlan=parseTrafficPortfolioPlan("",selectedTrafficTopics);
           await input.onEvent?.({type:"progress",phase:"portfolio_planning",status:"completed",label:"多选题分工完成",detail:"已按每题核心问题直接分工，不额外调用规划模型。"});
         }
+        trafficPortfolioPlan = applyRequestedTrafficPortfolioDuration(trafficPortfolioPlan, source);
         prompts = [];
         const baseTrafficBlueprint = trafficSourceBlueprint ?? fallbackTrafficSourceBlueprint(source);
         const resolvedTrafficAuthority = trafficAuthority ?? authorityForTrafficTask(baseTrafficBlueprint.taskMode);
@@ -638,9 +642,9 @@ export async function executeCreationAppRun(input: {
           let firstAudit: TrafficCopyAudit;
           try {
             const rawAudit=await runInsuranceContentAgent([{role:"user",content:buildTrafficCopyAuditPrompt({source,draft:draftV1,blueprint,authority:auditAuthority,brief,context:trafficContexts[promptIndex]??[]})}],input.userId,"traffic",{creatorContextMode:"none"});
-            firstAudit=parseTrafficCopyAudit(rawAudit);
+            firstAudit=applyTrafficDeterministicAuditChecks(parseTrafficCopyAudit(rawAudit),draftV1,{brief,blueprint,creatorName:style?.label,enforceTopicFulfillment:Boolean(topic),strictDuration:Boolean(explicitTrafficDurationSeconds)});
           } catch {
-            firstAudit=parseTrafficCopyAudit(JSON.stringify({status:"pass",issues:[{severity:"warning",type:"editorial_review_unavailable",location:"全文",reason:"本次独立成稿复审暂未返回",allowedFix:"保留教练原稿供创作者判断"}],semanticCoverage:0,expressionSimilarity:0,topicFulfillment:{score:0}}));
+            firstAudit=applyTrafficDeterministicAuditChecks(parseTrafficCopyAudit(JSON.stringify({status:"pass",issues:[{severity:"warning",type:"editorial_review_unavailable",location:"全文",reason:"本次独立成稿复审暂未返回",allowedFix:"保留教练原稿供创作者判断"}],semanticCoverage:0,expressionSimilarity:0,topicFulfillment:{score:0}})),draftV1,{brief,blueprint,creatorName:style?.label,strictDuration:Boolean(explicitTrafficDurationSeconds)});
           }
           let finalAudit = firstAudit;
           let revised = false;
@@ -650,13 +654,17 @@ export async function executeCreationAppRun(input: {
               finalDraft=sanitizeTrafficNarrativeIdentity((await runInsuranceContentAgent([{role:"user",content:buildTrafficCopyRevisionPrompt({source,draft:draftV1,blueprint,authority:auditAuthority,brief,audit:firstAudit,context:trafficContexts[promptIndex]??[],creatorSkill:style?.writingSkill})}],input.userId,"traffic",{creatorContextMode:"writing"})).trim());
               revisionDrafts.push(finalDraft);revised=true;
               const rawFinalAudit=await runInsuranceContentAgent([{role:"user",content:buildTrafficCopyAuditPrompt({source,draft:finalDraft,blueprint,authority:auditAuthority,brief,context:trafficContexts[promptIndex]??[]})}],input.userId,"traffic",{creatorContextMode:"none"});
-              finalAudit=parseTrafficCopyAudit(rawFinalAudit);
+              finalAudit=applyTrafficDeterministicAuditChecks(parseTrafficCopyAudit(rawFinalAudit),finalDraft,{brief,blueprint,creatorName:style?.label,enforceTopicFulfillment:Boolean(topic),strictDuration:Boolean(explicitTrafficDurationSeconds)});
             }catch{finalDraft=draftV1;revised=false;revisionDrafts.length=0;finalAudit=firstAudit;}
           }
           // Cap automated repair at one pass. A second revision+audit pair can
           // add minutes of latency while often changing only minor wording.
           // Preserve the complete first repair and surface remaining blocking
           // issues as “待复核”, instead of silently looping on the model.
+          const finalCharacters = finalDraft.replace(/\s/g, "").length;
+          if (explicitTrafficDurationSeconds && finalCharacters < brief.durationRange.preferredCharacters[0]) {
+            throw new Error(`口播文案未达到用户明确要求的时长：当前${finalCharacters}字，最低需要${brief.durationRange.preferredCharacters[0]}字；本轮未交付短稿。`);
+          }
           await input.onEvent?.({ type:"progress",phase:`audit:${style?.id ?? promptIndex}`,status:"completed",label:`${style?.label ?? "教练"}版本完成`,detail:revised?"独立编辑已完成一次局部精简或增强。":"独立编辑已完成选题兑现、专业增量和口播效率复审。",coachId:style?.id,coachLabel:style?.label });
           currentOutput = finalDraft;
           result += currentOutput;

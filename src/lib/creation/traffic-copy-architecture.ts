@@ -553,7 +553,7 @@ export function sanitizeTrafficNarrativeIdentity(draft: string) {
     .trim();
 }
 
-export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, draft: string, options?: { brief?: TrafficCopyCreativeBrief; blueprint?: TrafficSourceBlueprint; creatorName?: string; enforceTopicFulfillment?: boolean }) {
+export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, draft: string, options?: { brief?: TrafficCopyCreativeBrief; blueprint?: TrafficSourceBlueprint; creatorName?: string; enforceTopicFulfillment?: boolean; strictDuration?: boolean }) {
   const leaks = detectTrafficNarrativeIdentityLeaks(draft);
   const issues = [...audit.issues];
   if (leaks.length) issues.push({ severity:"blocking" as const,type:"narrative_identity_leak",location:leaks.join("、"),reason:"正文泄漏了内部素材或任务容器身份，创作者没有以本人身份直接表达。",allowedFix:"仅删除来源容器和元叙述，直接表达其中的观点或事实；真实外部机构出处仍可保留。" });
@@ -569,8 +569,9 @@ export function applyTrafficDeterministicAuditChecks(audit: TrafficCopyAudit, dr
   const maximumCharacters = options?.brief?.durationRange.preferredCharacters[1];
   const minimumCharacters = options?.brief?.durationRange.preferredCharacters[0];
   const actualCharacters = Array.from(draft.replace(/\s/g, "")).length;
-  if (minimumCharacters && actualCharacters < Math.round(minimumCharacters * 0.85)) {
-    issues.push({ severity:"blocking",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:`低于本题信息量下限${minimumCharacters}字，通常表示required资产、核心机制或必要推理没有展开完整。`,allowedFix:`只补足required资产、核心机制和缺失推理，使正文达到至少${minimumCharacters}字；不得用重复观点或空泛口号凑字数。` });
+  const minimumRatio = options?.strictDuration ? 1 : 0.85;
+  if (minimumCharacters && actualCharacters < Math.round(minimumCharacters * minimumRatio)) {
+    issues.push({ severity:"blocking",type:"automatic_length_underrun",location:`全文${actualCharacters}字`,reason:options?.strictDuration ? `用户明确要求的时长下限为${minimumCharacters}字，当前成稿未达到，不可交付。` : `低于本题信息量下限${minimumCharacters}字，通常表示required资产、核心机制或必要推理没有展开完整。`,allowedFix:`只补足required资产、核心机制和缺失推理，使正文达到至少${minimumCharacters}字；不得用重复观点或空泛口号凑字数。` });
   }
   if (maximumCharacters && actualCharacters > Math.round(maximumCharacters * 1.1)) {
     reductionNeeded = true;

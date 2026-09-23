@@ -179,6 +179,15 @@ test("automatic length guard blocks a materially incomplete short draft", () => 
   assert.ok(guarded.issues.some((item) => item.type === "automatic_length_underrun"));
 });
 
+test("explicit user duration enforces the full minimum instead of the flexible automatic threshold", () => {
+  const cleanAudit = parseTrafficCopyAudit(JSON.stringify({ status:"pass",issues:[],semanticCoverage:1,expressionSimilarity:.1 }));
+  const brief = { ...fallbackTrafficCopyCreativeBrief("主题"), durationRange:{ preferredSeconds:[285,315],preferredCharacters:[1069,1181] },targetSeconds:300,targetCharacters:1125 };
+  assert.equal(applyTrafficDeterministicAuditChecks(cleanAudit,"字".repeat(962),{brief}).status,"pass");
+  const guarded = applyTrafficDeterministicAuditChecks(cleanAudit,"字".repeat(962),{brief,strictDuration:true});
+  assert.equal(guarded.status,"revise");
+  assert.match(guarded.issues.find(item=>item.type==="automatic_length_underrun")?.reason??"",/用户明确要求/);
+});
+
 test("substantial source material cannot collapse into a few hundred characters", () => {
   const brief = normalizeTrafficBriefForSource(fallbackTrafficCopyCreativeBrief("资".repeat(1616)), "资".repeat(1616));
   assert.deepEqual(brief.durationRange.preferredCharacters, [1224,1800]);

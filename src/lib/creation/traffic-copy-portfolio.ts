@@ -49,6 +49,13 @@ export function portfolioUnitContext(plan: TrafficPortfolioPlan | null, topicId:
   return [`【本批次内容分工】`, `本篇角色：${unit.contentRole}`, `独家价值：${unit.uniqueValue}`, `只聚焦：${unit.exclusiveFocus}`, unit.avoidRepeating.length?`避免与同批次其他篇重复：${unit.avoidRepeating.join("；")}`:"", `建议形式：${unit.recommendedFormat}`, `自然时长：${unit.targetSeconds[0]}-${unit.targetSeconds[1]}秒，讲完即停`].filter(Boolean).join("\n");
 }
 
+export function applyRequestedTrafficPortfolioDuration(plan: TrafficPortfolioPlan | null, text: string): TrafficPortfolioPlan | null {
+  const requested = requestedTrafficDurationSeconds(text);
+  if (!plan || !requested) return plan;
+  const targetSeconds: [number, number] = [Math.max(60, requested - 15), Math.min(600, requested + 15)];
+  return { ...plan, units: plan.units.map(unit => ({ ...unit, targetSeconds })) };
+}
+
 export function applyPortfolioDuration(brief: TrafficCopyCreativeBrief, unit: TrafficPortfolioUnit | undefined): TrafficCopyCreativeBrief {
   if(!unit)return brief;
   const rate=brief.durationBasis.reasoningSteps>=4||brief.durationBasis.evidenceUnits>=4?225:250;
@@ -57,9 +64,9 @@ export function applyPortfolioDuration(brief: TrafficCopyCreativeBrief, unit: Tr
 }
 
 export function requestedTrafficDurationSeconds(text: string): number | null {
-  const minutes = text.match(/(\d+(?:\.\d+)?)\s*(?:分钟|分(?:钟)?)(?:左右|上下|的)?(?:口播|文案|正文|稿)?/);
+  const minutes = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(?:分钟|分(?:钟)?)(?:左右|上下|的)?(?:口播|文案|正文|稿)?/g)].at(-1);
   if (minutes) return Math.min(600, Math.max(60, Math.round(Number(minutes[1]) * 60)));
-  const seconds = text.match(/(\d{2,4})\s*秒(?:钟)?(?:左右|上下|的)?(?:口播|文案|正文|稿)?/);
+  const seconds = [...text.matchAll(/(\d{2,4})\s*秒(?:钟)?(?:左右|上下|的)?(?:口播|文案|正文|稿)?/g)].at(-1);
   return seconds ? Math.min(600, Math.max(60, Math.round(Number(seconds[1])))) : null;
 }
 
