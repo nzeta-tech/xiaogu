@@ -39,6 +39,7 @@ const socksProxy = /^socks/i.test(process.env.HTTPS_PROXY||process.env.https_pro
 let commonsUnavailableUntil=0;
 const renderConcurrency=Math.min(2,Math.max(1,Number(process.env.LOCAL_AGENT_VIDEO_RENDER_CONCURRENCY)||1));
 const finalRenderGate=createWorkGate(renderConcurrency);
+export const FINAL_RENDER_TIMEOUT_MS=60*60*1000;
 
 async function run(bin,args,options={}) {
   const pending=exec(bin,args,{timeout:options.timeout||120000,maxBuffer:8*1024*1024,cwd:options.cwd,env:options.env});
@@ -676,7 +677,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:expressionSafeTitleDuration(timedShots,options.titleDuration??4.5,transitionSeconds)})'[titled];[titled]${subtitleFilter}[v]`;
   if(singlePass){
     const exportIdentity={version:6,master:masterFingerprint,shots:await Promise.all(timedShots.map(async shot=>({start:shot.start,length:shot.length,layout:shot.layout,showMaterial:shot.showMaterial,hash:shot.showMaterial?await mediaFingerprint(shot.material.file):null}))),subtitle:compact,title:await mediaFingerprint(titleCard),options:{...options,subtitleFile:undefined,renderCacheDir:undefined},width,height,safeLayout,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"};
-    const rendered=await cachedVideoShot(options.renderCacheDir||dir,exportIdentity,file=>measureVideoStage("single_pass_encode",()=>encodeVideo(run,singlePassArgs({master,shots:timedShots,maskFile,titleCard,output:file,width,height,pipSize,safeLayout,total,decorate}),{timeout:1800000})));
+    const rendered=await cachedVideoShot(options.renderCacheDir||dir,exportIdentity,file=>measureVideoStage("single_pass_encode",()=>encodeVideo(run,singlePassArgs({master,shots:timedShots,maskFile,titleCard,output:file,width,height,pipSize,safeLayout,total,decorate}),{timeout:FINAL_RENDER_TIMEOUT_MS})));
     await copyFile(rendered,output);
   }else if(transitionSeconds&&pieces.length>1){
     const lengths=await Promise.all(pieces.map(duration));
@@ -688,14 +689,14 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
       accumulated+=lengths[index]-transitionSeconds;
     }
     filters.push(decorate("[joined]",`[${pieces.length+1}:v]`));
-    await encodeVideo(run,["-y","-filter_complex_threads","1",...pieces.flatMap(file=>["-i",file]),"-i",master,"-i",titleCard,"-filter_complex",filters.join(";"),"-map","[v]","-map",`${pieces.length}:a:0`,"-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:1800000});
+    await encodeVideo(run,["-y","-filter_complex_threads","1",...pieces.flatMap(file=>["-i",file]),"-i",master,"-i",titleCard,"-filter_complex",filters.join(";"),"-map","[v]","-map",`${pieces.length}:a:0`,"-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:FINAL_RENDER_TIMEOUT_MS});
   }else{
     await run("ffmpeg",["-y","-f","concat","-safe","0","-i",list,"-c","copy",stitched],{timeout:300000});
     // The shot files contain independently encoded AAC tracks. Concatenating those
     // tracks introduces encoder priming/padding at every visual cut and can sound
     // like a tiny pause or swallowed syllable. Keep the stitched file for video
     // only and take one continuous audio stream from the immutable presenter master.
-    await encodeVideo(run,["-y","-i",stitched,"-i",master,"-i",titleCard,"-filter_complex",decorate("[0:v]","[2:v]"),"-map","[v]","-map","1:a:0","-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:1800000});
+    await encodeVideo(run,["-y","-i",stitched,"-i",master,"-i",titleCard,"-filter_complex",decorate("[0:v]","[2:v]"),"-map","[v]","-map","1:a:0","-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:FINAL_RENDER_TIMEOUT_MS});
   }
   const finalDuration=await duration(output);if(Math.abs(finalDuration-total)>2)throw new Error("导出时长与口播母版不一致");
   const cover=path.join(dir,"cover.jpg");await run("ffmpeg",["-y","-ss",Math.min(1,finalDuration/2).toFixed(2),"-i",output,"-frames:v","1",cover]);

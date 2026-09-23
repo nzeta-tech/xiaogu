@@ -4,7 +4,11 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
+import { FINAL_RENDER_TIMEOUT_MS, compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
+
+test("final video rendering allows sixty minutes",()=>{
+  assert.equal(FINAL_RENDER_TIMEOUT_MS,60*60*1000);
+});
 
 test("advisory-only review delivers once without regenerating artwork",async()=>{
   let renders=0;
