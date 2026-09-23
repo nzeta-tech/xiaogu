@@ -725,7 +725,10 @@ export class VideoQualityError extends Error {
 export async function renderWithCodexReview({master,segments,materials,subtitleUrl,script,dir,title,aspectRatio,references=[],onProgress=async()=>{},generateVisual:generateVisualForReview=null,initialOptions={},resolveMaterial=null},dependencies={}){
   const finalizeVideo=dependencies.finalize||finalize,checkVideo=dependencies.check||checkedFinalVideo,reviewVideo=dependencies.review||codexReview,createSheet=dependencies.sheet||createReviewSheet;
   let currentMaterials=[...materials],currentSegments=segments.map(segment=>({...segment})),options={...initialOptions};
-  if(options.timelineMode==="semantic")currentSegments=currentSegments.map((segment,index)=>({...segment,layout:safeSemanticLayout(segment,currentMaterials[index])}));
+  const applySemanticLayout=()=>{
+    if(options.timelineMode==="semantic")currentSegments=currentSegments.map((segment,index)=>({...segment,layout:safeSemanticLayout(segment,currentMaterials[index])}));
+  };
+  applySemanticLayout();
   const reviewHistory=[],rejectedSearches=new Set();
   const layoutLocked=new Set();
   let previousSignature=null,previousFinal=null,previousSheet=null;
@@ -755,8 +758,9 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
       const index=currentSegments.findIndex(segment=>segment.id===id);
       if(index<0)continue;
       const style=safe(item(fixValue).style).slice(0,500);
-      const semanticLayout="fullscreen";
-      const revised={...currentSegments[index],forceCard:true,expression:undefined,cardStyle:style,...(options.timelineMode==="semantic"?{layout:semanticLayout,intent:"explain"}:{})};
+      // Artwork repair must not replace the director's shot contract. The old
+      // fullscreen/PIP rewrite silently degraded data, keyword and evidence beats.
+      const revised={...currentSegments[index],forceCard:true,expression:undefined,cardStyle:style,...(options.timelineMode==="semantic"?{intent:"explain"}:{})};
       const replacement=resolveMaterial?await resolveMaterial(revised,index):await createKnowledgeCard(revised,dir,index);
       currentSegments[index]=revised;currentMaterials[index]=replacement;changed=true;
     }
@@ -805,6 +809,7 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
     const requestedShare=presenterTooSmall?Math.max(Number(review.presenterShare)||0,currentShare+.1,.6):Number(review.presenterShare);
     if(options.timelineMode!=="semantic"&&Number.isFinite(requestedShare)&&requestedShare>=.3&&requestedShare<=.8&&requestedShare!==options.presenterShare){options.presenterShare=requestedShare;changed=true;}
     if(Number.isInteger(review.subtitleMaxChars)&&review.subtitleMaxChars>=10&&review.subtitleMaxChars<=14&&review.subtitleMaxChars!==options.subtitleMaxChars){options.subtitleMaxChars=review.subtitleMaxChars;changed=true;}
+    if(changed)applySemanticLayout();
     if(!changed)await onProgress("本轮没有可执行的画面修改，将复用成片继续复核",Math.min(94,78+attempt*6));
     if(changed)await onProgress(`Codex 发现问题，正在按建议修订：${review.issues.slice(0,2).join("；")}`,Math.min(94,78+attempt*6));
   }
