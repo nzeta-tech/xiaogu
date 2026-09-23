@@ -26,9 +26,9 @@ export function safeSemanticLayout(segment,material){
   if(material?.kind==="presenter")return "presenter";
   // Director shot modes own the composition.  Do not let an older material
   // hint silently turn a side visual back into the circular PIP fallback.
-  if(segment.visualTreatment==="side-asset"||segment.visualTreatment==="keyword-motion"||segment.visualTreatment==="background-replacement")return "presenter-overlay";
-  if(segment.visualTreatment==="data-widget")return "presenter-data";
-  if(segment.visualTreatment==="evidence-snippet")return "presenter-evidence";
+  if(segment.visualTreatment==="side-asset"||segment.visualTreatment==="background-replacement")return "presenter-overlay";
+  if(segment.visualTreatment==="keyword-motion")return "presenter";
+  if(segment.visualTreatment==="data-widget"||segment.visualTreatment==="evidence-snippet")return "fullscreen";
   // Explicit director decisions outrank a legacy card's internal PIP hint.
   if(segment.visualTreatment==="motion-card"||segment.layout==="fullscreen"&&["evidence","explain"].includes(segment.intent))return "fullscreen";
   if(material?.source==="xiaogu-knowledge-card-expression")return material.presentation?.endsWith(":pip-safe")?"presenter-pip":"fullscreen";

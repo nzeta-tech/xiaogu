@@ -28,6 +28,9 @@ test("financial explanation and evidence do not obscure diagrams with a presente
   assert.equal(safeSemanticLayout({intent:"scene",layout:"presenter-pip"},{kind:"image"}),"presenter-pip");
   assert.equal(safeSemanticLayout({intent:"explain",layout:"fullscreen",visualTreatment:"motion-card"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:cause:verbatim-partition:pip-safe"}),"fullscreen");
   assert.equal(safeSemanticLayout({intent:"explain",layout:"presenter-pip"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:sequence:verbatim-partition:fullscreen"}),"fullscreen");
+  assert.equal(safeSemanticLayout({intent:"explain",visualTreatment:"data-widget"},{kind:"image"}),"fullscreen");
+  assert.equal(safeSemanticLayout({intent:"evidence",visualTreatment:"evidence-snippet"},{kind:"image"}),"fullscreen");
+  assert.equal(safeSemanticLayout({intent:"explain",visualTreatment:"keyword-motion"},{kind:"image"}),"presenter");
 });
 
 test("intro title ends before a grounded diagram enters including its transition",()=>{

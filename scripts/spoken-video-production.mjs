@@ -931,7 +931,10 @@ async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
   if(segment.visualTreatment==="evidence-snippet")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
   if(segment.visualTreatment==="motion-card")return createKnowledgeCard({...segment,expression:undefined},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle});
-  if(["keyword-motion","data-widget"].includes(segment.visualTreatment))return createKnowledgeCard({...segment,expression:undefined,cardPoints:knowledgePoints(segment).slice(0,segment.visualTreatment==="keyword-motion"?2:1)},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle});
+  // Keyword motion is rendered directly with the presenter; creating a text card
+  // here both wastes a render and risks an old fallback displaying it as a panel.
+  if(segment.visualTreatment==="keyword-motion")return presenterAnchorMaterial(segment);
+  if(segment.visualTreatment==="data-widget")return createKnowledgeCard({...segment,expression:undefined,cardPoints:knowledgePoints(segment).slice(0,1)},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle||"V20 导演数据图解：一条结论、一个大数字或比例、箭头或迷你图表；不得使用小字号段落。"});
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
   const generateSceneFallback=["generated-scene","background-replacement"].includes(segment.visualTreatment)||["scene","emotion"].includes(segment.intent);
   return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:segment.cardStyle||options.cardStyle});

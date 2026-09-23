@@ -20,7 +20,7 @@ test("smart director chooses original evidence for factual beats and keeps gener
   const packs=buildEvidencePacks(segments,[[{title:"统计公报",url:"https://stats.gov.cn/report",excerpt:"同比增长10%。",kind:"webpage"}],[]]);
   const plan=fallbackDirectorPlan(segments,packs);
   assert.equal(plan[0].visualTreatment,"evidence-snippet");
-  assert.equal(plan[0].layout,"presenter-evidence");
+  assert.equal(plan[0].layout,"fullscreen");
   assert.deepEqual(plan[0].evidenceIds,["s1-b1-e1"]);
   assert.equal(plan[1].visualTreatment,"background-replacement");
   assert.match(plan[1].generativePrompt,/no text, no logo/);
@@ -65,5 +65,5 @@ test("smart director turns the five approved visual forms into executable layout
     {visualTreatment:"background-replacement",narrativeRole:"emotion"},
     {visualTreatment:"evidence-snippet",narrativeRole:"evidence",evidenceIds:["e1"]},
   ],packs);
-  assert.deepEqual(plan.map(shot=>shot.layout),["presenter-overlay","presenter-overlay","presenter-data","presenter-overlay","presenter-evidence"]);
+  assert.deepEqual(plan.map(shot=>shot.layout),["presenter-overlay","presenter","fullscreen","presenter-overlay","fullscreen"]);
 });
