@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applicationNeedsConversationForm, appNextActions, assessApplicationReadiness, buildConversationAppFields, buildConversationAppHandoffSource, buildPriorConversationAppSource, isGenericApplicationIntent, mergeConversationAppParameters, parseConversationAppParameters, resolveConversationAppParameters, resolveConversationAppSource, resolveConversationFormState, resolvePendingApplicationHandoff, sanitizeConversationAppValues, shouldSkipTrafficTopicSelection, stripConversationAppProtocols, upgradeStoredConversationPresentation } from "./app-conversation.ts";
+import { applicationNeedsConversationForm, appNextActions, assessApplicationReadiness, buildConversationAppFields, buildConversationAppHandoffSource, buildPriorConversationAppSource, isGenericApplicationIntent, isTrafficTopicRegenerationRequest, mergeConversationAppParameters, parseConversationAppParameters, resolveConversationAppParameters, resolveConversationAppSource, resolveConversationFormState, resolvePendingApplicationHandoff, sanitizeConversationAppValues, shouldSkipTrafficTopicSelection, stripConversationAppProtocols, upgradeStoredConversationPresentation } from "./app-conversation.ts";
 import { getCreationAppBySlug } from "../apps/catalog.ts";
 
 const app = {
@@ -227,6 +227,9 @@ test("traffic copy only skips topic selection when the creator explicitly asks",
   assert.equal(shouldSkipTrafficTopicSelection("用这个写一篇口播文案\n\n【当前焦点｜必须优先承接】\n铁头一审获刑8年"), true);
   assert.equal(shouldSkipTrafficTopicSelection("用第一个帮我写一篇口播文案"), false);
   assert.equal(shouldSkipTrafficTopicSelection("第2项生成口播稿"), false);
+  assert.equal(shouldSkipTrafficTopicSelection("基于这两个话题分别生成5分钟的口播文案"), true);
+  assert.equal(isTrafficTopicRegenerationRequest("基于这两个话题分别生成5分钟的口播文案"), true);
+  assert.equal(isTrafficTopicRegenerationRequest("这批不合适，重新选题"), false);
 });
 
 test("text-led image card hides the image remix branch", () => {

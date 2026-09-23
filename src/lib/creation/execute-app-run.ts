@@ -75,7 +75,7 @@ import { normalizeRemixCapability, remixCapabilityLabel } from "@/lib/creation/c
 import { adaptRemixCapabilityInput, buildPendingRemixContentJson, getRemixCapabilityDefinition, getRemixResultMeta } from "@/lib/creation/remix-capability-registry";
 import { parseSelectedTrafficTopics, trafficTopicGenerationContext, type TrafficTopicCandidate } from "@/lib/creation/traffic-topic-arena";
 import { runTrafficTopicAnalysis } from "@/lib/creation/traffic-topic-analysis";
-import { applyPortfolioDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, type TrafficPortfolioPlan } from "@/lib/creation/traffic-copy-portfolio";
+import { applyPortfolioDuration, applyRequestedTrafficDuration, buildTrafficPortfolioPlanPrompt, parseTrafficPortfolioPlan, portfolioUnitContext, type TrafficPortfolioPlan } from "@/lib/creation/traffic-copy-portfolio";
 import { assertVideoCoverMaterial, deriveVideoCoverHeadline, renderVideoCoverHeadlines } from "@/lib/creation/video-cover-contract";
 
 type FieldValue = CreationFieldValue;
@@ -593,6 +593,7 @@ export async function executeCreationAppRun(input: {
             : new Set<string>();
           creativeBrief = normalizeTrafficBriefForSource(creativeBrief, unitSource, routedIds);
           creativeBrief = applyPortfolioDuration(creativeBrief, topic ? trafficPortfolioPlan?.units.find((item)=>item.topicId===topic.id) : undefined);
+          creativeBrief = applyRequestedTrafficDuration(creativeBrief, unitSource);
           await input.onEvent?.({ type:"progress",phase:`coach_decision:${style.id}`,status:"completed",label:`${style.label}已确定创作方向`,detail:creativeBrief.workingThesis ? `核心方向：${creativeBrief.workingThesis.slice(0, 80)}` : "已确定内容入口、论证顺序和收束方式。",coachId:style.id,coachLabel:style.label });
           const selectedMethodCards = style.runtime ? renderSelectedCreativeCoachMethods(style.runtime, creativeBrief.selectedMethods.map((item) => item.methodId)) : "";
           const writingPrompt = buildTrafficCopyWritingPrompt({
