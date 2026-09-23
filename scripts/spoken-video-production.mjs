@@ -930,7 +930,10 @@ async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,ind
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
   if(segment.visualTreatment==="evidence-snippet")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
-  if(segment.visualTreatment==="motion-card")return createKnowledgeCard({...segment,expression:undefined},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle});
+  if(segment.visualTreatment==="motion-card"){
+    const relationStyle={compare:"左右对照图，使用清晰的 VS 和两个独立结论",sequence:"时间线，按发生顺序表达",timeline:"时间线，按发生顺序表达",cause:"因果流程箭头，清楚表现原因、结果和条件",parts:"组成关系图，拆分为并列要素",keypoints:"三项并列要点图，每项使用一个短标签"}[segment.expression?.kind]||"关系图解，禁止段落文字和说明页";
+    return createKnowledgeCard(segment,dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle||relationStyle});
+  }
   // Keyword motion is rendered directly with the presenter; creating a text card
   // here both wastes a render and risks an old fallback displaying it as a panel.
   if(segment.visualTreatment==="keyword-motion")return presenterAnchorMaterial(segment);
@@ -1012,11 +1015,19 @@ async function executeRecut(task,leaseToken,ctx){
     }
     const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
     const fullDirectorRedesign=productionMode==="smart"&&requestsFullDirectorRedesign(input.instructions);
+    // A legacy version may contain only a few paragraph-sized segments.  V20
+    // worked because it directed short semantic beats, not a 40-second block
+    // of narration per card. Rebuild the beat grid before any director call.
+    if(fullDirectorRedesign){
+      const planned=await planMaterials(dir,input.script,null);
+      input.materialPlan=smartTimelineSegments(planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
+    }
     await report(ctx,task,leaseToken,jobId,"planning_revision",8,"正在整理你的修改要求");
-    const plan=preserveMaterials
+    const plan=fullDirectorRedesign
+      ? {segments:prepareFullDirectorRedesign(input.materialPlan.map((segment,index)=>({id:segment.id||`s${index+1}`,parentId:segment.parentId||segment.id||`s${index+1}`,text:segment.text,expression:segment.expression,visual:segment.visual,query:segment.query||segment.material?.query||"",cardPoints:segment.cardPoints||segment.material?.points||[],regenerate:true,forceCard:false}))),options:editOptions({...input.options,transitionSeconds:0},input.aspectRatio)}
+      : preserveMaterials
       ? {segments:input.materialPlan.map((segment,index)=>({id:segment.id||`s${index+1}`,parentId:segment.parentId||segment.id||`s${index+1}`,text:segment.text,expression:segment.expression,visual:segment.visual,query:segment.query||segment.material?.query||"",intent:segment.intent,layout:segment.layout,cardPoints:segment.material?.points||[],material:segment.material,regenerate:false,forceCard:false})),options:editOptions({...input.options,transitionSeconds:.26},input.aspectRatio)}
       : await planRecut(dir,input);
-    if(fullDirectorRedesign)plan.segments=prepareFullDirectorRedesign(plan.segments);
     const needsSemanticUpgrade=plan.segments.some(segment=>!segment.intent||!segment.layout);
     if(needsSemanticUpgrade)plan.segments=plan.segments.map(segment=>({...segment,
       intent:segment.intent||(segment.material?.kind==="presenter"?"anchor":"explain"),
