@@ -480,6 +480,15 @@ async function renderSegment(master,material,maskFile,out,start,length,width,hei
     else args.push("-framerate","30","-loop","1","-t",length.toFixed(3),"-i",material.file);
     if(layout==="fullscreen"||!safeLayout.pipFits){
       args.push("-filter_complex",`[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v]`,"-map","[v]");
+    }else if(["presenter-overlay","presenter-data","presenter-evidence"].includes(layout)){
+      // Keep the talking head as the base.  The support visual occupies 25–40%
+      // of the frame and slides in briefly instead of replacing the presenter.
+      const panelWidth=Math.round(width*(layout==="presenter-overlay"?.36:layout==="presenter-evidence"?.40:.31));
+      const panelHeight=Math.round(height*(layout==="presenter-overlay"?.34:layout==="presenter-evidence"?.28:.22));
+      const x=width-panelWidth-42,y=layout==="presenter-data"?Math.round(height*.18):Math.round(height*.24);
+      const entered=`if(lt(t,0.24),${width}+(${x}-${width})*t/0.24,${x})`;
+      const filters=`[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=${panelWidth}:${panelHeight}:force_original_aspect_ratio=decrease,pad=${panelWidth}:${panelHeight}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setsar=1[asset];[base][asset]overlay=${entered}:${y}:shortest=1[v]`;
+      args.push("-filter_complex",filters,"-map","[v]");
     }else{
       args.push("-framerate","30","-loop","1","-t",length.toFixed(3),"-i",maskFile);
       const y=safeLayout.pip.y;
@@ -906,10 +915,11 @@ async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,ind
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
-  if(segment.visualTreatment==="official-source")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
+  if(segment.visualTreatment==="evidence-snippet")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
   if(segment.visualTreatment==="motion-card")return createKnowledgeCard({...segment,expression:undefined},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle});
+  if(["keyword-motion","data-widget"].includes(segment.visualTreatment))return createKnowledgeCard({...segment,expression:undefined,cardPoints:knowledgePoints(segment).slice(0,segment.visualTreatment==="keyword-motion"?2:1)},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle});
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
-  const generateSceneFallback=segment.visualTreatment==="generated-scene"||["scene","emotion"].includes(segment.intent);
+  const generateSceneFallback=["generated-scene","background-replacement"].includes(segment.visualTreatment)||["scene","emotion"].includes(segment.intent);
   return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:segment.cardStyle||options.cardStyle});
 }
 

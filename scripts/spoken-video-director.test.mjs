@@ -19,9 +19,10 @@ test("smart director chooses original evidence for factual beats and keeps gener
   ];
   const packs=buildEvidencePacks(segments,[[{title:"统计公报",url:"https://stats.gov.cn/report",excerpt:"同比增长10%。",kind:"webpage"}],[]]);
   const plan=fallbackDirectorPlan(segments,packs);
-  assert.equal(plan[0].visualTreatment,"official-source");
+  assert.equal(plan[0].visualTreatment,"evidence-snippet");
+  assert.equal(plan[0].layout,"presenter-evidence");
   assert.deepEqual(plan[0].evidenceIds,["s1-b1-e1"]);
-  assert.equal(plan[1].visualTreatment,"generated-scene");
+  assert.equal(plan[1].visualTreatment,"background-replacement");
   assert.match(plan[1].generativePrompt,/no text, no logo/);
 });
 
@@ -36,7 +37,7 @@ test("official evidence must contain the exact numeric claim",()=>{
   const mismatch=buildEvidencePacks([segment],[[{title:"报告",url:"https://stats.gov.cn/report",excerpt:"本期同比增长12.3%。"}]])[0];
   assert.equal(groundedOfficialSources(exact).length,1);
   assert.equal(groundedOfficialSources(mismatch).length,0);
-  assert.equal(fallbackDirectorPlan([segment],[mismatch])[0].visualTreatment,"motion-card");
+  assert.equal(fallbackDirectorPlan([segment],[mismatch])[0].visualTreatment,"data-widget");
 });
 
 test("one official source may ground one fact without repeating every number in the beat",()=>{
@@ -53,4 +54,16 @@ test("dense cards are fullscreen and a presenter beat breaks three repeated card
   assert.equal(plan[1].visualTreatment,"presenter");
   assert.equal(plan[1].layout,"presenter");
   assert.equal(plan[2].layout,"fullscreen");
+});
+
+test("smart director turns the five approved visual forms into executable layouts",()=>{
+  const packs=[{claim:"",sources:[]},{claim:"",sources:[]},{claim:"",sources:[]},{claim:"",sources:[]},{claim:"数据为10%",sources:[{id:"e1",official:true,kind:"webpage",excerpt:"数据为10%"}]}];
+  const plan=enforceDirectorPlan([
+    {visualTreatment:"side-asset",narrativeRole:"explain"},
+    {visualTreatment:"keyword-motion",narrativeRole:"explain"},
+    {visualTreatment:"data-widget",narrativeRole:"explain"},
+    {visualTreatment:"background-replacement",narrativeRole:"emotion"},
+    {visualTreatment:"evidence-snippet",narrativeRole:"evidence",evidenceIds:["e1"]},
+  ],packs);
+  assert.deepEqual(plan.map(shot=>shot.layout),["presenter-overlay","presenter-overlay","presenter-data","presenter-overlay","presenter-evidence"]);
 });
