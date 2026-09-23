@@ -56,3 +56,16 @@ test("short fallback keypoint cards also preserve presenter continuity",()=>{
   const layout=expressionLayout(segment,{aspectRatio:"9:16",subtitleFontSize:12});
   assert.equal(layout.spec.kind,"keypoints");assert.equal(layout.spec.nodes.length,1);assert.equal(layout.pipSafe,true);
 });
+
+test("three and four way comparisons render every verbatim node without missing labels",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"expression-multi-compare-"));
+  try{for(const count of [3,4])for(const aspectRatio of ["9:16","16:9"]){
+    const nodes=["甲方案需等待。","乙方案可随取。","丙方案有波动。","丁方案有条件。"].slice(0,count);
+    const segment={text:nodes.join(""),visual:"方案条件比较",expression:{kind:"compare",nodes,evidence:nodes.join("")}};
+    assert.equal(expressionLayout(segment,{aspectRatio}).cells.length,count);
+    const material=await createExpressionMaterial(segment,dir,count,{aspectRatio});
+    assert.deepEqual(material.points,nodes);
+    const metadata=await sharp(material.file).metadata();assert.equal(metadata.width,aspectRatio==="9:16"?1080:1920);
+    assert.ok((await sharp(material.file).stats()).channels.some(c=>c.stdev>10));
+  }}finally{await rm(dir,{recursive:true,force:true});}
+});

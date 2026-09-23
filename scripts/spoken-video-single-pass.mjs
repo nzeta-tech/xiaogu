@@ -1,4 +1,4 @@
-import {presenterOverlayFrame} from './spoken-video-layout.mjs';
+import {presenterOverlayFrame} from "./spoken-video-layout.mjs";
 
 export function singlePassArgs({master,shots,maskFile,titleCard,output,width,height,pipSize,safeLayout,total,decorate}){
   const args=['-y','-filter_complex_threads','1','-i',master];
@@ -10,11 +10,12 @@ export function singlePassArgs({master,shots,maskFile,titleCard,output,width,hei
     const isVideo=shot.material.kind==='video';
     args.push(...(isVideo?['-stream_loop','-1']:['-framerate','30','-loop','1']),'-t',shot.length.toFixed(3),'-i',shot.material.file);
     const start=shot.start.toFixed(3),end=(shot.start+shot.length).toFixed(3);
-    const overlay=presenterOverlayFrame(shot.layout,width,height,safeLayout);
-    if(overlay){
-      const fadeOut=Math.max(0,shot.length-.22).toFixed(3),target=overlay.x,slideEnd=(shot.start+.28).toFixed(3);
-      filters.push(`[${input++}:v]fps=30,scale=${overlay.width}:${overlay.height}:force_original_aspect_ratio=decrease,pad=${overlay.width}:${overlay.height}:(ow-iw)/2:(oh-ih)/2:color=0xf4f1e8,setsar=1,format=rgba,fade=t=in:st=0:d=0.22:alpha=1,fade=t=out:st=${fadeOut}:d=0.22:alpha=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
-      filters.push(`[${base}][m${i}]overlay=x='if(lt(t,${slideEnd}),-w+(${target}+w)*(t-${start})/0.28,${target})':y=${overlay.y}:eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;
+    const overlayMode=["presenter-overlay","presenter-data","presenter-evidence"].includes(shot.layout);
+    if(overlayMode){
+      const panel=presenterOverlayFrame(width,height,shot.layout);
+      const entry=`if(lt(t,${Number(start)+.24}),-${panel.width}+(${panel.x}+${panel.width})*(t-${start})/.24,${panel.x})`;
+      filters.push(`[${input++}:v]fps=30,setsar=1,scale=${panel.width}:${panel.height}:force_original_aspect_ratio=decrease,pad=${panel.width}:${panel.height}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
+      filters.push(`[${base}][m${i}]overlay=x='${entry}':y=${panel.y}:eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;
     }else{
       filters.push(`[${input++}:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
       filters.push(`[${base}][m${i}]overlay=eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;

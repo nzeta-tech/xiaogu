@@ -23,13 +23,14 @@ export async function GET(request: Request) {
     if(kind==="recut") {
       const base=(await query<{request_json:Record<string,unknown>}>("select request_json from digital_human_video_jobs where id=$1 and user_id=$2 and status in ('completed','failed') and (id=$3 or request_json->>'root_job_id'=$3::text)",[String(job.request_json.base_version_id||rootId),job.user_id,rootId])).rows[0];
       if(!base)return Response.json({error:"base_version_not_found"},{status:404});
-      return Response.json({title:root.title,script:root.script,aspectRatio:root.aspect_ratio,productionMode:job.request_json.production_mode==="smart"?"smart":"basic",baseProductionMode:base.request_json.production_mode==="smart"?"smart":"basic",providerJobId:root.provider_job_id,subtitleSrt:base.request_json.subtitle_srt||root.request_json.subtitle_srt||"",materialPlan:base.request_json.material_plan||[],options:base.request_json.edit_options||{},instructions:String(job.request_json.edit_instructions||"")});
+      const master=(await query<{id:string;size_bytes:string;sha256:string}>("select id,size_bytes,sha256 from digital_human_media_assets where video_job_id=$1 and user_id=$2 and kind='presenter_master'",[rootId,job.user_id])).rows[0];
+      return Response.json({master:master?{id:master.id,size:Number(master.size_bytes),sha256:master.sha256}:null,title:root.title,script:root.script,aspectRatio:root.aspect_ratio,productionMode:job.request_json.production_mode==="smart"?"smart":"basic",baseProductionMode:base.request_json.production_mode==="smart"?"smart":"basic",providerJobId:root.provider_job_id,subtitleSrt:base.request_json.subtitle_srt||root.request_json.subtitle_srt||"",materialPlan:base.request_json.material_plan||[],options:base.request_json.edit_options||{},instructions:String(job.request_json.edit_instructions||"")});
     }
     const mediaId=kind==="master"?(await query<{id:string}>("select id from digital_human_media_assets where video_job_id=$1 and user_id=$2 and kind='presenter_master'",[rootId,job.user_id])).rows[0]?.id:params.get("mediaId");
     if(!mediaId||!/^[0-9a-f-]{36}$/i.test(mediaId))return Response.json({error:"media_not_found"},{status:404});
     const media=await readDigitalHumanMedia(job.user_id,mediaId);
     if(!media)return Response.json({error:"media_unavailable"},{status:404});
-    return mediaResponse(media);
+    return mediaResponse(media,request.headers.get("range"));
   }
   if (kind === "photo") {
     const id = String(job.request_json.photo_id || "");
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
     if (!owner.rows[0]) return Response.json({ error: "photo_not_found" }, { status: 404 });
     const media = await readDigitalHumanMedia(job.user_id,id);
     if (!media) return Response.json({ error: "photo_unavailable" }, { status: 404 });
-    return mediaResponse(media);
+    return mediaResponse(media,request.headers.get("range"));
   }
   if (kind === "avatar_source") {
     if (!job.asset_id) return Response.json({ error: "avatar_not_selected" }, { status: 404 });

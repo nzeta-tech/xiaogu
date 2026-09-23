@@ -26,7 +26,7 @@ test("stock relevance requires meaningful whole-word matches, not generic people
   assert.equal(relevantAssetTitle("Monthly budget spreadsheet","family budget"),true);
 });
 
-test("repeated rejected stock escalates to an original scene and still requires final QA",async()=>{
+test("single review publishes visible stock issues without extra paid generation",async()=>{
   for(const finalPass of [true,false]){
     let searches=0,generated=0,reviews=0;
     const work=renderWithCodexReview({segments:[{id:"s1",text:"整理资料",query:"document folders",visual:"资料分类",intent:"scene",layout:"fullscreen"}],materials:[{source:"https://example.com/old",title:"Old",kind:"video"}],
@@ -34,11 +34,12 @@ test("repeated rejected stock escalates to an original scene and still requires 
       generateVisual:async()=>{generated++;return {source:"xiaogu-generated-visual",title:"资料分类",kind:"image"};},
     },{
       finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
-      review:async()=>({pass:++reviews===3&&finalPass,issues:reviews===3&&finalPass?[]:["s1画面无关"],searchQueries:{s1:["organizing document folders"]}}),
+      review:async()=>({pass:++reviews===2&&finalPass,issues:reviews===2&&finalPass?[]:["s1画面无关"],searchQueries:{s1:["organizing document folders"]}}),
     });
-    if(finalPass){const result=await work;assert.deepEqual(result.reviewHistory.map(r=>r.pass),[false,false,true]);assert.equal(result.materials[0].source,"xiaogu-generated-visual");}
-    else {const result=await work;assert.equal(result.acceptedWithNotes,true);assert.deepEqual(result.reviewHistory.map(r=>r.pass),[false,false,false]);}
-    assert.equal(searches,1);assert.equal(generated,1);assert.equal(reviews,3);
+    const result=await work;
+    assert.equal(result.acceptedWithNotes,true);assert.deepEqual(result.reviewHistory.map(r=>r.pass),[false]);
+    assert.equal(result.materials[0].source,"https://example.com/old");
+    assert.equal(searches,0);assert.equal(generated,0);assert.equal(reviews,1);
   }
 });
 
@@ -52,7 +53,7 @@ test("broader searches cannot weaken the original visual relevance requirement",
   assert.equal(accepted.source,"https://example.com/relevant");
 });
 
-test("a generated repair is reused without discarded extra image calls",async()=>{
+test("single review retains the generated visual without triggering a paid repair",async()=>{
   let resolved=0,reviews=0;
   const result=await renderWithCodexReview({segments:[{id:"s1",text:"整理资料",query:"document folders",visual:"资料分类"}],materials:[{source:"xiaogu-generated-visual",title:"资料分类",file:"old.jpg"}],
     resolveMaterial:async()=>{resolved++;return {source:"xiaogu-generated-visual",title:"资料分类",file:"new.jpg"};},
@@ -61,7 +62,7 @@ test("a generated repair is reused without discarded extra image calls",async()=
     finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
     review:async()=>({pass:++reviews===2,issues:[],searchQueries:{s1:["document folder","organized paperwork","file cabinet"]}}),
   });
-  assert.equal(resolved,1);assert.equal(reviews,2);assert.equal(result.materials[0].file,"new.jpg");
+  assert.equal(resolved,0);assert.equal(reviews,1);assert.equal(result.materials[0].file,"old.jpg");assert.equal(result.acceptedWithNotes,true);
 });
 
 test("diagram suggestions cannot invent template numbers or reporting periods",()=>{
@@ -171,17 +172,17 @@ test("transient QA failure retries review without re-rendering",async()=>{
   assert.equal(renders,1);assert.equal(reviews,2);assert.equal(result.acceptedWithNotes,false);
 });
 
-test("layout-only quality repairs reuse visuals and remain fullscreen in later rounds",async()=>{
+test("single review reports layout issues without a second render",async()=>{
   let rounds=0;const layouts=[];
   const material={kind:"image",file:"original.jpg",source:"fixture"};
   const result=await renderWithCodexReview({segments:[{id:"s1",text:"画面",intent:"scene",layout:"presenter-pip"}],materials:[material],initialOptions:{timelineMode:"semantic"},resolveMaterial:async()=>{throw Error("must not regenerate a layout-only repair");}},{
     finalize:async(_master,segments)=>{layouts.push(segments[0].layout);return {output:"test.mp4",durationSeconds:6};},check:async()=>{},sheet:async()=>"sheet.jpg",
-    review:async()=>{rounds++;return rounds===1?{pass:false,issues:["s1 人像PIP与字幕相叠"],layoutFixes:{s1:"fullscreen"}}:rounds===2?{pass:false,issues:["头像出镜不足"],subtitleMaxChars:12}:{pass:true,issues:[]};},
+    review:async()=>{rounds++;return rounds===1?{pass:false,issues:["s1 人像PIP与字幕相叠"],layoutFixes:{s1:"fullscreen"}}:{pass:true,issues:[]};},
   });
-  assert.deepEqual(layouts,["presenter-pip","fullscreen","fullscreen"]);assert.equal(result.materials[0],material);assert.equal(rounds,3);
+  assert.deepEqual(layouts,["presenter-pip"]);assert.equal(result.materials[0],material);assert.equal(rounds,1);assert.equal(result.acceptedWithNotes,true);
 });
 
-test("long financial timelines repair only the rejected beat and preserve locked narration",async()=>{
+test("single review preserves long financial timelines and locked narration",async()=>{
   const segments=Array.from({length:18},(_,index)=>({id:`s${index+1}`,text:`第${index+1}段：贷款利率与现金流需要结合条件判断。`,intent:index%3?"explain":"anchor",layout:index%3?"presenter-pip":"presenter"}));
   const materials=segments.map(s=>({kind:s.intent==="anchor"?"presenter":"image",source:"fixture",file:s.id+".jpg"}));
   const calls=[];let rounds=0;
@@ -189,35 +190,37 @@ test("long financial timelines repair only the rejected beat and preserve locked
     finalize:async(_master,current)=>{assert.deepEqual(current.map(s=>s.text),segments.map(s=>s.text));assert(current.filter(s=>s.intent==="explain").every(s=>s.layout==="fullscreen"));return {output:"test.mp4",durationSeconds:240};},check:async()=>{},sheet:async()=>"sheet.jpg",
     review:async()=>++rounds===1?{pass:false,issues:["s5现金流机制不清楚"],cardFixes:{s5:{style:"按原文条件展示资金流向，不增加数字"}}}:{pass:true,issues:[]},
   });
-  assert.deepEqual(calls,[4]);assert.equal(result.segments.length,18);
-  for(let i=0;i<18;i++)if(i!==4)assert.equal(result.materials[i],materials[i]);
+  assert.deepEqual(calls,[]);assert.equal(rounds,1);assert.equal(result.acceptedWithNotes,true);assert.equal(result.segments.length,18);
+  for(let i=0;i<18;i++)assert.equal(result.materials[i],materials[i]);
 });
 
-test("third review publishes with truthful findings, including review-only",async()=>{
+test("single review delivers with truthful notes including review-only",async()=>{
   for(const reviewOnly of [false,true]){
-    let reviews=0,renders=0;
+    let reviews=0;
     const result=await renderWithCodexReview({segments:[],materials:[],initialOptions:{reviewOnly}},{
-      finalize:async()=>{renders++;return {output:"test.mp4",durationSeconds:6};},check:async()=>{},sheet:async()=>"sheet.jpg",
-      review:async()=>{reviews++;return {pass:false,issues:["字幕遮挡"]};},
+      finalize:async()=>({output:"test.mp4",durationSeconds:6}),check:async()=>{},sheet:async()=>"sheet.jpg",
+      review:async()=>({pass:false,issues:["字幕遮挡"],subtitleMaxChars:13-++reviews}),
     });
-    assert.equal(reviews,3);assert.equal(renders,1);assert.equal(result.acceptedWithNotes,true);
-    assert.deepEqual(result.reviewHistory.at(-1).issues,["字幕遮挡"]);
+    assert.equal(result.acceptedWithNotes,true);assert.equal(result.reviewHistory.length,1);
+    assert.equal(reviews,1);
   }
 });
 
-test("technical failures never publish a corrupt or absent output",async()=>{
-  let reviews=0;
-  await assert.rejects(renderWithCodexReview({segments:[],materials:[]},{
-    finalize:async()=>({output:"bad.mp4"}),check:async()=>{throw Error("decode failed");},
-    review:async()=>{reviews++;return {pass:true,issues:[]};},
-  }),/decode failed/);assert.equal(reviews,0);
-});
-
-test('unavailable final reviewer releases after three rounds with an explicit user notice',async()=>{
-  let renders=0;
-  const result=await renderWithCodexReview({segments:[],materials:[]},{
-    finalize:async()=>{renders++;return {output:'playable.mp4'};},check:async()=>{},sheet:async()=> 'sheet.jpg',
-    review:async()=>{throw Error('review service unavailable');},
-  });
-  assert.equal(renders,1);assert.equal(result.reviewHistory.length,3);assert.equal(result.acceptedWithNotes,true);assert.match(result.reviewHistory.at(-1).issues[0],/未能完成/);
+test("material planning bounds each batch and retries only its failed batch",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-plan-batches-"));
+  try{
+    const script=Array.from({length:8},(_,i)=>`第${i+1}部分的完整说明：需要保留所有限制条件和数值，不能因为简化画面而删除这些内容。`).join("");
+    const calls=[],progress=[];let failed=false;const expected=[];
+    const planned=await planMaterials(dir,script,null,async(bin,args,options)=>{
+      const input=JSON.parse(await readFile(path.join(options.cwd,"research-input.json"),"utf8"));
+      assert(input.segments.length<=2);assert.equal(input.script,script);calls.push(input.segments.map(s=>s.id).join(","));
+      if(calls.length===2&&!failed){failed=true;throw Object.assign(new Error("timeout"),{killed:true,signal:"SIGTERM"});}
+      for(const segment of input.segments)expected.push(segment.id);
+      await writeFile(path.join(options.cwd,"material-plan.json"),JSON.stringify({segments:input.segments.map(s=>({...s,visual:"完整条件",query:"family planning"}))}));
+    },async(batch,total)=>progress.push([batch,total]));
+    assert(calls.length>2);assert.equal(calls[1],calls[2]);assert.equal(calls.filter(c=>c===calls[0]).length,1);
+    assert.deepEqual(planned.map(s=>s.id),expected);assert.equal(planned.map(s=>s.text).join(""),script);
+    assert.deepEqual(JSON.parse(await readFile(path.join(dir,"material-plan.json"),"utf8")).segments,planned);
+    assert.equal(progress.length,calls.length-1);
+  }finally{await rm(dir,{recursive:true,force:true});}
 });

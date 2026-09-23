@@ -12,6 +12,27 @@ type TaskRow = {
   attempt_count: number; max_attempts: number; created_at: string; updated_at: string;
 };
 
+// A delivered revision is the user's newest usable video. Keep this in the same
+// completion transaction so a reload never sees a completed revision while still
+// treating an older version as current. Failed or incomplete deliveries never
+// reach this helper.
+async function selectCompletedSpokenVideoAsCurrent(client: PoolClient, jobId: string) {
+  await client.query(
+    `update digital_human_video_jobs root
+       set request_json=coalesce(root.request_json,'{}'::jsonb)||jsonb_build_object('selected_version_id',$1::text),updated_at=now()
+      from digital_human_video_jobs delivered
+     where delivered.id=$1
+       and delivered.user_id=root.user_id
+       and delivered.status='completed'
+       and delivered.video_url is not null
+       and delivered.request_json->>'workflow'='spoken_video_v1'
+       and root.id=case when coalesce(delivered.request_json->>'root_job_id','')~'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                        then (delivered.request_json->>'root_job_id')::uuid else delivered.id end
+       and root.request_json->>'workflow'='spoken_video_v1'`,
+    [jobId],
+  );
+}
+
 const taskColumns = "id,task_type,status,priority,payload,result,error_message,attempt_count,max_attempts,created_at,updated_at";
 
 export async function recordLocalAgentHeartbeat(input: LocalAgentHeartbeat) {
@@ -313,11 +334,20 @@ export async function completeLocalAgentTask(id: string, agentId: string, leaseT
          where id=$1`,
         [jobId, completed ? "completed" : "failed", completed ? 100 : 0, String(resultPayload.videoId || ""), String(resultPayload.sessionId || ""), String(resultPayload.videoUrl || ""), String(resultPayload.previewImageUrl || ""), Number(resultPayload.durationSeconds) || null, completed ? null : String(resultPayload.error || "智能生成未能完成"), { stage: completed ? "completed" : "failed", creative_summary: Array.isArray(resultPayload.creativeSummary) ? resultPayload.creativeSummary.slice(0, 6) : [] }],
       );
+      if (completed) await selectCompletedSpokenVideoAsCurrent(client, jobId);
     }
     if (task.task_type === "xiaogu.video.compose") {
       const jobId=typeof task.payload.jobId==="string"?task.payload.jobId:"";const completed=resultPayload.status==="completed"&&typeof resultPayload.videoUrl==="string"&&resultPayload.videoUrl;
       if(!jobId)throw new Error("Xiaogu video compose task has no video job");
       await client.query(`update digital_human_video_jobs set status=$2,progress=$3,video_url=coalesce(nullif($4,''),video_url),duration_seconds=coalesce($5,duration_seconds),error_message=$6,request_json=request_json||$7::jsonb,updated_at=now(),completed_at=case when $2='completed' then now() else completed_at end where id=$1`,[jobId,completed?"completed":"failed",completed?100:96,String(resultPayload.videoUrl||""),Number(resultPayload.durationSeconds)||null,completed?null:String(resultPayload.error||"小谷智能编排未能完成"),{stage:completed?"completed":"composition_failed",archived_by_xiaogu:completed,smart_execution:"local-agent-worker",presenter_master_url:String(resultPayload.presenterMasterUrl||""),creative_summary:Array.isArray(resultPayload.creativeSummary)?resultPayload.creativeSummary.slice(0,6):[]}]);
+      if (completed) await selectCompletedSpokenVideoAsCurrent(client, jobId);
+    }
+    if(task.task_type==="digital-human.video.produce"){
+      const jobId=String(task.payload.jobId||"");if(!jobId)throw new Error("Spoken video task has no job");
+      const {completed,error,reviews,deliveryNotes,deliveryIssues,qualityPassed}=spokenVideoCompletion(resultPayload);
+      await client.query(`update digital_human_video_jobs set status=$2,progress=$3,video_url=$4,preview_image_url=$5,duration_seconds=$6,error_message=$7,request_json=request_json||$8::jsonb,updated_at=now(),completed_at=case when $2='completed' then now() else null end where id=$1`,[jobId,completed?"completed":"failed",completed?100:0,completed?String(resultPayload.videoUrl):null,completed?String(resultPayload.coverUrl||"")||null:null,completed?Number(resultPayload.durationSeconds)||null:null,error,{stage:completed?"completed":"failed",material_plan:resultPayload.materialPlan||null,subtitle_srt:typeof resultPayload.subtitleSrt==="string"?resultPayload.subtitleSrt:"",edit_options:resultPayload.editOptions||{},quality_review:reviews,delivery_notes:deliveryNotes,quality_issues:deliveryIssues,quality_passed:qualityPassed,performance:resultPayload.performance||null,creative_summary:Array.isArray(resultPayload.creativeSummary)?resultPayload.creativeSummary:[]}]);
+      if (completed) await selectCompletedSpokenVideoAsCurrent(client, jobId);
+      if(!completed)await client.query("update local_agent_tasks set status='failed',error_message=$2 where id=$1",[id,error]);
     }
     if(task.task_type==="digital-human.video.produce"){
       const jobId=String(task.payload.jobId||"");if(!jobId)throw new Error("Spoken video task has no job");

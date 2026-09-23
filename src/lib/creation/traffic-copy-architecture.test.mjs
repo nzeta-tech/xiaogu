@@ -119,7 +119,8 @@ test("writer receives coach-led inspiration without the full source prose", () =
   assert.doesNotMatch(prompt, /这个完整原稿专属长句/);
   assert.doesNotMatch(prompt, /sourceStatus/);
   assert.doesNotMatch(prompt, /【教练决策单】|【搜索与补充材料】/);
-  assert.match(prompt, /开头、结构、篇幅、节奏、称谓、案例组织、观点强度和结尾全部由教练声纹与本题内容决定/);
+  assert.match(prompt, /正文需完整覆盖成稿契约中的requiredUnits/);
+  assert.match(prompt, /320-680 字区间/);
 });
 
 test("publication contract exposes permissions without leaking internal provenance", () => {
@@ -128,6 +129,7 @@ test("publication contract exposes permissions without leaking internal provenan
   const contract = compileTrafficPublicationContract(blueprint, fallbackTrafficCopyCreativeBrief(source));
   const serialized = JSON.stringify(contract);
   assert.equal(contract.narrativeIdentity, "creator-direct");
+  assert.deepEqual(contract.requiredUnits, [{ meaning:"先保流动性",function:"结论" }]);
   assert.doesNotMatch(serialized, /sourceStatus|contentAssets|selectedAssetIds/);
   assert.match(serialized, /先保流动性/);
 });
@@ -152,8 +154,8 @@ test("automatic duration and routed method boundary are deterministic", () => {
   const parsed = parseTrafficCopyCreativeBrief(JSON.stringify({ selectedMethods:[{methodId:"allowed",purpose:"x",targetGap:"g1",uniqueContribution:"only",removalTest:"breaks",necessary:true},{methodId:"invented",purpose:"x",targetGap:"g2",uniqueContribution:"only",removalTest:"breaks",necessary:true}], durationRange:{preferredSeconds:[300,600],preferredCharacters:[2400,3000]} }));
   const normalized = normalizeTrafficBriefForSource(parsed, "资".repeat(400), ["allowed"]);
   assert.deepEqual(normalized.selectedMethods.map((item) => item.methodId), ["allowed"]);
-  assert.deepEqual(normalized.durationRange.preferredCharacters, [750,1000]);
-  assert.deepEqual(normalized.durationRange.preferredSeconds, [180,240]);
+  assert.deepEqual(normalized.durationRange.preferredCharacters, [612,900]);
+  assert.deepEqual(normalized.durationRange.preferredSeconds, [147,216]);
   assert.equal(normalized.primaryMethod, "allowed");
 });
 
@@ -168,13 +170,19 @@ test("identity and automatic length guards request one minimal revision", () => 
   assert.ok(guarded.reductionPlan.length > 0);
 });
 
-test("automatic length guard warns without treating character count as semantic proof", () => {
+test("automatic length guard blocks a materially incomplete short draft", () => {
   const cleanAudit = parseTrafficCopyAudit(JSON.stringify({ status:"pass",issues:[],semanticCoverage:1,expressionSimilarity:.1 }));
   const brief = normalizeTrafficBriefForSource(fallbackTrafficCopyCreativeBrief("资".repeat(400)), "资".repeat(400));
   const guarded = applyTrafficDeterministicAuditChecks(cleanAudit, "观点很重要，但正文没有解释具体机制。", { brief });
-  assert.equal(guarded.status, "pass");
-  assert.equal(guarded.hardBlocking, false);
+  assert.equal(guarded.status, "revise");
+  assert.equal(guarded.hardBlocking, true);
   assert.ok(guarded.issues.some((item) => item.type === "automatic_length_underrun"));
+});
+
+test("substantial source material cannot collapse into a few hundred characters", () => {
+  const brief = normalizeTrafficBriefForSource(fallbackTrafficCopyCreativeBrief("资".repeat(1616)), "资".repeat(1616));
+  assert.deepEqual(brief.durationRange.preferredCharacters, [1224,1800]);
+  assert.ok(brief.durationRange.preferredSeconds[0] >= 290);
 });
 
 test("missing publication-contract evidence is deterministically blocking", () => {

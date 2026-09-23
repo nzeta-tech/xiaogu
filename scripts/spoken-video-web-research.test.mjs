@@ -47,25 +47,3 @@ test("Codex research validates segment alignment and keeps unlicensed media as l
     await assert.rejects(researchSegmentsWithCodex(segments,dir,async(_command,args)=>writeFile(args[args.indexOf("-o")+1],JSON.stringify({webAccessed:false,segments:[]}))),/实时网页检索/);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
-
-test("resume research batches uncached segments while retaining per-segment checkpoints",async()=>{
-  const root=await mkdtemp(path.join(os.tmpdir(),"spoken-research-batch-test-"));
-  const dir=path.join(root,"work");
-  const {videoResumeCache}=await import("./spoken-video-resume.mjs");
-  const segments=Array.from({length:9},(_,index)=>({id:`s${index+1}`,visual:`主题${index+1}`,text:`内容${index+1}`}));
-  const calls=[];
-  const runner=async(_command,args,options)=>{
-    const input=JSON.parse(await readFile(path.join(options.cwd,"web-research-input.json"),"utf8"));
-    calls.push(input.segments.map(segment=>segment.id));
-    await writeFile(args[args.indexOf("-o")+1],JSON.stringify({webAccessed:true,segments:input.segments.map(segment=>({id:segment.id,sources:[]}))}));
-  };
-  try{
-    await researchSegmentsWithCodex(segments,dir,runner,videoResumeCache(root,"task"));
-    assert.deepEqual(calls.map(call=>call.length).sort((a,b)=>a-b),[1,4,4]);
-    calls.length=0;
-    await researchSegmentsWithCodex(segments,dir,runner,videoResumeCache(root,"task"));
-    assert.equal(calls.length,0);
-    await researchSegmentsWithCodex([{...segments[0],text:"已修改"},...segments.slice(1)],dir,runner,videoResumeCache(root,"task"));
-    assert.deepEqual(calls,[["s1"]]);
-  }finally{await rm(root,{recursive:true,force:true});}
-});

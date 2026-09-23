@@ -14,20 +14,23 @@ test("subtitle and PIP safety uses the same ASS coordinate scale for both aspect
   assert.throws(()=>videoSafeLayout(0,1920));
 });
 
+test("presenter overlays use the left safe column and never occupy the right presenter zone",()=>{
+  const frame=presenterOverlayFrame(1080,1920,"presenter-overlay");
+  const pip=videoSafeLayout(1080,1920).pip;
+  assert.equal(frame.side,"left");
+  assert(frame.x+frame.width<pip.x,"support panel must not cover the right-side presenter");
+  assert(frame.y+frame.height<videoSafeLayout(1080,1920).subtitleTop,"support panel must clear captions");
+});
+
 test("financial explanation and evidence do not obscure diagrams with a presenter",()=>{
   for(const intent of ["evidence","explain"])assert.equal(safeSemanticLayout({intent,layout:"presenter-pip"},{kind:"image"}),"fullscreen");
   assert.equal(safeSemanticLayout({intent:"explain"},{kind:"presenter"}),"presenter");
   assert.equal(safeSemanticLayout({intent:"scene",layout:"presenter-pip"},{kind:"image"}),"presenter-pip");
-  for(const layout of ["presenter-overlay","presenter-data","presenter-evidence"])assert.equal(safeSemanticLayout({intent:"evidence",layout},{kind:"image"}),layout);
-  assert.equal(safeSemanticLayout({intent:"explain",layout:"fullscreen"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:cause:verbatim-partition:pip-safe"}),"presenter-pip");
+  assert.equal(safeSemanticLayout({intent:"explain",layout:"fullscreen",visualTreatment:"motion-card"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:cause:verbatim-partition:pip-safe"}),"fullscreen");
   assert.equal(safeSemanticLayout({intent:"explain",layout:"presenter-pip"},{kind:"image",source:"xiaogu-knowledge-card-expression",presentation:"expression-v2:sequence:verbatim-partition:fullscreen"}),"fullscreen");
-});
-
-test("smart presenter overlays stay above subtitles in portrait and landscape",()=>{
-  for(const [width,height] of [[1080,1920],[1920,1080]])for(const layout of ["presenter-overlay","presenter-data","presenter-evidence"]){
-    const safe=videoSafeLayout(width,height),frame=presenterOverlayFrame(layout,width,height,safe);
-    assert(frame);assert(frame.x>=0&&frame.y>=0);assert(frame.x+frame.width<=width);assert(frame.y+frame.height<safe.subtitleTop);
-  }
+  assert.equal(safeSemanticLayout({intent:"explain",visualTreatment:"data-widget"},{kind:"image"}),"fullscreen");
+  assert.equal(safeSemanticLayout({intent:"evidence",visualTreatment:"evidence-snippet"},{kind:"image"}),"fullscreen");
+  assert.equal(safeSemanticLayout({intent:"explain",visualTreatment:"keyword-motion"},{kind:"image"}),"presenter");
 });
 
 test("intro title ends before a grounded diagram enters including its transition",()=>{

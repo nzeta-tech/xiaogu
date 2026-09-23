@@ -19,18 +19,17 @@ test("retry in a fresh workspace only researches unfinished or changed segments"
   };
   try {
     const first = await mkdtemp(path.join(root, "attempt-"));
-    process.env.LOCAL_AGENT_VIDEO_RESEARCH_BATCH_SIZE="1";
     await assert.rejects(researchSegmentsWithCodex(segments, first, runner, videoResumeCache(root, "task-a")), /interrupted/);
     await rm(first, { recursive: true });
     fail = false;
     const second = await mkdtemp(path.join(root, "attempt-"));
     assert.deepEqual(await researchSegmentsWithCodex(segments, second, runner, videoResumeCache(root, "task-a")), [[], []]);
-    assert.deepEqual(calls.slice(0,2).sort(), ["s1", "s2"]);assert.equal(calls[2],"s2");
+    assert.deepEqual(calls, ["s1", "s2", "s2"]);
     await researchSegmentsWithCodex([{ ...segments[0], text: "changed" }, segments[1]], second, runner, videoResumeCache(root, "task-a"));
-    assert.equal(calls.length,4);assert.equal(calls[3],"s1");
+    assert.deepEqual(calls, ["s1", "s2", "s2", "s1"]);
     await researchSegmentsWithCodex(segments, second, runner, videoResumeCache(root, "task-b"));
-    assert.deepEqual(calls.slice(-2).sort(), ["s1", "s2"]);
-  } finally { delete process.env.LOCAL_AGENT_VIDEO_RESEARCH_BATCH_SIZE;await rm(root, { recursive: true, force: true }); }
+    assert.deepEqual(calls.slice(-2), ["s1", "s2"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("planning cache rejects invalid results, expires, survives corruption and clears", async () => {

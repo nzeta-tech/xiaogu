@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, statfs, writeFile } from "node:fs/promises";
 import { constants as fsConstants, createReadStream } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,6 +8,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { setDefaultResultOrder } from "node:dns";
 import sharp from "sharp";
+import {createWorkPool} from "./spoken-video-work-pool.mjs";
 
 setDefaultResultOrder("ipv4first");
 const execFileAsync = promisify(execFile);
@@ -38,6 +39,8 @@ const transcriptBatchMs = boundedNumber("LOCAL_AGENT_TRANSCRIPT_BATCH_MS", 400, 
 const maxTranscribeBytes = boundedNumber("LOCAL_AGENT_MAX_TRANSCRIBE_BYTES", 200 * 1024 * 1024, 1 * 1024 * 1024, 500 * 1024 * 1024);
 const mediaDownloadTimeoutMs = boundedNumber("LOCAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS", 300000, 30000, 600000);
 const protocolVersion = boundedNumber("LOCAL_AGENT_PROTOCOL_VERSION", 1, 1, 1000);
+const maxConcurrentTasks = boundedNumber("LOCAL_AGENT_MAX_CONCURRENT_TASKS", 1, 1, 8);
+const minFreeDiskBytes = boundedNumber("LOCAL_AGENT_MIN_FREE_DISK_BYTES", 12 * 1024 * 1024 * 1024, 1024 * 1024 * 1024, 500 * 1024 * 1024 * 1024);
 const nativeDouyinVerifierBase = process.env.DOUYIN_NATIVE_VERIFY_API_BASE?.trim().replace(/\/$/, "") || "";
 const readyFile = process.env.LOCAL_AGENT_READY_FILE || "/tmp/local-agent.ready";
 let activeTaskCount = 0;
@@ -53,15 +56,20 @@ const presenceTimer = setInterval(() => sendPresenceHeartbeat().catch((error) =>
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
     stopping = true;
-    clearInterval(presenceTimer);
-    sendPresenceHeartbeat("offline").finally(() => process.exit(0));
-    setTimeout(() => process.exit(0), 3000).unref();
+    console.log(`[local-agent] ${signal} received; draining ${activeTaskCount} active task(s)`);
   });
 }
-console.log(`[local-agent] ${agentId} polling ${remoteBase} with capabilities: ${capabilities.join(", ")}`);
+console.log(`[local-agent] ${agentId} polling ${remoteBase} with concurrency ${maxConcurrentTasks}; capabilities: ${capabilities.join(", ")}`);
 
+const taskPool = createWorkPool(maxConcurrentTasks, {onError:error => console.error(`[local-agent] task runner failed: ${messageOf(error)}`)});
 while (!stopping) {
   try {
+    await taskPool.waitForCapacity();
+    if (stopping) break;
+    if (taskPool.size > 0 && !await hasVideoDiskCapacity()) {
+      await delay(pollIntervalMs);
+      continue;
+    }
     const leased = await remote("/api/internal/local-agent/tasks/lease", {
       agentId, capabilities: readyForTasks ? availableCapabilities() : [], leaseSeconds, protocolVersion,
     });
@@ -69,11 +77,20 @@ while (!stopping) {
       await delay(pollIntervalMs);
       continue;
     }
-    await executeLeasedTask(leased.task, leased.leaseToken);
+    taskPool.start(() => executeLeasedTask(leased.task, leased.leaseToken));
   } catch (error) {
     console.error(`[local-agent] polling failed: ${messageOf(error)}`);
     await delay(Math.max(pollIntervalMs, 5000));
   }
+}
+await taskPool.drain();
+clearInterval(presenceTimer);
+await sendPresenceHeartbeat("offline").catch(error => console.error(`[local-agent] offline heartbeat failed: ${messageOf(error)}`));
+
+async function hasVideoDiskCapacity() {
+  const directory = process.env.LOCAL_AGENT_VIDEO_WORKDIR || os.tmpdir();
+  try { const value = await statfs(directory); return Number(value.bavail) * Number(value.bsize) >= minFreeDiskBytes; }
+  catch { return false; }
 }
 
 async function executeLeasedTask(task, leaseToken) {
@@ -665,7 +682,7 @@ async function heygenAuthHealth() {
   const proxy = process.env.HEYGEN_CLI_PROXY_URL;
   if (proxy) Object.assign(env, { HTTP_PROXY: proxy, HTTPS_PROXY: proxy, ALL_PROXY: proxy });
   try {
-    await execFileAsync(process.env.HEYGEN_CLI_BIN || "heygen", ["auth", "status"], { timeout: 15000, env });
+    await execFileAsync(process.env.HEYGEN_CLI_BIN || "heygen", ["auth", "status"], { timeout: 8000, env });
     lastHeygenAuthSuccessAt = Date.now();
     return "healthy";
   } catch (error) {
@@ -676,21 +693,7 @@ async function heygenAuthHealth() {
       lastHeygenAuthSuccessAt = 0;
       return "unhealthy";
     }
-    console.error(`[local-agent] HeyGen auth health check failed: ${error?.killed ? "timeout" : error?.code || "unknown"}`);
-    if (Date.now() - lastHeygenAuthSuccessAt < 120_000 || await hasUsableStoredHeygenOAuth()) return "healthy";
-    return "unhealthy";
-  }
-}
-
-async function hasUsableStoredHeygenOAuth() {
-  try {
-    const credential = JSON.parse(await readFile(path.join(os.homedir(), ".heygen", "credentials"), "utf8"));
-    const oauth = credential?.oauth;
-    const expiresAt = Date.parse(oauth?.expires_at || "");
-    return typeof oauth?.refresh_token === "string" && oauth.refresh_token.length > 0
-      && Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000;
-  } catch {
-    return false;
+    return Date.now() - lastHeygenAuthSuccessAt < 120_000 ? "healthy" : "unhealthy";
   }
 }
 

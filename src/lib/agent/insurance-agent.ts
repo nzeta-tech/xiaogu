@@ -1,3 +1,4 @@
+import { readStructuredModelStream } from "./structured-model-stream";
 import { hasModelConfig, isDemoModeEnabled } from "@/lib/config/runtime";
 import { formatAvatarMemoriesForPrompt, tryListActiveAvatarMemories, tryLogAvatarUsage, type AvatarMemoryScope } from "@/lib/avatar/store";
 import { tryGetBrokerProfile, tryGetLatestThinkingProfileSnapshot } from "@/lib/db/repositories";
@@ -338,7 +339,7 @@ async function callOpenAICompatible(
     body: JSON.stringify({
       model: config.model,
       temperature: options?.temperature ?? 0.6,
-      ...(options?.responseFormat ? { response_format: { type: options.responseFormat } } : {}),
+      ...(options?.responseFormat ? { response_format: { type: options.responseFormat }, stream: true, ...(/^gpt-[56]/.test(config.model) ? { reasoning_effort: "low" } : {}) } : {}),
       messages: [{ role: "system", content: system }, ...messages],
     }),
   } satisfies RequestInit;
@@ -353,6 +354,8 @@ async function callOpenAICompatible(
     const detail = await readModelError(response);
     throw new Error(`大模型服务调用失败：${response.status}${detail ? `，${detail}` : ""}`);
   }
+
+  if (options?.responseFormat) return readStructuredModelStream(response);
 
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;

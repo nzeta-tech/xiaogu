@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
 import { createWorkbuddyTask, type WorkbuddyExecutionEvent } from "@/lib/workbuddy/store";
+import { startWorkbuddyStreamHeartbeat } from "@/lib/workbuddy/stream-lifecycle";
 
 const inputSchema = z.object({
   objective: z.string().trim().min(1).max(6000),
@@ -23,14 +24,21 @@ export async function POST(request: Request) {
         if (closed) return;
         try { controller.enqueue(encoder.encode(`data: ${JSON.stringify({ ...event, at: new Date().toISOString() })}\n\n`)); } catch { closed = true; }
       };
+      const stopHeartbeat = startWorkbuddyStreamHeartbeat(() => {
+        if (closed) return;
+        try { controller.enqueue(encoder.encode(": heartbeat\n\n")); } catch { closed = true; }
+      });
       send({ type: "request.accepted", message: "已收到目标，正在分析任务意图" });
       try {
-        const task = await createWorkbuddyTask(user, parsed.data, send, request.signal);
+        // A WorkBuddy task is durable once accepted. A dropped browser/SSE
+        // connection must not cancel the background application run.
+        const task = await createWorkbuddyTask(user, parsed.data, send);
         if (!task) throw new Error("任务执行完成但未能读取结果");
         send({ type: "done", message: "任务流已完成", taskId: task.id, data: { task } });
       } catch (error) {
         send({ type: "error", message: error instanceof Error ? error.message : "任务执行失败" });
       } finally {
+        stopHeartbeat();
         if (!closed) controller.close();
       }
     },

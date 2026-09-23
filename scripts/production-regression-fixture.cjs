@@ -16,7 +16,14 @@ const{createRequire}=require('node:module');const req=createRequire(process.env.
   if(!/^[0-9a-f-]{36}$/.test(id||''))throw Error('invalid fixture id');
   const allowed=await pool.query("select id from users where id=$1 and email=$2",[id,'spoken-release-'+id+'@example.invalid']);if(!allowed.rowCount)throw Error('fixture owner mismatch');
   if(action==='cleanup'){
+   const media=await pool.query('select storage_key from digital_human_media_assets where user_id=$1 and storage_node_id=$2',[id,process.env.MEDIA_NODE_ID]);for(const row of media.rows)if(row.storage_key){const r=await fetch(process.env.MEDIA_NODE_URL+'/objects/'+row.storage_key,{method:'DELETE',headers:{authorization:'Bearer '+process.env.MEDIA_NODE_TOKEN}});if(!r.ok)throw Error('fixture media cleanup failed');}
    await pool.query('delete from local_agent_tasks where owner_user_id=$1',[id]);await pool.query('delete from spoken_photo_assets where user_id=$1',[id]);await pool.query('delete from digital_human_media_assets where user_id=$1',[id]);await pool.query('delete from users where id=$1',[id]);console.log(JSON.stringify({cleaned:true}));
+  }else if(action==='media-renew'){
+   await pool.query("update local_agent_tasks set lease_expires_at=now()+interval '2 hours' where owner_user_id=$1 and status='leased'",[id]);console.log(JSON.stringify({renewed:true}));
+  }else if(action==='media-evidence'){
+   const rows=await pool.query("select id,video_job_id,kind,size_bytes,sha256,metadata_json->>'upload_part' as upload_part from digital_human_media_assets where user_id=$1",[id]);console.log(JSON.stringify({media:rows.rows}));
+  }else if(action==='media-lock'){
+   await pool.query("update digital_human_video_jobs set status='completed' where user_id=$1",[id]);console.log(JSON.stringify({locked:true}));
   }else if(action==='grant'){
    await pool.query("insert into exclusive_app_access_overrides(user_id,mode,reason) values($1,'granted','Production release regression') on conflict(user_id) do update set mode='granted'",[id]);console.log(JSON.stringify({granted:true}));
   }else if(action==='quality-create'){
@@ -24,8 +31,14 @@ const{createRequire}=require('node:module');const req=createRequire(process.env.
    await pool.query("insert into digital_human_video_jobs(id,user_id,provider,edition,title,script,aspect_ratio,status,quota_cost,request_json) values($1,$2,'heygen','pro','质检验收','合成验收文案','9:16','processing',50,'{\"workflow\":\"spoken_video_v1\"}')",[jobId,id]);
    await pool.query("insert into local_agent_tasks(id,task_type,owner_user_id,payload,status,agent_id,lease_token_hash,lease_expires_at,attempt_count) values($1,'digital-human.video.produce',$2,$3,'leased',$4,$5,now()+interval '5 minutes',1)",[taskId,id,{jobId},agentId,createHash('sha256').update(leaseToken).digest('hex')]);
    console.log(JSON.stringify({jobId,taskId,leaseToken,agentId}));
+  }else if(action==='quality-version-create'){
+   const rootJobId=randomUUID(),jobId=randomUUID(),taskId=randomUUID(),leaseToken=randomUUID(),agentId='release-quality-'+id;
+   await pool.query("insert into digital_human_video_jobs(id,user_id,provider,edition,title,script,aspect_ratio,status,quota_cost,video_url,request_json) values($1,$2,'heygen','pro','根版本','合成验收文案','9:16','completed',50,'https://example.invalid/root.mp4','{\"workflow\":\"spoken_video_v1\"}')",[rootJobId,id]);
+   await pool.query("insert into digital_human_video_jobs(id,user_id,provider,edition,title,script,aspect_ratio,status,quota_cost,request_json) values($1,$2,'heygen','pro','修改版本','合成验收文案','9:16','processing',50,$3)",[jobId,id,{workflow:'spoken_video_v1',root_job_id:rootJobId,base_version_id:rootJobId,revision_number:2}]);
+   await pool.query("insert into local_agent_tasks(id,task_type,owner_user_id,payload,status,agent_id,lease_token_hash,lease_expires_at,attempt_count) values($1,'digital-human.video.produce',$2,$3,'leased',$4,$5,now()+interval '5 minutes',1)",[taskId,id,{jobId},agentId,createHash('sha256').update(leaseToken).digest('hex')]);
+   console.log(JSON.stringify({rootJobId,jobId,taskId,leaseToken,agentId}));
   }else if(action==='quality-evidence'){
-   const rows=await pool.query("select job.id,job.status,job.error_message,job.video_url is not null as has_video,job.request_json->'quality_review' as reviews,task.status as task_status,(select count(*)::int from usage_logs where metadata->>'digitalHumanVideoJobId'=job.id::text) as charges from digital_human_video_jobs job join local_agent_tasks task on task.payload->>'jobId'=job.id::text where job.user_id=$1",[id]);
+   const rows=await pool.query("select job.id,job.status,job.error_message,job.video_url is not null as has_video,job.request_json->'quality_review' as reviews,job.request_json->'delivery_notes' as delivery_notes,job.request_json->'quality_passed' as quality_passed,job.request_json->>'selected_version_id' as selected_version_id,task.status as task_status,(select count(*)::int from usage_logs where metadata->>'digitalHumanVideoJobId'=job.id::text) as charges from digital_human_video_jobs job left join local_agent_tasks task on task.payload->>'jobId'=job.id::text where job.user_id=$1",[id]);
    console.log(JSON.stringify({jobs:rows.rows}));
   }else if(action==='task-evidence'){
    const tasks=await pool.query("select id,status,task_type,result,attempt_count from local_agent_tasks where owner_user_id=$1 order by created_at desc",[id]);console.log(JSON.stringify({tasks:tasks.rows}));
