@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {mkdtemp,writeFile,readFile,rm} from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import {videoSafeLayout,safeSemanticLayout,expressionSafeTitleDuration} from "./spoken-video-layout.mjs";
+import {videoSafeLayout,safeSemanticLayout,expressionSafeTitleDuration,presenterOverlayFrame} from "./spoken-video-layout.mjs";
 import {cachedVideoShot,mediaFingerprint} from "./spoken-video-render-cache.mjs";
 
 test("subtitle and PIP safety uses the same ASS coordinate scale for both aspect ratios",()=>{
@@ -12,6 +12,14 @@ test("subtitle and PIP safety uses the same ASS coordinate scale for both aspect
   }
   assert.equal(videoSafeLayout(320,240,70).pipFits,false);
   assert.throws(()=>videoSafeLayout(0,1920));
+});
+
+test("presenter overlays use the left safe column and never occupy the right presenter zone",()=>{
+  const frame=presenterOverlayFrame(1080,1920,"presenter-overlay");
+  const pip=videoSafeLayout(1080,1920).pip;
+  assert.equal(frame.side,"left");
+  assert(frame.x+frame.width<pip.x,"support panel must not cover the right-side presenter");
+  assert(frame.y+frame.height<videoSafeLayout(1080,1920).subtitleTop,"support panel must clear captions");
 });
 
 test("financial explanation and evidence do not obscure diagrams with a presenter",()=>{

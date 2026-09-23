@@ -21,7 +21,7 @@ import { mapVideoWork } from "./spoken-video-concurrency.mjs";
 import { buildSpokenPresenterRequest } from "./spoken-video-motion.mjs";
 import { retryVideoStage, VideoStageOutputError, isRetryableVideoStageError } from "./spoken-video-stage.mjs";
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
-import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration } from "./spoken-video-layout.mjs";
+import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration, presenterOverlayFrame } from "./spoken-video-layout.mjs";
 import { mediaFingerprint, cachedVideoShot } from "./spoken-video-render-cache.mjs";
 import { buildEvidencePacks, createOfficialEvidenceCard, directSmartVideoWithCodex } from "./spoken-video-director.mjs";
 import {createWorkGate} from "./spoken-video-work-pool.mjs";
@@ -483,10 +483,9 @@ async function renderSegment(master,material,maskFile,out,start,length,width,hei
     }else if(["presenter-overlay","presenter-data","presenter-evidence"].includes(layout)){
       // Keep the talking head as the base.  The support visual occupies 25–40%
       // of the frame and slides in briefly instead of replacing the presenter.
-      const panelWidth=Math.round(width*(layout==="presenter-overlay"?.36:layout==="presenter-evidence"?.40:.31));
-      const panelHeight=Math.round(height*(layout==="presenter-overlay"?.34:layout==="presenter-evidence"?.28:.22));
-      const x=width-panelWidth-42,y=layout==="presenter-data"?Math.round(height*.18):Math.round(height*.24);
-      const entered=`if(lt(t,0.24),${width}+(${x}-${width})*t/0.24,${x})`;
+      const panel=presenterOverlayFrame(width,height,layout);
+      const panelWidth=panel.width,panelHeight=panel.height,x=panel.x,y=panel.y;
+      const entered=`if(lt(t,0.24),-${panelWidth}+(${x}+${panelWidth})*t/0.24,${x})`;
       const filters=`[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=${panelWidth}:${panelHeight}:force_original_aspect_ratio=decrease,pad=${panelWidth}:${panelHeight}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setsar=1[asset];[base][asset]overlay=${entered}:${y}:shortest=1[v]`;
       args.push("-filter_complex",filters,"-map","[v]");
     }else{
