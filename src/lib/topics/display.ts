@@ -12,7 +12,6 @@ export function getTopicTab(topic: HotTopic): "热点" | "财经" | "香港" | "
   if (/财经|金融|市场|利率|房贷|消费|物价|股|债|基金|经济|企业|现金流/i.test(signal)) return "财经";
   return "热点";
 }
-
 export function matchesFinanceFilter(topic: HotTopic, filter: FinanceFilter) {
   if (filter === "全部") return true;
   const signal = `${topic.title} ${topic.summary} ${topic.source} ${topic.category}`;
@@ -43,4 +42,3 @@ export function compareTopicsForDisplay(left: HotTopic, right: HotTopic, tab: "�
   };
   return score(right) - score(left) || left.title.localeCompare(right.title, "zh-CN");
 }
-
