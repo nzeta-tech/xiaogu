@@ -394,6 +394,8 @@ function isNavItemActive(pathname: string, itemId?: string, navigationSource?: s
     return pathname === "/today" || (isWorkDetail && workNavigationItem === "workbench");
   }
 
+  if (itemId === "today") return pathname === "/today";
+
   if (itemId === "crm") {
     return pathname === "/avatar" || pathname === "/questionnaire";
   }

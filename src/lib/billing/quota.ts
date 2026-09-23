@@ -1,5 +1,6 @@
 export type QuotaAction =
   | "hot_topics"
+  | "short_videos"
   | "topic_angles"
   | "write_script"
   | "rewrite"
@@ -8,6 +9,7 @@ export type QuotaAction =
 
 export const quotaCosts: Record<QuotaAction, number> = {
   hot_topics: 2,
+  short_videos: 1,
   topic_angles: 3,
   write_script: 5,
   rewrite: 2,
