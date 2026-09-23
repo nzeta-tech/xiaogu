@@ -722,6 +722,15 @@ export class VideoQualityError extends Error {
   result(jobId){return {status:"failed",jobId,error:this.message,qualityReview:this.reviewHistory};}
 }
 
+export function creatorQualityIssues(issues,segments=[]){
+  const titles=new Map((segments||[]).map(segment=>[segment.id,safe(segment.visual)||"对应画面"]));
+  return [...new Set((issues||[]).filter(issue=>typeof issue==="string"&&issue.trim()))].slice(0,8).map(issue=>{
+    const match=issue.match(/^(s\d+(?:-b\d+)?)\s*[：:]/),id=match?.[1],message=issue.replace(/^(s\d+(?:-b\d+)?)\s*[：:]\s*/,"").trim();
+    const critical=/事实|数据.*(?:错误|不符|矛盾)|来源.*(?:不支持|错误)|伪造|误导|脸部变形|空白画面/.test(message);
+    return {level:critical?"critical":"warning",title:id?titles.get(id)||"对应画面":"成片检查",message:message||issue};
+  });
+}
+
 export async function renderWithCodexReview({master,segments,materials,subtitleUrl,script,dir,title,aspectRatio,references=[],onProgress=async()=>{},generateVisual:generateVisualForReview=null,initialOptions={},resolveMaterial=null},dependencies={}){
   const finalizeVideo=dependencies.finalize||finalize,checkVideo=dependencies.check||checkedFinalVideo,reviewVideo=dependencies.review||codexReview,createSheet=dependencies.sheet||createReviewSheet;
   let currentMaterials=[...materials],currentSegments=segments.map(segment=>({...segment})),options={...initialOptions};
@@ -732,7 +741,7 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
   const reviewHistory=[],rejectedSearches=new Set();
   const layoutLocked=new Set();
   let previousSignature=null,previousFinal=null,previousSheet=null;
-  for(let attempt=1;attempt<=2;attempt++){
+  for(let attempt=1;attempt<=1;attempt++){
     await onProgress(`正在进行第 ${attempt} 轮本地混剪与质量验收`,Math.min(90,72+attempt*5));
     const signature={global:JSON.stringify({options,script,title,aspectRatio}),shots:await Promise.all(currentSegments.map(async(segment,i)=>JSON.stringify({segment,material:currentMaterials[i],hash:currentMaterials[i]?.file?await mediaFingerprint(currentMaterials[i].file).catch(()=>currentMaterials[i].file):null})))};
     let scope=changedReviewScope(previousSignature,signature);
@@ -749,7 +758,7 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
     try{review=await measureVideoStage("director_review",()=>retryVideoStage(()=>reviewVideo({dir,contactSheet:sheet,title,script,segments:currentSegments,materials:currentMaterials,references,attempt,presenterShare:Number.isFinite(options.presenterShare)?options.presenterShare:.4,shotTimeline:final.shotTimeline,reviewScope:scope===null?null:scope.map(i=>currentSegments[i].id),previousReview:reviewHistory.at(-1)})),{attempt});}
     catch{review={pass:false,issues:["本轮自动质检未能完成，请查看成片确认画面质量。"]};}
     reviewHistory.push({attempt,pass:review.pass,issues:review.issues,...(review.warnings?.length?{warnings:review.warnings}:{})});
-    if(review.pass||attempt===2)return {...final,materials:currentMaterials,segments:currentSegments.map((segment,i)=>({...segment,layout:final.shotTimeline?.[i]?.layout||segment.layout})),reviewHistory,options,acceptedWithNotes:!review.pass};
+    if(review.pass||attempt===1)return {...final,materials:currentMaterials,segments:currentSegments.map((segment,i)=>({...segment,layout:final.shotTimeline?.[i]?.layout||segment.layout})),reviewHistory,options,acceptedWithNotes:!review.pass};
     previousSignature=signature;previousFinal=final;previousSheet=sheet;
     if(options.reviewOnly)continue;
     let changed=false;
@@ -879,7 +888,8 @@ async function executeProduction(task,leaseToken,ctx){
     const externalCount=final.materials.filter(material=>material.source.startsWith("https://")).length;
     const generatedCount=final.materials.filter(material=>["xiaogu-generated-visual","xiaogu-ai-knowledge-card"].includes(material.source)).length;
     // Retain validated planning/research for scoped cross-version reuse (24h TTL).
-    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,presenterMasterUrl:masterUrl,materialPlan:finalManifest,acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,p.aspectRatio),creativeSummary:[`画面素材 ${final.materials.length} 段：外部 ${externalCount}、AI 生成 ${generatedCount}、本地 ${final.materials.length-externalCount-generatedCount}`,productionMode==="smart"?`已完成导演镜头脚本与 ${evidencePacks.filter(pack=>pack.sources.length).length} 个知识点证据包`:"已按语义节点完成真实素材、资料画面和人物镜头混剪","已完成一次 HeyGen 口播合成",`已完成 ${final.reviewHistory.length} 轮成片检查与优化`,`已完成混剪、字幕、标题和封面`]};
+    const deliveryIssues=final.acceptedWithNotes?creatorQualityIssues(final.reviewHistory.at(-1)?.issues,final.segments):[];
+    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,presenterMasterUrl:masterUrl,materialPlan:finalManifest,acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:deliveryIssues.map(issue=>issue.message),deliveryIssues,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,p.aspectRatio),creativeSummary:[`画面素材 ${final.materials.length} 段：外部 ${externalCount}、AI 生成 ${generatedCount}、本地 ${final.materials.length-externalCount-generatedCount}`,productionMode==="smart"?`已完成导演镜头脚本与 ${evidencePacks.filter(pack=>pack.sources.length).length} 个知识点证据包`:"已按语义节点完成真实素材、资料画面和人物镜头混剪","已完成一次 HeyGen 口播合成",`已完成 ${final.reviewHistory.length} 轮成片检查`,`已完成混剪、字幕、标题和封面`]};
   } catch(error){
     if(error instanceof VideoQualityError)return error.result(jobId);
     throw error;
@@ -1047,7 +1057,8 @@ async function executeRecut(task,leaseToken,ctx){
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${input.title}-封面.jpg`,"image/jpeg");
-    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,input.aspectRatio),materialPlan:final.segments.map((s,i)=>({id:s.id,parentId:s.parentId||s.id,text:s.text,expression:s.expression,visual:s.visual,query:s.query,intent:s.intent||"segment",narrativeRole:s.narrativeRole||null,visualTreatment:s.visualTreatment||null,transition:s.transition||"cut",directorNote:s.directorNote||"",layout:s.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{contentBounds:archived[i].contentBounds,kind:archived[i].kind,title:archived[i].title,source:archived[i].source,license:archived[i].license||"",licenseUrl:archived[i].licenseUrl||"",credit:archived[i].credit||"",changes:archived[i].changes||"",points:archived[i].points||[],mediaId:archived[i].mediaId}})),acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],creativeSummary:["已按修改要求完成新版本","保留原口播与声音","旧版本仍可查看和下载"]};
+    const deliveryIssues=final.acceptedWithNotes?creatorQualityIssues(final.reviewHistory.at(-1)?.issues,final.segments):[];
+    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,input.aspectRatio),materialPlan:final.segments.map((s,i)=>({id:s.id,parentId:s.parentId||s.id,text:s.text,expression:s.expression,visual:s.visual,query:s.query,intent:s.intent||"segment",narrativeRole:s.narrativeRole||null,visualTreatment:s.visualTreatment||null,transition:s.transition||"cut",directorNote:s.directorNote||"",layout:s.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{contentBounds:archived[i].contentBounds,kind:archived[i].kind,title:archived[i].title,source:archived[i].source,license:archived[i].license||"",licenseUrl:archived[i].licenseUrl||"",credit:archived[i].credit||"",changes:archived[i].changes||"",points:archived[i].points||[],mediaId:archived[i].mediaId}})),acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:deliveryIssues.map(issue=>issue.message),deliveryIssues,creativeSummary:["已按修改要求完成新版本","保留原口播与声音","旧版本仍可查看和下载"]};
   }catch(error){
     if(error instanceof VideoQualityError)return error.result(jobId);
     throw error;

@@ -162,7 +162,7 @@ test('QA artwork repair preserves the smart overlay layout contract',async()=>{
    check:async()=>{},sheet:async()=>'/tmp/sheet.jpg',
    review:async()=>++reviews===1?{pass:false,issues:['s1：信息层级弱。'],cardFixes:{s1:{style:'比例对比图'}},searchQueries:{}}:{pass:true,issues:[]},
  });
- assert.deepEqual(layouts,['presenter-data','presenter-data']);
+ assert.deepEqual(layouts,['presenter-data']);
  assert.equal(result.segments[0].layout,'presenter-data');
 });
 
