@@ -6,7 +6,7 @@ import { listActiveWorkbuddyCapabilities, type WorkbuddyOperation } from "./capa
 import { buildAgentPolicyPrompt } from "./agent-policies";
 import { needsTrafficTopicSelection } from "./traffic-workflow";
 import { buildSemanticRoutingPrompt, requestRouteSchema, semanticRequestRouteSchema, intentRouteIssues } from "./route-intent";
-import { parseConversationAppParameters } from "./app-conversation";
+import { isTrafficTopicRegenerationRequest, parseConversationAppParameters } from "./app-conversation";
 import { classifyWorkflowTurn, type WorkbuddyActiveWorkflow } from "./workflow-state";
 import { capabilityManifest, discloseCapabilities } from "./capability-disclosure";
 import { inferTurnEnvelope } from "./interaction-protocol";
@@ -43,6 +43,10 @@ export async function routeWorkbuddyRequest(user: SessionUser, input: { objectiv
   const requestedCapabilityId = input.requestedCapabilityId?.trim();
   const continuation = parseConversationContinuation(currentRequest);
   const selectedId = requestedCapabilityId || continuation?.targetCapabilityId || text.match(/能力 ID[：:]\s*([^\s。]+)/)?.[1];
+  if (!selectedId && input.activeWorkflow?.appSlug === "traffic-copy" && isTrafficTopicRegenerationRequest(currentRequest)) return {
+    mode: "capability", intent: currentRequest.slice(0, 160), targetCapabilityId: "app.traffic-copy",
+    requiresFreshInformation: false, rationale: "用户明确要求沿用当前已选话题重新生成文案，不应返回选题阶段", operation: "regenerate", preserve: ["topic", "material", "research", "coach", "format", "length"],
+  } satisfies WorkbuddyRequestRoute;
   if (!selectedId && classifyWorkflowTurn(currentRequest, input.activeWorkflow) === "retry") return {
     mode: "capability", intent: currentRequest.slice(0, 160), targetCapabilityId: `app.${input.activeWorkflow!.appSlug}`,
     requiresFreshInformation: false, rationale: "用户正在口播选题阶段要求更换候选，沿用原素材重新运行选题分析", operation: "reselect", preserve: ["material", "research"],

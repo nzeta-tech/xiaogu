@@ -243,7 +243,14 @@ export function isGenericApplicationIntent(request: string, app?: CreationApp) {
 export function shouldSkipTrafficTopicSelection(text: string) {
   const hasCompiledFocus = text.includes("【当前焦点｜必须优先承接】") || text.includes("【上一轮已经确认的主题与成果（本次必须承接，不得重新选题）】");
   const createsFromContext = /(?:写|生成|创作|制作|输出|做成|转成).{0,18}(?:口播|文案|正文|稿|文章|脚本)/.test(text);
-  return hasCompiledFocus && createsFromContext || /(?:题目|选题|角度)(?:已经|已|就|都)?(?:定了|确定|明确)|(?:无需|不用|不要|跳过)(?:再)?(?:分析|推荐|选择)?选题|直接(?:按这个题|根据这个题|写|生成)(?:口播|文案|正文|稿)?|^(?:重新写(?:一版)?|重写|再写一版|再写一个版本|换个版本|另写一版|从头写|重新生成)(?:一下|一遍|正文|这篇|这一篇|吧)?[。！!\s]*$|(?:重新写(?:一版)?|重写|再写一版|换个版本|另写一版|从头写|重新生成(?:并优化)?).{0,50}(?:已承接|已有|上一版|原(?:来|有)|口播|正文|文案)/.test(text);
+  return hasCompiledFocus && createsFromContext || /(?:题目|选题|角度)(?:已经|已|就|都)?(?:定了|确定|明确)|(?:无需|不用|不要|跳过)(?:再)?(?:分析|推荐|选择)?选题|直接(?:按这个题|根据这个题|写|生成)(?:口播|文案|正文|稿)?|^(?:重新写(?:一版)?|重写|再写一版|再写一个版本|换个版本|另写一版|从头写|重新生成)(?:一下|一遍|正文|这篇|这一篇|吧)?[。！!\s]*$|(?:重新写(?:一版)?|重写|再写一版|换个版本|另写一版|从头写|重新生成(?:并优化)?).{0,50}(?:已承接|已有|上一版|原(?:来|有)|口播|正文|文案)|(?:基于|按照|沿用|用).{0,16}(?:这|那|上(?:一轮|次)?|原(?:来|有)?|已有)(?:两|2|这些|几个)?(?:个)?(?:话题|选题).{0,30}(?:分别)?(?:重新|再)?(?:写|生成|创作|制作|输出)/.test(text);
+}
+
+export function isTrafficTopicRegenerationRequest(text: string) {
+  const keepsExistingTopics = /(?:基于|按照|沿用|用).{0,16}(?:这|那|上(?:一轮|次)?|原(?:来|有)?|已有)(?:两|2|这些|几个)?(?:个)?(?:话题|选题)/.test(text);
+  const asksForCopy = /(?:分别)?(?:重新|再)?(?:写|生成|创作|制作|输出).{0,24}(?:口播|文案|正文|稿)|(?:口播|文案|正文|稿).{0,24}(?:更长|\d+(?:\.\d+)?\s*(?:分钟|分|秒))/.test(text);
+  const asksToReselect = /(?:重新选题|重选|换一批|换组选题|重新推荐|还有别的选题)/.test(text);
+  return keepsExistingTopics && asksForCopy && !asksToReselect;
 }
 
 function escapeRegExp(value: string) {

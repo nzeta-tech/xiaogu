@@ -55,3 +55,19 @@ export function applyPortfolioDuration(brief: TrafficCopyCreativeBrief, unit: Tr
   const preferredCharacters:[number,number]=[Math.round(unit.targetSeconds[0]*rate/60),Math.round(unit.targetSeconds[1]*rate/60)];
   return{...brief,durationRange:{preferredSeconds:unit.targetSeconds,preferredCharacters},targetSeconds:Math.round((unit.targetSeconds[0]+unit.targetSeconds[1])/2),targetCharacters:Math.round((preferredCharacters[0]+preferredCharacters[1])/2),durationRationale:`按本批次分工在 ${unit.targetSeconds[0]}-${unit.targetSeconds[1]} 秒内完成“${unit.exclusiveFocus}”，不重复其他篇背景。`};
 }
+
+export function requestedTrafficDurationSeconds(text: string): number | null {
+  const minutes = text.match(/(\d+(?:\.\d+)?)\s*(?:分钟|分(?:钟)?)(?:左右|上下|的)?(?:口播|文案|正文|稿)?/);
+  if (minutes) return Math.min(600, Math.max(60, Math.round(Number(minutes[1]) * 60)));
+  const seconds = text.match(/(\d{2,4})\s*秒(?:钟)?(?:左右|上下|的)?(?:口播|文案|正文|稿)?/);
+  return seconds ? Math.min(600, Math.max(60, Math.round(Number(seconds[1])))) : null;
+}
+
+export function applyRequestedTrafficDuration(brief: TrafficCopyCreativeBrief, text: string): TrafficCopyCreativeBrief {
+  const requested = requestedTrafficDurationSeconds(text);
+  if (!requested) return brief;
+  const preferredSeconds: [number, number] = [Math.max(60, requested - 15), Math.min(600, requested + 15)];
+  const rate = brief.durationBasis.reasoningSteps >= 4 || brief.durationBasis.evidenceUnits >= 4 ? 225 : 250;
+  const preferredCharacters: [number, number] = preferredSeconds.map(seconds => Math.round(seconds * rate / 60)) as [number, number];
+  return { ...brief, durationRange: { preferredSeconds, preferredCharacters }, targetSeconds: requested, targetCharacters: Math.round(requested * rate / 60), durationRationale: `用户明确要求每篇约 ${requested} 秒，正文应完整展开至 ${preferredSeconds[0]}-${preferredSeconds[1]} 秒，不得沿用默认短稿时长。` };
+}
