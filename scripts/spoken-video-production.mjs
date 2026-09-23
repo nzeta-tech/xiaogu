@@ -1000,6 +1000,10 @@ export async function planRecut(dir,input,runner=run){
 export async function executeSpokenVideoRecut(task,leaseToken,ctx){
   return performanceScope(null,async()=>{const result=await executeRecut(task,leaseToken,ctx);return {...result,performance:videoMetrics()};});
 }
+export function shouldPreserveRecutMaterials(instructions) {
+  const value=safe(instructions);
+  return /只调整后期|不更换|保留.{0,12}素材|(?:使用|复用|沿用).{0,16}(?:相同|原有|原版|已有|全部).{0,8}素材|(?:相同|原有|原版|已有|全部).{0,8}素材(?:和|与|、)?.{0,8}模板/.test(value);
+}
 async function executeRecut(task,leaseToken,ctx){
   ctx={...ctx,videoCacheScope:renderCacheDirectory(ctx,task)};
   const jobId=safe(item(task.payload).jobId);if(!jobId)throw new Error("invalid revision job");
@@ -1014,7 +1018,7 @@ async function executeRecut(task,leaseToken,ctx){
       const planned=await planMaterials(dir,input.script,null);
       input.materialPlan=smartTimelineSegments(planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
     }
-    const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
+    const preserveMaterials=shouldPreserveRecutMaterials(input.instructions);
     const fullDirectorRedesign=productionMode==="smart"&&requestsFullDirectorRedesign(input.instructions);
     // A legacy version may contain only a few paragraph-sized segments.  V20
     // worked because it directed short semantic beats, not a 40-second block
