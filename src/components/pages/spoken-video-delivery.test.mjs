@@ -15,5 +15,5 @@ async function component(){
 test('published second-round issues remain visible alongside playback and download',async()=>{
   const Component=await component();const root={id:'job',title:'Test',created_at:'2026-09-21T00:00:00Z',status:'completed',video_url:'/movie.mp4',request_json:{delivery_notes:['字幕遮挡'],quality_review:[{attempt:2,pass:false,issues:['字幕遮挡']}]}};
   const html=renderToStaticMarkup(React.createElement(Component,{root,versions:[root],available:true,onRefresh:async()=>{}}));
-  assert.match(html,/已发布 · 质检仍有待改进项/);assert.match(html,/字幕遮挡/);assert.match(html,/<video/);assert.match(html,/下载此版本/);assert.doesNotMatch(html,/这个版本未能完成/);
+  assert.match(html,/已发布 · 成片有待改进项/);assert.match(html,/字幕遮挡/);assert.match(html,/<video/);assert.match(html,/下载此版本/);assert.doesNotMatch(html,/这个版本未能完成/);
 });
