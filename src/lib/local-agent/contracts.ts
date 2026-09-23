@@ -10,6 +10,8 @@ export const localAgentTaskTypes = [
   "heygen.video.generate",
   "xiaogu.video.compose",
   "openchatcut.edit",
+  "digital-human.video.produce",
+  "spoken.voice.clone",
 ] as const;
 
 export const LOCAL_AGENT_PROTOCOL_VERSION = 1;

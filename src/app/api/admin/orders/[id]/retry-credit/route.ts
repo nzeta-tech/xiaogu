@@ -1,3 +1,4 @@
+import { recordVerifiedManualPayment } from "@/lib/billing/paid-access";
 import { requireSessionUser } from "@/lib/auth/session";
 import { grantCredits } from "@/lib/billing/openmeter";
 import { accrueAffiliateCredits } from "@/lib/affiliate/service";
@@ -14,6 +15,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   const grant = await grantCredits({ customerId: order.user_id, amount: order.quota_amount, reason: "admin_credit_retry", eventId: `order-credit:${order.id}`, metadata: { orderId: order.id } });
   if (!grant.ok) return Response.json({ error: "积分发放失败" }, { status: 502 });
   await tryMarkOrderCompleted(order.id);
+  if (order.provider === "manual") await recordVerifiedManualPayment(order.id);
   await queueCreditChangeEmail({ eventKey: `payment:${order.id}`, userId: order.user_id, orderId: order.id, deltaCredits: order.quota_amount, changeKind: "purchase", changeLabel: "充值" });
   await accrueAffiliateCredits({ orderId: order.id, inviteeUserId: order.user_id, purchasedCredits: order.quota_amount });
   await tryCreateAdminAuditLog({ adminUserId: user.id, action: "order.credit_retry", targetType: "order", targetId: order.id, detail: {} });

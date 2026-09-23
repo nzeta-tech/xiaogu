@@ -6,11 +6,11 @@ import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admi
 import { apiPath, appPath } from "@/lib/client/url";
 
 const platformNavItems = [
+  { id: "workbuddy", href: "/workbuddy", label: "Workbuddy", shortLabel: "AI 工作团队", icon: "workbuddy" },
   { id: "workbench", href: "/today", label: "今日灵感", shortLabel: "今日灵感", icon: "home" },
   { id: "creation", href: "/create", label: "创作广场", shortLabel: "创作广场", icon: "edit" },
   { id: "assets", href: "/works", label: "创作历史", shortLabel: "作品与素材", icon: "assets" },
   { id: "crm", href: "/avatar", label: "数字分身", shortLabel: "人设与表达", icon: "users" },
-  { id: "workbuddy", href: "/workbuddy", label: "Workbuddy", shortLabel: "AI 工作团队", icon: "workbuddy" },
   { id: "invite", href: "/rewards#invite", label: "邀请有礼", shortLabel: "邀请与奖励", icon: "gift" },
   { id: "billing", href: "/billing", label: "充值中心", shortLabel: "充值与订单", icon: "wallet" },
   { id: "growth", href: "/account", label: "用户中心", shortLabel: "权益与账户", icon: "sprout" },
@@ -110,7 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="appSidebar">
         <div className="appSidebarInner">
           <div className="sidebarBrandRow">
-            <a className="brand brandLink" href={appPath("/create")} title={sidebarCollapsed ? creationBrandName : undefined}>
+            <a className="brand brandLink" href={appPath("/workbuddy")} title={sidebarCollapsed ? creationBrandName : undefined}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img className="brandMark" src={resolvePublicUrl(siteConfig.logoUrl)} alt="小谷" />
               <div className="brandCopy creationBrandCopy">
@@ -148,7 +148,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             ) : null}
             {pathname === "/admin" ? (
-              <a className="adminBackToWorkspace" href={appPath("/create")}>
+              <a className="adminBackToWorkspace" href={appPath("/workbuddy")}>
                 <span className="appSidebarIcon" aria-hidden="true"><NavIcon name="creation" /></span>
                 <span>返回工作空间</span>
               </a>

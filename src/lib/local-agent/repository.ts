@@ -4,6 +4,7 @@ import { getPool, query } from "@/lib/db/client";
 import { LOCAL_AGENT_PROTOCOL_VERSION, type LinkRemixAvailability, type LocalAgentHeartbeat, type LocalAgentTask, type LocalAgentTaskEvent, type LocalAgentTaskEventType, type LocalAgentTaskType } from "@/lib/local-agent/contracts";
 import { buildDouyinDeepVerificationResult, isDouyinDeepVerificationResult } from "@/lib/douyin-deep-verification";
 import { saveLinkRemixSourceCache } from "@/lib/creation/link-remix-cache";
+import { spokenVideoCompletion } from "@/lib/local-agent/video-completion";
 
 type TaskRow = {
   id: string; task_type: LocalAgentTaskType; status: LocalAgentTask["status"]; priority: number;
@@ -106,6 +107,19 @@ export async function getVideoComposeAvailability(): Promise<LinkRemixAvailabili
   const timeoutSeconds=Math.min(Math.max(Number(process.env.LOCAL_AGENT_OFFLINE_AFTER_SECONDS)||45,20),300);
   const result=await query<{last_seen_at:string}>(`select last_seen_at from local_agent_nodes where status in ('ready','busy') and last_seen_at>now()-($1||' seconds')::interval and capabilities->>'xiaogu.video.compose'='true' and protocol_version=$2 and health->>'ffmpeg'='healthy' order by last_seen_at desc limit 1`,[timeoutSeconds,LOCAL_AGENT_PROTOCOL_VERSION]).catch(()=>({rows:[] as Array<{last_seen_at:string}>}));
   return result.rows[0]?{available:true,reason:"",lastSeenAt:result.rows[0].last_seen_at,enabled:true,protocolVersion:LOCAL_AGENT_PROTOCOL_VERSION}:{available:false,reason:"小谷视频 Worker 离线，任务将排队等待",lastSeenAt:null,enabled:true,protocolVersion:LOCAL_AGENT_PROTOCOL_VERSION};
+}
+
+export async function getSpokenVoiceAgentAvailability() {
+  if(process.env.LOCAL_AGENT_ENABLED!=="1"||!await isLocalAgentDelegationEnabled())return false;
+  const result=await query(`select 1 from local_agent_nodes where status in ('ready','busy') and last_seen_at>now()-interval '90 seconds' and protocol_version=$1 and capabilities->>'spoken.voice.clone'='true' and health->>'heygenCli'='healthy' and health->>'ffmpeg'='healthy' limit 1`,[LOCAL_AGENT_PROTOCOL_VERSION]);
+  return Boolean(result.rowCount);
+}
+
+export async function getSpokenVideoAgentAvailability(): Promise<LinkRemixAvailability> {
+  if (process.env.LOCAL_AGENT_ENABLED !== "1" || !await isLocalAgentDelegationEnabled()) return { available:false, reason:"本机视频 Agent 尚未启用", lastSeenAt:null, enabled:false, protocolVersion:LOCAL_AGENT_PROTOCOL_VERSION };
+  const timeoutSeconds=Math.min(Math.max(Number(process.env.LOCAL_AGENT_OFFLINE_AFTER_SECONDS)||45,20),300);
+  const result=await query<{last_seen_at:string}>(`select last_seen_at from local_agent_nodes where status in ('ready','busy') and last_seen_at>now()-($1||' seconds')::interval and capabilities->>'digital-human.video.produce'='true' and protocol_version=$2 and health->>'codexCli'='healthy' and health->>'heygenCli'='healthy' and health->>'ffmpeg'='healthy' order by last_seen_at desc limit 1`,[timeoutSeconds,LOCAL_AGENT_PROTOCOL_VERSION]).catch(()=>({rows:[] as Array<{last_seen_at:string}>}));
+  return result.rows[0]?{available:true,reason:"",lastSeenAt:result.rows[0].last_seen_at,enabled:true,protocolVersion:LOCAL_AGENT_PROTOCOL_VERSION}:{available:false,reason:"本机视频 Agent 离线，请启动后重试",lastSeenAt:null,enabled:true,protocolVersion:LOCAL_AGENT_PROTOCOL_VERSION};
 }
 
 export async function getOpenChatCutAvailability(): Promise<LinkRemixAvailability> {
@@ -278,6 +292,12 @@ export async function completeLocalAgentTask(id: string, agentId: string, leaseT
       await client.query("commit");
       return false;
     }
+    if (task.task_type === "spoken.voice.clone") {
+      if(resultPayload.status!=="completed"||typeof resultPayload.providerVoiceId!=="string"||!resultPayload.providerVoiceId)throw new Error("Invalid voice completion");
+      const saved=await client.query(`update digital_human_voice_assets set status='ready',error_message=null,updated_at=now()
+        where id=$1 and provider_voice_id=$2 returning id`,[String(task.payload.voiceId||""),resultPayload.providerVoiceId]);
+      if(!saved.rowCount)throw new Error("Voice checkpoint missing");
+    }
     if (task.task_type === "douyin.deep_verify") {
       await persistDouyinDeepVerification(client, task.payload, resultPayload, id);
     }
@@ -298,6 +318,12 @@ export async function completeLocalAgentTask(id: string, agentId: string, leaseT
       const jobId=typeof task.payload.jobId==="string"?task.payload.jobId:"";const completed=resultPayload.status==="completed"&&typeof resultPayload.videoUrl==="string"&&resultPayload.videoUrl;
       if(!jobId)throw new Error("Xiaogu video compose task has no video job");
       await client.query(`update digital_human_video_jobs set status=$2,progress=$3,video_url=coalesce(nullif($4,''),video_url),duration_seconds=coalesce($5,duration_seconds),error_message=$6,request_json=request_json||$7::jsonb,updated_at=now(),completed_at=case when $2='completed' then now() else completed_at end where id=$1`,[jobId,completed?"completed":"failed",completed?100:96,String(resultPayload.videoUrl||""),Number(resultPayload.durationSeconds)||null,completed?null:String(resultPayload.error||"小谷智能编排未能完成"),{stage:completed?"completed":"composition_failed",archived_by_xiaogu:completed,smart_execution:"local-agent-worker",presenter_master_url:String(resultPayload.presenterMasterUrl||""),creative_summary:Array.isArray(resultPayload.creativeSummary)?resultPayload.creativeSummary.slice(0,6):[]}]);
+    }
+    if(task.task_type==="digital-human.video.produce"){
+      const jobId=String(task.payload.jobId||"");if(!jobId)throw new Error("Spoken video task has no job");
+      const {completed,error,reviews,deliveryNotes,qualityPassed}=spokenVideoCompletion(resultPayload);
+      await client.query(`update digital_human_video_jobs set status=$2,progress=$3,video_url=$4,preview_image_url=$5,duration_seconds=$6,error_message=$7,request_json=request_json||$8::jsonb,updated_at=now(),completed_at=case when $2='completed' then now() else null end where id=$1`,[jobId,completed?"completed":"failed",completed?100:0,completed?String(resultPayload.videoUrl):null,completed?String(resultPayload.coverUrl||"")||null:null,completed?Number(resultPayload.durationSeconds)||null:null,error,{stage:completed?"completed":"failed",material_plan:resultPayload.materialPlan||null,subtitle_srt:typeof resultPayload.subtitleSrt==="string"?resultPayload.subtitleSrt:"",edit_options:resultPayload.editOptions||{},quality_review:reviews,delivery_notes:deliveryNotes,quality_passed:qualityPassed,performance:resultPayload.performance||null,creative_summary:Array.isArray(resultPayload.creativeSummary)?resultPayload.creativeSummary:[]}]);
+      if(!completed)await client.query("update local_agent_tasks set status='failed',error_message=$2 where id=$1",[id,error]);
     }
     const cacheableSourceUrl = typeof task.payload.url === "string" ? task.payload.url : typeof task.payload.sourceUrl === "string" ? task.payload.sourceUrl : "";
     if (task.task_type === "source.inspect" && ["link_remix", "avatar_training"].includes(String(task.payload.purpose)) && cacheableSourceUrl) {
@@ -395,7 +421,7 @@ export async function failLocalAgentTask(id: string, agentId: string, leaseToken
     await query(
       `update digital_human_video_jobs job set status='failed',progress=0,error_message=$2,
          request_json=request_json||$3::jsonb,updated_at=now()
-       from local_agent_tasks task where task.id=$1 and task.task_type in ('heygen.video.generate','xiaogu.video.compose')
+       from local_agent_tasks task where task.id=$1 and task.task_type in ('heygen.video.generate','xiaogu.video.compose','digital-human.video.produce')
          and task.status='failed' and job.id=(task.payload->>'jobId')::uuid`,
       [id, errorMessage.slice(0, 500), { stage: "failed" }],
     ).catch(() => undefined);
@@ -413,6 +439,12 @@ async function recoverExpiredLeases(client: PoolClient) {
        agent_id=null,lease_token_hash=null,lease_expires_at=null,updated_at=now()
      where status='leased' and lease_expires_at<=now()`,
   );
+  await client.query(`update digital_human_video_jobs job set status='failed',progress=0,
+      error_message=coalesce(task.error_message,'本机视频 Agent 中断'),
+      request_json=job.request_json||'{"stage":"failed"}'::jsonb,updated_at=now()
+    from local_agent_tasks task where task.task_type='digital-human.video.produce'
+      and task.status='failed' and job.id=(task.payload->>'jobId')::uuid
+      and job.status='processing'`);
 }
 
 function hashToken(token: string) { return createHash("sha256").update(token).digest("hex"); }

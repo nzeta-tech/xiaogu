@@ -1,6 +1,7 @@
+import { retiredChanjingResponse } from "@/lib/digital-human/retirement";
 import { z } from "zod";
 import { requireSessionUser } from "@/lib/auth/session";
-import { createProviderAvatar, deleteProviderAvatar, getChanjingGeneratedPhoto, listChanjingResourceLibrary, providerAvailability, publicDigitalHumanError, refreshProviderAvatar } from "@/lib/digital-human/providers";
+import { createProviderAvatar, deleteProviderAvatar, providerAvailability, publicDigitalHumanError, refreshProviderAvatar } from "@/lib/digital-human/providers";
 import { archiveDigitalHumanAsset, getDigitalHumanAsset, insertDigitalHumanAsset, listCreatingEditionBindings, listDigitalHumanAssets, updateDigitalHumanAsset, updateEditionBindingStatus, upsertDigitalHumanEditionBinding } from "@/lib/digital-human/store";
 import { readDigitalHumanSource, storeDigitalHumanMedia } from "@/lib/digital-human/media-assets";
 
@@ -10,25 +11,13 @@ const idSchema = z.string().uuid();
 async function refreshCreating(userId: string) {
   const assets = await listDigitalHumanAssets(userId);
   const editionBindings=await listCreatingEditionBindings(userId);
-  await Promise.all(editionBindings.map(async(binding)=>{const identity=assets.find(asset=>asset.id===binding.digital_human_id);if(!identity||!binding.remote_avatar_id)return;try{const remote=await refreshProviderAvatar({...identity,provider:binding.provider,provider_avatar_id:binding.remote_avatar_id,provider_group_id:binding.remote_group_id,provider_voice_id:binding.remote_voice_id,metadata_json:{...identity.metadata_json,...binding.capabilities}});if(remote)await updateEditionBindingStatus(binding.id,{status:remote.status,voiceId:remote.voiceId,capabilities:remote.capabilities,error:remote.error});}catch{/* retry on next load */}}));
-  await Promise.all(assets.filter((asset) => !["public","chanjing_generated_photo"].includes(String(asset.metadata_json?.source || "")) && (asset.status === "creating" || (asset.status === "ready" && !asset.metadata_json?.provider_capabilities))).map(async (asset) => {
+  await Promise.all(editionBindings.map(async(binding)=>{const identity=assets.find(asset=>asset.id===binding.digital_human_id);if(!identity||binding.provider==="chanjing"||!binding.remote_avatar_id)return;try{const remote=await refreshProviderAvatar({...identity,provider:binding.provider,provider_avatar_id:binding.remote_avatar_id,provider_group_id:binding.remote_group_id,provider_voice_id:binding.remote_voice_id,metadata_json:{...identity.metadata_json,...binding.capabilities}});if(remote)await updateEditionBindingStatus(binding.id,{status:remote.status,voiceId:remote.voiceId,capabilities:remote.capabilities,error:remote.error});}catch{/* retry on next load */}}));
+  await Promise.all(assets.filter((asset) => asset.provider !== "chanjing" && !["public","chanjing_generated_photo"].includes(String(asset.metadata_json?.source || "")) && (asset.status === "creating" || (asset.status === "ready" && !asset.metadata_json?.provider_capabilities))).map(async (asset) => {
     try {
       const remote = await refreshProviderAvatar(asset); if (!remote) return;
       await updateDigitalHumanAsset(userId, asset.id, { status: remote.status, provider_voice_id: remote.voiceId || undefined, preview_image_url: remote.previewImageUrl || undefined, preview_video_url: remote.previewVideoUrl || undefined, error_message: remote.error || null, metadata_json:{supports_remove_background:Boolean(remote.capabilities?.supportsRemoveBackground),supports_4k:Boolean(remote.capabilities?.supports4k),source_width:Number(remote.capabilities?.width||0),source_height:Number(remote.capabilities?.height||0),voice_trained:Boolean(remote.capabilities?.trainsVoice),provider_capabilities:remote.capabilities||{}} });
     } catch { /* Preserve the last known state when a provider status check is transiently unavailable. */ }
   }));
-  const refreshed = await listDigitalHumanAssets(userId);
-  const missingPublicCovers = refreshed.filter((asset) => asset.metadata_json?.source === "public" && !asset.preview_image_url && asset.provider_avatar_id);
-  if (missingPublicCovers.length) {
-    try {
-      const library = await listChanjingResourceLibrary();
-      await Promise.all(missingPublicCovers.map(async (asset) => {
-        const figureType = String(asset.metadata_json?.figure_type || "");
-        const template = library.templates.find((item) => item.id === asset.provider_avatar_id && item.figure_type === figureType);
-        if (template?.cover_url) await updateDigitalHumanAsset(userId, asset.id, { preview_image_url: template.cover_url });
-      }));
-    } catch { /* Keep the asset usable and retry the cover backfill on the next load. */ }
-  }
   return listDigitalHumanAssets(userId);
 }
 
@@ -47,13 +36,13 @@ export async function POST(request: Request) {
   const trainType=form?.get("trainType")==="figure"?"figure" as const:"both" as const; const language=form?.get("language")==="en"?"en" as const:"cn" as const; const continueWithoutVoice=form?.get("continueWithoutVoice")==="true";
   if (name.length < 2 || name.length > 80 || !(file instanceof File) || !consent) return Response.json({ error: "请填写名称、选择正确素材并确认本人授权" }, { status: 400 });
   const provider = file.type.startsWith("image/") ? "heygen" : file.type.startsWith("video/") ? "chanjing" : null;
+  if (provider === "chanjing" || targetEdition === "standard") return retiredChanjingResponse();
   if (!provider) return Response.json({ error: "请上传 JPG/PNG 照片或 MP4/MOV/WebM 视频" }, { status: 400 });
   if (!(await providerAvailability())[provider]) return Response.json({ error: provider === "heygen" ? "快速形象创建暂时繁忙，请稍后再试" : "高还原形象创建暂时繁忙，请稍后再试" }, { status: 503 });
   const maxBytes = provider === "heygen" ? 32 * 1024 * 1024 : 80 * 1024 * 1024;
   if (file.size > maxBytes) return Response.json({ error: provider === "heygen" ? "照片不能超过 32MB" : "视频不能超过 80MB" }, { status: 400 });
   const upgradeIdentity=identityId&&idSchema.safeParse(identityId).success?await getDigitalHumanAsset(user.id,identityId):null;
   if(identityId&&!upgradeIdentity)return Response.json({error:"要升级的数字人不存在"},{status:404});
-  if(upgradeIdentity&&((targetEdition==="pro"&&provider!=="heygen")||(targetEdition==="standard"&&provider!=="chanjing")))return Response.json({error:targetEdition==="pro"?"Pro 版需要上传一张清晰正面照片":"标准版需要上传一段真人训练视频"},{status:400});
   const asset = upgradeIdentity || await insertDigitalHumanAsset({ userId: user.id, provider, name, sourceType: provider === "heygen" ? "photo" : "video", metadata: { originalFileName: file.name, creation_mode: provider === "heygen" ? "quick_photo" : "high_fidelity_video",replace_background_requested:replaceBackground,quality,train_type:trainType,language,continue_without_voice:continueWithoutVoice } });
   try {
     const bytes=Buffer.from(await file.arrayBuffer());
@@ -75,8 +64,8 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => null) as { id?: string; action?: string } | null;
   if (!body?.id || !idSchema.safeParse(body.id).success) return Response.json({ error: "数字人参数不正确" }, { status: 400 });
   const asset = await getDigitalHumanAsset(user.id, body.id); if (!asset) return Response.json({ error: "数字人不存在" }, { status: 404 });
+  if (asset.provider === "chanjing") return retiredChanjingResponse();
   if (body.action === "refresh") {
-    if (asset.metadata_json?.source === "chanjing_generated_photo") { const remote = await getChanjingGeneratedPhoto(String(asset.metadata_json.photo_task_id || "")); return Response.json({ asset: await updateDigitalHumanAsset(user.id, asset.id, { status: remote.status, preview_image_url: remote.imageUrl || undefined, error_message: remote.error || null }) }); }
     const remote = await refreshProviderAvatar(asset); if (!remote) return Response.json({ asset });
     return Response.json({ asset: await updateDigitalHumanAsset(user.id, asset.id, { status: remote.status, provider_voice_id: remote.voiceId || undefined, preview_image_url: remote.previewImageUrl || undefined, preview_video_url: remote.previewVideoUrl || undefined, error_message: remote.error || null,metadata_json:{supports_remove_background:Boolean(remote.capabilities?.supportsRemoveBackground),supports_4k:Boolean(remote.capabilities?.supports4k),source_width:Number(remote.capabilities?.width||0),source_height:Number(remote.capabilities?.height||0),voice_trained:Boolean(remote.capabilities?.trainsVoice),provider_capabilities:remote.capabilities||{}} }) });
   }

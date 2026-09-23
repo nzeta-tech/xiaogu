@@ -6,6 +6,7 @@ import {
   type CreationApp,
   type CreationCategory,
 } from "@/lib/apps/catalog";
+import { SPOKEN_VIDEO_PRICES } from "@/lib/digital-human/spoken-video-modes";
 import { hiddenWorkspaceCardSlugs } from "@/lib/apps/workspace-visibility";
 import { appPath, apiPath } from "@/lib/client/url";
 
@@ -58,12 +59,12 @@ const allWorkspaceCards: WorkspaceCard[] = [
   {
     slug: "digital-human-video",
     appSlug: "digital-human-video",
-    name: "数字人视频",
+    name: "口播视频生成",
     emoji: "🎭",
-    pointsLabel: "12",
+    pointsLabel: `${SPOKEN_VIDEO_PRICES.basic} 起`,
     badge: "新",
-    description: "选择自己的数字人，把确认后的口播文案直接生成视频。",
-    hint: "数字人需先在数字分身的形象资产中创建或收藏。",
+    description: "选择照片与声音，把定稿口播文案生成带字幕、剪辑和封面的视频。",
+    hint: "基础版 50 积分，智能版 100 积分，成功后扣除；照片与声音可在数字分身中管理。",
     actionLabel: "使用",
     goals: ["attention", "trust", "conversion", "brand"],
   },
@@ -394,6 +395,7 @@ const workspaceCardPriority = new Map([
   ["wechat-studio", 4],
   ["ppt-maker", 5],
   ["link-remix", 6],
+  ["digital-human-video", 7],
 ]);
 
 const workspaceIconUrls: Record<string, string> = {
@@ -520,6 +522,7 @@ export function CreationHubPageClient() {
         <div className="workspaceFrequentGrid">
           {frequentCards.map((card) => {
             const unavailable = isWorkspaceCardUnavailable(card, hubData);
+            const paidOnly = hubData?.apps.find(app => app.slug === card.appSlug)?.accessPolicy === "paid_customer";
             const content = <>
               <span className={`workspaceFrequentIcon workspaceFrequentIcon-${getWorkspaceCategory(card)}`} aria-hidden="true"><WorkspaceIcon card={card} /></span>
               <div>
@@ -561,11 +564,13 @@ export function CreationHubPageClient() {
         <div className="workspaceHubGrid">
           {filteredCards.map((card) => {
             const unavailable = isWorkspaceCardUnavailable(card, hubData);
+            const paidOnly = hubData?.apps.find(app => app.slug === card.appSlug)?.accessPolicy === "paid_customer";
             return <article className={`workspaceHubCard workspaceCard-${getWorkspaceCategory(card)} ${getCardThemeClass(card.badge)} ${unavailable ? "workspaceHubCardUnavailable" : ""}`} key={card.slug}>
               <div className="workspaceHubCardHeader">
                 <span className="workspaceHubCardIcon" aria-hidden="true"><WorkspaceIcon card={card} /></span>
                 <div>
                   <span className="workspaceCardCategory">{getWorkspaceCategoryLabel(card)}</span>
+                  {paidOnly ? <em>充值用户专享</em> : null}
                   {card.badge ? <em>{card.badge.replace("！", "")}</em> : null}
                   {getUsageCount(card, usageByApp) > 0 ? <small>使用过 {getUsageCount(card, usageByApp)} 次</small> : null}
                 </div>
@@ -633,6 +638,7 @@ function getUsageCount(card: WorkspaceCard, usageByApp: Map<string, number>) {
 }
 
 function getCardOutputLabel(card: WorkspaceCard) {
+  if (card.slug === "digital-human-video") return "口播视频";
   if (card.slug === "wechat-studio") return "文章 + 配图";
   if (card.slug === "image-card" || card.slug === "wechat-images" || card.slug === "policy-renewal-card" || card.slug === "video-cover") return "图片结果";
   if (card.slug.includes("check")) return "风险报告";

@@ -3,16 +3,23 @@
 
 import {
   ChangeEvent,
+  ClipboardEvent,
   FormEvent,
   Fragment,
   KeyboardEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import homeStyles from "@/components/workbuddy/workbuddy-home.module.css";
+import { HotTopicsPanel, HotTopicSourceCard } from "@/components/workbuddy/HotTopicsPanel";
+import { buildHotTopicConversation } from "@/lib/workbuddy/hot-topic-conversation";
+import type { HotTopic } from "@/lib/topics/types";
 import { visibleCreationFields } from "@/lib/apps/field-interaction";
 import { resolveConversationFormState } from "@/lib/workbuddy/app-conversation";
+import { clipboardImageFiles } from "@/lib/workbuddy/clipboard-images";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
 import { creationApps, type CreationApp } from "@/lib/apps/catalog";
@@ -28,6 +35,25 @@ import {
   serializeWorkbuddyComposerContext,
   type WorkbuddyComposerContextItem,
 } from "@/lib/workbuddy/composer-context";
+
+function useAttachmentMenuDismiss(onClose: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+  const cancel = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  useEffect(() => cancel, [cancel]);
+  return {
+    onMouseEnter: cancel,
+    onMouseLeave: () => {
+      cancel();
+      // Allow crossing the small gap between the + button and its popup.
+      timer.current = setTimeout(() => { timer.current = null; close.current(); }, 180);
+    },
+  };
+}
 
 type Workspace = {
   tasks: WorkbuddyTask[];
@@ -348,19 +374,29 @@ export function WorkbuddyPageClient() {
   }
   async function createTask(event: FormEvent) {
     event.preventDefault();
-    if (!objective.trim()) return;
+    await startTask({ objective, context: serializeWorkbuddyComposerContext(contextItems, contextTypeLabel), scenario, requestedCapabilityId: selectedSkill?.id });
+  }
+  async function startTopicConversation(topic: HotTopic) {
+    if (busy) return;
+    const conversation = buildHotTopicConversation(topic);
+    if (objective.trim() || contextItems.length || selectedSkill) {
+      const item: ComposerContextItem = { id: `topic-${topic.id}`, type: "file", label: topic.title, meta: "热点资料", content: conversation.context };
+      setContextItems((items) => [...items.filter((existing) => !existing.id.startsWith("topic-")), item]);
+      if (!objective.trim()) setObjective(conversation.objective);
+      return;
+    }
+    await startTask({ ...conversation, scenario: "general" });
+  }
+  async function startTask(input: { objective: string; context: string; scenario: WorkbuddyScenario; requestedCapabilityId?: string }) {
+    if (busy || !input.objective.trim()) return;
     const executionController = new AbortController();
     executionAbortRef.current = executionController;
     executingTaskIdRef.current = "";
-    setSubmittedObjective(objective);
+    setSubmittedObjective(input.objective);
     setBusy("create");
     setError("");
     setLiveEvents([]);
     setStreamedContent("");
-    const context = serializeWorkbuddyComposerContext(
-      contextItems,
-      contextTypeLabel,
-    );
     try {
       const response = await fetch(apiPath("/api/workbuddy/tasks/stream"), {
         method: "POST",
@@ -368,12 +404,7 @@ export function WorkbuddyPageClient() {
           "content-type": "application/json",
           accept: "text/event-stream",
         },
-        body: JSON.stringify({
-          objective,
-          context,
-          scenario,
-          requestedCapabilityId: selectedSkill?.id,
-        }),
+        body: JSON.stringify(input),
         signal: executionController.signal,
       });
       if (!response.ok || !response.body) {
@@ -411,6 +442,9 @@ export function WorkbuddyPageClient() {
           ) {
             openedTaskId = streamEvent.taskId;
             executingTaskIdRef.current = streamEvent.taskId;
+            const taskUrl = new URL(window.location.href);
+            taskUrl.searchParams.set("task", streamEvent.taskId);
+            window.history.replaceState(null, "", taskUrl);
             setObjective("");
             setContextItems([]);
             setSelectedSkill(null);
@@ -852,6 +886,7 @@ export function WorkbuddyPageClient() {
             setWorks={setMentionWorks}
             onHistory={() => setHistoryOpen(true)}
             onSubmit={createTask}
+            onTopicSelect={startTopicConversation}
           />
         )}
         {task ? (
@@ -930,11 +965,26 @@ function NewTaskComposer(p: {
   setWorks: (v: MentionWork[]) => void;
   onHistory: () => void;
   onSubmit: (e: FormEvent) => void;
+  onTopicSelect: (topic: HotTopic) => void;
 }) {
+  const homeRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const navigation = document.querySelector<HTMLElement>(".mobileAppNav");
+    if (!navigation) return;
+    const update = () => homeRef.current?.style.setProperty("--home-nav-height", `${navigation.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(update);
+    observer.observe(navigation);
+    update();
+    return () => observer.disconnect();
+  }, []);
   const [attachmentMenu, setAttachmentMenu] = useState(false);
   const [attachmentSkillMenu, setAttachmentSkillMenu] = useState<
     "system" | "app" | false
   >(false);
+  const attachmentHover = useAttachmentMenuDismiss(() => {
+    setAttachmentMenu(false);
+    setAttachmentSkillMenu(false);
+  });
   const [trigger, setTrigger] = useState<{
     mode: "mention" | "command";
     query: string;
@@ -946,6 +996,7 @@ function NewTaskComposer(p: {
     top: 52,
     above: false,
   });
+  const uploadInFlight = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
@@ -1197,7 +1248,21 @@ function NewTaskComposer(p: {
   async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
+    await uploadFiles(files);
+  }
+  function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = clipboardImageFiles(event.clipboardData);
     if (!files.length) return;
+    event.preventDefault();
+    if (uploadInFlight.current || p.busy) {
+      p.setError("请等待当前操作完成后再粘贴图片");
+      return;
+    }
+    void uploadFiles(files);
+  }
+  async function uploadFiles(files: File[]) {
+    if (!files.length || uploadInFlight.current || p.busy) return;
+    uploadInFlight.current = true;
     setAttachmentMenu(false);
     p.setBusy("attachment");
     p.setError("");
@@ -1236,28 +1301,27 @@ function NewTaskComposer(p: {
     } catch (cause) {
       p.setError(cause instanceof Error ? cause.message : "文件上传失败");
     } finally {
+      uploadInFlight.current = false;
       p.setBusy("");
     }
   }
   return (
-    <section className="wbNewTaskScreen">
-      <div className="wbHomeTop">
+    <section className={homeStyles.home} ref={homeRef}>
+      <div className={homeStyles.topbar}>
         <button
           className="wbTaskDrawerTrigger"
           onClick={p.onHistory}
           type="button"
         >
-          <span>☰</span> 任务 {p.taskCount ? <em>{p.taskCount}</em> : null}
+          <span>☰</span> 历史对话 {p.taskCount ? <em>{p.taskCount}</em> : null}
         </button>
       </div>
-      <div className="wbWelcome">
-        <h1>
-          <img alt="小谷" src={appPath("/brand/xiaogu-icon.png")} />
-          小谷 Workbuddy，我帮你
-        </h1>
-        <p>说出目标，我会自动选择合适的应用和工作流程</p>
-      </div>
-      <div className="wbQuickCapabilities">
+      <div className={homeStyles.dock}>
+      <h1 className={homeStyles.brand}>
+        <img alt="" src={appPath("/brand/xiaogu-icon.png")} width={38} height={38} />
+        <span>小谷 Workbuddy，我帮你</span>
+      </h1>
+      <div className={homeStyles.tools}>
         {p.skills
           .filter((skill) => skill.kind === "app")
           .slice(0, 6)
@@ -1265,16 +1329,17 @@ function NewTaskComposer(p: {
             <button
               aria-pressed={p.selectedSkill?.id === skill.id}
               className={p.selectedSkill?.id === skill.id ? "active" : ""}
+              title={skill.title}
               key={skill.id}
               onClick={() => selectSkill(skill)}
               type="button"
             >
               <i>{skill.icon}</i>
-              {skill.title}
+              <span>{skill.title}</span>
             </button>
           ))}
       </div>
-      <form className="wbBigComposer" onSubmit={p.onSubmit} ref={composerRef}>
+      <form className={`wbBigComposer ${homeStyles.composer}`} onSubmit={p.onSubmit} ref={composerRef}>
         {p.selectedSkill ? (
           <div
             className="wbWorkflowChip"
@@ -1306,10 +1371,9 @@ function NewTaskComposer(p: {
           }
           aria-autocomplete="list"
           aria-controls={trigger ? "wb-composer-menu" : undefined}
-          autoFocus
-          rows={6}
+          rows={3}
           maxLength={6000}
-          placeholder="今天帮你做些什么？可直接粘贴文字，@ 引用资料，/ 选择 Skill"
+          placeholder="输入你的想法，支持粘贴图片或添加文件…"
           ref={textareaRef}
           value={p.objective}
           onChange={(e) => {
@@ -1322,6 +1386,7 @@ function NewTaskComposer(p: {
               textareaRef.current?.selectionStart ?? p.objective.length,
             )
           }
+          onPaste={pasteImages}
           onKeyDown={handleKeyDown}
           onKeyUp={(event) => {
             if (
@@ -1408,9 +1473,9 @@ function NewTaskComposer(p: {
           </div>
         ) : null}
         <footer>
-          <div className="wbAttachmentControl">
+          <div className="wbAttachmentControl" {...attachmentHover}>
             <input
-              accept=".txt,.md,.csv,.pdf,.docx"
+              accept=".txt,.md,.csv,.pdf,.docx,.jpg,.jpeg,.png,.webp,.gif"
               hidden
               multiple
               onChange={uploadFile}
@@ -1435,7 +1500,7 @@ function NewTaskComposer(p: {
                   <i>↑</i>
                   <span>
                     <strong>添加本地文件</strong>
-                    <small>PDF、Word、CSV、TXT、Markdown</small>
+                    <small>图片（JPG/PNG/WebP/GIF）、PDF、Word、CSV、TXT、Markdown · 最大 10MB</small>
                   </span>
                 </button>
                 <button
@@ -1524,9 +1589,13 @@ function NewTaskComposer(p: {
           </div>
         </footer>
       </form>
-      <p className="wbSafety">
+      <p className={homeStyles.safety}>
         内容由 AI 生成，请核验产品、客户及合规信息后使用。
       </p>
+      </div>
+      <div className={homeStyles.recommendations}>
+        <HotTopicsPanel busy={Boolean(p.busy)} onSelect={p.onTopicSelect} />
+      </div>
     </section>
   );
 }
@@ -1710,10 +1779,15 @@ function FollowupComposer({
   const [menu, setMenu] = useState<
     "attach" | "skills" | "mention" | "command" | null
   >(null);
+  const attachmentHover = useAttachmentMenuDismiss(() => {
+    setMenu((current) => current === "attach" || current === "skills" ? null : current);
+  });
   const [query, setQuery] = useState("");
   const [triggerStart, setTriggerStart] = useState(-1);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const uploadInFlight = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const ownFormRef = useRef<HTMLFormElement>(null);
   const activeFormRef = formRef ?? ownFormRef;
@@ -1851,8 +1925,23 @@ function FollowupComposer({
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []).slice(0, 3);
     event.target.value = "";
+    await uploadFiles(files);
+  }
+  function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = clipboardImageFiles(event.clipboardData);
     if (!files.length) return;
+    event.preventDefault();
+    if (uploadInFlight.current) {
+      setUploadError("请等待图片上传完成后再粘贴");
+      return;
+    }
+    void uploadFiles(files.slice(0, 3));
+  }
+  async function uploadFiles(files: File[]) {
+    if (!files.length || uploadInFlight.current) return;
+    uploadInFlight.current = true;
     setUploading(true);
+    setUploadError("");
     setMenu(null);
     try {
       const parsed = await Promise.all(
@@ -1884,16 +1973,26 @@ function FollowupComposer({
           (item) => !contextItems.some((existing) => existing.id === item.id),
         ),
       ]);
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : "文件上传失败");
     } finally {
+      uploadInFlight.current = false;
       setUploading(false);
     }
   }
   return (
     <form
       className="wbFollowup wbUnifiedFollowup"
-      onSubmit={onSubmit}
+      onSubmit={(event) => {
+        if (uploadInFlight.current) {
+          event.preventDefault();
+          return;
+        }
+        onSubmit?.(event);
+      }}
       ref={activeFormRef}
     >
+      {uploadError ? <div className="wbError" role="alert">{uploadError}</div> : null}
       {selectedSkill ? (
         <div className="wbWorkflowChip" role="group" aria-label="已选择 Skill">
           <i>{selectedSkill.icon}</i>
@@ -1914,7 +2013,8 @@ function FollowupComposer({
       <textarea
         ref={inputRef}
         rows={1}
-        placeholder="继续输入要求，@ 引用资料，/ 选择 Skill"
+        placeholder="继续输入要求，可粘贴图片，@ 引用资料，/ 选择 Skill"
+        onPaste={pasteImages}
         value={value}
         onChange={(event) => {
           setValue(event.target.value);
@@ -1936,7 +2036,7 @@ function FollowupComposer({
           }
           if (event.key === "Enter" && !event.shiftKey && !menu) {
             event.preventDefault();
-            if (value.trim()) event.currentTarget.form?.requestSubmit();
+            if (value.trim() && !uploadInFlight.current) event.currentTarget.form?.requestSubmit();
           }
         }}
       />
@@ -1971,12 +2071,12 @@ function FollowupComposer({
         </div>
       ) : null}
       {menu === "attach" ? (
-        <div className="wbAttachmentMenu wbFollowupMenu">
+        <div className="wbAttachmentMenu wbFollowupMenu" {...attachmentHover}>
           <button onClick={() => fileRef.current?.click()} type="button">
             <i>↑</i>
             <span>
               <strong>添加本地文件</strong>
-              <small>PDF、Word、CSV、TXT、Markdown</small>
+              <small>图片（JPG/PNG/WebP/GIF）、PDF、Word、CSV、TXT、Markdown · 最大 10MB</small>
             </span>
           </button>
           <button
@@ -1995,7 +2095,7 @@ function FollowupComposer({
         </div>
       ) : null}
       {menu === "mention" || menu === "command" || menu === "skills" ? (
-        <div className="wbMentionMenu wbFollowupMention">
+        <div className="wbMentionMenu wbFollowupMention" {...(menu === "skills" ? attachmentHover : {})}>
           <header>
             <strong>{menu === "mention" ? "引用资料" : "选择 Skill"}</strong>
             <kbd>点击选择 · Esc 关闭</kbd>
@@ -2017,7 +2117,7 @@ function FollowupComposer({
       <footer>
         <div className="wbFollowupTools">
           <input
-            accept=".txt,.md,.csv,.pdf,.docx"
+            accept=".txt,.md,.csv,.pdf,.docx,.jpg,.jpeg,.png,.webp,.gif"
             hidden
             multiple
             onChange={upload}
@@ -2025,6 +2125,7 @@ function FollowupComposer({
             type="file"
           />
           <button
+            {...attachmentHover}
             aria-expanded={menu === "attach"}
             aria-label="添加资料"
             className="wbFollowupAdd"
@@ -2212,6 +2313,7 @@ function TaskConversation({
         </div>
       </header>
       <div className="wbMessages" ref={messagesRef}>
+        <HotTopicSourceCard context={task.context_json?.supplementalContext} />
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {index === executionAnchor ? executionNode : null}

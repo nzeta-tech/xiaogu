@@ -53,6 +53,7 @@ export type CreationApp = {
   emoji: string;
   category: CreationCategoryId;
   points: number;
+  accessPolicy?: "credits" | "paid_customer";
   badge?: string;
   featured?: boolean;
   requiresThinking?: boolean;
@@ -87,11 +88,12 @@ export const creationCategories: CreationCategory[] = [
 export const creationApps: CreationApp[] = [
   {
     id: "digital-human-video",
+    accessPolicy: "paid_customer",
     slug: "digital-human-video",
-    name: "数字人视频",
+    name: "口播视频生成",
     emoji: "🎭",
     category: "content",
-    points: 12,
+    points: 50,
     badge: "新",
     featured: true,
     description: "选择你在数字分身中创建或收藏的数字人，把口播文案生成可发布视频。",

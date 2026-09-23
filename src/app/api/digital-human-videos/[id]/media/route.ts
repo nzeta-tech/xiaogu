@@ -1,17 +1,8 @@
-import { createReadStream } from "node:fs";
-import { Readable } from "node:stream";
+import { mediaResponse } from "@/lib/digital-human/media-response";
+import { MediaNodeError } from "@/lib/digital-human/media-node";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getDigitalHumanVideoJob } from "@/lib/digital-human/store";
 import { readDigitalHumanMedia } from "@/lib/digital-human/media-assets";
-
-function byteRange(size: number, rangeHeader: string | null) {
-  const match = rangeHeader?.match(/^bytes=(\d*)-(\d*)$/);
-  if (!match) return null;
-  const start = match[1] ? Number(match[1]) : 0;
-  const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) return null;
-  return { start, end };
-}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireSessionUser();
@@ -25,30 +16,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const source = poster ? job.preview_image_url : job.video_url;
   if (!source) return Response.json({ error: poster ? "封面尚未生成" : "视频尚未生成" }, { status: 404 });
 
-  if (!poster && source.startsWith("/api/digital-human-media/")) {
+  if (source.startsWith("/api/digital-human-media/")) {
     const mediaId = source.split("/").filter(Boolean).at(-1) || "";
-    const media = await readDigitalHumanMedia(user.id, mediaId);
-    if (!media) return Response.json({ error: "视频文件不存在" }, { status: 404 });
-    const filePath = "filePath" in media && typeof media.filePath === "string" ? media.filePath : null;
-    const bytes = "bytes" in media && Buffer.isBuffer(media.bytes) ? media.bytes : null;
-    if (!filePath && !bytes) return Response.json({ error: "视频文件不存在" }, { status: 404 });
-    const size = Number(media.row.size_bytes) || bytes?.length || 0;
-    const range = byteRange(size, request.headers.get("range"));
-    const headers: Record<string, string> = {
-      "content-type": media.row.content_type,
-      "accept-ranges": "bytes",
-      "cache-control": "private, max-age=300",
-      "content-disposition": `${url.searchParams.get("download") === "1" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(media.row.original_filename)}`,
-    };
-    if (range) {
-      headers["content-range"] = `bytes ${range.start}-${range.end}/${size}`;
-      headers["content-length"] = String(range.end - range.start + 1);
-      const body = filePath ? Readable.toWeb(createReadStream(filePath, { start: range.start, end: range.end })) : bytes!.subarray(range.start, range.end + 1);
-      return new Response(body as BodyInit, { status: 206, headers });
-    }
-    headers["content-length"] = String(size);
-    const body = filePath ? Readable.toWeb(createReadStream(filePath)) : bytes!;
-    return new Response(body as BodyInit, { headers });
+    try {
+      const media = await readDigitalHumanMedia(user.id, mediaId);
+      if (!media) return Response.json({error:"视频文件不存在"},{status:404});
+      return await mediaResponse(media,request.headers.get("range"),url.searchParams.get("download")==="1");
+    } catch(error) {return Response.json({error:error instanceof MediaNodeError?error.message:"媒体读取暂时不可用"},{status:error instanceof MediaNodeError?error.status:503});}
   }
 
   let remote: URL;

@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   if (!topic && !source) return Response.json({ error: "请填写主题或上传资料。" }, { status: 400 });
   if (source.length > MAX_SOURCE_CHARS) return Response.json({ error: `PPT 资料最多支持 ${MAX_SOURCE_CHARS} 个字符，当前为 ${source.length} 个字符；系统不会静默截断，请精简或拆分资料后重试。`, code: "INPUT_TOO_LONG", input: { originalChars: source.length, acceptedChars: MAX_SOURCE_CHARS, truncated: true } }, { status: 400 });
   if (!pageCounts.has(pageCount)) return Response.json({ error: "页数仅支持 5、8 或 12 页。" }, { status: 400 });
-  const quota = await requireQuota(user, "write_script", 12);
+  const quota = await requireQuota(user, "write_script", 12, { appSlug: "ppt-maker" });
   if (!quota.ok) return quota.response;
   const title = createShortTitle(topic, source);
   const brief = { topic: topic.slice(0, 120), source: source.slice(0, MAX_SOURCE_CHARS), style, pageCount, compliance: "保险内容不得承诺收益或夸大保障；不确定事实须明确标注待核验。" };

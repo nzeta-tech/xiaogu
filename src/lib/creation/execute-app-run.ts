@@ -1,3 +1,4 @@
+import { requireAppAccess } from "@/lib/billing/paid-access";
 import { generateImageSet } from "@/lib/agent/image-generator";
 import { extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
 import { runInsuranceContentAgent, streamInsuranceContentAgent } from "@/lib/agent/insurance-agent";
@@ -127,6 +128,11 @@ export async function executeCreationAppRun(input: {
   const app = (await tryGetCreationAppBySlug(input.slug)) ?? getCreationAppBySlug(input.slug);
   if (!app) {
     throw new Error("应用不存在");
+  }
+  const accessDenied = await requireAppAccess(input.userId, app.slug);
+  if (accessDenied) {
+    const payload = await accessDenied.json();
+    throw new Error(payload.error);
   }
   const entry = typeof input.values?.app_entry === "string" ? input.values.app_entry.trim() : "";
   const effectiveApp = getEntryAdjustedApp(app, entry);

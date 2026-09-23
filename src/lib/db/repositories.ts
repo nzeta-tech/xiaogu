@@ -1320,7 +1320,7 @@ export async function tryMarkOrderPaidByProvider(input: { provider: string; prov
     }>(
       `update orders
        set status = 'paid', paid_at = coalesce(paid_at, now())
-       where provider = $1 and provider_order_id = $2 and status <> 'paid'
+       where provider = $1 and provider_order_id = $2 and status = 'pending'
        returning id, user_id, quota_amount, status`,
       [input.provider, input.providerOrderId],
     );
@@ -2113,9 +2113,9 @@ export async function trySyncCreationCatalog() {
     for (const [index, app] of creationApps.entries()) {
       const appRow = await query<{ id: string }>(
         `insert into apps(
-           category_id, code, slug, name, emoji, description, badge, points_cost, result_type, prompt_strategy, requires_thinking, featured, status, metadata, sort_order
+           category_id, code, slug, name, emoji, description, badge, points_cost, result_type, prompt_strategy, requires_thinking, featured, status, metadata, sort_order, access_policy
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'default', $10, $11, 'active', $12::jsonb, $13)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'default', $10, $11, 'active', $12::jsonb, $13, $14)
          on conflict (slug) do update set
            category_id = excluded.category_id,
            code = excluded.code,
@@ -2143,6 +2143,7 @@ export async function trySyncCreationCatalog() {
             promptHint: app.promptHint,
           }),
           index,
+          app.accessPolicy ?? "credits",
         ],
       );
 
@@ -2215,13 +2216,14 @@ export async function tryListCreationCatalog() {
       description: string;
       badge: string | null;
       points_cost: number;
+      access_policy: "credits" | "paid_customer";
       result_type: "text" | "image-plan" | "image";
       requires_thinking: boolean;
       featured: boolean;
       metadata: Record<string, unknown>;
       category_code: string | null;
     }>(
-      `select a.id, a.code, a.slug, a.name, a.emoji, a.description, a.badge, a.points_cost, a.result_type, a.requires_thinking, a.featured, a.metadata,
+      `select a.id, a.code, a.slug, a.name, a.emoji, a.description, a.badge, a.points_cost, a.access_policy, a.result_type, a.requires_thinking, a.featured, a.metadata,
               c.code as category_code
        from apps a
        left join app_categories c on c.id = a.category_id
@@ -2272,6 +2274,7 @@ export async function tryListCreationCatalog() {
       emoji: row.emoji,
       category: (row.category_code as CreationApp["category"]) ?? "content",
       points: row.points_cost,
+      accessPolicy: row.access_policy,
       badge: row.badge ?? undefined,
       featured: row.featured,
       requiresThinking: row.requires_thinking,
@@ -2305,6 +2308,7 @@ export async function tryListAdminCreationApps() {
       description: string;
       badge: string | null;
       points_cost: number;
+      access_policy: "credits" | "paid_customer";
       result_type: string;
       requires_thinking: boolean;
       featured: boolean;
@@ -2314,7 +2318,7 @@ export async function tryListAdminCreationApps() {
       run_count: string;
       updated_at: string;
     }>(
-      `select a.id, a.code, a.slug, a.name, a.emoji, a.description, a.badge, a.points_cost, a.result_type,
+      `select a.id, a.code, a.slug, a.name, a.emoji, a.description, a.badge, a.points_cost, a.access_policy, a.result_type,
               a.requires_thinking, a.featured, a.status, a.sort_order, a.updated_at, c.name as category_name,
               coalesce((select count(*) from app_runs ar where ar.app_id = a.id), 0)::text as run_count
        from apps a
@@ -2332,6 +2336,7 @@ export async function tryUpdateAdminCreationApp(input: {
   status?: string;
   featured?: boolean;
   pointsCost?: number;
+  accessPolicy?: "credits" | "paid_customer";
   badge?: string | null;
   sortOrder?: number;
 }) {
@@ -2342,6 +2347,7 @@ export async function tryUpdateAdminCreationApp(input: {
       status: string;
       featured: boolean;
       points_cost: number;
+      access_policy: "credits" | "paid_customer";
       badge: string | null;
       sort_order: number;
       updated_at: string;
@@ -2352,10 +2358,11 @@ export async function tryUpdateAdminCreationApp(input: {
            points_cost = coalesce($4, points_cost),
            badge = coalesce($5, badge),
            sort_order = coalesce($6, sort_order),
+           access_policy = coalesce($7, access_policy),
            updated_at = now()
        where id = $1
-       returning id, slug, status, featured, points_cost, badge, sort_order, updated_at`,
-      [input.appId, input.status ?? null, input.featured ?? null, input.pointsCost ?? null, input.badge ?? null, input.sortOrder ?? null],
+       returning id, slug, status, featured, points_cost, access_policy, badge, sort_order, updated_at`,
+      [input.appId, input.status ?? null, input.featured ?? null, input.pointsCost ?? null, input.badge ?? null, input.sortOrder ?? null, input.accessPolicy ?? null],
     );
     return result.rows[0] ?? null;
   } catch {

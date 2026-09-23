@@ -31,6 +31,21 @@ export type SemanticRoute = {
   deliverable?: SemanticDeliverableContract;
 };
 
+// Evidence needs apply equally to conversational and direct answers.
+export function normalizeConversationEvidence(route: SemanticRoute): SemanticRoute {
+  if (!["chat", "direct"].includes(route.mode)
+    || !(route.requiresFreshInformation || (route.evidenceRequirement && route.evidenceRequirement !== "none"))) return route;
+  return {
+    ...route,
+    mode: "fast-research",
+    operation: "verify",
+    targetCapabilityId: "agent.fast-research",
+    requiresFreshInformation: true,
+    evidenceRequirement: route.evidenceRequirement === "verification" ? "verification" : "current",
+    rationale: "当前讨论依赖外部事实，先通过 Fast Research 核实，再继续通用对话",
+  };
+}
+
 /**
  * Pick the cheapest research capability that can plausibly finish the task.
  * Sequential lookups are not by themselves deep research: Fast Research can

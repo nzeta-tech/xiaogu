@@ -6,7 +6,7 @@ import { getHotTopics } from "@/lib/topics/hot-topics";
 import { getModelRuntime, isTimeoutError, modelTimeoutSignal, recordModelRuntime } from "@/lib/agent/model-runtime";
 import { resolveConfiguredTextModel } from "@/lib/agent/model-config";
 import { buildDomainPrompt, inferDomainContext, type DomainContext } from "@/lib/domain/context";
-import { selectAvatarMemoriesForContext, type CreatorContextMode } from "@/lib/agent/creator-context";
+import { selectAvatarMemoriesForContext, topicPositioningPersona, type CreatorContextMode } from "@/lib/agent/creator-context";
 
 export { selectAvatarMemoriesForContext } from "@/lib/agent/creator-context";
 export type { CreatorContextMode } from "@/lib/agent/creator-context";
@@ -118,12 +118,16 @@ function buildSystemPrompt(
           ].join("\n");
 
   const brief = thinkingSnapshot?.snapshot_json ? buildThinkingProfileBrief(thinkingSnapshot.snapshot_json, thinkingSnapshot.summary_json) : null;
+  if (brief && creatorContextMode === "topic-positioning") {
+    const identity = thinkingSnapshot!.snapshot_json.identity_profile;
+    brief.persona = topicPositioningPersona(identity);
+  }
   const profileLine = creatorContextMode === "none"
     ? ""
     : brief
     ? `当前用户长期人设画像：人设底色=${brief.persona || "未设置"}。目标受众=${brief.targetAudience || "未设置"}。擅长主题=${brief.specialty || "未设置"}。表达偏好=${brief.topicPreference || "未设置"}。`
     : profile
-      ? `当前用户账号展示信息：昵称=${profile.display_name || "未设置"}。签名=${profile.ip_tagline || "未设置"}。简介=${profile.profile_summary || "未设置"}。`
+      ? `当前用户账号展示信息：昵称=${profile.display_name || "未设置"}。签名=${profile.ip_tagline || "未设置"}。${creatorContextMode === "topic-positioning" ? "" : `简介=${profile.profile_summary || "未设置"}。`}`
       : "如果没有读取到账户人设，保持专业、理性和领域中立，严格围绕用户本轮题目输出。";
 
   const system = [
@@ -134,7 +138,7 @@ function buildSystemPrompt(
     "注意区分两层人设：小谷是对话助手的人格；最终生成的内容必须贴合用户自己的账号人设。",
     buildDomainPrompt(domainContext),
     profileLine,
-    creatorContextMode !== "positioning" && thinkingSnapshot?.snapshot_json
+    creatorContextMode !== "positioning" && creatorContextMode !== "topic-positioning" && thinkingSnapshot?.snapshot_json
       ? formatThinkingProfileSnapshotForPrompt(thinkingSnapshot.snapshot_json, thinkingSnapshot.summary_json)
       : "",
     formatAvatarMemoriesForPrompt(avatarMemories),

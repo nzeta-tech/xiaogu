@@ -125,3 +125,7 @@ stripe listen --forward-to localhost:3000/api/billing/webhook
 - compliance_reports
 - organization_members
 - approval_tasks
+
+## 应用充值资格
+
+普通应用与充值专享应用的规则、历史订单核验及上线步骤见 [真实充值用户专享应用](PAID_APPLICATION_ACCESS.md)。

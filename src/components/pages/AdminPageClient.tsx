@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { adminMenuItems, getAdminSection, type AdminSectionId } from "@/lib/admin/navigation";
+import { UserExclusiveAccessPanel } from "@/components/admin/UserExclusiveAccessPanel";
 import { CreativeCoachProductionPanel } from "@/components/admin/CreativeCoachProductionPanel";
 import { apiPath } from "@/lib/client/url";
 import { defaultSystemSettings, type SystemSettings } from "@/lib/system/settings";
@@ -202,6 +203,7 @@ type AdminOrderDetail = AdminOrder & {
 };
 
 type AdminCreationApp = {
+  access_policy: "credits" | "paid_customer";
   id: string;
   code: string;
   slug: string;
@@ -283,6 +285,7 @@ type Plan = {
 };
 
 type AdminUserDetail = {
+  paidAccess?: { eligible: boolean; totals: Record<string, number>; orders: Array<{ order_id: string; source: string }> };
   user: AdminUser;
   balance: number;
   orders: AdminOrderDetail[];
@@ -616,7 +619,7 @@ export function AdminPageClient() {
     const response = await fetch(apiPath("/api/admin/users/credits"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId, quotaAmount, note: "后台充值" }),
+      body: JSON.stringify({ userId, quotaAmount, note: "管理员赠送" }),
     });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) {
@@ -624,19 +627,19 @@ export function AdminPageClient() {
       return;
     }
     await loadSection("users");
-    showToast(`已充值 ${quotaAmount} 点`);
+    showToast(`已赠送 ${quotaAmount} 点`);
   }
 
   function confirmCreditGrant(user: AdminUser) {
     const quotaAmount = Number(creditAmounts[user.id] ?? "100");
     if (!Number.isInteger(quotaAmount) || quotaAmount < 1) {
-      showToast("请输入至少 1 点的整数充值金额", "error");
+      showToast("请输入至少 1 点的整数赠送积分", "error");
       return;
     }
     requestConfirm({
-      title: "确认充值积分？",
-      description: `将向 ${user.email} 充值 ${quotaAmount} 点，操作会写入审计日志。`,
-      confirmLabel: `充值 ${quotaAmount} 点`,
+      title: "确认赠送积分？",
+      description: `将向 ${user.email} 赠送 ${quotaAmount} 点，操作会写入审计日志。`,
+      confirmLabel: `赠送 ${quotaAmount} 点`,
       onConfirm: () => grantCredits(user.id, quotaAmount),
     });
   }
@@ -656,7 +659,7 @@ export function AdminPageClient() {
     showToast("订单状态已更新");
   }
 
-  async function updateCreationApp(appId: string, input: { status?: string; featured?: boolean; pointsCost?: number; badge?: string; sortOrder?: number }) {
+  async function updateCreationApp(appId: string, input: { status?: string; featured?: boolean; accessPolicy?: "credits" | "paid_customer"; pointsCost?: number; badge?: string; sortOrder?: number }) {
     const response = await fetch(apiPath("/api/admin/apps"), {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -1387,8 +1390,8 @@ export function AdminPageClient() {
                 <div className="adminDataCell"><strong>{user.current_balance ?? 0} 点</strong><span>消费 ¥{((user.order_total ?? 0) / 100).toFixed(0)}</span></div>
                 <div className="adminRowMenu">
                   <button className="secondaryButton" onClick={() => void loadUserDetail(user.id)} type="button">查看详情</button>
-                  <input aria-label={`为 ${user.email} 充值的积分数量`} className="adminCreditAmountInput" inputMode="numeric" min="1" step="1" type="number" value={creditAmounts[user.id] ?? "100"} onChange={(event) => setCreditAmounts((current) => ({ ...current, [user.id]: event.target.value }))} />
-                  <button className="primaryButton" onClick={() => confirmCreditGrant(user)} type="button">充值</button>
+                  <input aria-label={`为 ${user.email} 赠送的积分数量`} className="adminCreditAmountInput" inputMode="numeric" min="1" step="1" type="number" value={creditAmounts[user.id] ?? "100"} onChange={(event) => setCreditAmounts((current) => ({ ...current, [user.id]: event.target.value }))} />
+                  <button className="primaryButton" onClick={() => confirmCreditGrant(user)} type="button">赠送积分</button>
                   <button className="secondaryButton" onClick={() => requestConfirm({ title: user.status === "active" ? "停用这个用户？" : "恢复这个用户？", description: `${user.email} ${user.status === "active" ? "将无法继续登录和创作，历史数据会保留。" : "将重新获得登录和使用权限。"}`, confirmLabel: user.status === "active" ? "确认停用" : "确认恢复", danger: user.status === "active", onConfirm: () => updateUser(user.id, { status: user.status === "active" ? "suspended" : "active" }) })} type="button">{user.status === "active" ? "停用" : "恢复"}</button>
                 </div>
               </div>
@@ -1412,6 +1415,13 @@ export function AdminPageClient() {
                 <Metric label="购买积分" value={selectedUserDetail.totals.quotaPurchased} />
                 <Metric label="累计消耗" value={selectedUserDetail.totals.quotaConsumed} />
               </div>
+              <UserExclusiveAccessPanel key={selectedUserDetail.user.id} userId={selectedUserDetail.user.id} />
+              <AdminPanel title="真实充值记录">
+                <strong>{selectedUserDetail.paidAccess?.eligible ? "有有效真实充值记录" : "暂无有效真实充值记录"}</strong>
+                <p>赠送积分与管理员手动标记到账不计入资格。</p>
+                {Object.entries(selectedUserDetail.paidAccess?.totals ?? {}).map(([currency, cents]) => <p key={currency}>有效实付：{formatMoney(cents, currency)}</p>)}
+                {selectedUserDetail.paidAccess?.orders.map(order => <p key={order.order_id}>凭据订单：{order.order_id} · {order.source}</p>)}
+              </AdminPanel>
               <AdminPanel title="最近订单">{selectedUserDetail.orders.slice(0, 8).map((order) => <Row key={order.id} title={formatMoney(order.amount_cents, order.currency)} meta={`${order.quota_amount} 点 · ${order.status} · ${formatDate(order.created_at)}`} />)}</AdminPanel>
               <AdminPanel title="最近作品">{selectedUserDetail.works.slice(0, 8).map((work) => <Row key={work.id} title={work.title} meta={`${work.platform} · ${work.status} · ${formatDate(work.updated_at)}`} href={adminWorkHref(work.id)} />)}</AdminPanel>
             </div> : null}
@@ -1524,6 +1534,9 @@ export function AdminPageClient() {
                   <strong>{app.points_cost} 点</strong>
                   <span>{app.run_count} 次</span>
                   <div className="adminRowMenu">
+                    <select aria-label={`${app.name}使用条件`} value={app.access_policy} onChange={event => void updateCreationApp(app.id, { accessPolicy: event.target.value as "credits" | "paid_customer" })}>
+                      <option value="credits">积分足够即可</option><option value="paid_customer">真实充值用户专享</option>
+                    </select>
                     <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { sortOrder: Math.max(app.sort_order - 1, 0) })}>上移</button>
                     <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { sortOrder: app.sort_order + 1 })}>下移</button>
                     <button className="secondaryButton" onClick={() => void updateCreationApp(app.id, { pointsCost: Math.max(app.points_cost - 1, 0) })}>-1 点</button>
@@ -1895,7 +1908,7 @@ export function AdminPageClient() {
 
           {settingsTab === "security" ? <AdminPanel title="注册与登录安全"><SettingsToggle title="允许新用户注册" hint="关闭后注册接口立即停止创建账号。" checked={settings.auth.allowRegistration} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, allowRegistration: checked } }))} /><SettingsToggle title="注册要求平台准入码" hint="固定准入码与返利邀请码相互独立。" checked={settings.auth.requireInviteCode} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, requireInviteCode: checked } }))} /><SettingsToggle title="邮箱验证" hint="启用后新账号必须验证邮箱才能登录。" checked={settings.auth.emailVerificationEnabled} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, emailVerificationEnabled: checked } }))} /><SettingsToggle title="找回密码" hint="通过一次性邮件链接重置密码。" checked={settings.auth.passwordResetEnabled} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordResetEnabled: checked } }))} /><div className="settingsFormGrid"><SettingsNumber label="会话有效期（天）" value={settings.auth.sessionDays} min={1} max={30} onChange={(value) => setSettings((current) => ({ ...current, auth: { ...current.auth, sessionDays: value } }))} /><SettingsNumber label="登录失败上限" value={settings.auth.loginAttemptLimit} min={3} max={100} onChange={(value) => setSettings((current) => ({ ...current, auth: { ...current.auth, loginAttemptLimit: value } }))} /><SettingsNumber label="限制窗口（分钟）" value={settings.auth.loginWindowMinutes} min={1} max={1440} onChange={(value) => setSettings((current) => ({ ...current, auth: { ...current.auth, loginWindowMinutes: value } }))} /><SettingsField label="允许邮箱域名" hint="英文逗号分隔，留空允许所有域名。"><input value={settings.auth.allowedEmailDomains.join(", ")} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, allowedEmailDomains: event.target.value.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) } }))} /></SettingsField></div><SettingsToggle title="Cloudflare Turnstile" hint="登录和注册都必须通过服务端人机验证。" checked={settings.auth.turnstileEnabled} onChange={(checked) => setSettings((current) => ({ ...current, auth: { ...current.auth, turnstileEnabled: checked } }))} />{settings.auth.turnstileEnabled ? <div className="settingsFormGrid"><SettingsField label="Site Key"><input value={settings.auth.turnstileSiteKey} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, turnstileSiteKey: event.target.value } }))} /></SettingsField><SettingsField label="Secret" hint={settings.auth.turnstileSecretConfigured ? "已配置；留空保持原值" : "尚未配置"}><input type="password" value={turnstileSecret} onChange={(event) => setTurnstileSecret(event.target.value)} /></SettingsField></div> : null}</AdminPanel> : null}
 
-          {settingsTab === "defaults" ? <div className="pageStack"><AdminPanel title="新用户自动充值积分"><SettingsToggle title="启用自动充值" hint="仅影响新注册用户；开启后会发放下方设置的积分。" checked={settings.defaults.signupCreditsEnabled} onChange={(checked) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCreditsEnabled: checked } }))} />{settings.defaults.signupCreditsEnabled ? <div className="settingsFormGrid"><SettingsNumber label="每位新用户充值积分" value={settings.defaults.signupCredits} min={0} max={100000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCredits: value } }))} /></div> : null}</AdminPanel><AdminPanel title="创作与密码默认值"><div className="settingsFormGrid"><SettingsNumber label="每日创作次数（0=不限）" value={settings.defaults.dailyCreationLimit} min={0} max={10000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, dailyCreationLimit: value } }))} /><SettingsField label="密码规则提示"><input value={settings.auth.passwordHint} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordHint: event.target.value } }))} /></SettingsField></div></AdminPanel></div> : null}
+          {settingsTab === "defaults" ? <div className="pageStack"><AdminPanel title="注册赠送积分"><SettingsToggle title="启用注册赠送" hint="仅影响新注册用户；开启后会发放下方设置的积分。" checked={settings.defaults.signupCreditsEnabled} onChange={(checked) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCreditsEnabled: checked } }))} />{settings.defaults.signupCreditsEnabled ? <div className="settingsFormGrid"><SettingsNumber label="每位新用户赠送积分" value={settings.defaults.signupCredits} min={0} max={100000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, signupCredits: value } }))} /></div> : null}</AdminPanel><AdminPanel title="创作与密码默认值"><div className="settingsFormGrid"><SettingsNumber label="每日创作次数（0=不限）" value={settings.defaults.dailyCreationLimit} min={0} max={10000} onChange={(value) => setSettings((current) => ({ ...current, defaults: { ...current.defaults, dailyCreationLimit: value } }))} /><SettingsField label="密码规则提示"><input value={settings.auth.passwordHint} onChange={(event) => setSettings((current) => ({ ...current, auth: { ...current.auth, passwordHint: event.target.value } }))} /></SettingsField></div></AdminPanel></div> : null}
 
           {settingsTab === "services" ? <AdminPanel title="外部服务状态"><div className="panelHeaderActions"><button className="secondaryButton" disabled={actionKey === "services"} onClick={() => void refreshServiceHealth()} type="button">{actionKey === "services" ? "检测中" : "重新检测"}</button></div><div className="serviceHealthGrid">{serviceHealth?.checks.map((check) => <article className={check.ok ? "healthy" : "unhealthy"} key={check.key}><div><strong>{check.label}</strong><AdminStatus value={check.ok ? "active" : check.required ? "failed" : "inactive"} /></div><span>{check.latencyMs} ms</span><p>{check.ok ? "连接正常" : check.error}</p></article>)}{!serviceHealth ? <AdminEmptyState title="尚未检测" description="点击重新检测查看数据库、模型、支付、邮件和遥测服务状态。" /> : null}</div>{serviceHealth?.lastStripeWebhook ? <p className="subtleText">最近 Stripe Webhook：{serviceHealth.lastStripeWebhook.lastWebhookAt ?? "未知"} · {serviceHealth.lastStripeWebhook.lastEventType ?? "未知事件"}</p> : null}</AdminPanel> : null}
 
@@ -2119,6 +2132,7 @@ function adminActionLabel(action: string) {
     "settings.update": "更新系统设置",
     "user.update": "更新用户",
     "user.grant_credits": "赠送积分",
+    "user.exclusive_app_access.update": "修改专享应用权限",
     "order.mark_paid": "标记订单已支付",
     "order.refund": "订单退款",
     "order.update_status": "更新订单状态",

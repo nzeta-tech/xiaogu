@@ -1,27 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Deprecated: use scripts/host-agentctl.py install --env production. Do not register this legacy label. -->
 <plist version="1.0">
 <dict>
-  <key>Label</key>
-  <string>ai.nzeta.xiaogu-ppt-agent</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/a2251/.xiaogu-agent/bin/run-production-ppt-agent.sh</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>/Users/a2251/.xiaogu-agent/logs/ppt-agent.out.log</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/a2251/.xiaogu-agent/logs/ppt-agent.err.log</string>
+	<key>Label</key>
+	<string>ai.nzeta.xiaogu-ppt-agent</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/a2251/.xiaogu-agent/bin/run-production-ppt-agent.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HTTP_PROXY</key>
+		<string>http://127.0.0.1:7890</string>
+		<key>HTTPS_PROXY</key>
+		<string>http://127.0.0.1:7890</string>
+		<key>ALL_PROXY</key>
+		<string>http://127.0.0.1:7890</string>
+		<key>NO_PROXY</key>
+		<string>localhost,127.0.0.1</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/a2251/.xiaogu-agent/logs/ppt-agent.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/a2251/.xiaogu-agent/logs/ppt-agent.err.log</string>
 </dict>
 </plist>

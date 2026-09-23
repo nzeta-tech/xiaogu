@@ -12,7 +12,7 @@ export async function GET() {
   return Response.json({
     channels: [
       { id: "heygen", label: "快速形象通道", provider: "HeyGen", enabled: settings.digitalHuman.heygenEnabled, configured: Boolean(process.env.HEYGEN_API_KEY) },
-      { id: "chanjing", label: "高还原形象通道", provider: "禅境", enabled: settings.digitalHuman.chanjingEnabled, configured: Boolean(process.env.CHANJING_APP_ID && process.env.CHANJING_SECRET_KEY) },
+
     ],
     storage: { ...media.rows[0], databaseBytes: database.rows[0]?.bytes ?? "0", s3Configured: Boolean(settings.backup.s3Enabled && settings.backup.s3Bucket && settings.backup.s3SecretEncrypted),localDiskEnabled:settings.digitalHuman.localDiskEnabled,localDiskPath:process.env.DIGITAL_HUMAN_LOCAL_STORAGE_DIR||settings.digitalHuman.localDiskPath,localDiskNodeId:settings.digitalHuman.localDiskNodeId, maxFileMb: settings.digitalHuman.databaseMaxFileMb, warningMb: settings.digitalHuman.databaseWarningMb },
   });

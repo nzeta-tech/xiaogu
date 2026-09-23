@@ -1,3 +1,5 @@
+import { recordVerifiedPayment, recordVerifiedRefund } from "@/lib/billing/paid-access";
+import { verifiedStripePayment } from "@/lib/billing/paid-access-rules";
 import { grantCredits } from "@/lib/billing/openmeter";
 import { isDemoModeEnabled } from "@/lib/config/runtime";
 import { tryFinishWebhookEvent, tryGetOrderByProvider, tryGetPaymentProvider, tryListPaymentProviders, tryMarkOrderCompleted, tryMarkOrderPaidByProvider, tryRecordWebhookEvent } from "@/lib/db/repositories";
@@ -25,16 +27,52 @@ export async function POST(request: Request) {
         [JSON.stringify({ lastWebhookAt: new Date().toISOString(), lastEventType: event.type, ok: true })],
       );
 
-      if (event.type === "checkout.session.completed") {
+      if (event.type === "charge.refunded" && event.livemode) {
+        const charge = event.data.object;
+        const reference = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+        if (reference) {
+          try { await recordVerifiedRefund("stripe_live", reference, charge.amount_refunded); }
+          catch {
+            await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "failed", errorMessage: "refund persistence failed" });
+            return Response.json({ error: "退款资格记录失败，请重试" }, { status: 502 });
+          }
+        }
+      }
+
+      if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
         const session = event.data.object;
+        if (session.payment_status !== "paid") {
+          await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "processed" });
+          return Response.json({ received: true, awaitingPayment: true });
+        }
+        const expected = await query<{ id: string; amount_cents: number; currency: string; status: string }>(
+          "select id,amount_cents,currency,status from orders where provider='stripe' and provider_order_id=$1", [session.id]);
+        const expectedOrder = expected.rows[0];
+        if (!expectedOrder || session.amount_total !== expectedOrder.amount_cents || session.currency?.toUpperCase() !== expectedOrder.currency.toUpperCase()) {
+          await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "failed", errorMessage: "order or payment amount mismatch" });
+          return Response.json({ error: "支付订单或金额不匹配" }, { status: 400 });
+        }
         const orderInput = {
           provider: "stripe",
           providerOrderId: session.id,
         };
         const order = await tryMarkOrderPaidByProvider(orderInput) ?? await tryGetOrderByProvider(orderInput);
 
-        if (order) {
-          const grant = await grantCredits({
+        if (order && ["paid", "completed"].includes(order.status)) {
+          if (verifiedStripePayment(session, expectedOrder)) {
+            const reference = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+            if (!reference) {
+              await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "failed", errorMessage: "missing payment reference" });
+              return Response.json({ error: "支付凭据不完整" }, { status: 400 });
+            }
+            try {
+              await recordVerifiedPayment({ orderId: order.id, source: "stripe_live", reference, amountCents: session.amount_total!, currency: session.currency! });
+            } catch {
+              await tryFinishWebhookEvent({ providerKey: "stripe", eventId: event.id, status: "failed", errorMessage: "receipt persistence failed" });
+              return Response.json({ error: "支付资格记录失败，请重试" }, { status: 502 });
+            }
+          }
+          const grant = order.status === "completed" ? { ok: true, duplicate: true } : await grantCredits({
             customerId: order.user_id,
             amount: order.quota_amount,
             reason: "stripe_checkout_completed",

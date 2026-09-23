@@ -1,0 +1,14 @@
+[Unit]
+Description=Xiaogu persistent media service
+Requires=docker.service
+After=docker.service network-online.target
+RequiresMountsFor=/data/xiaogu-media
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/ubuntu/xiaogu-media/config
+ExecStartPre=/usr/bin/mountpoint -q /data/xiaogu-media
+ExecStart=/usr/bin/docker compose up -d --wait
+ExecStop=/usr/bin/docker compose stop
+[Install]
+WantedBy=multi-user.target

@@ -89,7 +89,7 @@ export async function invokeWorkbuddyCapability(input: {
     && (operationRequiresTopicSelection || (!operationSkipsTopicSelection && !shouldSkipTrafficTopicSelection([currentSemanticRequest, trafficSemanticSource].filter(Boolean).join("\n"))));
   if (isTrafficTopicStage) Object.assign(values, buildTrafficTopicAnalysisValues(values, "workbuddy"));
   input.onEvent?.({ type: "app.preparing", message: `正在准备${app.name}的执行参数`, data: { appSlug: app.slug } });
-  const quota = await requireQuota(input.user, "write_script", app.points);
+  const quota = await requireQuota(input.user, "write_script", app.points, { appSlug: app.slug });
   if (!quota.ok) {
     const payload = await quota.response.json().catch(() => ({})) as { error?: string };
     throw new Error(payload.error || "当前额度不足，无法运行应用");
@@ -226,17 +226,17 @@ async function invokeDigitalHumanHandoff(
   // Handoffs must carry the user's deliverable, not the compiled agent context
   // (which also contains routing instructions, workflow state and observations).
   const script=(input.taskInput.previousArtifact || input.taskInput.sourceMaterial || input.taskInput.followup || input.taskInput.objective || input.taskInput.context).trim().slice(0,5000);
-  if(script.length<5)throw new Error("请先提供要生成数字人视频的完整口播文案");
-  const params=new URLSearchParams({script,title:input.taskInput.objective.replace(/\s+/g," ").slice(0,60)||"小谷数字人视频"});
+  if(script.length<5)throw new Error("请先提供要生成口播视频的完整口播文案");
+  const params=new URLSearchParams({script,title:input.taskInput.objective.replace(/\s+/g," ").slice(0,60)||"小谷口播视频"});
   const resultUrl=`/apps/digital-human-video?${params.toString()}`;
   const protocol=input.taskInput.protocol;
   const invocation=await query<{id:string}>(
     `insert into workbuddy_capability_invocations(task_id,step_id,user_id,capability_id,capability_kind,app_slug,status,input_json,output_json,points_cost,started_at,completed_at,idempotency_key)
      values($1,$2,$3,$4,'app','digital-human-video','completed',$5,$6,0,now(),now(),$7)
      on conflict(idempotency_key) where idempotency_key is not null do update set updated_at=now() returning id`,
-    [input.taskId,input.stepId,input.user.id,capability.id,JSON.stringify({source:script,protocol}),JSON.stringify({title:"数字人视频已就绪",content:"口播文案已带入数字人工作台",contentJson:{items:[{id:"digital-human-handoff",title:"数字人视频工作台",url:resultUrl}]},resultUrl}),protocol?.idempotencyKey??null],
+    [input.taskId,input.stepId,input.user.id,capability.id,JSON.stringify({source:script,protocol}),JSON.stringify({title:"口播视频生成已就绪",content:"口播文案已带入口播视频生成工作台",contentJson:{items:[{id:"digital-human-handoff",title:"口播视频生成工作台",url:resultUrl}]},resultUrl}),protocol?.idempotencyKey??null],
   ).then(result=>result.rows[0]??null);
-  return {invocationId:invocation?.id??null,capabilityId:capability.id,appSlug:"digital-human-video",workId:null,title:"数字人视频已就绪",content:"口播文案已完整带入数字人视频工作台。请确认人物、声音和画幅后提交生成。",contentJson:{items:[{id:"digital-human-handoff",title:"数字人视频工作台",url:resultUrl}],handoff:true},resultUrl} satisfies CapabilityInvocationResult;
+  return {invocationId:invocation?.id??null,capabilityId:capability.id,appSlug:"digital-human-video",workId:null,title:"口播视频生成已就绪",content:"口播文案已完整带入口播视频生成工作台。请确认人物、声音和画幅后提交生成。",contentJson:{items:[{id:"digital-human-handoff",title:"口播视频生成工作台",url:resultUrl}],handoff:true},resultUrl} satisfies CapabilityInvocationResult;
 }
 
 async function invokeOpenChatCut(
@@ -477,7 +477,7 @@ function buildNativePrompt(type: NonNullable<NonNullable<Awaited<ReturnType<type
     "file-analysis": "你在执行文件阅读分析。只依据用户上传并解析到上下文中的文件内容，输出：文件概览、执行摘要、关键信息与数据、风险或矛盾、待确认事项、建议下一步。找不到原文依据的内容不得补猜；若没有实际文件内容，明确请用户上传文件。",
     "hot-topic-discovery": "读取实时热点榜单并返回候选信号。",
     "openchatcut-edit": "OpenChatCut 剪辑任务由独立本机执行器处理。",
-    "digital-human-handoff": "数字人视频由专用工作台在用户确认身份资产后提交。",
+    "digital-human-handoff": "口播视频由专用工作台在用户确认身份资产后提交。",
     "xiaohongshu-assets": "小红书图文配套由专用组合执行器处理。",
   }[type];
   return `${instructions}\n\n${common}`;

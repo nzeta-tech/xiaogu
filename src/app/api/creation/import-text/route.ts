@@ -2,6 +2,8 @@ import path from "node:path";
 import mammoth from "mammoth";
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { requireSessionUser } from "@/lib/auth/session";
+import { extractKnowledgeFromReferenceImage } from "@/lib/agent/image-knowledge-extractor";
+import { importImageExtensions, readUploadedImage } from "@/lib/creation/import-image";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const supportedExtensions = new Set([".txt", ".md", ".csv", ".pdf", ".docx"]);
@@ -21,15 +23,18 @@ export async function POST(request: Request) {
   }
 
   const ext = path.extname(file.name).toLowerCase();
-  if (!supportedExtensions.has(ext)) {
-    return Response.json({ error: "当前仅支持 txt / md / csv / pdf / docx" }, { status: 400 });
+  const isImage = importImageExtensions.has(ext);
+  if (!supportedExtensions.has(ext) && !isImage) {
+    return Response.json({ error: "支持 TXT、Markdown、CSV、PDF、Word，以及 JPG、PNG、WebP、GIF 图片" }, { status: 400 });
   }
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
     let text = "";
 
-    if (ext === ".txt" || ext === ".md" || ext === ".csv") {
+    if (isImage) {
+      text = await readUploadedImage(bytes, (dataUrl) => extractKnowledgeFromReferenceImage(dataUrl, "attachment"));
+    } else if (ext === ".txt" || ext === ".md" || ext === ".csv") {
       text = bytes.toString("utf8");
     } else if (ext === ".pdf") {
       text = (await pdf(bytes)).text;
@@ -39,6 +44,7 @@ export async function POST(request: Request) {
 
     return Response.json({ text: text.trim() });
   } catch {
+    if (isImage) return Response.json({ error: "图片识别失败，请确认图片有效，或稍后重试。" }, { status: 422 });
     return Response.json({ error: "文件解析失败，请确认文件未加密或损坏。" }, { status: 422 });
   }
 }

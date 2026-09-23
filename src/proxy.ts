@@ -1,12 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-/**
- * Hard release boundary for capabilities that are present in the source tree
- * but are intentionally not part of the current production release. Returning
- * 404 avoids advertising an unavailable surface and also blocks direct API use.
- */
+/** Keep the unreleased external editor hidden; spoken routes use their own auth. */
 export function proxy(request: NextRequest) {
-  return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const editor = request.nextUrl.pathname === "/workbuddy/video-editor"
+    || request.nextUrl.pathname.startsWith("/workbuddy/video-editor/");
+  if (editor && process.env.NODE_ENV !== "development") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  return NextResponse.next();
 }
 
 export const config = {
@@ -19,6 +20,9 @@ export const config = {
     "/api/digital-human-template-favorites/:path*",
     "/api/digital-human-template-library/:path*",
     "/api/digital-human-videos/:path*",
+    "/api/spoken-photos/:path*",
+    "/api/spoken-photo-templates/:path*",
+    "/api/spoken-voices/:path*",
     "/api/avatar/digital-human-looks/:path*",
     "/api/avatar/digital-human-voice-preview/:path*",
     "/api/avatar/digital-humans/:path*",

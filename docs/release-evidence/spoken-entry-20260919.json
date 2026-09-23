@@ -1,0 +1,70 @@
+{
+  "completedAt": "2026-09-19T04:17:08.456261+00:00",
+  "sha": "53c594e3bb65529979a84e4a9d5b977d4cf3605f",
+  "status": "passed",
+  "incident": "Production-only workspace visibility hid released spoken application. Public regression failed before fix and passed after.",
+  "candidate": {
+    "passed": true,
+    "assertions": 25,
+    "environment": "compiled-production-candidate",
+    "browser": "Chrome headless",
+    "tags": [
+      "spoken:entry",
+      "apps:visibility"
+    ]
+  },
+  "production": {
+    "passed": true,
+    "assertions": 25,
+    "environment": "production",
+    "browser": "Chrome headless",
+    "tags": [
+      "spoken:entry",
+      "apps:visibility"
+    ]
+  },
+  "unitAndProxyTests": 13,
+  "nodes": 3,
+  "allNodesManifestVerified": true,
+  "allNodesReady": true,
+  "manifestSha256": "230a10374ccff6a96dc15e46637abe09d3b2567ee68ea4ab34dc5a7655df7012",
+  "preservation": {
+    "baseline": "0fc845e64967",
+    "candidate": "53c594e3bb65",
+    "changes": {
+      "M": 4,
+      "A": 2
+    },
+    "preservedRoutes": 200,
+    "preservedMigrations": 96,
+    "preservedScripts": 37,
+    "catalogDecision": "new coverage added",
+    "catalogMaintenance": "merged",
+    "runner": "scripts/regression-spoken-entry.mjs",
+    "scope": "Web production entry visibility and card metadata; inherited committed host proxy configuration and prior regression helpers reviewed"
+  },
+  "release": {
+    "component": "web",
+    "sha": "53c594e3bb65",
+    "previousSha": "0fc845e64967",
+    "lineage": "forward",
+    "validation": "fast",
+    "startedAt": "2026-09-19T04:08:29Z",
+    "releaseBundleId": "53c594e3bb65-ddb88c0cb5c6-ab3fe5dd9580",
+    "coachSnapshotSha256": "ddb88c0cb5c6ac35a7a719f3378c2666393a2deb790ed819ffa63c7d7666a16c",
+    "modelProfileSha256": "ab3fe5dd9580a288ea6fca07f984a71a39f82dadcaa8186dc5dba5a82c3a7c5b",
+    "artifactBytes": 139100160,
+    "artifactReused": 1,
+    "skippedActiveNodes": 0,
+    "durations": {
+      "validation": 5,
+      "prepare": 0,
+      "stage": 52,
+      "activation": 307,
+      "smoke": 15,
+      "total": 390
+    },
+    "status": "passed"
+  },
+  "cleanup": "Browser runner cleanup completed successfully."
+}

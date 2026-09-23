@@ -5,14 +5,14 @@ import type { WorkbuddyScenario } from "./catalog";
 import { listActiveWorkbuddyCapabilities, type WorkbuddyOperation } from "./capabilities";
 import { buildAgentPolicyPrompt } from "./agent-policies";
 import { needsTrafficTopicSelection } from "./traffic-workflow";
-import { deterministicSpokenCopyRoute } from "./content-route";
+import { buildSemanticRoutingPrompt, requestRouteSchema, semanticRequestRouteSchema, intentRouteIssues } from "./route-intent";
 import { parseConversationAppParameters } from "./app-conversation";
 import { classifyWorkflowTurn, type WorkbuddyActiveWorkflow } from "./workflow-state";
 import { capabilityManifest, discloseCapabilities } from "./capability-disclosure";
 import { inferTurnEnvelope } from "./interaction-protocol";
 import { buildLayeredPrompt } from "./prompt-architecture";
 import type { DeliverableContract } from "./deliverable-contract";
-import { matchNamedCapability, normalizeResearchDepth, normalizeSemanticRouteCandidate, reconcileSemanticRoute } from "./semantic-route";
+import { matchNamedCapability, normalizeConversationEvidence, normalizeResearchDepth, normalizeSemanticRouteCandidate, reconcileSemanticRoute } from "./semantic-route";
 import { parseConversationContinuation } from "./continuation-navigation";
 import { query } from "@/lib/db/client";
 
@@ -26,39 +26,6 @@ const decisionSchema = z.object({
 });
 
 export type WorkbuddyPlanDecision = z.infer<typeof decisionSchema>;
-
-const requestRouteSchema = z.object({
-  mode: z.enum(["chat", "direct", "fast-research", "deep-research", "capability"]),
-  intent: z.string().min(2).max(160),
-  targetCapabilityId: z.string().nullable(),
-  requiresFreshInformation: z.boolean(),
-  rationale: z.string().min(2).max(300),
-  operation: z.enum(["chat", "answer", "research", "create", "regenerate", "revise", "reselect", "transform", "verify"]).optional(),
-  preserve: z.array(z.enum(["topic", "material", "research", "coach", "format", "platform", "length"])).max(7).optional(),
-  evidenceRequirement: z.enum(["none", "current", "verification"]).optional(),
-  researchProfile: z.object({
-    explicitDeepResearch: z.boolean(),
-    highStakes: z.boolean(),
-    requiresConflictResolution: z.boolean(),
-    broadSynthesis: z.boolean(),
-  }).optional(),
-  prerequisites: z.array(z.object({
-    capabilityId: z.enum(["agent.fast-research", "agent.deep-research", "tool.hot-topic-discovery"]),
-    intent: z.string().min(2).max(300),
-    rationale: z.string().min(2).max(300),
-  })).max(3).optional(),
-  deliverable: z.object({
-    required: z.boolean(),
-    kind: z.enum(["text", "image", "presentation", "video", "data"]).nullable(),
-    format: z.string().min(2).max(80).nullable(),
-    count: z.number().int().min(1).max(10),
-    sourceRelation: z.enum(["new", "previous-artifact", "referenced-artifact", "conversation"]),
-  }).optional(),
-});
-
-const semanticRequestRouteSchema = requestRouteSchema.extend({
-  deliverable: requestRouteSchema.shape.deliverable.unwrap(),
-});
 
 export type WorkbuddyRequestRoute = z.infer<typeof requestRouteSchema>;
 
@@ -84,13 +51,6 @@ export async function routeWorkbuddyRequest(user: SessionUser, input: { objectiv
   const confirmedValues = confirmedApp ? parseConversationAppParameters(input.followup ?? "", confirmedApp) : null;
   const confirmedOperation = isWorkbuddyOperation(confirmedValues?._workbuddy_operation) ? confirmedValues._workbuddy_operation : undefined;
   const forced = selectedId || (confirmedApp ? confirmedApp === "xiaohongshu-assets" ? "skill.xiaohongshu-assets" : `app.${confirmedApp}` : "");
-  const spokenCopyRoute = forced || input.activeWorkflow ? null : deterministicSpokenCopyRoute(currentRequest, input.sourceContext ?? input.context ?? "");
-  if (spokenCopyRoute) return {
-    mode: "capability", intent: currentRequest.slice(0, 160), targetCapabilityId: spokenCopyRoute.capabilityId,
-    requiresFreshInformation: spokenCopyRoute.requiresFreshInformation, rationale: spokenCopyRoute.rationale, operation: "create", preserve: [],
-  } satisfies WorkbuddyRequestRoute;
-  const deterministic = forced || input.activeWorkflow ? null : deterministicWorkbuddyRoute(currentRequest, Boolean(input.context?.trim()));
-  if (deterministic) return deterministic;
   const capabilities = await listActiveWorkbuddyCapabilities();
   const selectedCapability = forced ? capabilities.find((item) => item.id === forced) : null;
   if (requestedCapabilityId && !selectedCapability) throw new Error("你明确选择的 Skill 当前不可用，请重新选择；本轮不会自动替换成其他能力。");
@@ -101,49 +61,53 @@ export async function routeWorkbuddyRequest(user: SessionUser, input: { objectiv
   } satisfies WorkbuddyRequestRoute;
   const available = capabilityManifest(discloseCapabilities({ request: currentRequest, capabilities: capabilities.filter((item) => item.id !== "agent.orchestrator"), max: 8 }));
   const now = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "full", timeStyle: "medium" }).format(new Date());
-  const turn = inferTurnEnvelope({ request: currentRequest, hasActiveRun: Boolean(input.followup || input.activeWorkflow) });
-  const prompt = buildLayeredPrompt({ task: "route", turn, capabilityManifest: available, runContext: `可信北京时间：${now}\n原始目标：${input.objective}\n当前工作流：${JSON.stringify(input.activeWorkflow ?? null)}\n持续对话状态：${(input.context || "无").slice(0, 7000)}`, taskInstructions: `你只负责语义规划，不回答用户问题。理解用户表达的动作及其先后依赖，不得依据某几个固定词或句式机械匹配。先确定最终交付物，再判断完成它之前是否必须取得当前外部信息。用户用任何自然表达要求先搜索、调查、核验、了解外部动态，再生成另一项产物时：保留最终产物对应的 targetCapabilityId，并把信息获取动作放入 prerequisites；后续产物依赖其结果。不要因为句子里出现图片、文章、视频等最终产物，就吞掉前置动作。只有多个动作彼此独立时才可省略依赖。用户明确要求一种可由专业能力生成的产物时，mode 必须是 capability 且 targetCapabilityId 必须填写；不能降级为 direct。transform/edit/repair 不得退回选题发现。研究能力采用渐进升级：连续的“先搜索事件、再搜索人物”等依赖仍可由 Fast Research 动态补查，不能仅因有两个步骤就判为 Deep Research。只有用户明确要求深度报告、结论属于高风险专业判断、已有来源冲突必须消解，或需要跨三个以上独立领域做广泛综合时，才直接 Deep Research，并在 researchProfile 中给出结构化理由。format 必须使用能力清单中给出的 canonical format；普通问答可填 null。preserve 只列出 topic/material/research/coach/format/platform/length。\n只输出JSON：{"mode":"chat|direct|fast-research|deep-research|capability","operation":"chat|answer|research|create|regenerate|revise|reselect|transform|verify","intent":"完整最终目标","targetCapabilityId":null,"requiresFreshInformation":false,"evidenceRequirement":"none|current|verification","researchProfile":{"explicitDeepResearch":false,"highStakes":false,"requiresConflictResolution":false,"broadSynthesis":false},"preserve":[],"prerequisites":[{"capabilityId":"agent.fast-research","intent":"需要先取得的信息","rationale":"为什么是后续产物的必要输入"}],"deliverable":{"required":false,"kind":null,"format":null,"count":1,"sourceRelation":"conversation"},"rationale":"..."}` }).prompt;
+  const prompt = buildSemanticRoutingPrompt({ request: currentRequest, objective: input.objective, context: input.context, sourceContext: input.sourceContext, activeWorkflow: input.activeWorkflow, capabilityManifest: available, now });
   let requiresResearchFallback = false;
+  let routeFeedback = "";
   for (let attempt = 0, previous = ""; attempt < 2; attempt += 1) {
     try {
-      previous = await runInsuranceContentAgent([{ role: "user", content: attempt ? `${prompt}\n上次路由无法通过契约校验：${previous.slice(0, 1200)}。请根据能力 formats 纠正 mode、targetCapabilityId 与 deliverable，只返回合法JSON。` : prompt }], user.id, "general", { creatorContextMode: "none", responseFormat: "json_object", temperature: 0.1, timeoutSeconds: 20 });
+      previous = await runInsuranceContentAgent([{ role: "user", content: attempt ? `${prompt}\n上次路由无法通过契约校验：${previous.slice(0, 1200)}。具体问题：${routeFeedback}。重新核对当前意图、证据需求和能力契约，只返回合法JSON。` : prompt }], user.id, "general", { creatorContextMode: "none", responseFormat: "json_object", temperature: 0.1, timeoutSeconds: 20 });
       const json = previous.match(/\{[\s\S]*\}/)?.[0];
       const rawCandidate = json ? JSON.parse(json) : null;
       if (rawCandidate && typeof rawCandidate === "object") {
         const signal = rawCandidate as Record<string, unknown>;
-        requiresResearchFallback ||= signal.requiresFreshInformation === true || signal.mode === "fast-research" || signal.mode === "deep-research";
+        requiresResearchFallback ||= signal.requiresFreshInformation === true || signal.evidenceRequirement === "current" || signal.evidenceRequirement === "verification" || (signal.intentAssessment as { externalEvidenceNeeded?: boolean } | undefined)?.externalEvidenceNeeded === true || signal.mode === "fast-research" || signal.mode === "deep-research";
       }
       const parsed = semanticRequestRouteSchema.safeParse(normalizeSemanticRouteCandidate(rawCandidate));
       if (!parsed.success) {
+        routeFeedback = JSON.stringify(parsed.error.issues);
         await auditRouteAttempt(input.taskId, user.id, attempt + 1, "schema_invalid", previous, parsed.error.issues);
         continue;
       }
+      const intentIssues = intentRouteIssues(parsed.data);
+      if (intentIssues.length) {
+        routeFeedback = intentIssues.join("；");
+        await auditRouteAttempt(input.taskId, user.id, attempt + 1, "intent_mismatch", previous, intentIssues.map(message => ({ path: ["intentAssessment"], message })));
+        continue;
+      }
       if (parsed.data.targetCapabilityId && !capabilities.some((item) => item.id === parsed.data.targetCapabilityId)) {
+        routeFeedback = `能力不存在：${parsed.data.targetCapabilityId}`;
         await auditRouteAttempt(input.taskId, user.id, attempt + 1, "unknown_capability", previous, [{ path: ["targetCapabilityId"], message: parsed.data.targetCapabilityId }]);
         continue;
       }
       const reconciled = reconcileSemanticRoute(parsed.data, capabilities);
       if (!reconciled) {
+        routeFeedback = "交付物格式与能力不匹配，请根据能力清单重新选择";
         await auditRouteAttempt(input.taskId, user.id, attempt + 1, "contract_mismatch", previous, []);
         continue;
       }
-      const route = normalizeResearchDepth(reconciled);
+      const route = normalizeResearchDepth(normalizeConversationEvidence(reconciled));
       const operation = route.operation ?? operationForMode(route.mode);
       const selected = route.targetCapabilityId ? capabilities.find(item => item.id === route.targetCapabilityId) : null;
       if (route.mode === "capability" && selected && !(selected.operations ?? inferCapabilityOperations(selected.kind)).includes(operation)) {
+        routeFeedback = `所选能力不支持操作：${operation}`;
         await auditRouteAttempt(input.taskId, user.id, attempt + 1, "operation_mismatch", previous, [{ path: ["operation"], message: operation }]);
         continue;
       }
       await auditRouteAttempt(input.taskId, user.id, attempt + 1, "accepted", previous, []);
-      const inheritsResearchEvidence = /当前阶段：research/.test(input.context ?? "") && route.mode === "direct";
-      if (inheritsResearchEvidence) return {
-        ...route, mode: "fast-research", operation: "verify", targetCapabilityId: "agent.fast-research", requiresFreshInformation: true, evidenceRequirement: "verification", preserve: route.preserve ?? ["topic", "research"], rationale: "本轮承接尚在进行的研究语境，先检索并落地新出现的对象再回答",
-      } satisfies WorkbuddyRequestRoute;
-      if (route.mode === "direct" && route.evidenceRequirement && route.evidenceRequirement !== "none") return {
-        ...route, mode: "fast-research", operation: "verify", targetCapabilityId: "agent.fast-research", requiresFreshInformation: true, preserve: route.preserve ?? [], rationale: "当前回答依赖外部事实且证据不足，先执行增量检索",
-      } satisfies WorkbuddyRequestRoute;
       return { ...route, operation, preserve: route.preserve ?? [], prerequisites: route.prerequisites ?? [] };
     } catch (error) {
+      routeFeedback = "模型调用或 JSON 解析失败，请返回符合指定契约的 JSON";
       await auditRouteAttempt(input.taskId, user.id, attempt + 1, "parse_or_model_error", previous, [{ path: [], message: error instanceof Error ? error.message : String(error) }]);
     }
   }
@@ -184,7 +148,7 @@ export async function routeWorkbuddyRequest(user: SessionUser, input: { objectiv
     } satisfies WorkbuddyRequestRoute;
   }
   // Router failure means intent is uncertain. Outside the deterministic chat
-  // and stable-answer cases handled above, research is the safer generic
+  // cases, research is the safer generic
   // fallback: it gathers evidence instead of confidently answering from memory.
   if (requiresResearchFallback) return {
     mode: "fast-research", operation: "research", intent: currentRequest.slice(0, 160), targetCapabilityId: "agent.fast-research",
@@ -216,23 +180,6 @@ function preferredOperation(operations: WorkbuddyOperation[]): WorkbuddyOperatio
 
 function operationForMode(mode: WorkbuddyRequestRoute["mode"]): WorkbuddyOperation {
   return mode === "chat" ? "chat" : mode === "direct" ? "answer" : mode === "fast-research" || mode === "deep-research" ? "research" : "create";
-}
-
-export function deterministicWorkbuddyRoute(objective: string, hasContext = false): WorkbuddyRequestRoute | null {
-  const text = objective.trim();
-  if (/^(你好|您好|嗨|hi|hello|在吗|早上好|下午好|晚上好)[呀啊吗!！,.，。\s]*$/i.test(text) || /^(你是谁|你能做什么|介绍一下你自己)[?？。\s]*$/.test(text)) {
-    return { mode: "chat", intent: text.slice(0, 160), targetCapabilityId: null, requiresFreshInformation: false, rationale: "属于问候、闲聊或能力介绍" };
-  }
-  if (/(今天|今日|现在|当前|最近).{0,12}(热点|热搜|热议|选题)|有什么.{0,8}(热点|热搜)/.test(text)) {
-    return { mode: "fast-research", intent: text.slice(0, 160), targetCapabilityId: "tool.hot-topic-discovery", requiresFreshInformation: true, rationale: "需要结合热榜与搜索发现当前热点" };
-  }
-  if (hasContext && /^(总结|概括|润色|改写|翻译|提炼|整理)/.test(text)) {
-    return { mode: "direct", intent: text.slice(0, 160), targetCapabilityId: null, requiresFreshInformation: false, rationale: "已有资料足够完成简单处理" };
-  }
-  if (/^(什么是|什么叫|.+是什么意思|怎么理解|请解释|解释一下)/.test(text) && !/(今天|今日|现在|当前|最近|最新|政策|价格|行情|在任|现任)/.test(text)) {
-    return { mode: "direct", intent: text.slice(0, 160), targetCapabilityId: null, requiresFreshInformation: false, rationale: "属于不依赖当前外部信息的简单解释问题" };
-  }
-  return null;
 }
 
 export async function decideWorkbuddyAgentAction(user: SessionUser, input: { objective: string; context?: string; followup?: string; observations: Array<{ capabilityId: string; status: string; summary: string }>; iteration: number; route?: WorkbuddyRequestRoute; runId?: string; deliverableContract?: DeliverableContract | null; outputSlotIds?: string[] }) {

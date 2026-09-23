@@ -102,9 +102,18 @@ export async function updateDigitalHumanVideoJobById(id: string, patch: { status
 
 export async function listDigitalHumanVideoJobs(userId: string) {
   const result = await query<DigitalHumanVideoJob & { asset_name: string }>(
-    `select job.*,asset.name as asset_name from digital_human_video_jobs job join digital_human_assets asset on asset.id=job.asset_id where job.user_id=$1 order by job.created_at desc limit 50`, [userId],
+    `select job.*,asset.name as asset_name from digital_human_video_jobs job left join digital_human_assets asset on asset.id=job.asset_id where job.user_id=$1 and (job.id in (select id from digital_human_video_jobs where user_id=$1 and not(request_json ? 'root_job_id') order by updated_at desc limit 50) or job.request_json->>'root_job_id' in (select id::text from digital_human_video_jobs where user_id=$1 and not(request_json ? 'root_job_id') order by updated_at desc limit 50)) order by job.created_at desc`, [userId],
   );
   return result.rows;
+}
+
+export async function insertSpokenVideoJob(input: { userId: string; assetId: string | null; title: string; script: string; aspectRatio: "9:16" | "16:9"; voiceId: string; voiceName: string; voiceSource: string; request: Record<string, unknown> }) {
+  const result = await query<DigitalHumanVideoJob>(
+    `insert into digital_human_video_jobs(user_id,asset_id,provider,edition,title,script,aspect_ratio,subtitle_enabled,voice_id,voice_name,voice_source,request_json)
+     values($1,$2,'heygen','standard',$3,$4,$5,true,$6,$7,$8,$9::jsonb) returning *`,
+    [input.userId,input.assetId,input.title,input.script,input.aspectRatio,input.voiceId,input.voiceName,input.voiceSource,input.request],
+  );
+  return result.rows[0];
 }
 
 export async function getDigitalHumanVideoJob(userId: string, id: string) {
@@ -113,7 +122,7 @@ export async function getDigitalHumanVideoJob(userId: string, id: string) {
 }
 
 export async function listCreatorVoices(userId: string) {
-  const result = await query<{ id: string; provider: "heygen" | "chanjing"; name: string; status: "creating" | "ready" | "failed" | "disabled"; provider_voice_id: string | null; preview_audio_url: string | null; error_message: string | null; metadata_json: Record<string, unknown> }>(`select id,provider,name,status,provider_voice_id,preview_audio_url,error_message,metadata_json from digital_human_voice_assets where user_id=$1 order by created_at desc`, [userId]);
+  const result = await query<{ id: string; provider: "heygen" | "chanjing"; name: string; status: "creating" | "ready" | "failed" | "disabled"; provider_voice_id: string | null; preview_audio_url: string | null; error_message: string | null; metadata_json: Record<string, unknown> }>(`select id,provider,name,status,provider_voice_id,preview_audio_url,error_message,metadata_json from digital_human_voice_assets where user_id=$1 and provider='heygen' order by created_at desc`, [userId]);
   return result.rows;
 }
 

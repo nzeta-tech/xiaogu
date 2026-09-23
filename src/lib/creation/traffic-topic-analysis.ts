@@ -6,6 +6,9 @@ import { buildTrafficEvidencePackFromFastResearch, buildTrafficTopicSearchQuerie
 import { applyLocalTrafficTopicCoachRecommendations, applyTrafficTopicCoachRecommendations, buildTrafficTopicCoachRecommendationPrompt, buildTrafficTopicFastDecisionPrompt, parseTrafficTopicArena, parseTrafficTopicNewsroomInsight, type TrafficTopicCoachCard } from "@/lib/creation/traffic-topic-arena";
 import { fallbackFastTopics } from "@/lib/creation/traffic-topic-fallback";
 import { query } from "@/lib/db/client";
+import { tryListActiveAvatarMemories } from "@/lib/avatar/store";
+import { inferDomainContext } from "@/lib/domain/context";
+import { guardPositioningTopic, positioningConstraints, selectTopicStories, type PositioningModel } from "./traffic-topic-positioning";
 
 type TopicProgress = { phase:string;status:"active"|"completed";label:string;detail:string };
 
@@ -20,10 +23,18 @@ export async function runTrafficTopicAnalysis(input:{ slug:string;userId:string;
   await input.onProgress?.({phase:"topic_research",status:"completed",label:"素材补充完成",detail:"已形成本轮选题可共用的素材池。"});
 
   const insight=parseTrafficTopicNewsroomInsight("",source);
+  const positioningModel: PositioningModel = (prompt, creatorContextMode, timeoutSeconds) => runInsuranceContentAgent(
+    [{role:"user",content:prompt}],input.userId,"traffic",{creatorContextMode,timeoutSeconds,domainContext:inferDomainContext(source),responseFormat:"json_object"},
+  );
+  await input.onProgress?.({phase:"topic_positioning",status:"active",label:"正在匹配个人定位",detail:"结合本轮素材与专业定位，按需参考相关经历。"});
+  const memories=await tryListActiveAvatarMemories(input.userId,40,"short_video");
+  const stories=await selectTopicStories(source,memories,positioningModel);
+  const constraints=positioningConstraints(stories);
+  await input.onProgress?.({phase:"topic_positioning",status:"completed",label:"个人定位匹配完成",detail:"历史案例按本轮相关性使用，不作为固定选题。"});
   await input.onProgress?.({phase:"topic_generation",status:"active",label:"正在生成5+1个选题",detail:"根据素材生成5个内容方向，并结合创作者分身生成1个IP定位题。"});
   let topics=[] as ReturnType<typeof parseTrafficTopicArena>;
   try{
-    topics=parseTrafficTopicArena(await runInsuranceContentAgent([{role:"user",content:buildTrafficTopicFastDecisionPrompt({source,research})}],input.userId,"traffic",{creatorContextMode:"positioning",timeoutSeconds:180}),6);
+    topics=parseTrafficTopicArena(await positioningModel(`${buildTrafficTopicFastDecisionPrompt({source,research})}\n\n${constraints}`,"topic-positioning",180),6);
   }catch{
     // Do not trigger three full background retries after the extended model
     // window is exhausted; return editable deterministic candidates instead.
@@ -31,6 +42,10 @@ export async function runTrafficTopicAnalysis(input:{ slug:string;userId:string;
   }
   if(topics.length!==6)topics=fallbackFastTopics(source);
   if(topics.length!==6)throw new Error("本轮没有形成5个竞技场选题和1个定位保送题，请补充更具体的事件或完善个人定位后重试");
+  await input.onProgress?.({phase:"topic_quality",status:"active",label:"正在检查定位题",detail:"检查素材关联、个人依据、品牌引用与本轮题目区分，只重写不合格的第6题。"});
+  const guarded=await guardPositioningTopic({source,topics,stories,model:positioningModel});
+  topics=guarded.topics;
+  await input.onProgress?.({phase:"topic_quality",status:"completed",label:"定位题检查完成",detail:guarded.status==="regenerated"?"已重写第6题并通过复核。":"定位题已通过素材相关性与个人定位检查。"});
   await input.onProgress?.({phase:"topic_generation",status:"completed",label:"5+1个选题已完成",detail:"已生成5个素材型选题和1个IP定位题，可选择最多3个进入正文创作。"});
   await input.onProgress?.({phase:"coach_recommendation",status:"active",label:"正在匹配创作教练",detail:"根据每题的内容任务匹配教练，不重新干预选题。"});
   const coaches=await loadTrafficTopicCoachCards(input.userId);
@@ -48,7 +63,7 @@ export async function runTrafficTopicAnalysis(input:{ slug:string;userId:string;
     usedLocalCoachFallback=true;
   }
   await input.onProgress?.({phase:"coach_recommendation",status:"completed",label:usedLocalCoachFallback?"已使用快速教练匹配":"创作教练匹配完成",detail:usedLocalCoachFallback?"智能推荐暂未返回，已根据教练能力卡完成本地匹配，仍可手动更换。":"已为每个选题推荐正文创作教练，仍可手动更换。"});
-  return{topics,insight,topicProcess:{version:6,mode:"topic_first_then_coach_match",insight,proposals:[],challenges:[],finalists:topics},coaches:coaches.map(({id,label,title,summary,scenarios,styleTags,bestFor})=>({id,label,title,summary,scenarios,styleTags,bestFor})),research,evidencePack};
+  return{topics,insight,topicProcess:{version:8,mode:"topic_first_then_coach_match",positioningReview:guarded.status,insight,proposals:[],challenges:[],finalists:topics},coaches:coaches.map(({id,label,title,summary,scenarios,styleTags,bestFor})=>({id,label,title,summary,scenarios,styleTags,bestFor})),research,evidencePack};
 }
 
 async function loadTrafficTopicCoachCards(userId:string):Promise<TrafficTopicCoachCard[]> {

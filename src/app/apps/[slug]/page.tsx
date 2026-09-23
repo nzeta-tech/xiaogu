@@ -1,3 +1,4 @@
+import { PaidApplicationNotice } from "@/components/PaidApplicationNotice";
 import { notFound } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppShell } from "@/components/layout/AppShell";
@@ -5,7 +6,7 @@ import { CreationAppPageClient } from "@/components/pages/CreationAppPageClient"
 import { PptMakerPageClient } from "@/components/pages/PptMakerPageClient";
 import { WechatStudioPageClient } from "@/components/pages/WechatStudioPageClient";
 import { XiaohongshuStudioPageClient } from "@/components/pages/XiaohongshuStudioPageClient";
-import { DigitalHumanVideoPageClient } from "@/components/pages/DigitalHumanVideoPageClient";
+import { SpokenVideoPageClient } from "@/components/pages/SpokenVideoPageClient";
 import { tryGetCreationAppBySlug, trySyncCreationCatalog } from "@/lib/db/repositories";
 import { tryGetWorkDetail } from "@/lib/db/repositories";
 import { getSessionUser } from "@/lib/auth/session";
@@ -32,7 +33,8 @@ export default async function CreationAppPage({ params, searchParams }: { params
   return (
     <AuthGuard>
       <AppShell>
-        {app.slug === "digital-human-video" ? <DigitalHumanVideoPageClient /> : app.slug === "ppt-maker" ? <PptMakerPageClient /> : app.slug === "wechat-studio" ? <WechatStudioPageClient app={app} initialWork={initialWork} /> : app.slug === "xiaohongshu-studio" ? <XiaohongshuStudioPageClient app={app} initialWork={initialWork} /> : <CreationAppPageClient app={app} />}
+        <PaidApplicationNotice appSlug={app.slug} />
+        {app.slug === "digital-human-video" ? <SpokenVideoPageClient /> : app.slug === "ppt-maker" ? <PptMakerPageClient /> : app.slug === "wechat-studio" ? <WechatStudioPageClient app={app} initialWork={initialWork} /> : app.slug === "xiaohongshu-studio" ? <XiaohongshuStudioPageClient app={app} initialWork={initialWork} /> : <CreationAppPageClient app={app} />}
       </AppShell>
     </AuthGuard>
   );

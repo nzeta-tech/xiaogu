@@ -102,7 +102,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     return Response.json({ error: "二创模式需要先上传一张原图。" }, { status: 400 });
   }
 
-  const quota = await requireQuota(user, "write_script");
+  const quota = await requireQuota(user, "write_script", app.points, { appSlug: app.slug });
   if (!quota.ok) return quota.response;
 
   const usesTrafficArchitecture = app.slug === "traffic-copy"
