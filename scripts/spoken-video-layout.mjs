@@ -15,7 +15,8 @@ export function presenterOverlayFrame(width,height,layout="presenter-overlay"){
   const portrait=height>width;
   const widthRatio=layout==="presenter-evidence"?.40:layout==="presenter-data"?.31:.36;
   const heightRatio=layout==="presenter-evidence"?.28:layout==="presenter-data"?.22:.34;
-  const panelWidth=Math.round(width*widthRatio),panelHeight=Math.round(height*heightRatio);
+  const even=value=>Math.floor(value/2)*2;
+  const panelWidth=even(width*widthRatio),panelHeight=even(height*heightRatio);
   const x=Math.round(width*.04);
   const y=Math.round(height*(layout==="presenter-data"?.16:portrait?.27:.18));
   return {x,y,width:panelWidth,height:panelHeight,side:"left"};

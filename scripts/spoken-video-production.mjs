@@ -665,7 +665,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   if(!singlePass)for(const [index,shot] of timedShots.entries()){
     const lead=index?transitionSeconds/2:0,tail=index<plannedShots.length-1?transitionSeconds/2:0;
     const identity={version:1,master:masterFingerprint,material:shot.showMaterial?await mediaFingerprint(shot.material.file):null,kind:shot.material.kind,start:shot.start-lead,length:shot.length+lead+tail,width,height,pipSize,showMaterial:shot.showMaterial,layout:shot.layout,safeLayout};
-    const output=await cachedVideoShot(options.renderCacheDir||dir,{...identity,version:4,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"},file=>renderSegment(master,shot.material,maskFile,file,identity.start,identity.length,width,height,pipSize,shot.showMaterial,shot.layout,safeLayout));
+    const output=await cachedVideoShot(options.renderCacheDir||dir,{...identity,version:6,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"},file=>renderSegment(master,shot.material,maskFile,file,identity.start,identity.length,width,height,pipSize,shot.showMaterial,shot.layout,safeLayout));
     pieces.push(output);
   }
   const list=path.join(dir,"concat.txt");await writeFile(list,pieces.map(file=>`file '${file.replaceAll("'","'\\''")}'`).join("\n"));
@@ -675,7 +675,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   const subtitleFilter=`subtitles=${srt}:force_style='FontName=PingFang SC,FontSize=${safeLayout.fontSize},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HFF000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=${safeLayout.marginV}'`;
   const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:expressionSafeTitleDuration(timedShots,options.titleDuration??4.5,transitionSeconds)})'[titled];[titled]${subtitleFilter}[v]`;
   if(singlePass){
-    const exportIdentity={version:5,master:masterFingerprint,shots:await Promise.all(timedShots.map(async shot=>({start:shot.start,length:shot.length,layout:shot.layout,showMaterial:shot.showMaterial,hash:shot.showMaterial?await mediaFingerprint(shot.material.file):null}))),subtitle:compact,title:await mediaFingerprint(titleCard),options:{...options,subtitleFile:undefined,renderCacheDir:undefined},width,height,safeLayout,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"};
+    const exportIdentity={version:6,master:masterFingerprint,shots:await Promise.all(timedShots.map(async shot=>({start:shot.start,length:shot.length,layout:shot.layout,showMaterial:shot.showMaterial,hash:shot.showMaterial?await mediaFingerprint(shot.material.file):null}))),subtitle:compact,title:await mediaFingerprint(titleCard),options:{...options,subtitleFile:undefined,renderCacheDir:undefined},width,height,safeLayout,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"};
     const rendered=await cachedVideoShot(options.renderCacheDir||dir,exportIdentity,file=>measureVideoStage("single_pass_encode",()=>encodeVideo(run,singlePassArgs({master,shots:timedShots,maskFile,titleCard,output:file,width,height,pipSize,safeLayout,total,decorate}),{timeout:1800000})));
     await copyFile(rendered,output);
   }else if(transitionSeconds&&pieces.length>1){
@@ -910,7 +910,7 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
 
 async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(!ctx.videoCacheScope)return uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options);
-  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:5,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
+  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:6,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
