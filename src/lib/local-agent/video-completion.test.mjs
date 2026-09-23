@@ -23,9 +23,9 @@ test("invalid or incomplete quality reports cannot publish",()=>{
 test("second failed review and legacy soft-success retain visible reasons",()=>{
   const qualityReview=[1,2].map(attempt=>({attempt,pass:false,issues:["字幕遮挡","脸部变形"]}));
   const result=spokenVideoCompletion({...passed,qualityReview,deliveryNotes:["字幕遮挡"]});
-  assert.equal(result.completed,true);
-  assert.equal(result.error,null);
-  assert.deepEqual(result.deliveryNotes,["字幕遮挡","脸部变形"]);
+  assert.equal(result.completed,false);
+  assert.match(result.error||"",/成片质检未通过/);
+  assert.deepEqual(result.deliveryNotes,[]);
   assert.equal(result.qualityPassed,false);
   assert.deepEqual(result.reviews,qualityReview);
   const failure=new VideoQualityError("成片质检未通过：脸部变形",qualityReview).result("job");
@@ -41,7 +41,7 @@ test("existing transaction, charging condition and UI are wired to the guarded s
   const repo=await readFile(new URL("./repository.ts",import.meta.url),"utf8");
   const billing=await readFile(new URL("../../../migrations/084_paid_application_access.sql",import.meta.url),"utf8");
   const ui=await readFile(new URL("../../components/pages/SpokenVideoVersions.tsx",import.meta.url),"utf8");
-  assert.match(repo,/const \{completed,error,reviews,deliveryNotes,qualityPassed\}=spokenVideoCompletion\(resultPayload\)/);
+  assert.match(repo,/const \{completed,error,reviews,deliveryNotes,deliveryIssues,qualityPassed\}=spokenVideoCompletion\(resultPayload\)/);
   assert.match(repo,/quality_review:reviews/);
   assert.match(repo,/if\(!completed\)await client.query\("update local_agent_tasks set status='failed'/);
   assert.match(repo,/if \(completed\) await selectCompletedSpokenVideoAsCurrent\(client, jobId\)/);

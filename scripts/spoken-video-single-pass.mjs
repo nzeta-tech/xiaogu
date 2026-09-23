@@ -1,3 +1,5 @@
+import {presenterOverlayFrame} from "./spoken-video-layout.mjs";
+
 export function singlePassArgs({master,shots,maskFile,titleCard,output,width,height,pipSize,safeLayout,total,decorate}){
   const args=['-y','-filter_complex_threads','1','-i',master];
   const filters=[],pipShots=shots.filter(s=>s.showMaterial&&s.layout==='presenter-pip');
@@ -8,8 +10,16 @@ export function singlePassArgs({master,shots,maskFile,titleCard,output,width,hei
     const isVideo=shot.material.kind==='video';
     args.push(...(isVideo?['-stream_loop','-1']:['-framerate','30','-loop','1']),'-t',shot.length.toFixed(3),'-i',shot.material.file);
     const start=shot.start.toFixed(3),end=(shot.start+shot.length).toFixed(3);
-    filters.push(`[${input++}:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
-    filters.push(`[${base}][m${i}]overlay=eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;
+    const overlayMode=["presenter-overlay","presenter-data","presenter-evidence"].includes(shot.layout);
+    if(overlayMode){
+      const panel=presenterOverlayFrame(width,height,shot.layout);
+      const entry=`if(lt(t,${Number(start)+.24}),-${panel.width}+(${panel.x}+${panel.width})*(t-${start})/.24,${panel.x})`;
+      filters.push(`[${input++}:v]fps=30,setsar=1,scale=${panel.width}:${panel.height}:force_original_aspect_ratio=decrease,pad=${panel.width}:${panel.height}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
+      filters.push(`[${base}][m${i}]overlay=x='${entry}':y=${panel.y}:eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;
+    }else{
+      filters.push(`[${input++}:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
+      filters.push(`[${base}][m${i}]overlay=eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;
+    }
     if(shot.layout==='presenter-pip'){
       args.push('-loop','1','-t',total.toFixed(3),'-i',maskFile);
       filters.push(`[p${pip++}]scale=${pipSize}:${pipSize}:force_original_aspect_ratio=increase,crop=${pipSize}:${pipSize},setsar=1[face${i}];[${input++}:v]format=gray[mask${i}];[face${i}][mask${i}]alphamerge[round${i}];[${base}][round${i}]overlay=${safeLayout.pip.x}:${safeLayout.pip.y}:eof_action=pass:enable='gte(t,${start})*lt(t,${end})'[pip${i}]`);base=`pip${i}`;

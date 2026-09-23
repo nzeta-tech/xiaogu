@@ -21,9 +21,10 @@ import { mapVideoWork } from "./spoken-video-concurrency.mjs";
 import { buildSpokenPresenterRequest } from "./spoken-video-motion.mjs";
 import { retryVideoStage, VideoStageOutputError, isRetryableVideoStageError } from "./spoken-video-stage.mjs";
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
-import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration } from "./spoken-video-layout.mjs";
+import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration, presenterOverlayFrame } from "./spoken-video-layout.mjs";
 import { mediaFingerprint, cachedVideoShot } from "./spoken-video-render-cache.mjs";
 import { buildEvidencePacks, createOfficialEvidenceCard, directSmartVideoWithCodex } from "./spoken-video-director.mjs";
+import {createWorkGate} from "./spoken-video-work-pool.mjs";
 
 import { cachedMaterial, pruneVideoCache } from "./spoken-video-artifact-cache.mjs";
 import { encodeVideo } from "./spoken-video-encoder.mjs";
@@ -36,6 +37,8 @@ const item = (value) => value && typeof value === "object" && !Array.isArray(val
 const escapeXml = (value) => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]));
 const socksProxy = /^socks/i.test(process.env.HTTPS_PROXY||process.env.https_proxy||process.env.ALL_PROXY||process.env.all_proxy||"");
 let commonsUnavailableUntil=0;
+const renderConcurrency=Math.min(2,Math.max(1,Number(process.env.LOCAL_AGENT_VIDEO_RENDER_CONCURRENCY)||1));
+const finalRenderGate=createWorkGate(renderConcurrency);
 
 async function run(bin,args,options={}) {
   const pending=exec(bin,args,{timeout:options.timeout||120000,maxBuffer:8*1024*1024,cwd:options.cwd,env:options.env});
@@ -477,6 +480,14 @@ async function renderSegment(master,material,maskFile,out,start,length,width,hei
     else args.push("-framerate","30","-loop","1","-t",length.toFixed(3),"-i",material.file);
     if(layout==="fullscreen"||!safeLayout.pipFits){
       args.push("-filter_complex",`[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v]`,"-map","[v]");
+    }else if(["presenter-overlay","presenter-data","presenter-evidence"].includes(layout)){
+      // Keep the talking head as the base.  The support visual occupies 25–40%
+      // of the frame and slides in briefly instead of replacing the presenter.
+      const panel=presenterOverlayFrame(width,height,layout);
+      const panelWidth=panel.width,panelHeight=panel.height,x=panel.x,y=panel.y;
+      const entered=`if(lt(t,0.24),-${panelWidth}+(${x}+${panelWidth})*t/0.24,${x})`;
+      const filters=`[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=${panelWidth}:${panelHeight}:force_original_aspect_ratio=decrease,pad=${panelWidth}:${panelHeight}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setsar=1[asset];[base][asset]overlay=${entered}:${y}:shortest=1[v]`;
+      args.push("-filter_complex",filters,"-map","[v]");
     }else{
       args.push("-framerate","30","-loop","1","-t",length.toFixed(3),"-i",maskFile);
       const y=safeLayout.pip.y;
@@ -654,7 +665,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   if(!singlePass)for(const [index,shot] of timedShots.entries()){
     const lead=index?transitionSeconds/2:0,tail=index<plannedShots.length-1?transitionSeconds/2:0;
     const identity={version:1,master:masterFingerprint,material:shot.showMaterial?await mediaFingerprint(shot.material.file):null,kind:shot.material.kind,start:shot.start-lead,length:shot.length+lead+tail,width,height,pipSize,showMaterial:shot.showMaterial,layout:shot.layout,safeLayout};
-    const output=await cachedVideoShot(options.renderCacheDir||dir,{...identity,version:4,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"},file=>renderSegment(master,shot.material,maskFile,file,identity.start,identity.length,width,height,pipSize,shot.showMaterial,shot.layout,safeLayout));
+    const output=await cachedVideoShot(options.renderCacheDir||dir,{...identity,version:6,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"},file=>renderSegment(master,shot.material,maskFile,file,identity.start,identity.length,width,height,pipSize,shot.showMaterial,shot.layout,safeLayout));
     pieces.push(output);
   }
   const list=path.join(dir,"concat.txt");await writeFile(list,pieces.map(file=>`file '${file.replaceAll("'","'\\''")}'`).join("\n"));
@@ -664,7 +675,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   const subtitleFilter=`subtitles=${srt}:force_style='FontName=PingFang SC,FontSize=${safeLayout.fontSize},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HFF000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=${safeLayout.marginV}'`;
   const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:expressionSafeTitleDuration(timedShots,options.titleDuration??4.5,transitionSeconds)})'[titled];[titled]${subtitleFilter}[v]`;
   if(singlePass){
-    const exportIdentity={version:5,master:masterFingerprint,shots:await Promise.all(timedShots.map(async shot=>({start:shot.start,length:shot.length,layout:shot.layout,showMaterial:shot.showMaterial,hash:shot.showMaterial?await mediaFingerprint(shot.material.file):null}))),subtitle:compact,title:await mediaFingerprint(titleCard),options:{...options,subtitleFile:undefined,renderCacheDir:undefined},width,height,safeLayout,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"};
+    const exportIdentity={version:6,master:masterFingerprint,shots:await Promise.all(timedShots.map(async shot=>({start:shot.start,length:shot.length,layout:shot.layout,showMaterial:shot.showMaterial,hash:shot.showMaterial?await mediaFingerprint(shot.material.file):null}))),subtitle:compact,title:await mediaFingerprint(titleCard),options:{...options,subtitleFile:undefined,renderCacheDir:undefined},width,height,safeLayout,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"};
     const rendered=await cachedVideoShot(options.renderCacheDir||dir,exportIdentity,file=>measureVideoStage("single_pass_encode",()=>encodeVideo(run,singlePassArgs({master,shots:timedShots,maskFile,titleCard,output:file,width,height,pipSize,safeLayout,total,decorate}),{timeout:1800000})));
     await copyFile(rendered,output);
   }else if(transitionSeconds&&pieces.length>1){
@@ -711,14 +722,26 @@ export class VideoQualityError extends Error {
   result(jobId){return {status:"failed",jobId,error:this.message,qualityReview:this.reviewHistory};}
 }
 
+export function creatorQualityIssues(issues,segments=[]){
+  const titles=new Map((segments||[]).map(segment=>[segment.id,safe(segment.visual)||"对应画面"]));
+  return [...new Set((issues||[]).filter(issue=>typeof issue==="string"&&issue.trim()))].slice(0,8).map(issue=>{
+    const match=issue.match(/^(s\d+(?:-b\d+)?)\s*[：:]/),id=match?.[1],message=issue.replace(/^(s\d+(?:-b\d+)?)\s*[：:]\s*/,"").trim();
+    const critical=/事实|数据.*(?:错误|不符|矛盾)|来源.*(?:不支持|错误)|伪造|误导|脸部变形|空白画面/.test(message);
+    return {level:critical?"critical":"warning",title:id?titles.get(id)||"对应画面":"成片检查",message:message||issue};
+  });
+}
+
 export async function renderWithCodexReview({master,segments,materials,subtitleUrl,script,dir,title,aspectRatio,references=[],onProgress=async()=>{},generateVisual:generateVisualForReview=null,initialOptions={},resolveMaterial=null},dependencies={}){
   const finalizeVideo=dependencies.finalize||finalize,checkVideo=dependencies.check||checkedFinalVideo,reviewVideo=dependencies.review||codexReview,createSheet=dependencies.sheet||createReviewSheet;
   let currentMaterials=[...materials],currentSegments=segments.map(segment=>({...segment})),options={...initialOptions};
-  if(options.timelineMode==="semantic")currentSegments=currentSegments.map((segment,index)=>({...segment,layout:safeSemanticLayout(segment,currentMaterials[index])}));
+  const applySemanticLayout=()=>{
+    if(options.timelineMode==="semantic")currentSegments=currentSegments.map((segment,index)=>({...segment,layout:safeSemanticLayout(segment,currentMaterials[index])}));
+  };
+  applySemanticLayout();
   const reviewHistory=[],rejectedSearches=new Set();
   const layoutLocked=new Set();
   let previousSignature=null,previousFinal=null,previousSheet=null;
-  for(let attempt=1;attempt<=2;attempt++){
+  for(let attempt=1;attempt<=1;attempt++){
     await onProgress(`正在进行第 ${attempt} 轮本地混剪与质量验收`,Math.min(90,72+attempt*5));
     const signature={global:JSON.stringify({options,script,title,aspectRatio}),shots:await Promise.all(currentSegments.map(async(segment,i)=>JSON.stringify({segment,material:currentMaterials[i],hash:currentMaterials[i]?.file?await mediaFingerprint(currentMaterials[i].file).catch(()=>currentMaterials[i].file):null})))};
     let scope=changedReviewScope(previousSignature,signature);
@@ -735,7 +758,7 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
     try{review=await measureVideoStage("director_review",()=>retryVideoStage(()=>reviewVideo({dir,contactSheet:sheet,title,script,segments:currentSegments,materials:currentMaterials,references,attempt,presenterShare:Number.isFinite(options.presenterShare)?options.presenterShare:.4,shotTimeline:final.shotTimeline,reviewScope:scope===null?null:scope.map(i=>currentSegments[i].id),previousReview:reviewHistory.at(-1)})),{attempt});}
     catch{review={pass:false,issues:["本轮自动质检未能完成，请查看成片确认画面质量。"]};}
     reviewHistory.push({attempt,pass:review.pass,issues:review.issues,...(review.warnings?.length?{warnings:review.warnings}:{})});
-    if(review.pass||attempt===2)return {...final,materials:currentMaterials,segments:currentSegments.map((segment,i)=>({...segment,layout:final.shotTimeline?.[i]?.layout||segment.layout})),reviewHistory,options,acceptedWithNotes:!review.pass};
+    if(review.pass||attempt===1)return {...final,materials:currentMaterials,segments:currentSegments.map((segment,i)=>({...segment,layout:final.shotTimeline?.[i]?.layout||segment.layout})),reviewHistory,options,acceptedWithNotes:!review.pass};
     previousSignature=signature;previousFinal=final;previousSheet=sheet;
     if(options.reviewOnly)continue;
     let changed=false;
@@ -744,8 +767,9 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
       const index=currentSegments.findIndex(segment=>segment.id===id);
       if(index<0)continue;
       const style=safe(item(fixValue).style).slice(0,500);
-      const semanticLayout="fullscreen";
-      const revised={...currentSegments[index],forceCard:true,expression:undefined,cardStyle:style,...(options.timelineMode==="semantic"?{layout:semanticLayout,intent:"explain"}:{})};
+      // Artwork repair must not replace the director's shot contract. The old
+      // fullscreen/PIP rewrite silently degraded data, keyword and evidence beats.
+      const revised={...currentSegments[index],forceCard:true,expression:undefined,cardStyle:style,...(options.timelineMode==="semantic"?{intent:"explain"}:{})};
       const replacement=resolveMaterial?await resolveMaterial(revised,index):await createKnowledgeCard(revised,dir,index);
       currentSegments[index]=revised;currentMaterials[index]=replacement;changed=true;
     }
@@ -794,6 +818,7 @@ export async function renderWithCodexReview({master,segments,materials,subtitleU
     const requestedShare=presenterTooSmall?Math.max(Number(review.presenterShare)||0,currentShare+.1,.6):Number(review.presenterShare);
     if(options.timelineMode!=="semantic"&&Number.isFinite(requestedShare)&&requestedShare>=.3&&requestedShare<=.8&&requestedShare!==options.presenterShare){options.presenterShare=requestedShare;changed=true;}
     if(Number.isInteger(review.subtitleMaxChars)&&review.subtitleMaxChars>=10&&review.subtitleMaxChars<=14&&review.subtitleMaxChars!==options.subtitleMaxChars){options.subtitleMaxChars=review.subtitleMaxChars;changed=true;}
+    if(changed)applySemanticLayout();
     if(!changed)await onProgress("本轮没有可执行的画面修改，将复用成片继续复核",Math.min(94,78+attempt*6));
     if(changed)await onProgress(`Codex 发现问题，正在按建议修订：${review.issues.slice(0,2).join("；")}`,Math.min(94,78+attempt*6));
   }
@@ -854,7 +879,7 @@ async function executeProduction(task,leaseToken,ctx){
     const manifest=segments.map((segment,i)=>({id:segment.id,parentId:segment.parentId||segment.id,text:segment.text,expression:segment.expression,visual:segment.visual,intent:segment.intent||"segment",narrativeRole:segment.narrativeRole||null,visualTreatment:segment.visualTreatment||null,transition:segment.transition||"cut",directorNote:segment.directorNote||"",layout:segment.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{kind:materials[i].kind,title:materials[i].title,source:materials[i].source,license:materials[i].license,licenseUrl:materials[i].licenseUrl||"",credit:materials[i].credit||"",changes:materials[i].changes||""}}));
     await report(ctx,task,leaseToken,jobId,"materials_ready",68,productionMode==="smart"?`导演方案已完成，正在组合 ${segments.length} 个证据与叙事镜头`:`已为 ${segments.length} 个语义节点准备多类型画面`,{materialPlan:manifest});
     await report(ctx,task,leaseToken,jobId,"composing",72,"Codex 正在主导混剪，并检查画面与字幕…");
-    const final=await renderWithCodexReview({master,segments,materials,subtitleUrl:created.subtitleUrl,script,dir,title,aspectRatio:p.aspectRatio,references,initialOptions:{renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:.26,snapCutsToCaptions:true,titleDuration:productionMode==="smart"?1.25:4.5},onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message),generateVisual:(segment,index)=>generateVisual(ctx,jobId,segment,dir,index,{purpose:"scene",style:segment.generativePrompt,researchReferences:references[index]}),resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{aspectRatio:p.aspectRatio,researchReferences:references[index]})});
+    const final=await finalRenderGate.run(()=>renderWithCodexReview({master,segments,materials,subtitleUrl:created.subtitleUrl,script,dir,title,aspectRatio:p.aspectRatio,references,initialOptions:{renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:.26,snapCutsToCaptions:true,titleDuration:productionMode==="smart"?1.25:4.5},onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message),generateVisual:(segment,index)=>generateVisual(ctx,jobId,segment,dir,index,{purpose:"scene",style:segment.generativePrompt,researchReferences:references[index]}),resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{aspectRatio:p.aspectRatio,researchReferences:references[index]})}),{onWait:()=>report(ctx,task,leaseToken,jobId,"waiting_render",70,"画面素材已准备完成，正在等待渲染资源…")});
     await report(ctx,task,leaseToken,jobId,"quality_check",96,"成片检查已完成，正在保存文件…");
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${title}.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${title}-封面.jpg`,"image/jpeg");
@@ -863,7 +888,8 @@ async function executeProduction(task,leaseToken,ctx){
     const externalCount=final.materials.filter(material=>material.source.startsWith("https://")).length;
     const generatedCount=final.materials.filter(material=>["xiaogu-generated-visual","xiaogu-ai-knowledge-card"].includes(material.source)).length;
     // Retain validated planning/research for scoped cross-version reuse (24h TTL).
-    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?3:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,presenterMasterUrl:masterUrl,materialPlan:finalManifest,acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,p.aspectRatio),creativeSummary:[`画面素材 ${final.materials.length} 段：外部 ${externalCount}、AI 生成 ${generatedCount}、本地 ${final.materials.length-externalCount-generatedCount}`,productionMode==="smart"?`已完成导演镜头脚本与 ${evidencePacks.filter(pack=>pack.sources.length).length} 个知识点证据包`:"已按语义节点完成真实素材、资料画面和人物镜头混剪","已完成一次 HeyGen 口播合成",`已完成 ${final.reviewHistory.length} 轮成片检查与优化`,`已完成混剪、字幕、标题和封面`]};
+    const deliveryIssues=final.acceptedWithNotes?creatorQualityIssues(final.reviewHistory.at(-1)?.issues,final.segments):[];
+    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,presenterMasterUrl:masterUrl,materialPlan:finalManifest,acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:deliveryIssues.map(issue=>issue.message),deliveryIssues,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,p.aspectRatio),creativeSummary:[`画面素材 ${final.materials.length} 段：外部 ${externalCount}、AI 生成 ${generatedCount}、本地 ${final.materials.length-externalCount-generatedCount}`,productionMode==="smart"?`已完成导演镜头脚本与 ${evidencePacks.filter(pack=>pack.sources.length).length} 个知识点证据包`:"已按语义节点完成真实素材、资料画面和人物镜头混剪","已完成一次 HeyGen 口播合成",`已完成 ${final.reviewHistory.length} 轮成片检查`,`已完成混剪、字幕、标题和封面`]};
   } catch(error){
     if(error instanceof VideoQualityError)return error.result(jobId);
     throw error;
@@ -899,13 +925,21 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
 
 async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(!ctx.videoCacheScope)return uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options);
-  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:3,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
+  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:6,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
-  if(segment.visualTreatment==="official-source")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
+  if(segment.visualTreatment==="evidence-snippet")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
+  if(segment.visualTreatment==="motion-card"){
+    const relationStyle={compare:"左右对照图，使用清晰的 VS 和两个独立结论",sequence:"时间线，按发生顺序表达",timeline:"时间线，按发生顺序表达",cause:"因果流程箭头，清楚表现原因、结果和条件",parts:"组成关系图，拆分为并列要素",keypoints:"三项并列要点图，每项使用一个短标签"}[segment.expression?.kind]||"关系图解，禁止段落文字和说明页";
+    return createKnowledgeCard(segment,dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle||relationStyle});
+  }
+  // Keyword motion is rendered directly with the presenter; creating a text card
+  // here both wastes a render and risks an old fallback displaying it as a panel.
+  if(segment.visualTreatment==="keyword-motion")return presenterAnchorMaterial(segment);
+  if(segment.visualTreatment==="data-widget")return createKnowledgeCard({...segment,expression:undefined,cardPoints:knowledgePoints(segment).slice(0,1)},dir,index,{aspectRatio:options.aspectRatio,cardStyle:segment.cardStyle||options.cardStyle||"V20 导演数据图解：一条结论、一个大数字或比例、箭头或迷你图表；不得使用小字号段落。"});
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
-  const generateSceneFallback=segment.visualTreatment==="generated-scene"||["scene","emotion"].includes(segment.intent);
+  const generateSceneFallback=["generated-scene","background-replacement"].includes(segment.visualTreatment)||["scene","emotion"].includes(segment.intent);
   return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:segment.cardStyle||options.cardStyle});
 }
 
@@ -923,6 +957,14 @@ export function validateRecutPlan(parsed,segments,aspectRatio){
   if(!Array.isArray(parsed.segments)||parsed.segments.length!==segments.length||parsed.segments.some((s,i)=>s.id!==segments[i].id||s.text!==segments[i].text))throw new Error("修改方案改变了口播内容，请仅修改画面、字幕或节奏");
   if(parsed.unsupportedReason)throw new Error(`仅支持画面和后期修改：${safe(parsed.unsupportedReason).slice(0,160)}`);
   return {segments:parsed.segments.map((s,i)=>({...segments[i],expression:s.expression,query:safe(s.query)||segments[i].query,visual:safe(s.visual)||segments[i].visual,cardPoints:knowledgePoints(s),regenerate:s.regenerate===true,forceCard:s.forceCard===true})),options:editOptions(parsed.options,aspectRatio)};
+}
+
+export function requestsFullDirectorRedesign(value){
+  return /完整重做|全部分镜.{0,10}(?:重做|重新|优化)|从零.{0,10}(?:设计|规划)|重新规划.{0,10}全部|全片.{0,10}(?:重做|重新导演)/.test(safe(value));
+}
+
+export function prepareFullDirectorRedesign(segments){
+  return segments.map(segment=>({...segment,regenerate:true,expression:undefined,visualTreatment:undefined,layout:undefined,narrativeRole:undefined,intent:undefined,transition:"cut",directorNote:"",evidenceIds:[],cardStyle:""}));
 }
 
 export async function planRecut(dir,input,runner=run){
@@ -972,8 +1014,18 @@ async function executeRecut(task,leaseToken,ctx){
       input.materialPlan=smartTimelineSegments(planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
     }
     const preserveMaterials=/只调整后期|不更换|保留.{0,12}素材/.test(safe(input.instructions));
+    const fullDirectorRedesign=productionMode==="smart"&&requestsFullDirectorRedesign(input.instructions);
+    // A legacy version may contain only a few paragraph-sized segments.  V20
+    // worked because it directed short semantic beats, not a 40-second block
+    // of narration per card. Rebuild the beat grid before any director call.
+    if(fullDirectorRedesign){
+      const planned=await planMaterials(dir,input.script,null);
+      input.materialPlan=smartTimelineSegments(planned).map(segment=>({...segment,material:{points:segment.cardPoints||[]}}));
+    }
     await report(ctx,task,leaseToken,jobId,"planning_revision",8,"正在整理你的修改要求");
-    const plan=preserveMaterials
+    const plan=fullDirectorRedesign
+      ? {segments:prepareFullDirectorRedesign(input.materialPlan.map((segment,index)=>({id:segment.id||`s${index+1}`,parentId:segment.parentId||segment.id||`s${index+1}`,text:segment.text,expression:segment.expression,visual:segment.visual,query:segment.query||segment.material?.query||"",cardPoints:segment.cardPoints||segment.material?.points||[],regenerate:true,forceCard:false}))),options:editOptions({...input.options,transitionSeconds:0},input.aspectRatio)}
+      : preserveMaterials
       ? {segments:input.materialPlan.map((segment,index)=>({id:segment.id||`s${index+1}`,parentId:segment.parentId||segment.id||`s${index+1}`,text:segment.text,expression:segment.expression,visual:segment.visual,query:segment.query||segment.material?.query||"",intent:segment.intent,layout:segment.layout,cardPoints:segment.material?.points||[],material:segment.material,regenerate:false,forceCard:false})),options:editOptions({...input.options,transitionSeconds:.26},input.aspectRatio)}
       : await planRecut(dir,input);
     const needsSemanticUpgrade=plan.segments.some(segment=>!segment.intent||!segment.layout);
@@ -989,11 +1041,12 @@ async function executeRecut(task,leaseToken,ctx){
     else if(safe(input.providerJobId)){const remote=await heygenPoll(input.providerJobId);subtitleUrl=remote.subtitleUrl||"";}
     const changedSegments=plan.segments.filter(segment=>segment.regenerate);
     const resume=videoResumeCache(process.env.LOCAL_AGENT_VIDEO_WORKDIR||os.tmpdir(),{endpoint:ctx.remoteBase,owner:task.owner_user_id||task.ownerUserId||jobId});
-    const refreshedReferences=changedSegments.length?await researchSegmentsWithCodex(changedSegments,dir,undefined,resume):[];
-    const references=plan.segments.map((segment,index)=>{
-      const changedIndex=changedSegments.findIndex(changed=>changed.id===segment.id);
-      return changedIndex>=0?refreshedReferences[changedIndex]:input.materialPlan[index]?.researchReferences||[];
-    });
+    const references=plan.segments.map((segment,index)=>input.materialPlan[index]?.researchReferences||[]);
+    const missingResearch=plan.segments.map((segment,index)=>({segment,index})).filter(({segment,index})=>segment.regenerate&&!references[index].length);
+    if(missingResearch.length){
+      const researched=await researchSegmentsWithCodex(missingResearch.map(item=>item.segment),dir,undefined,resume);
+      missingResearch.forEach(({index},i)=>{references[index]=researched[i]||[];});
+    }
     const evidencePacks=buildEvidencePacks(plan.segments,references);
     const undirected=plan.segments.map((segment,index)=>({segment,index})).filter(({segment})=>segment.regenerate&&!segment.visualTreatment);
     if(productionMode==="smart"&&undirected.length){
@@ -1014,11 +1067,12 @@ async function executeRecut(task,leaseToken,ctx){
         return {material};
       }));for(const item of batch)materials.push(item.material);
     }
-    const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
+    const final=await finalRenderGate.run(()=>renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:productionMode==="smart"?0:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)}),{onWait:()=>report(ctx,task,leaseToken,jobId,"waiting_render",68,"画面素材已准备完成，正在等待渲染资源…")});
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${input.title}-封面.jpg`,"image/jpeg");
-    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?3:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,input.aspectRatio),materialPlan:final.segments.map((s,i)=>({id:s.id,parentId:s.parentId||s.id,text:s.text,expression:s.expression,visual:s.visual,query:s.query,intent:s.intent||"segment",narrativeRole:s.narrativeRole||null,visualTreatment:s.visualTreatment||null,transition:s.transition||"cut",directorNote:s.directorNote||"",layout:s.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{contentBounds:archived[i].contentBounds,kind:archived[i].kind,title:archived[i].title,source:archived[i].source,license:archived[i].license||"",licenseUrl:archived[i].licenseUrl||"",credit:archived[i].credit||"",changes:archived[i].changes||"",points:archived[i].points||[],mediaId:archived[i].mediaId}})),acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:final.acceptedWithNotes?final.reviewHistory.at(-1)?.issues||[]:[],creativeSummary:["已按修改要求完成新版本","保留原口播与声音","旧版本仍可查看和下载"]};
+    const deliveryIssues=final.acceptedWithNotes?creatorQualityIssues(final.reviewHistory.at(-1)?.issues,final.segments):[];
+    return {status:"completed",jobId,productionMode,planVersion:productionMode==="smart"?4:2,videoUrl,coverUrl,durationSeconds:final.durationSeconds,subtitleSrt:await readFile(final.subtitleFile,"utf8"),editOptions:editOptions(final.options,input.aspectRatio),materialPlan:final.segments.map((s,i)=>({id:s.id,parentId:s.parentId||s.id,text:s.text,expression:s.expression,visual:s.visual,query:s.query,intent:s.intent||"segment",narrativeRole:s.narrativeRole||null,visualTreatment:s.visualTreatment||null,transition:s.transition||"cut",directorNote:s.directorNote||"",layout:s.layout||"alternating",evidencePack:evidencePacks[i],textReference:references[i][0]||null,researchReferences:references[i],material:{contentBounds:archived[i].contentBounds,kind:archived[i].kind,title:archived[i].title,source:archived[i].source,license:archived[i].license||"",licenseUrl:archived[i].licenseUrl||"",credit:archived[i].credit||"",changes:archived[i].changes||"",points:archived[i].points||[],mediaId:archived[i].mediaId}})),acceptedWithNotes:final.acceptedWithNotes,qualityReview:final.reviewHistory,deliveryNotes:deliveryIssues.map(issue=>issue.message),deliveryIssues,creativeSummary:["已按修改要求完成新版本","保留原口播与声音","旧版本仍可查看和下载"]};
   }catch(error){
     if(error instanceof VideoQualityError)return error.result(jobId);
     throw error;

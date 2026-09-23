@@ -34,5 +34,11 @@ test("real FFmpeg PIP pixels stay above subtitle pixels and unchanged shots are 
     const fallback=await finalize(master,[{id:"s1",text:"SAFE CAPTIONS"}],[{kind:"presenter",source:"xiaogu-presenter-anchor"}],"","SAFE CAPTIONS",dir,"Fixture","9:16",{subtitleFile:srt,showTitle:false,transitionSeconds:0});
     assert.ok((await stat(fallback.output)).size>1000,"two-second synthetic presenter fallback needs no material file");
     await exec("ffmpeg",["-v","error","-i",fallback.output,"-f","null","-"]);
+    const overlay=await finalize(master,[{id:"s1",text:"SAFE CAPTIONS",layout:"presenter-overlay"}],[{kind:"image",file:material,source:"fixture"}],"","SAFE CAPTIONS",dir,"Fixture","9:16",{timelineMode:"semantic",subtitleFile:srt,showTitle:false,transitionSeconds:0});
+    const overlayFrame=await exec("ffmpeg",["-v","error","-ss","1","-i",overlay.output,"-frames:v","1","-f","image2pipe","-vcodec","png","-"],{encoding:"buffer",maxBuffer:10*1024*1024});
+    const pixels=await sharp(overlayFrame.stdout).removeAlpha().raw().toBuffer({resolveWithObject:true});
+    const at=(x,y)=>{const i=(y*pixels.info.width+x)*pixels.info.channels;return [pixels.data[i],pixels.data[i+1],pixels.data[i+2]];};
+    assert(at(120,900)[2]>130,"left safe column contains the supporting visual");
+    assert(at(900,900)[0]>130,"right presenter area remains visible");
   }finally{await rm(dir,{recursive:true,force:true});}
 });
