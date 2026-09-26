@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor } from "./spoken-video-production.mjs";
+import { compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor, RECUT_PLANNING_TIMEOUT_MS } from "./spoken-video-production.mjs";
 
 test("advisory-only review delivers once without regenerating artwork",async()=>{
   let renders=0;
@@ -14,6 +14,17 @@ test("advisory-only review delivers once without regenerating artwork",async()=>
   });
   assert.equal(renders,1);assert.equal(result.acceptedWithNotes,false);
   assert.deepEqual(result.reviewHistory,[{attempt:1,pass:true,issues:[],warnings:["模板变化可以更丰富"]}]);
+});
+
+test("quality repair cannot override a layout locked by the base revision",async()=>{
+  const layouts=[];let reviews=0;
+  const result=await renderWithCodexReview({segments:[{id:"s1-b4",text:"居民贷款减少。",intent:"scene",layout:"fullscreen"}],materials:[{kind:"image",source:"fixture",file:"card.jpg"}],initialOptions:{timelineMode:"semantic",lockedLayouts:{"s1-b4":"fullscreen"}}},{
+    finalize:async(_master,segments)=>{layouts.push(segments[0].layout);return {output:"test.mp4",durationSeconds:6};},check:async()=>{},sheet:async()=>"sheet.jpg",
+    review:async()=>++reviews<3?{pass:false,issues:["讲述者出镜太少"],presenterShare:.8}:{pass:true,issues:[]},
+  });
+  assert.deepEqual(layouts,["fullscreen"]);
+  assert.equal(reviews,3);
+  assert.equal(result.segments[0].layout,"fullscreen");
 });
 import { researchSegmentsWithCodex } from "./spoken-video-web-research.mjs";
 
@@ -121,7 +132,7 @@ test("valid recut plan survives a nonzero Codex exit without a second model call
   const dir=await mkdtemp(path.join(os.tmpdir(),"video-recut-plan-"));
   try{
     let calls=0;
-    const input={aspectRatio:"9:16",options:{subtitleFontSize:12},materialPlan:[{id:"s1",text:"家里有没有足够现金？",visual:"现金储备",query:"family cash reserve",material:{points:["家里有没有足够现金"]}}]};
+    const input={aspectRatio:"9:16",instructions:"字幕大一点",options:{subtitleFontSize:12},materialPlan:[{id:"s1",text:"家里有没有足够现金？",visual:"现金储备",query:"family cash reserve",material:{points:["家里有没有足够现金"]}}]};
     const result=await planRecut(dir,input,async()=>{
       calls++;
       const saved=JSON.parse(await readFile(path.join(dir,"recut-input.json"),"utf8"));
@@ -131,6 +142,51 @@ test("valid recut plan survives a nonzero Codex exit without a second model call
     assert.equal(calls,1);
     assert.equal(result.segments[0].regenerate,true);
     assert.equal(result.options.subtitleFontSize,14);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("recut planning allows sixty minutes for each Codex attempt",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-recut-timeout-"));
+  try{
+    let observedTimeout=0;
+    const input={aspectRatio:"9:16",options:{},materialPlan:[{id:"s1",text:"先看现金流。",visual:"现金流",query:"cash flow",material:{points:["先看现金流"]}}]};
+    await planRecut(dir,input,async(_bin,_args,options)=>{
+      observedTimeout=options.timeout;
+      const saved=JSON.parse(await readFile(path.join(dir,"recut-input.json"),"utf8"));
+      await writeFile(path.join(dir,"recut-plan.json"),JSON.stringify({segments:saved.segments,options:{}}));
+    });
+    assert.equal(RECUT_PLANNING_TIMEOUT_MS,3_600_000);
+    assert.equal(observedTimeout,3_600_000);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("style-only recuts preserve the base layout and pacing even when planning proposes PIP",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-recut-scope-"));
+  try{
+    const input={aspectRatio:"9:16",instructions:"知识卡更精美，使用有质感的插画",options:{presenterShare:.55,transitionSeconds:.18,subtitleFontSize:13,titleDuration:2.2},materialPlan:[{id:"s1-b4",text:"居民贷款前8个月减少了1.03万亿。",visual:"居民贷款减少",query:"household loans",intent:"explain",layout:"fullscreen",visualTreatment:"motion-card",material:{points:["居民贷款前8个月减少了1.03万亿。"]}}]};
+    const result=await planRecut(dir,input,async()=>{
+      const saved=JSON.parse(await readFile(path.join(dir,"recut-input.json"),"utf8"));
+      await writeFile(path.join(dir,"recut-plan.json"),JSON.stringify({segments:saved.segments.map(segment=>({...segment,layout:"presenter-pip",regenerate:true,forceCard:true})),options:{presenterShare:.8,transitionSeconds:0,subtitleFontSize:18,titleDuration:8,cardStyle:"纸张质感"}}));
+    });
+    assert.equal(result.segments[0].layout,"fullscreen");
+    assert.equal(result.options.presenterShare,.55);
+    assert.equal(result.options.transitionSeconds,.18);
+    assert.equal(result.options.subtitleFontSize,13);
+    assert.equal(result.options.titleDuration,2.2);
+    assert.equal(result.options.cardStyle,"纸张质感");
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("an explicit fullscreen request may change a prior PIP knowledge card",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"video-recut-layout-"));
+  try{
+    const input={aspectRatio:"9:16",instructions:"所有知识卡改为全屏，不要画中画",options:{},materialPlan:[{id:"s1-b4",text:"居民贷款前8个月减少了1.03万亿。",visual:"居民贷款减少",layout:"presenter-pip",material:{points:["居民贷款前8个月减少了1.03万亿。"]}}]};
+    const result=await planRecut(dir,input,async()=>{
+      const saved=JSON.parse(await readFile(path.join(dir,"recut-input.json"),"utf8"));
+      await writeFile(path.join(dir,"recut-plan.json"),JSON.stringify({segments:saved.segments.map(segment=>({...segment,layout:"fullscreen",regenerate:true,forceCard:true})),options:{}}));
+    });
+    assert.equal(result.segments[0].layout,"fullscreen");
+    assert.equal(result.editScope.layout,true);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

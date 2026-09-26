@@ -141,7 +141,7 @@ test('recut plan refuses any narration rewrite or segment reorder', async()=>{
  assert.throws(()=>validateRecutPlan({segments:[{...segments[0],text:'全新文案'},segments[1]]},segments,'9:16'),/改变了口播/);
  assert.throws(()=>validateRecutPlan({segments:[segments[1],segments[0]]},segments,'9:16'),/改变了口播/);
  assert.throws(()=>validateRecutPlan({segments,unsupportedReason:'更换声音'},segments,'9:16'),/仅支持/);
- const plan=validateRecutPlan({segments,options:{subtitleFontSize:999,presenterShare:-1,script:'bad',voiceId:'bad'}},segments,'9:16');
+ const plan=validateRecutPlan({segments,options:{subtitleFontSize:999,presenterShare:-1,script:'bad',voiceId:'bad'}},segments,'9:16',{instructions:'字幕和人物比例都调整'});
  assert.equal(plan.options.presenterShare,.3);assert.equal('script' in plan.options,false);assert.equal('voiceId' in plan.options,false);
 });
 
