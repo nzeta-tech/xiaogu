@@ -267,8 +267,13 @@ async function pixabayAsset(query,dir,index,relevanceQuery=query){
 // Cards use verbatim excerpts so a failed stock search never invents factual claims.
 export function knowledgePoints(segment){
   const source=safe(segment.text);
+  // A verified expression is the director's content outline.  Keep every
+  // complete node (including a four-item enumeration) instead of falling back
+  // to three arbitrary excerpts of the narration.
+  const expression=expressionSpec(segment);
+  if(expression.kind!=="presenter"&&Array.isArray(expression.nodes)&&expression.nodes.length>=2&&expression.nodes.length<=4&&expression.nodes.join("")===source)return expression.nodes;
   const supplied=Array.isArray(segment.cardPoints)?segment.cardPoints.filter(point=>typeof point==="string"&&point.length>=4&&point.length<=72&&source.includes(point)):[];
-  if(supplied.length>=2)return supplied.slice(0,3);
+  if(supplied.length>=2)return supplied.slice(0,4);
   const sentences=source.split(/(?<=[。！？!?；;])/u).map(s=>s.trim()).filter(Boolean);
   const candidates=sentences.flatMap(sentence=>sentence.length<=72?[sentence]:sentence.split(/(?<=[，：])/u)).filter(s=>s.length>=6&&s.length<=72);
   if(candidates.length<=3)return candidates.length?candidates:[source.slice(0,72)];
@@ -833,7 +838,11 @@ function scopedRecutOptions(parsed,prior,aspectRatio,instructions){
 async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
   if(options.forceCard||["evidence","explain"].includes(segment.intent)||segment.expression?.kind&&segment.expression.kind!=="presenter"){
     if(expressionSpec(segment).kind==="presenter")return presenterAnchorMaterial(segment);
-    return createExpressionMaterial(segment,dir,index,options);
+    // The generic expression renderer is safe but visually reads as a stack of
+    // labelled text boxes.  Route grounded explanatory cards through the
+    // director card library instead: it chooses an actual comparison, flow,
+    // timeline, metric or financial-mechanism composition from the relation.
+    return createKnowledgeCard(segment,dir,index,options);
   }
   const found=await materialFor(segment,dir,index);
   if(!found.source.includes("knowledge-card"))return found;
@@ -841,7 +850,7 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
     try{return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"scene",style:"Relevant documentary illustration, no text, numbers or diagram.",researchReferences:options.researchReferences});}
     catch(error){console.warn("[spoken-video] scene unavailable; using grounded fallback",String(error.message).slice(0,160));}
   }
-  return createExpressionMaterial(segment,dir,index,options);
+  return createKnowledgeCard(segment,dir,index,options);
 }
 
 async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
