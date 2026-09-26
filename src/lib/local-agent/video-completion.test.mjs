@@ -20,12 +20,12 @@ test("invalid or incomplete quality reports cannot publish",()=>{
     {videoUrl:" "}, {status:"failed"}, {acceptedWithNotes:true}, {deliveryNotes:["字幕遮挡"]},
   ]) assert.equal(spokenVideoCompletion({...passed,...patch}).completed,false,JSON.stringify(patch));
 });
-test("second failed review and legacy soft-success retain visible reasons",()=>{
-  const qualityReview=[1,2].map(attempt=>({attempt,pass:false,issues:["字幕遮挡","脸部变形"]}));
+test("three failed reviews release with visible reasons",()=>{
+  const qualityReview=[1,2,3].map(attempt=>({attempt,pass:false,issues:["字幕遮挡","脸部变形"]}));
   const result=spokenVideoCompletion({...passed,qualityReview,deliveryNotes:["字幕遮挡"]});
-  assert.equal(result.completed,false);
-  assert.match(result.error||"",/成片质检未通过/);
-  assert.deepEqual(result.deliveryNotes,[]);
+  assert.equal(result.completed,true);
+  assert.equal(result.error,null);
+  assert.deepEqual(result.deliveryNotes,["字幕遮挡","脸部变形"]);
   assert.equal(result.qualityPassed,false);
   assert.deepEqual(result.reviews,qualityReview);
   const failure=new VideoQualityError("成片质检未通过：脸部变形",qualityReview).result("job");

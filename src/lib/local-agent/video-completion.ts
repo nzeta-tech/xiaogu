@@ -3,7 +3,7 @@ type DeliveryIssue = { level:"critical"|"warning"; title:string; message:string 
 
 export function spokenVideoCompletion(result: Record<string, unknown>) {
   const raw = Array.isArray(result.qualityReview) ? result.qualityReview : [];
-  const valid = raw.length > 0 && raw.length <= 2 && raw.every((value, index) =>
+  const valid = raw.length > 0 && raw.length <= 3 && raw.every((value, index) =>
     value && typeof value === "object" && typeof value.pass === "boolean" &&
     value.attempt === index + 1 &&
     Array.isArray(value.issues) && value.issues.every((issue: unknown) => typeof issue === "string"));
@@ -14,7 +14,9 @@ export function spokenVideoCompletion(result: Record<string, unknown>) {
   const final = reviews.at(-1);
   const qualityPassed = valid && final?.pass === true && final.issues.length === 0 && result.acceptedWithNotes !== true &&
     (result.deliveryNotes === undefined || (Array.isArray(result.deliveryNotes) && result.deliveryNotes.length === 0));
-  const releasedWithIssues = valid && reviews.length === 1 && final?.pass === false && final.issues.length > 0;
+  // After three sequential reviews, a technically valid video is delivered with
+  // its remaining issues recorded. Earlier failed rounds remain blocking.
+  const releasedWithIssues = valid && reviews.length === 3 && !qualityPassed;
   const deliveryNotes = releasedWithIssues ? [...new Set([...(final?.issues || []),
     ...(Array.isArray(result.deliveryNotes) ? result.deliveryNotes.filter((v): v is string => typeof v === "string") : [])])].slice(0, 8).map(v => v.slice(0, 500)) : [];
   if(releasedWithIssues && !deliveryNotes.length)deliveryNotes.push("已完成一次质检，仍有待改进项，请查看后决定是否继续调整。");
