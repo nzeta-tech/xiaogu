@@ -5,6 +5,10 @@ import { spokenVideoCompletion } from "./video-completion.ts";
 import { VideoQualityError } from "../../../scripts/spoken-video-production.mjs";
 
 const passed = {status:"completed",videoUrl:"https://example.com/video.mp4",qualityReview:[{attempt:1,pass:true,issues:[]}]};
+test("technical validation permits delivery without AI quality review",()=>{
+  const result=spokenVideoCompletion({status:"completed",videoUrl:"https://example.com/video.mp4",technicalCheckPassed:true,qualityReview:[]});
+  assert.equal(result.completed,true);assert.equal(result.error,null);assert.deepEqual(result.reviews,[]);assert.deepEqual(result.deliveryNotes,[]);
+});
 test("advisories persist without bypassing blocking issues or explicit failures",()=>{
   const review={attempt:1,pass:true,issues:[],warnings:["s2：模板可以更多样"]};
   const result=spokenVideoCompletion({...passed,qualityReview:[review]});

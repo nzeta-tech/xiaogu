@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSrt, knowledgeCardSpec, materialSearchQueries, prepareFullDirectorRedesign, requestsFullDirectorRedesign, reusableLicense, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { compactSrt, knowledgeCardSpec, materialSearchQueries, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+
+test("same materials and template bypasses recut replanning",()=>{
+  assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
+  assert.equal(shouldPreserveRecutMaterials("复用原有全部素材和模板，只重新渲染成片"),true);
+  assert.equal(shouldPreserveRecutMaterials("知识卡更精美，替换全部画面素材"),false);
+});
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
 
 test("smart production expands a paragraph into exact semantic visual beats", () => {
@@ -145,25 +151,15 @@ test('recut plan refuses any narration rewrite or segment reorder', async()=>{
  assert.equal(plan.options.presenterShare,.3);assert.equal('script' in plan.options,false);assert.equal('voiceId' in plan.options,false);
 });
 
-test('a full visual redo clears inherited director choices',()=>{
- assert.equal(requestsFullDirectorRedesign('完整重做全部分镜，达到专业导演级'),true);
- assert.equal(requestsFullDirectorRedesign('只把字幕调大一点'),false);
- const [segment]=prepareFullDirectorRedesign([{id:'s1',text:'观点',expression:{kind:'keypoints'},intent:'explain',visualTreatment:'motion-card',layout:'presenter-pip',narrativeRole:'explain',cardStyle:'旧模板'}]);
- assert.equal(segment.regenerate,true);assert.equal(segment.expression,undefined);assert.equal(segment.intent,undefined);assert.equal(segment.visualTreatment,undefined);assert.equal(segment.layout,undefined);assert.equal(segment.narrativeRole,undefined);assert.equal(segment.cardStyle,'');
-});
-
-test('QA artwork repair preserves the smart overlay layout contract',async()=>{
- const {renderWithCodexReview}=await import('./spoken-video-production.mjs');
- const segment={id:'s1',text:'金融活钱资产只占20.4%。',visualTreatment:'data-widget',layout:'fullscreen',intent:'explain',visual:'活钱资产'};
- const material={kind:'image',file:'/tmp/original.jpg',source:'xiaogu-knowledge-card',title:'活钱资产',points:[]};
- let reviews=0,layouts=[];
- const result=await renderWithCodexReview({master:'master',segments:[segment],materials:[material],subtitleUrl:'',script:segment.text,dir:'/tmp',title:'测试',aspectRatio:'9:16',initialOptions:{timelineMode:'semantic'},resolveMaterial:async()=>({...material,file:'/tmp/repaired.jpg'})},{
-   finalize:async(_master,segments)=>{layouts.push(segments[0].layout);return {output:'/tmp/final.mp4,dummy',durationSeconds:3,subtitleFile:'/tmp/captions.srt',shotTimeline:[{start:0,length:3,layout:segments[0].layout,showMaterial:true}]};},
-   check:async()=>{},sheet:async()=>'/tmp/sheet.jpg',
-   review:async()=>++reviews===1?{pass:false,issues:['s1：信息层级弱。'],cardFixes:{s1:{style:'比例对比图'}},searchQueries:{}}:{pass:true,issues:[]},
- });
- assert.deepEqual(layouts,['fullscreen']);
- assert.equal(result.segments[0].layout,'fullscreen');
+test('explicit full-screen card recuts cannot leave explanatory cards in PIP',async()=>{
+ const {validateRecutPlan}=await import('./spoken-video-production.mjs');
+ const instructions='将所有知识卡、证据卡和解释图改为全屏，禁止人物画中画和无意义留白。';
+ assert.equal(requiresFullscreenKnowledgeCards(instructions),true);
+ const segments=[{id:'s1',text:'今天我们聊现金流。',intent:'anchor',visualTreatment:'presenter',layout:'presenter'},{id:'s2',text:'第一，现金流够不够稳；第二，急用钱能不能拿出来。',intent:'explain',visualTreatment:'motion-card',layout:'presenter-pip'}];
+ const parsed={segments:segments.map(s=>({...s,regenerate:false,forceCard:false,layout:'presenter-pip'})),options:{}};
+ const plan=validateRecutPlan(parsed,segments,'9:16',{instructions});
+ assert.equal(plan.segments[0].layout,'presenter');
+ assert.deepEqual(Object.fromEntries(['layout','forceFullscreen','regenerate','forceCard'].map(key=>[key,plan.segments[1][key]])),{layout:'fullscreen',forceFullscreen:true,regenerate:true,forceCard:true});
 });
 
 test('recut dispatch never requires a voice or invokes HeyGen creation',async()=>{

@@ -24,10 +24,10 @@ for(const expression of fixtures)test(`cross-domain ${expression.kind} retains a
     assert.ok(layout.cells.every(c=>c.y+c.height<videoSafeLayout(layout.width,layout.height,aspectRatio==="9:16"?18:24).subtitleTop));
   }
 });
-test("unsupported relation, omitted caveat, and invented numbers degrade to full quotation",()=>{
+test("unsupported relation, omitted caveat, and invented numbers degrade to presenter",()=>{
   const text="预期收益5%，但不保证本金。";
   for(const expression of [{kind:"compare",nodes:["预期收益5%","保证本金"],evidence:text},{kind:"cause",nodes:["预期收益5%，","但不保证本金。"],evidence:"因为"},{kind:"unknown",nodes:[text]}]){
-    const result=expressionSpec({text,expression});assert.equal(result.kind,"keypoints");assert.equal(result.nodes.join(""),text);
+    const result=expressionSpec({text,expression});assert.equal(result.kind,"presenter");assert.equal(result.nodes.length,0);
   }
 });
 test("oversized text and indivisible tokens fall back to mother instead of truncation",()=>{
@@ -51,10 +51,20 @@ test("short portrait expression cards reserve a presenter PIP zone",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"expression-pip-"));
   try{const material=await createExpressionMaterial(segment,dir,0,{aspectRatio:"9:16"});assert.match(material.presentation,/:pip-safe$/);}finally{await rm(dir,{recursive:true,force:true});}
 });
-test("short fallback keypoint cards also preserve presenter continuity",()=>{
+test("unstructured prose falls back to the presenter instead of a fake card",()=>{
   const segment={text:"利率会随市场变动。",visual:"利率随市场变动"};
   const layout=expressionLayout(segment,{aspectRatio:"9:16",subtitleFontSize:12});
-  assert.equal(layout.spec.kind,"keypoints");assert.equal(layout.spec.nodes.length,1);assert.equal(layout.pipSafe,true);
+  assert.equal(layout.spec.kind,"presenter");assert.equal(layout.spec.nodes.length,0);
+});
+test("numbered spoken criteria become one complete keypoint per criterion",()=>{
+  const text="判断一种资产能不能替你发工资，只看四点：第一，现金流够不够稳；第二，要不要天天管理；第三，急用钱能不能拿出来；第四，价格波动能不能承受。";
+  const spec=expressionSpec({text,visual:"判断现金流的四点"});
+  assert.equal(spec.kind,"keypoints");
+  assert.deepEqual(spec.nodes,["第一，现金流够不够稳；","第二，要不要天天管理；","第三，急用钱能不能拿出来；","第四，价格波动能不能承受。"]);
+  assert.equal(spec.grounding,"verbatim-enumeration");
+  const layout=expressionLayout({text,visual:"判断现金流的四点"},{aspectRatio:"9:16",subtitleFontSize:12});
+  assert.equal(layout.cells.length,4);
+  assert.ok(layout.cells.every(cell=>cell.lines?.length));
 });
 
 test("three and four way comparisons render every verbatim node without missing labels",async()=>{
