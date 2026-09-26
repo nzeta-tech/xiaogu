@@ -30,6 +30,10 @@ import { preflightShots, changedReviewScope } from "./spoken-video-preflight.mjs
 import { measureVideoStage, performanceScope, videoMetrics } from "./spoken-video-performance.mjs";
 const exec = promisify(execFile);
 export const RECUT_PLANNING_TIMEOUT_MS = 60 * 60 * 1000;
+// A long vertical recut can require a single FFmpeg filter graph with dozens of
+// inputs. Keep its deadline aligned with the user-visible production timeout;
+// planning alone is not the only long-running stage.
+export const VIDEO_RENDER_TIMEOUT_MS = 60 * 60 * 1000;
 const safe = (value) => typeof value === "string" ? value.trim() : "";
 const item = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const escapeXml = (value) => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]));
@@ -468,7 +472,7 @@ async function renderSegment(master,material,maskFile,out,start,length,width,hei
     args.push("-vf",`scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,"-map","0:v:0");
   }
   args.push("-map","0:a:0","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-t",length.toFixed(3),"-shortest",out);
-  await encodeVideo(run,args,{timeout:900000});
+  await encodeVideo(run,args,{timeout:VIDEO_RENDER_TIMEOUT_MS});
 }
 
 function fallbackSrt(script,total){const segments=roughSegments(script);const sum=segments.reduce((n,s)=>n+s.text.length,0);let start=0;const stamp=s=>{const ms=Math.floor(s*1000),h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),sec=Math.floor(ms%60000/1000),rest=ms%1000;return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")},${String(rest).padStart(3,"0")}`};return segments.map((s,i)=>{const end=i===segments.length-1?total:start+total*s.text.length/sum;const row=`${i+1}\n${stamp(start)} --> ${stamp(end)}\n${s.text}\n`;start=end;return row}).join("\n");}
@@ -654,7 +658,7 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   const decorate=(video,title)=>`${video}${title}overlay=0:0:enable='lt(t,${options.showTitle===false?0:expressionSafeTitleDuration(timedShots,options.titleDuration??4.5,transitionSeconds)})'[titled];[titled]${subtitleFilter}[v]`;
   if(singlePass){
     const exportIdentity={version:5,master:masterFingerprint,shots:await Promise.all(timedShots.map(async shot=>({start:shot.start,length:shot.length,layout:shot.layout,showMaterial:shot.showMaterial,hash:shot.showMaterial?await mediaFingerprint(shot.material.file):null}))),subtitle:compact,title:await mediaFingerprint(titleCard),options:{...options,subtitleFile:undefined,renderCacheDir:undefined},width,height,safeLayout,encoder:process.env.LOCAL_AGENT_VIDEO_ENCODER||"auto"};
-    const rendered=await cachedVideoShot(options.renderCacheDir||dir,exportIdentity,file=>measureVideoStage("single_pass_encode",()=>encodeVideo(run,singlePassArgs({master,shots:timedShots,maskFile,titleCard,output:file,width,height,pipSize,safeLayout,total,decorate}),{timeout:1800000})));
+    const rendered=await cachedVideoShot(options.renderCacheDir||dir,exportIdentity,file=>measureVideoStage("single_pass_encode",()=>encodeVideo(run,singlePassArgs({master,shots:timedShots,maskFile,titleCard,output:file,width,height,pipSize,safeLayout,total,decorate}),{timeout:VIDEO_RENDER_TIMEOUT_MS})));
     await copyFile(rendered,output);
   }else if(transitionSeconds&&pieces.length>1){
     const lengths=await Promise.all(pieces.map(duration));
@@ -666,14 +670,14 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
       accumulated+=lengths[index]-transitionSeconds;
     }
     filters.push(decorate("[joined]",`[${pieces.length+1}:v]`));
-    await encodeVideo(run,["-y","-filter_complex_threads","1",...pieces.flatMap(file=>["-i",file]),"-i",master,"-i",titleCard,"-filter_complex",filters.join(";"),"-map","[v]","-map",`${pieces.length}:a:0`,"-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:1800000});
+    await encodeVideo(run,["-y","-filter_complex_threads","1",...pieces.flatMap(file=>["-i",file]),"-i",master,"-i",titleCard,"-filter_complex",filters.join(";"),"-map","[v]","-map",`${pieces.length}:a:0`,"-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:VIDEO_RENDER_TIMEOUT_MS});
   }else{
     await run("ffmpeg",["-y","-f","concat","-safe","0","-i",list,"-c","copy",stitched],{timeout:300000});
     // The shot files contain independently encoded AAC tracks. Concatenating those
     // tracks introduces encoder priming/padding at every visual cut and can sound
     // like a tiny pause or swallowed syllable. Keep the stitched file for video
     // only and take one continuous audio stream from the immutable presenter master.
-    await encodeVideo(run,["-y","-i",stitched,"-i",master,"-i",titleCard,"-filter_complex",decorate("[0:v]","[2:v]"),"-map","[v]","-map","1:a:0","-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:1800000});
+    await encodeVideo(run,["-y","-i",stitched,"-i",master,"-i",titleCard,"-filter_complex",decorate("[0:v]","[2:v]"),"-map","[v]","-map","1:a:0","-af","dynaudnorm=f=500:g=15:p=.9:m=20,alimiter=limit=.841:level=false","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-t",total.toFixed(3),"-movflags","+faststart",output],{timeout:VIDEO_RENDER_TIMEOUT_MS});
   }
   const finalDuration=await duration(output);if(Math.abs(finalDuration-total)>2)throw new Error("导出时长与口播母版不一致");
   const cover=path.join(dir,"cover.jpg");await run("ffmpeg",["-y","-ss",Math.min(1,finalDuration/2).toFixed(2),"-i",output,"-frames:v","1",cover]);

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { retryVideoStage, VideoStageOutputError } from "./spoken-video-stage.mjs";
-import { compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor, RECUT_PLANNING_TIMEOUT_MS } from "./spoken-video-production.mjs";
+import { compactSrt, validateVideoSubtitles, planMaterials, planRecut, renderWithCodexReview, knowledgeCardSpec, relevantAssetTitle, materialFor, RECUT_PLANNING_TIMEOUT_MS, VIDEO_RENDER_TIMEOUT_MS } from "./spoken-video-production.mjs";
 
 test("advisory-only review delivers once without regenerating artwork",async()=>{
   let renders=0;
@@ -158,6 +158,10 @@ test("recut planning allows sixty minutes for each Codex attempt",async()=>{
     assert.equal(RECUT_PLANNING_TIMEOUT_MS,3_600_000);
     assert.equal(observedTimeout,3_600_000);
   }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("video render deadline matches the sixty-minute production allowance",()=>{
+  assert.equal(VIDEO_RENDER_TIMEOUT_MS,3_600_000);
 });
 
 test("style-only recuts preserve the base layout and pacing even when planning proposes PIP",async()=>{
