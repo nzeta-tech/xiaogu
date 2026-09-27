@@ -12,7 +12,8 @@ test("review stays within the locked source scope without overriding an explicit
       assert(args.at(-1).startsWith(reviewScopeRules));
       assert.match(args.at(-1),/Never require extra examples/);
       assert.match(args.at(-1),/Still reject unrelated or misleading visuals/);
-      assert.match(args.at(-1),/layout-only defect must use layoutFixes/);
+      assert.match(args.at(-1),/do not return layout fixes for it/);
+      assert.match(args.at(-1),/Presenter PIP may overlap cards/);
       assert.doesNotMatch(args.at(-1),/fail repeated generic cards/);
       assert.match(args.at(-1),/advisory-only results must pass/);
       await writeFile(path.join(dir,"qa-review-1.json"),JSON.stringify({pass:false,issues:["无关素材和字幕遮挡"],layoutFixes:{s1:"fullscreen",s2:"invalid"}}));
