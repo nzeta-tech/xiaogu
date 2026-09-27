@@ -43,6 +43,18 @@ test("presenter anchors do not create or archive filler artwork", () => {
   assert.equal(material.source,"xiaogu-presenter-anchor");
 });
 
+test("money retained and resident-loan decline selects a debt-flow diagram without a repayment keyword",()=>{
+  const spec=knowledgeCardSpec(["钱并没有凭空消失，","居民贷款前8个月却减少了1.03万亿。"],"货币与居民贷款变化",3);
+  assert.equal(spec.kind,"debtFlow");
+  assert.match(spec.claim,/1\.03万亿/);
+});
+
+test("validated expression relation selects a generic diagram without domain keywords",()=>{
+  const spec=knowledgeCardSpec(["收入一波动，","它就是现金流压力。"],"收入波动与现金流",13,"",{kind:"cause",nodes:["收入一波动，","它就是现金流压力。"]});
+  assert.equal(spec.kind,"causeDiagram");
+  assert.deepEqual(spec.nodes,["收入一波动，","它就是现金流压力。"]);
+});
+
 test("long Chinese subtitle cues are split into timed, screen-safe lines", () => {
   const result = compactSrt("1\n00:00:00,000 --> 00:00:04,000\n为什么现在很多家庭手里一有余钱，第一反应不是投资，而是先还贷？\n");
   const cues = result.trim().split(/\n\n/);

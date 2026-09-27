@@ -283,7 +283,7 @@ export function knowledgePoints(segment){
 export async function createKnowledgeCard(segment,dir,index,options={}){
   const title=safe(segment.visual)||"核心要点",points=knowledgePoints(segment);
   const wide=options.aspectRatio==="16:9",width=wide?1920:1080,height=wide?1080:1920;
-  if(!wide&&options.presentation!=="editorial")return createProfessionalKnowledgeCard({...segment,visual:title,cardPoints:points},knowledgeCardSpec(points,title,index,options.cardStyle),options.backgroundFile||null,dir,index);
+  if(!wide&&options.presentation!=="editorial")return createProfessionalKnowledgeCard({...segment,visual:title,cardPoints:points},knowledgeCardSpec(points,title,index,options.cardStyle,expressionSpec(segment)),options.backgroundFile||null,dir,index);
   const wrap=(text,count)=>{
     const tokens=text.replace(/[。；，]+$/u,"").match(/[0-9]+(?:[.．][0-9]+)*(?:[%％万亿千百元]+)?|[A-Za-z]+[0-9]*|./gu)||[];
     const lines=[];let line="";for(const token of tokens){if(line&&Array.from(line+token).length>count&&!/^[，。！？；：、”）]$/u.test(token)){lines.push(line);line="";}line+=token;}if(line)lines.push(line);return lines;
@@ -337,7 +337,7 @@ export function smartTimelineSegments(segments){
   });
 }
 
-export function knowledgeCardSpec(points,title,index,style=""){
+export function knowledgeCardSpec(points,title,index,style="",expression={}){
   const joined=points.join(' ');
   const direction=`${title} ${style}`;
   if(!/投资回报|资产价格/.test(joined)&&/收入.*(?:波动|变化)|波动.*收入/.test(`${joined} ${direction}`)&&/月供|固定支出/.test(`${joined} ${direction}`)&&/现金流.*压力|压力.*现金流/.test(`${joined} ${direction}`))return {kind:"incomeVolatility",note:"收入会波动，固定月供仍会按期到来"};
@@ -362,6 +362,14 @@ export function knowledgeCardSpec(points,title,index,style=""){
   if(/上涨预期弱|预期转弱|弱化上行箭头/.test(`${joined} ${direction}`)&&!/居住价值|地段价值/.test(`${joined} ${direction}`))return {kind:"expectationWeakening",note:"从确定上行，转向波动与分化"};
   if(/居住价值|地段价值|必涨|房价预期|上涨预期/.test(`${joined} ${direction}`))return {kind:"houseExpectation",note:"价值仍在，上涨确定性减弱"};
   if(/去杠杆|资产负债表|先扩大资产|守住现金流/.test(`${joined} ${direction}`))return {kind:"balanceShift",note:"家庭资产负债表进入新阶段"};
+  // The planner has already validated this relation against the exact spoken
+  // text.  Let that semantic contract choose the diagram grammar across every
+  // topic instead of requiring a domain-specific keyword in the renderer.
+  const relation=safe(expression?.kind),relationNodes=Array.isArray(expression?.nodes)&&expression.nodes.length>=2?expression.nodes:points;
+  if(relation==="cause")return {kind:"causeDiagram",nodes:relationNodes.slice(0,3)};
+  if(relation==="compare")return {kind:"comparisonDiagram",nodes:relationNodes.slice(0,3)};
+  if(relation==="sequence"||relation==="timeline")return {kind:"timelineDiagram",nodes:relationNodes.slice(0,4)};
+  if(relation==="parts")return {kind:"flowDiagram",nodes:relationNodes.slice(0,3)};
   const diagramNodes=points.flatMap(point=>point.split(/(?<=[，；：。])/u).map(value=>value.trim()).filter(value=>value.length>=2)).slice(0,4);
   const nodes=diagramNodes.length>=2?diagramNodes:points.slice(0,4);
   if(/时间线|瀑布|阶段|依次/.test(style))return {kind:"timelineDiagram",nodes};
