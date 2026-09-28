@@ -27,6 +27,11 @@ function content(spec){
   }
   if(spec.kind==='comparisonDiagram'){
     const left=spec.nodes[0]||'',right=spec.nodes[1]||spec.nodes[0]||'',extra=spec.nodes.slice(2).join('');
+    const long=chars(left).length>28||chars(right).length>28;
+    if(long){
+      const leftSize=chars(left).length>48?36:41,rightSize=chars(right).length>48?36:41;
+      return `${small('同一尺度对照',76,400)}${divider(76,445,1004)}<rect x="76" y="520" width="928" height="300" rx="38" fill="#e3f0eb"/><text x="125" y="585" fill="#10685e" font-size="31" font-weight="700">01</text>${text(left,125,660,leftSize,21,leftSize+13,700,'#10685e')}<path d="M540 835V900" stroke="#b59b68" stroke-width="10"/><path d="M510 875L540 910 570 875" fill="none" stroke="#b59b68" stroke-width="10"/><rect x="76" y="925" width="928" height="300" rx="38" fill="#f4ead8"/><text x="125" y="990" fill="#a57438" font-size="31" font-weight="700">02</text>${text(right,125,1065,rightSize,21,rightSize+13,700,'#a57438')}${extra?`${divider(76,1310,1004)}${text(extra,76,1400,39,23,52,600)}`:''}`;
+    }
     return `${small('同一尺度对照',76,400)}${divider(76,445,1004)}<rect x="76" y="535" width="430" height="465" rx="38" fill="#e3f0eb"/><rect x="574" y="535" width="430" height="465" rx="38" fill="#f4ead8"/><text x="540" y="775" text-anchor="middle" fill="#b59b68" font-size="70" font-weight="800">VS</text>${text(left,125,650,45,14,59,720,'#10685e')}${text(right,625,650,45,14,59,720,'#a57438')}${extra?`${divider(76,1080,1004)}${text(extra,76,1180,42,21,55,600)}`:''}`;
   }
   if(spec.kind==='formulaDiagram'){
@@ -57,7 +62,10 @@ function content(spec){
     }).join('');
     return `${small('关键要点',76,400)}${text(focus,76,485,font,wrapLimit,font+13,750,'#10685e')}${supports}`;
   }
-  if(spec.kind==='numbered')return `${small('先记住这三点',76,400)}${spec.points.slice(0,3).map((point,i)=>{const y=500+i*250;const font=i===0?52:43;return `<text x="76" y="${y+30}" fill="${i===0?'#10685e':'#b59b68'}" font-size="${i===0?74:55}" font-weight="750">0${i+1}</text>${text(point,195,y+15,font,i===0?15:19,font+12,i===0?750:560,i===0?'#10685e':'#173d40')}${divider(195,y+185,1004)}`;}).join('')}`;
+  if(spec.kind==='numbered'){
+    const points=spec.points.slice(0,4),count=points.length,gap=count===4?225:270,start=500;
+    return `${small(`先记住这${count===4?'四':count===3?'三':count===2?'两':count}点`,76,400)}${points.map((point,i)=>{const y=start+i*gap,font=count===4?(chars(point).length>34?35:40):(i===0?50:42),limit=count===4?22:(i===0?16:19);return `<text x="76" y="${y+30}" fill="${i===0?'#10685e':'#b59b68'}" font-size="${count===4?52:i===0?70:55}" font-weight="750">0${i+1}</text>${text(point,195,y+15,font,limit,font+12,i===0?750:580,i===0?'#10685e':'#173d40')}${divider(195,y+gap-48,1004)}`;}).join('')}`;
+  }
   if(spec.kind==='spotlight')return `${small('核心判断',76,400)}${divider(76,435,1004)}${text(spec.focus,76,540,spec.focus.length>36?51:64,spec.focus.length>36?18:15,spec.focus.length>36?64:78,750,'#10685e')}${divider(76,950,1004)}${(spec.supports||[]).slice(0,2).map((point,i)=>`${small(i===0?'为什么':'还要看到',76,1040+i*265)}${text(point,76,1120+i*265,43,21,57,570)}`).join('')}`;
   if(spec.kind==='metrics')return `${small('关键数据',76,395)}${divider(76,435,1004)}${small(spec.metrics[0].label,76,540)}${text(spec.metrics[0].value,76,680,116,8,126,750,'#10685e')}${divider(76,760,1004)}${small(spec.metrics[1].label,76,845)}${text(spec.metrics[1].value,76,970,96,10,108,750,'#10685e')}${spec.note?`${divider(76,1040,1004)}${small(spec.note,76,1130)}`:''}`;
   if(spec.kind==='clarify')return `${small('别急着下结论',76,402)}${text(spec.focus,76,520,76,12,91,750)}${divider(76,675,1004)}${small('还可以这样理解',76,750)}${text(spec.explanation,76,850,55,17,70,600)}${divider(76,1070,1004)}`;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSrt, knowledgeCardSpec, materialSearchQueries, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { compactSrt, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -53,6 +53,18 @@ test("validated expression relation selects a generic diagram without domain key
   const spec=knowledgeCardSpec(["收入一波动，","它就是现金流压力。"],"收入波动与现金流",13,"",{kind:"cause",nodes:["收入一波动，","它就是现金流压力。"]});
   assert.equal(spec.kind,"causeDiagram");
   assert.deepEqual(spec.nodes,["收入一波动，","它就是现金流压力。"]);
+});
+
+test("card capacity gate routes long prose to generated editorial artwork",()=>{
+  assert.equal(knowledgeCardNeedsGeneratedCard({kind:"comparisonDiagram",nodes:["央行的城镇居民资产调研告诉我们，国内城镇家庭住房资产占家庭总资产接近60%。","真正的金融活钱资产只占20.4%。"]}),true);
+  assert.equal(knowledgeCardNeedsGeneratedCard({kind:"comparisonDiagram",nodes:["住房资产接近60%","金融活钱约20.4%"]}),false);
+});
+
+test("numbered cards preserve four grounded criteria",()=>{
+  const points=["第一，现金流够不够稳；","第二，要不要天天管理；","第三，急用钱能不能拿出来；","第四，价格波动能不能承受。"];
+  const spec=knowledgeCardSpec(points,"四个判断维度",1);
+  assert.equal(spec.kind,"numbered");
+  assert.deepEqual(spec.points,points);
 });
 
 test("long Chinese subtitle cues are split into timed, screen-safe lines", () => {

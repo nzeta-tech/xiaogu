@@ -283,7 +283,7 @@ export function knowledgePoints(segment){
 export async function createKnowledgeCard(segment,dir,index,options={}){
   const title=safe(segment.visual)||"核心要点",points=knowledgePoints(segment);
   const wide=options.aspectRatio==="16:9",width=wide?1920:1080,height=wide?1080:1920;
-  if(!wide&&options.presentation!=="editorial")return createProfessionalKnowledgeCard({...segment,visual:title,cardPoints:points},knowledgeCardSpec(points,title,index,options.cardStyle,expressionSpec(segment)),options.backgroundFile||null,dir,index);
+  if(!wide&&options.presentation!=="editorial")return createProfessionalKnowledgeCard({...segment,visual:title,cardPoints:points},options.cardSpec||knowledgeCardSpec(points,title,index,options.cardStyle,expressionSpec(segment)),options.backgroundFile||null,dir,index);
   const wrap=(text,count)=>{
     const tokens=text.replace(/[。；，]+$/u,"").match(/[0-9]+(?:[.．][0-9]+)*(?:[%％万亿千百元]+)?|[A-Za-z]+[0-9]*|./gu)||[];
     const lines=[];let line="";for(const token of tokens){if(line&&Array.from(line+token).length>count&&!/^[，。！？；：、”）]$/u.test(token)){lines.push(line);line="";}line+=token;}if(line)lines.push(line);return lines;
@@ -387,20 +387,33 @@ export function knowledgeCardSpec(points,title,index,style="",expression={}){
   if(/赌未来上涨/.test(joined)&&/降低确定性压力/.test(joined))return {kind:"shift",before:"赌未来上涨",after:"降低确定性压力",note:points[0]};
   if(/不是所有家庭都变穷/.test(joined)&&/固定负债/.test(joined))return {kind:"clarify",focus:"不是所有家庭都变穷了",explanation:points.find(point=>/固定负债/.test(point))||points[0]};
   if(points.length>=2&&points[0].length<=28&&points[1].length<=42&&/不是|不等于|不能|但|而是/.test(points[0]))return {kind:"clarify",focus:points[0],explanation:points[1]};
-  if(points.length>=3)return index%2?{kind:"numbered",points:points.slice(0,3)}:{kind:"explain",focus:points[0],supports:points.slice(1)};
+  if(points.length>=3)return index%2?{kind:"numbered",points:points.slice(0,4)}:{kind:"explain",focus:points[0],supports:points.slice(1,4)};
   return index%2?{kind:"spotlight",focus:points[0],supports:points.slice(1)}:{kind:"explain",focus:points[0],supports:points.slice(1)};
+}
+
+// Decide before rendering whether a deterministic layout can carry the exact
+// spoken content comfortably. When it cannot, the image model receives the
+// grounded shot package and owns the complete, final knowledge-card design.
+export function knowledgeCardNeedsGeneratedCard(spec={}){
+  const values=spec.kind==="comparisonDiagram"?spec.nodes:spec.kind==="numbered"?spec.points:
+    [spec.focus,...(spec.supports||[])];
+  const lengths=(Array.isArray(values)?values:[]).map(value=>Array.from(safe(value)).length);
+  if(spec.kind==="comparisonDiagram")return lengths.length<2||lengths.some(length=>length>32)||lengths.reduce((sum,length)=>sum+length,0)>56;
+  if(spec.kind==="numbered")return lengths.length>4||lengths.some(length=>length>46);
+  if(["explain","spotlight"].includes(spec.kind))return !lengths.length||lengths.some(length=>length>54)||lengths.reduce((sum,length)=>sum+length,0)>105;
+  return false;
 }
 
 async function generateVisual(ctx,jobId,segment,dir,index,options={}){
   const concept=safe(segment.visual).length>=4?safe(segment.visual):safe(segment.text).slice(0,40);
   const evidence=(Array.isArray(options.researchReferences)?options.researchReferences:[]).filter(source=>source.kind==="webpage"||source.kind==="document").slice(0,2).map(source=>`${safe(source.title)}：${safe(source.excerpt)}`).join("；");
   const context=[safe(segment.text),evidence?`检索资料摘要（仅供构思画面）：${evidence}`:""].filter(Boolean).join("\n").slice(0,1000);
-  const response=await fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/visual`,{method:"POST",headers:{authorization:`Bearer ${ctx.token}`,"content-type":"application/json"},body:JSON.stringify({jobId,visual:concept.slice(0,160),context,purpose:options.purpose||"scene",style:safe(options.style).slice(0,1500)}),signal:AbortSignal.timeout(300000)});
+  const response=await fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/visual`,{method:"POST",headers:{authorization:`Bearer ${ctx.token}`,"content-type":"application/json"},body:JSON.stringify({jobId,visual:concept.slice(0,160),context,purpose:options.purpose||"scene",style:safe(options.style).slice(0,1500),cardContent:options.cardContent}),signal:AbortSignal.timeout(300000)});
   if(!response.ok||!response.body){const error=await response.json().catch(()=>({}));throw new Error(safe(error.error)||`补充画面生成失败（${response.status}）`);}
   const file=path.join(dir,`generated-visual-${index}-${randomUUID()}.jpg`);
   await pipeline(Readable.fromWeb(response.body),createWriteStream(file));
   if((await stat(file)).size<10000)throw new Error("补充画面文件异常");
-  return {kind:"image",file,source:"xiaogu-generated-visual",license:"generated",title:safe(segment.visual)||"口播主题画面",query:segment.query};
+  return {kind:"image",file,source:options.purpose==="knowledge-card"?"xiaogu-ai-knowledge-card":"xiaogu-generated-visual",license:"generated",title:safe(segment.visual)||"口播主题画面",query:segment.query,...(options.purpose==="knowledge-card"?{points:options.cardContent?.points||[],presentation:"generated-full-card"}:{})};
 }
 
 async function fetchInput(ctx,jobId,kind,file){
@@ -850,7 +863,13 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
     // labelled text boxes.  Route grounded explanatory cards through the
     // director card library instead: it chooses an actual comparison, flow,
     // timeline, metric or financial-mechanism composition from the relation.
-    return createKnowledgeCard(segment,dir,index,options);
+    const points=knowledgePoints(segment),spec=knowledgeCardSpec(points,safe(segment.visual)||"核心要点",index,options.cardStyle,expressionSpec(segment));
+    if(knowledgeCardNeedsGeneratedCard(spec)){
+      try{
+        return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:safe(expressionSpec(segment).kind),presentation:safe(spec.kind)}});
+      }catch(error){console.warn("[spoken-video] generated full knowledge card unavailable; using adaptive local layout",String(error.message||error).slice(0,180));}
+    }
+    return createKnowledgeCard(segment,dir,index,{...options,cardSpec:spec});
   }
   const found=await materialFor(segment,dir,index);
   if(!found.source.includes("knowledge-card"))return found;
@@ -863,7 +882,7 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
 
 async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(!ctx.videoCacheScope)return uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options);
-  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:3,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
+  return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:4,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
