@@ -350,7 +350,7 @@ export function knowledgeCardSpec(points,title,index,style="",expression={}){
   }
   if(/1\.03\s*万亿|居民贷款.*减少|储蓄池|负债收缩|资金流/.test(`${joined} ${direction}`)){
     const claim=points.find(point=>/居民贷款[^。；]*减少[^。；]*\d+(?:\.\d+)?\s*(?:万亿元|万亿|亿元|亿)/.test(point));
-    if(claim&&/还贷|还款|主动.*减债|贷款(?:余额)?.*向下|资金流/.test(`${joined} ${direction}`))return {kind:"debtFlow",claim,note:"钱仍在家庭资产端，贷款余额同时下降"};
+    if(claim&&(/钱(?:并)?没有凭空消失/.test(`${joined} ${direction}`)||/还贷|还款|主动.*减债|贷款(?:余额)?.*向下|资金流/.test(`${joined} ${direction}`)))return {kind:"debtFlow",claim,note:"钱仍在家庭资产端，贷款余额同时下降"};
   }
   if(/居民没钱.*悲观|没钱了.*悲观|快速结论气泡/.test(`${joined} ${direction}`))return {kind:"quickConclusion",note:"单一贷款指标还不足以下结论"};
   if(/只对一半|贷款(?:下降|减少).*没钱|不等于.*没钱|两类家庭/.test(`${joined} ${direction}`))return {kind:"halfTruth",note:"少借钱，不等于没有钱"};
