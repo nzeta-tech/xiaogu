@@ -40,5 +40,16 @@ test("real FFmpeg PIP pixels stay above subtitle pixels and unchanged shots are 
     const at=(x,y)=>{const i=(y*pixels.info.width+x)*pixels.info.channels;return [pixels.data[i],pixels.data[i+1],pixels.data[i+2]];};
     assert(at(120,900)[2]>130,"left safe column contains the supporting visual");
     assert(at(900,900)[0]>130,"right presenter area remains visible");
+
+    const fullCard=path.join(dir,"knowledge-card.jpg");
+    await sharp({create:{width:1080,height:1920,channels:3,background:"#f8f5ec"}})
+      .composite([{input:Buffer.from('<svg width="1080" height="1920" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="1080" height="1920" fill="#174f46"/><rect x="900" y="200" width="120" height="120" fill="#e7b85f"/></svg>')}])
+      .jpeg().toFile(fullCard);
+    const cardResult=await finalize(master,[{id:"s1",text:"SAFE CAPTIONS",intent:"explain",layout:"presenter-pip"}],[{kind:"image",file:fullCard,source:"xiaogu-knowledge-card",contentBounds:{left:0,top:0,right:1080,bottom:1920,width:1080,height:1920}}],"","SAFE CAPTIONS",dir,"Fixture","9:16",{timelineMode:"semantic",subtitleFile:srt,showTitle:false,transitionSeconds:0});
+    const cardFrame=await exec("ffmpeg",["-v","error","-ss","1","-i",cardResult.output,"-frames:v","1","-f","image2pipe","-vcodec","png","-"],{encoding:"buffer",maxBuffer:10*1024*1024});
+    const cardPixels=await sharp(cardFrame.stdout).removeAlpha().raw().toBuffer({resolveWithObject:true});
+    const cardAt=(x,y)=>{const i=(y*cardPixels.info.width+x)*cardPixels.info.channels;return [cardPixels.data[i],cardPixels.data[i+1],cardPixels.data[i+2]];};
+    assert(cardAt(40,900)[1]>50,"knowledge card remains full-bleed at the left edge");
+    assert(cardAt(1040,900)[1]>50,"knowledge card remains full-bleed at the right edge instead of shrinking left of PIP");
   }finally{await rm(dir,{recursive:true,force:true});}
 });

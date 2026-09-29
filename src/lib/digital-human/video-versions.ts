@@ -28,7 +28,7 @@ export async function createVideoVersion(userId: string, baseId: string, instruc
       values($1,$2,$3,$4,$5,$6,$7,$8,true,'processing',0,$9) returning *`, [jobId, userId, root.asset_id, root.provider, root.edition, root.title, root.script, root.aspect_ratio, request]);
     // The worker obtains all immutable inputs from the server; a revision task has no HeyGen submission parameters.
     await db.query(`insert into local_agent_tasks(id,task_type,owner_user_id,payload,dedupe_key,priority,max_attempts)
-      values($1,'digital-human.video.produce',$2,$3,$4,90,1)`, [taskId, userId, { jobId, mode: "recut" }, jobId]);
+      values($1,'digital-human.video.produce',$2,$3,$4,90,3)`, [taskId, userId, { jobId, mode: "recut" }, jobId]);
     await db.query("update digital_human_video_jobs set updated_at=now() where id=$1",[rootId]);
     await db.query("commit");
     return inserted.rows[0];

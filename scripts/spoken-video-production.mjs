@@ -644,6 +644,11 @@ export async function finalize(master,segments,materials,subtitleUrl,script,dir,
   // Preserve image contents above captions/PIP rather than covering card text.
   for(const [index,shot] of timedShots.entries()){
     if(!shot.showMaterial||shot.material.kind!=="image"||(!shot.material.contentBounds&&!/card|evidence|expression/.test(`${shot.material.source||""} ${shot.material.presentation||""}`)))continue;
+    // A knowledge card is already authored as a complete video-sized canvas.
+    // Keep it full-bleed and place the presenter on top. Constraining the whole
+    // card to the left of the PIP creates a small top-left slide and a large
+    // empty column, while also defeating the card model's composition.
+    if(/xiaogu-(?:ai-)?knowledge-card/.test(shot.material.source||""))continue;
     // Composite panels are already constrained to a subtitle-safe rectangle by
     // presenterOverlayFrame; wrapping them in another full-canvas safety image
     // would shrink their text twice and make short evidence/data unreadable.

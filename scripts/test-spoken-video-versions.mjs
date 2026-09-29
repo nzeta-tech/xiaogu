@@ -19,7 +19,7 @@ try{
  assert.equal((await call(root,'POST',body)).data.job.id,v2);
  assert.equal((await call(root,'POST',{...body,requestId:randomUUID()})).status,409);
  assert.equal((await call(root,'PATCH',{versionId:v2})).status,404);
- const payload=(await db.query("select payload from local_agent_tasks where owner_user_id=$1",[uid])).rows[0].payload;assert.deepEqual(Object.keys(payload).sort(),['jobId','mode']);assert.equal(payload.mode,'recut');
+ const queuedTask=(await db.query("select payload,max_attempts from local_agent_tasks where owner_user_id=$1",[uid])).rows[0],payload=queuedTask.payload;assert.deepEqual(Object.keys(payload).sort(),['jobId','mode']);assert.equal(payload.mode,'recut');assert.equal(queuedTask.max_attempts,3);
  // Simulate completion of this isolated fixture to test a second edit and selection.
  await db.query("update local_agent_tasks set status='succeeded' where owner_user_id=$1",[uid]);
  await db.query("update digital_human_video_jobs set status='completed',video_url='/fixture/v2' where id=$1",[v2]);

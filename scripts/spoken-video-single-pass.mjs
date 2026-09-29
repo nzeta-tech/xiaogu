@@ -12,9 +12,9 @@ export function singlePassArgs({master,shots,maskFile,titleCard,output,width,hei
     const start=shot.start.toFixed(3),end=(shot.start+shot.length).toFixed(3);
     const overlayMode=["presenter-overlay","presenter-data","presenter-evidence"].includes(shot.layout);
     if(overlayMode){
-      const panel=presenterOverlayFrame(width,height,shot.layout);
+      const panel=presenterOverlayFrame(shot.layout,width,height,safeLayout);
       const entry=`if(lt(t,${Number(start)+.24}),-${panel.width}+(${panel.x}+${panel.width})*(t-${start})/.24,${panel.x})`;
-      filters.push(`[${input++}:v]fps=30,setsar=1,scale=${panel.width}:${panel.height}:force_original_aspect_ratio=decrease,pad=${panel.width}:${panel.height}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
+      filters.push(`[${input++}:v]fps=30,scale=${panel.width}:${panel.height}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,pad=${panel.width}:${panel.height}:(ow-iw)/2:(oh-ih)/2:color=0xFDFBF5,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
       filters.push(`[${base}][m${i}]overlay=x='${entry}':y=${panel.y}:eof_action=pass:repeatlast=0:enable='gte(t,${start})*lt(t,${end})'[b${i}]`);base=`b${i}`;
     }else{
       filters.push(`[${input++}:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS+${start}/TB[m${i}]`);
