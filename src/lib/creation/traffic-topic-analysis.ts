@@ -45,7 +45,7 @@ export async function runTrafficTopicAnalysis(input:{ slug:string;userId:string;
   await input.onProgress?.({phase:"topic_quality",status:"active",label:"正在检查定位题",detail:"检查素材关联、个人依据、品牌引用与本轮题目区分，只重写不合格的第6题。"});
   const guarded=await guardPositioningTopic({source,topics,stories,model:positioningModel});
   topics=guarded.topics;
-  await input.onProgress?.({phase:"topic_quality",status:"completed",label:"定位题检查完成",detail:guarded.status==="regenerated"?"已重写第6题并通过复核。":"定位题已通过素材相关性与个人定位检查。"});
+  await input.onProgress?.({phase:"topic_quality",status:"completed",label:"定位题检查完成",detail:guarded.status==="regenerated"?"已重写第6题并通过复核。":guarded.status==="neutral_fallback"?"个人定位依据不足，已生成不冒用经历的素材中立题。":"定位题已通过素材相关性与个人定位检查。"});
   await input.onProgress?.({phase:"topic_generation",status:"completed",label:"5+1个选题已完成",detail:"已生成5个素材型选题和1个IP定位题，可选择最多3个进入正文创作。"});
   await input.onProgress?.({phase:"coach_recommendation",status:"active",label:"正在匹配创作教练",detail:"根据每题的内容任务匹配教练，不重新干预选题。"});
   const coaches=await loadTrafficTopicCoachCards(input.userId);

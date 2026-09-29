@@ -83,12 +83,17 @@ test("same brand remains allowed on a related source when review passes",async()
   assert.match(result.topics[5].title,/泰康/);
 });
 
-test("persistent invalid/repeated sixth fails explicitly after one bounded retry",async()=>{
+test("persistent invalid/repeated sixth recovers with a source-grounded neutral topic",async()=>{
   let calls=0;
-  await assert.rejects(()=>guardPositioningTopic({source:"汇率",topics:topics(),stories:[],model:async()=>{
+  const result=await guardPositioningTopic({source:"人民币汇率变化",topics:topics(),stories:[],model:async()=>{
     calls++;return calls===2?JSON.stringify({topics:[{title:"改标题仍讲养老社区",coreQuestion:"买社区会不会占用未来生活费",workingThesis:"先看长期生活费够不够，再买社区"}]}):fail;
-  }}),/未通过素材相关性或本轮题目区分检查/);
+  }});
   assert.equal(calls,3);
+  assert.equal(result.status,"neutral_fallback");
+  assert.match(result.topics[5].title,/人民币汇率变化/);
+  assert.equal(result.topics[5].creatorFit,"none");
+  assert.deepEqual(result.topics[5].creatorEvidence,[]);
+  assert.equal(result.topics[5].selectionRole,"positioning_wildcard");
 });
 
 test("sixth topic still cannot duplicate a first-five topic within the same batch",async()=>{
@@ -101,9 +106,13 @@ test("sixth topic still cannot duplicate a first-five topic within the same batc
   assert.equal(calls,2);assert.equal(result.status,"regenerated");
 });
 
-test("missing review fields and outages fail closed, never become a selectable placeholder",async()=>{
+test("missing review fields and outages recover without inventing identity evidence",async()=>{
   for(const response of ['{}','{"sourceRelated":true,"grounded":true,"brandAllowed":true}',"not json"]){
-    await assert.rejects(()=>guardPositioningTopic({source:"汇率",topics:topics(),stories:[],model:async()=>response}),/未通过/);
+    const result=await guardPositioningTopic({source:"汇率",topics:topics(),stories:[],model:async()=>response});
+    assert.equal(result.status,"neutral_fallback");
+    assert.equal(result.topics[5].creatorFit,"none");
+    assert.deepEqual(result.topics[5].creatorEvidence,[]);
   }
-  await assert.rejects(()=>guardPositioningTopic({source:"汇率",topics:topics(),stories:[],model:async()=>{throw new Error("timeout")}}),/未通过/);
+  const outage=await guardPositioningTopic({source:"汇率",topics:topics(),stories:[],model:async()=>{throw new Error("timeout")}});
+  assert.equal(outage.status,"neutral_fallback");
 });
