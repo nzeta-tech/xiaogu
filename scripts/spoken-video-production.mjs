@@ -28,6 +28,7 @@ import { encodeVideo } from "./spoken-video-encoder.mjs";
 import { singlePassArgs } from "./spoken-video-single-pass.mjs";
 import { preflightShots, changedReviewScope } from "./spoken-video-preflight.mjs";
 import { measureVideoStage, performanceScope, videoMetrics } from "./spoken-video-performance.mjs";
+import { uploadVideoParts } from "./spoken-video-multipart-upload.mjs";
 const exec = promisify(execFile);
 export const RECUT_PLANNING_TIMEOUT_MS = 60 * 60 * 1000;
 // A long vertical recut can require a single FFmpeg filter graph with dozens of
@@ -460,9 +461,15 @@ async function duration(file){
   catch(error){if(error?.code!=="ENOENT")throw error;try{await run("ffmpeg",["-hide_banner","-i",file],{timeout:30000});}catch(probe){const line=String(probe.stderr||"").match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);if(line)return Number(line[1])*3600+Number(line[2])*60+Number(line[3]);throw probe;}return 0;}
 }
 
-async function upload(ctx,jobId,kind,file,name,contentType){
+export async function upload(ctx,jobId,kind,file,name,contentType,{fetchImpl=fetch,multipartUpload=uploadVideoParts,multipartThreshold=16*1024*1024}={}){
   const size=(await stat(file)).size;
-  const response=await measureVideoStage("upload",()=>fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/media?${new URLSearchParams({jobId,kind})}`,{method:"PUT",headers:{authorization:`Bearer ${ctx.token}`,"content-type":contentType,"content-length":String(size),"x-xiaogu-filename":encodeURIComponent(name)},body:createReadStream(file),duplex:"half",signal:AbortSignal.timeout(1200000)}));
+  if(size>=multipartThreshold&&["output","presenter_master"].includes(kind)){
+    const cacheDir=path.join(path.dirname(ctx.videoCacheScope||path.join(process.env.LOCAL_AGENT_VIDEO_CACHE_DIR||path.join(os.tmpdir(),"xiaogu-spoken-video-cache"),"shots")),"uploads");
+    const result=await measureVideoStage("upload",()=>multipartUpload({base:ctx.remoteBase,token:ctx.token,jobId,kind,file,size,name,contentType,cacheDir,fetchImpl}));
+    if(Number(result.size)!==size)throw new Error(`成片上传不完整：预期 ${size} 字节，实际 ${result.size||0} 字节`);
+    return result.url;
+  }
+  const response=await measureVideoStage("upload",()=>fetchImpl(`${ctx.remoteBase}/api/internal/local-agent/digital-human/media?${new URLSearchParams({jobId,kind})}`,{method:"PUT",headers:{authorization:`Bearer ${ctx.token}`,"content-type":contentType,"content-length":String(size),"x-xiaogu-filename":encodeURIComponent(name)},body:createReadStream(file),duplex:"half",signal:AbortSignal.timeout(1200000)}));
   const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(safe(result.error)||`成片上传失败（${response.status}）`);
   if(Number(result.size)!==size)throw new Error(`成片上传不完整：预期 ${size} 字节，实际 ${result.size||0} 字节`);
   return result.url;
