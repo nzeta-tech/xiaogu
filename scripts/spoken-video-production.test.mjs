@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSrt, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -184,6 +184,20 @@ test('explicit full-screen card recuts cannot leave explanatory cards in PIP',as
  const plan=validateRecutPlan(parsed,segments,'9:16',{instructions});
  assert.equal(plan.segments[0].layout,'presenter');
  assert.deepEqual(Object.fromEntries(['layout','forceFullscreen','regenerate','forceCard'].map(key=>[key,plan.segments[1][key]])),{layout:'fullscreen',forceFullscreen:true,regenerate:true,forceCard:true});
+});
+
+test('natural full-canvas wording forces relationship shots back to knowledge cards',()=>{
+ const instructions='重新优化并混剪全部知识卡分镜，每张知识卡始终按竖屏画布完整铺满，人物仅作为右下角圆形浮层。';
+ assert.equal(requiresFullscreenKnowledgeCards(instructions),true);
+ const segments=[
+  {id:'s1',text:'开场。',intent:'anchor',expression:{kind:'presenter',nodes:[]},layout:'presenter',visualTreatment:'presenter'},
+  {id:'s2',text:'住房占60%，活钱占20.4%。',intent:'evidence',expression:{kind:'compare',nodes:['住房占60%，','活钱占20.4%。']},layout:'presenter',visualTreatment:'presenter'},
+ ];
+ const result=enforceRequestedKnowledgeCards(segments,instructions);
+ assert.equal(result[0].visualTreatment,'presenter');
+ assert.deepEqual(Object.fromEntries(['layout','forceFullscreen','regenerate','forceCard','visualTreatment'].map(key=>[key,result[1][key]])),{layout:'fullscreen',forceFullscreen:true,regenerate:true,forceCard:true,visualTreatment:'motion-card'});
+ assert.throws(()=>assertRequestedKnowledgeCards(result,[{kind:'presenter'},{kind:'presenter',source:'xiaogu-presenter-anchor'}],instructions),/修改要求未落实/);
+ assert.equal(assertRequestedKnowledgeCards(result,[{kind:'presenter'},{kind:'image',source:'xiaogu-knowledge-card'}],instructions),true);
 });
 
 test('recut dispatch never requires a voice or invokes HeyGen creation',async()=>{

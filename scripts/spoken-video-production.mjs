@@ -850,11 +850,30 @@ export function recutEditScope(instructions=""){
 
 export function requiresFullscreenKnowledgeCards(instructions=""){
   const value=safe(instructions);
-  return /(?:所有|全部).{0,20}(?:知识卡|证据卡|解释图|图卡).{0,20}(?:改为|使用|做成)?全屏|(?:知识卡|证据卡|解释图|图卡).{0,20}(?:全部|均|都).{0,12}全屏|(?:禁止|不要).{0,16}(?:画中画|小窗|PIP)/i.test(value);
+  const card="(?:知识卡|证据卡|解释图|图卡|科普卡)",fill="(?:全屏|满屏|铺满|占满|完整铺满|全幅|满版|覆盖整(?:个)?画布|完整画布)";
+  return new RegExp(`${card}.{0,28}${fill}|${fill}.{0,28}${card}|(?:禁止|不要).{0,16}(?:画中画|小窗|PIP)`,"i").test(value);
 }
 
 function isKnowledgeCardSegment(segment={}){
-  return segment.forceCard===true||segment.visualTreatment==="motion-card"||segment.visualTreatment==="official-source"||["evidence","explain"].includes(segment.intent);
+  return segment.forceCard===true||segment.visualTreatment==="motion-card"||segment.visualTreatment==="official-source"||["evidence","explain"].includes(segment.intent)||safe(segment.expression?.kind)!==""&&safe(segment.expression?.kind)!=="presenter";
+}
+
+export function enforceRequestedKnowledgeCards(segments,instructions=""){
+  const value=safe(instructions),explicitCardEdit=/(?:重新|重做|优化|生成|制作|混剪).{0,24}(?:知识卡|证据卡|解释图|图卡|科普卡)|(?:全部|所有|每张).{0,16}(?:知识卡|证据卡|解释图|图卡|科普卡)/i.test(value);
+  const fullscreen=requiresFullscreenKnowledgeCards(value);
+  if(!explicitCardEdit&&!fullscreen)return segments;
+  return segments.map(segment=>{
+    if(!isKnowledgeCardSegment(segment))return segment;
+    const visualTreatment=segment.visualTreatment==="presenter"||!segment.visualTreatment?"motion-card":segment.visualTreatment;
+    return {...segment,visualTreatment,regenerate:true,forceCard:true,...(fullscreen?{layout:"fullscreen",forceFullscreen:true}:{})};
+  });
+}
+
+export function assertRequestedKnowledgeCards(segments,materials,instructions=""){
+  const constrained=enforceRequestedKnowledgeCards(segments,instructions),required=constrained.map((segment,index)=>({segment,index})).filter(({segment})=>segment.forceCard===true);
+  const missing=required.filter(({index})=>materials[index]?.kind==="presenter"||materials[index]?.source==="xiaogu-presenter-anchor");
+  if(missing.length)throw new Error(`修改要求未落实：${missing.length} 个知识卡分镜仍被降级为人物画面`);
+  return true;
 }
 
 function scopedRecutOptions(parsed,prior,aspectRatio,instructions){
@@ -918,10 +937,11 @@ export function validateRecutPlan(parsed,segments,aspectRatio,{instructions="",p
   if(!Array.isArray(parsed.segments)||parsed.segments.length!==segments.length||parsed.segments.some((s,i)=>s.id!==segments[i].id||s.text!==segments[i].text))throw new Error("修改方案改变了口播内容，请仅修改画面、字幕或节奏");
   if(parsed.unsupportedReason)throw new Error(`仅支持画面和后期修改：${safe(parsed.unsupportedReason).slice(0,160)}`);
   const scope=recutEditScope(instructions),validLayouts=new Set(["presenter","presenter-pip","fullscreen","presenter-overlay","presenter-data","presenter-evidence"]),fullscreenCards=requiresFullscreenKnowledgeCards(instructions);
-  return {segments:parsed.segments.map((s,i)=>{
+  const planned=parsed.segments.map((s,i)=>{
     const base=segments[i],card=fullscreenCards&&isKnowledgeCardSegment({...base,...s});
     return {...base,expression:s.expression,query:safe(s.query)||base.query,visual:safe(s.visual)||base.visual,cardPoints:knowledgePoints(s),regenerate:s.regenerate===true||card,forceCard:s.forceCard===true||card,...(card?{layout:"fullscreen",forceFullscreen:true}:fullscreenCards?{layout:base.layout}:scope.layout&&validLayouts.has(s.layout)?{layout:s.layout}:{})};
-  }),options:scopedRecutOptions(parsed.options,priorOptions,aspectRatio,instructions),editScope:scope};
+  });
+  return {segments:enforceRequestedKnowledgeCards(planned,instructions),options:scopedRecutOptions(parsed.options,priorOptions,aspectRatio,instructions),editScope:scope};
 }
 
 export async function planRecut(dir,input,runner=run){
@@ -1002,6 +1022,7 @@ async function executeRecut(task,leaseToken,ctx){
     if(productionMode==="smart"&&undirected.length){
       const directed=await directSmartVideoWithCodex(undirected.map(v=>v.segment),undirected.map(v=>evidencePacks[v.index]),dir);
       undirected.forEach(({index},i)=>{plan.segments[index]={...directed[i],regenerate:true};});
+      plan.segments=enforceRequestedKnowledgeCards(plan.segments,input.instructions);
     }
     const lockedLayouts=plan.editScope?.layout?{}:Object.fromEntries(input.materialPlan.map((segment,index)=>[segment.id||`s${index+1}`,segment.layout]).filter(([,layout])=>safe(layout)));
     if(!plan.editScope?.layout)plan.segments=plan.segments.map(segment=>lockedLayouts[segment.id]?{...segment,layout:lockedLayouts[segment.id]}:segment);
@@ -1019,6 +1040,7 @@ async function executeRecut(task,leaseToken,ctx){
         return {material};
       }));for(const item of batch)materials.push(item.material);
     }
+    assertRequestedKnowledgeCards(plan.segments,materials,input.instructions);
     const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,lockedLayouts,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
