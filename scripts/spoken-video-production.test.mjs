@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -58,6 +58,14 @@ test("validated expression relation selects a generic diagram without domain key
 test("card capacity gate routes long prose to generated editorial artwork",()=>{
   assert.equal(knowledgeCardNeedsGeneratedCard({kind:"comparisonDiagram",nodes:["央行的城镇居民资产调研告诉我们，国内城镇家庭住房资产占家庭总资产接近60%。","真正的金融活钱资产只占20.4%。"]}),true);
   assert.equal(knowledgeCardNeedsGeneratedCard({kind:"comparisonDiagram",nodes:["住房资产接近60%","金融活钱约20.4%"]}),false);
+});
+
+test("structured teaching cards prefer a complete AI-designed composition",()=>{
+  assert.equal(shouldGenerateCompleteKnowledgeCard({kind:"metrics"},["住房资产接近60%","金融活钱资产只占20.4%"]),true);
+  assert.equal(shouldGenerateCompleteKnowledgeCard({kind:"numbered",points:["第一，现金流稳定","第二，管理省心","第三，可以变现","第四，波动可承受"]},["第一，现金流稳定","第二，管理省心","第三，可以变现","第四，波动可承受"]),true);
+  assert.equal(shouldGenerateCompleteKnowledgeCard({kind:"causeDiagram",nodes:["利率上升","债券价格下降"]},["利率上升","债券价格下降"]),true);
+  assert.equal(shouldGenerateCompleteKnowledgeCard({kind:"spotlight"},["核心结论只有一句"]),false);
+  assert.equal(shouldGenerateCompleteKnowledgeCard({kind:"spotlight"},["收益率3%-5%","最大回撤25%-35%"]),true);
 });
 
 test("numbered cards preserve four grounded criteria",()=>{

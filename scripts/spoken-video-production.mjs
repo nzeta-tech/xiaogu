@@ -405,6 +405,19 @@ export function knowledgeCardNeedsGeneratedCard(spec={}){
   return false;
 }
 
+// The local SVG renderer is a resilient fallback, but cards whose meaning is
+// carried by a comparison, relationship, ordered set or multiple metrics need
+// a composed visual rather than a document-like stack of text. Prefer the
+// image model for those teachable structures and keep the exact local card as
+// the failure path.
+export function shouldGenerateCompleteKnowledgeCard(spec={},points=[]){
+  const structured=new Set(["comparisonDiagram","causeDiagram","timelineDiagram","flowDiagram","formulaDiagram","metrics","numbered"]);
+  if(structured.has(spec.kind))return true;
+  const text=(Array.isArray(points)?points:[]).join(" ");
+  const values=text.match(/\d+(?:\.\d+)?\s*(?:[-–—~至]\s*\d+(?:\.\d+)?)?\s*(?:%|％|万元|亿元|万亿|亿|万|元|个月|年)/g)||[];
+  return values.length>=2;
+}
+
 async function generateVisual(ctx,jobId,segment,dir,index,options={}){
   const concept=safe(segment.visual).length>=4?safe(segment.visual):safe(segment.text).slice(0,40);
   const evidence=(Array.isArray(options.researchReferences)?options.researchReferences:[]).filter(source=>source.kind==="webpage"||source.kind==="document").slice(0,2).map(source=>`${safe(source.title)}：${safe(source.excerpt)}`).join("；");
@@ -927,7 +940,7 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
         return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:"keypoints",presentation:safe(spec.kind)}});
       }catch(error){console.warn("[spoken-video] requested knowledge-card repair unavailable; using exact local card",String(error.message||error).slice(0,180));}
     }
-    if(knowledgeCardNeedsGeneratedCard(spec)){
+    if(shouldGenerateCompleteKnowledgeCard(spec,points)||knowledgeCardNeedsGeneratedCard(spec)){
       try{
         return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:safe(expressionSpec(segment).kind),presentation:safe(spec.kind)}});
       }catch(error){console.warn("[spoken-video] generated full knowledge card unavailable; using adaptive local layout",String(error.message||error).slice(0,180));}
