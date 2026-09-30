@@ -876,6 +876,17 @@ export function assertRequestedKnowledgeCards(segments,materials,instructions=""
   return true;
 }
 
+export async function repairRequestedKnowledgeCards(segments,materials,instructions,generate){
+  const constrained=enforceRequestedKnowledgeCards(segments,instructions),repaired=[...materials];
+  for(let index=0;index<constrained.length;index+=1){
+    const segment=constrained[index],material=repaired[index];
+    if(segment.forceCard!==true||material?.kind!=="presenter"&&material?.source!=="xiaogu-presenter-anchor")continue;
+    repaired[index]=await generate(segment,index);
+  }
+  assertRequestedKnowledgeCards(constrained,repaired,instructions);
+  return repaired;
+}
+
 function scopedRecutOptions(parsed,prior,aspectRatio,instructions){
   const scope=recutEditScope(instructions),base=editOptions(prior,aspectRatio),planned=editOptions({...prior,...parsed},aspectRatio);
   return {
@@ -889,12 +900,18 @@ function scopedRecutOptions(parsed,prior,aspectRatio,instructions){
 
 async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
   if(options.forceCard||["evidence","explain"].includes(segment.intent)||segment.expression?.kind&&segment.expression.kind!=="presenter"){
-    if(expressionSpec(segment).kind==="presenter")return presenterAnchorMaterial(segment);
+    const expression=expressionSpec(segment);
+    if(expression.kind==="presenter"&&!options.forceCard)return presenterAnchorMaterial(segment);
     // The generic expression renderer is safe but visually reads as a stack of
     // labelled text boxes.  Route grounded explanatory cards through the
     // director card library instead: it chooses an actual comparison, flow,
     // timeline, metric or financial-mechanism composition from the relation.
-    const points=knowledgePoints(segment),spec=knowledgeCardSpec(points,safe(segment.visual)||"核心要点",index,options.cardStyle,expressionSpec(segment));
+    const points=knowledgePoints(segment),spec=knowledgeCardSpec(points,safe(segment.visual)||"核心要点",index,options.cardStyle,expression);
+    if(expression.kind==="presenter"&&options.forceCard){
+      try{
+        return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:"keypoints",presentation:safe(spec.kind)}});
+      }catch(error){console.warn("[spoken-video] requested knowledge-card repair unavailable; using exact local card",String(error.message||error).slice(0,180));}
+    }
     if(knowledgeCardNeedsGeneratedCard(spec)){
       try{
         return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:safe(expressionSpec(segment).kind),presentation:safe(spec.kind)}});
@@ -916,7 +933,7 @@ async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,ind
   return cachedMaterial(path.join(path.dirname(ctx.videoCacheScope),"materials"),{version:4,segment,evidencePack,options},()=>uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options));
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
-  if(segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)return presenterAnchorMaterial(segment);
+  if((segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)&&segment.forceCard!==true)return presenterAnchorMaterial(segment);
   if(segment.visualTreatment==="official-source")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
   const generateSceneFallback=segment.visualTreatment==="generated-scene"||["scene","emotion"].includes(segment.intent);
@@ -1040,7 +1057,8 @@ async function executeRecut(task,leaseToken,ctx){
         return {material};
       }));for(const item of batch)materials.push(item.material);
     }
-    assertRequestedKnowledgeCards(plan.segments,materials,input.instructions);
+    const fulfilledMaterials=await repairRequestedKnowledgeCards(plan.segments,materials,input.instructions,(segment,index)=>productionMaterial(ctx,jobId,segment,dir,index,{...plan.options,forceCard:true,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}));
+    materials.splice(0,materials.length,...fulfilledMaterials);
     const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,lockedLayouts,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");

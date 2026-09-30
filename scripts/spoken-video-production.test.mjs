@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -198,6 +198,15 @@ test('natural full-canvas wording forces relationship shots back to knowledge ca
  assert.deepEqual(Object.fromEntries(['layout','forceFullscreen','regenerate','forceCard','visualTreatment'].map(key=>[key,result[1][key]])),{layout:'fullscreen',forceFullscreen:true,regenerate:true,forceCard:true,visualTreatment:'motion-card'});
  assert.throws(()=>assertRequestedKnowledgeCards(result,[{kind:'presenter'},{kind:'presenter',source:'xiaogu-presenter-anchor'}],instructions),/修改要求未落实/);
  assert.equal(assertRequestedKnowledgeCards(result,[{kind:'presenter'},{kind:'image',source:'xiaogu-knowledge-card'}],instructions),true);
+});
+
+test('requested cards are repaired inside the same attempt instead of restarting the task',async()=>{
+ const instructions='重新优化全部知识卡，每张知识卡完整铺满竖屏画布。';
+ const segments=[{id:'s1',text:'开场。',intent:'anchor',expression:{kind:'presenter',nodes:[]},layout:'presenter'},{id:'s2',text:'资产与活钱对比。',intent:'evidence',expression:{kind:'compare',nodes:['资产','与活钱对比。']},layout:'presenter'}];
+ const calls=[];
+ const repaired=await repairRequestedKnowledgeCards(segments,[{kind:'presenter'},{kind:'presenter',source:'xiaogu-presenter-anchor'}],instructions,async(segment,index)=>{calls.push([segment.id,index,segment.forceCard,segment.layout]);return{kind:'image',source:'xiaogu-ai-knowledge-card'};});
+ assert.deepEqual(calls,[['s2',1,true,'fullscreen']]);
+ assert.equal(repaired[1].kind,'image');
 });
 
 test('recut dispatch never requires a voice or invokes HeyGen creation',async()=>{
