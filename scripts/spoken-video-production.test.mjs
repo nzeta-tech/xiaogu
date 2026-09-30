@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -207,6 +207,18 @@ test('requested cards are repaired inside the same attempt instead of restarting
  const repaired=await repairRequestedKnowledgeCards(segments,[{kind:'presenter'},{kind:'presenter',source:'xiaogu-presenter-anchor'}],instructions,async(segment,index)=>{calls.push([segment.id,index,segment.forceCard,segment.layout]);return{kind:'image',source:'xiaogu-ai-knowledge-card'};});
  assert.deepEqual(calls,[['s2',1,true,'fullscreen']]);
  assert.equal(repaired[1].kind,'image');
+});
+
+test('knowledge-card scheduler preserves rhythm and prioritizes teachable relations',()=>{
+ const segments=Array.from({length:30},(_,index)=>({id:`s${index}`,text:index%3===0?'过渡观点。':`第${index}项收益为${index}%，因此现金流变化。`,intent:index%3===0?'anchor':'evidence',expression:index%3===0?{kind:'presenter',nodes:[]}:{kind:'cause',nodes:[`第${index}项收益为${index}%，`,'因此现金流变化。']},visualTreatment:'motion-card',material:{kind:'image'}}));
+ const selected=selectKnowledgeCardIndices(segments);
+ assert(selected.size<=18);
+ assert(!selected.has(0));
+ let run=0;for(let index=0;index<segments.length;index+=1){run=selected.has(index)?run+1:0;assert(run<=2);}
+ const planned=enforceRequestedKnowledgeCards(segments,'重新优化全部知识卡并完整铺满画布');
+ assert.equal(planned[0].layout,'presenter');
+ assert.equal(planned[1].layout,'fullscreen');
+ assert.equal(planned.filter(segment=>segment.forceCard).length,selected.size);
 });
 
 test('recut dispatch never requires a voice or invokes HeyGen creation',async()=>{

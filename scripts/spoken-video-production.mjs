@@ -858,12 +858,27 @@ function isKnowledgeCardSegment(segment={}){
   return segment.forceCard===true||segment.visualTreatment==="motion-card"||segment.visualTreatment==="official-source"||["evidence","explain"].includes(segment.intent)||safe(segment.expression?.kind)!==""&&safe(segment.expression?.kind)!=="presenter";
 }
 
+export function selectKnowledgeCardIndices(segments,{maximum=18,maxConsecutive=2}={}){
+  const scored=segments.map((segment,index)=>{
+    const text=safe(segment.text),relation=safe(segment.expression?.kind),numeric=/\d+(?:\.\d+)?\s*(?:%|％|万|亿|元|个月|年)/.test(text);
+    const structural=["compare","cause","sequence","timeline","parts"].includes(relation);
+    const eligible=isKnowledgeCardSegment(segment)&&relation!=="presenter"&&(["evidence","explain"].includes(segment.intent)||numeric||structural);
+    const score=(numeric?4:0)+(structural?3:0)+(["evidence","explain"].includes(segment.intent)?2:0)+(relation==="keypoints"?1:0)-(["anchor","emotion"].includes(segment.intent)?2:0);
+    return{index,eligible,score};
+  });
+  const selected=new Set();let consecutive=0;
+  for(const item of scored){if(!item.eligible||consecutive>=maxConsecutive){consecutive=0;continue;}selected.add(item.index);consecutive++;}
+  if(selected.size>maximum){const remove=[...selected].sort((a,b)=>scored[a].score-scored[b].score||b-a).slice(0,selected.size-maximum);remove.forEach(index=>selected.delete(index));}
+  return selected;
+}
+
 export function enforceRequestedKnowledgeCards(segments,instructions=""){
   const value=safe(instructions),explicitCardEdit=/(?:重新|重做|优化|生成|制作|混剪).{0,24}(?:知识卡|证据卡|解释图|图卡|科普卡)|(?:全部|所有|每张).{0,16}(?:知识卡|证据卡|解释图|图卡|科普卡)/i.test(value);
   const fullscreen=requiresFullscreenKnowledgeCards(value);
   if(!explicitCardEdit&&!fullscreen)return segments;
-  return segments.map(segment=>{
-    if(!isKnowledgeCardSegment(segment))return segment;
+  const selected=selectKnowledgeCardIndices(segments);
+  return segments.map((segment,index)=>{
+    if(!selected.has(index))return {...segment,visualTreatment:"presenter",layout:"presenter",forceCard:false,forceFullscreen:false,regenerate:segment.visualTreatment!=="presenter"||segment.material?.kind!=="presenter"};
     const visualTreatment=segment.visualTreatment==="presenter"||!segment.visualTreatment?"motion-card":segment.visualTreatment;
     return {...segment,visualTreatment,regenerate:true,forceCard:true,...(fullscreen?{layout:"fullscreen",forceFullscreen:true}:{})};
   });
