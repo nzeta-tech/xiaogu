@@ -1,11 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, normalizePresentationText, normalizeSubtitleSrt, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
   assert.equal(shouldPreserveRecutMaterials("复用原有全部素材和模板，只重新渲染成片"),true);
   assert.equal(shouldPreserveRecutMaterials("知识卡更精美，替换全部画面素材"),false);
+});
+
+test("presentation copy repairs adjacent percentage ranges without changing values",()=>{
+  assert.equal(normalizePresentationText("收益率常年在 2.5%3.5% 区间"),"收益率常年在 2.5%—3.5% 区间");
+  assert.equal(normalizePresentationText("3%-5%、6%-10%、25%-35%"),"3%-5%、6%-10%、25%-35%");
+});
+
+test("recut subtitles repair a percentage range split across timed cues",()=>{
+  const input="1\n00:00:01,000 --> 00:00:02,000\n收益率常年在2.\n\n2\n00:00:02,000 --> 00:00:03,000\n5%3.5%区间。\n";
+  const output=normalizeSubtitleSrt(input);
+  assert.match(output,/收益率常年在\n\n2\n/);
+  assert.match(output,/2\.5%—3\.5%区间/);
+  assert.doesNotMatch(output,/2\.5%3\.5%/);
 });
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
 

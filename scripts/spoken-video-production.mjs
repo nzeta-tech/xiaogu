@@ -282,7 +282,7 @@ export function knowledgePoints(segment){
 }
 
 export async function createKnowledgeCard(segment,dir,index,options={}){
-  const title=safe(segment.visual)||"核心要点",points=knowledgePoints(segment);
+  const title=safe(segment.visual)||"核心要点",points=knowledgePoints(segment).map(normalizePresentationText);
   const wide=options.aspectRatio==="16:9",width=wide?1920:1080,height=wide?1080:1920;
   if(!wide&&options.presentation!=="editorial")return createProfessionalKnowledgeCard({...segment,visual:title,cardPoints:points},options.cardSpec||knowledgeCardSpec(points,title,index,options.cardStyle,expressionSpec(segment)),options.backgroundFile||null,dir,index);
   const wrap=(text,count)=>{
@@ -304,6 +304,25 @@ export async function createKnowledgeCard(segment,dir,index,options={}){
   if(options.backgroundFile)await sharp(options.backgroundFile).resize(width,height,{fit:"cover"}).composite([{input:Buffer.from(fitCardSvg(svg,width,height))}]).jpeg({quality:94}).toFile(file);
   else await sharp(Buffer.from(fitCardSvg(svg,width,height))).jpeg({quality:94}).toFile(file);
   return {kind:"image",file,contentBounds:cardContentBounds(svg,width,height),source:options.backgroundFile?"xiaogu-ai-knowledge-card":"xiaogu-knowledge-card",license:options.backgroundFile?"generated":"project-owned",title,query:segment.query,points};
+}
+
+export function normalizePresentationText(value){
+  return String(value||"").replace(/(\d+(?:[.．]\d+)?\s*[%％])\s*(?=\d+(?:[.．]\d+)?\s*[%％])/gu,"$1—");
+}
+
+export function normalizeSubtitleSrt(value){
+  const blocks=String(value||"").replace(/\r\n/g,"\n").split(/\n{2,}/);
+  for(let index=0;index<blocks.length-1;index+=1){
+    const current=blocks[index].split("\n"),next=blocks[index+1].split("\n");
+    const currentText=current.slice(2).join("\n"),nextText=next.slice(2).join("\n");
+    const decimal=currentText.match(/(\d+)[.．]$/u),range=nextText.match(/^(\d+[%％])\s*(\d+(?:[.．]\d+)?[%％])/u);
+    if(decimal&&range){
+      current.splice(2,current.length-2,currentText.slice(0,-decimal[0].length));
+      next.splice(2,next.length-2,`${decimal[1]}.${range[1]}—${range[2]}${nextText.slice(range[0].length)}`);
+      blocks[index]=current.join("\n");blocks[index+1]=next.join("\n");
+    }
+  }
+  return normalizePresentationText(blocks.join("\n\n"));
 }
 
 export function materialSearchQueries(value){
@@ -422,7 +441,8 @@ async function generateVisual(ctx,jobId,segment,dir,index,options={}){
   const concept=safe(segment.visual).length>=4?safe(segment.visual):safe(segment.text).slice(0,40);
   const evidence=(Array.isArray(options.researchReferences)?options.researchReferences:[]).filter(source=>source.kind==="webpage"||source.kind==="document").slice(0,2).map(source=>`${safe(source.title)}：${safe(source.excerpt)}`).join("；");
   const context=[safe(segment.text),evidence?`检索资料摘要（仅供构思画面）：${evidence}`:""].filter(Boolean).join("\n").slice(0,1000);
-  const response=await fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/visual`,{method:"POST",headers:{authorization:`Bearer ${ctx.token}`,"content-type":"application/json"},body:JSON.stringify({jobId,visual:concept.slice(0,160),context,purpose:options.purpose||"scene",style:safe(options.style).slice(0,1500),cardContent:options.cardContent}),signal:AbortSignal.timeout(300000)});
+  const cardContent=options.cardContent?{...options.cardContent,points:(options.cardContent.points||[]).map(normalizePresentationText),narration:normalizePresentationText(options.cardContent.narration)}:undefined;
+  const response=await fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/visual`,{method:"POST",headers:{authorization:`Bearer ${ctx.token}`,"content-type":"application/json"},body:JSON.stringify({jobId,visual:concept.slice(0,160),context:normalizePresentationText(context),purpose:options.purpose||"scene",style:safe(options.style).slice(0,1500),cardContent}),signal:AbortSignal.timeout(300000)});
   if(!response.ok||!response.body){const error=await response.json().catch(()=>({}));throw new Error(safe(error.error)||`补充画面生成失败（${response.status}）`);}
   const file=path.join(dir,`generated-visual-${index}-${randomUUID()}.jpg`);
   await pipeline(Readable.fromWeb(response.body),createWriteStream(file));
@@ -940,7 +960,8 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
         return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:"keypoints",presentation:safe(spec.kind)}});
       }catch(error){console.warn("[spoken-video] requested knowledge-card repair unavailable; using exact local card",String(error.message||error).slice(0,180));}
     }
-    if(shouldGenerateCompleteKnowledgeCard(spec,points)||knowledgeCardNeedsGeneratedCard(spec)){
+    const explicitlyDesignedAiCard=options.forceCard&&/(?:AI|生成|立体|深蓝|青绿|珊瑚|财经信息图|visual metaphor|3D)/iu.test(safe(options.cardStyle));
+    if(explicitlyDesignedAiCard||shouldGenerateCompleteKnowledgeCard(spec,points)||knowledgeCardNeedsGeneratedCard(spec)){
       try{
         return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:safe(expressionSpec(segment).kind),presentation:safe(spec.kind)}});
       }catch(error){console.warn("[spoken-video] generated full knowledge card unavailable; using adaptive local layout",String(error.message||error).slice(0,180));}
@@ -1053,7 +1074,7 @@ async function executeRecut(task,leaseToken,ctx){
     // Revisions can only download the immutable server-owned master. No HeyGen creation path exists here.
     const master=path.join(dir,"presenter-master.mp4");await fetchInput(ctx,jobId,"master",master);
     const subtitleFile=path.join(dir,"original.srt");let subtitleUrl="";
-    if(safe(input.subtitleSrt))await writeFile(subtitleFile,input.subtitleSrt);
+    if(safe(input.subtitleSrt))await writeFile(subtitleFile,normalizeSubtitleSrt(input.subtitleSrt));
     else if(safe(input.providerJobId)){const remote=await heygenPoll(input.providerJobId);subtitleUrl=remote.subtitleUrl||"";}
     const changedSegments=plan.segments.filter(segment=>segment.regenerate);
     const resume=videoResumeCache(process.env.LOCAL_AGENT_VIDEO_WORKDIR||os.tmpdir(),{endpoint:ctx.remoteBase,owner:task.owner_user_id||task.ownerUserId||jobId});
