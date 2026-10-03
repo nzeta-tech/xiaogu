@@ -466,6 +466,10 @@ export function requiresStrictAiKnowledgeCards(options={}){
   return options.forceCard===true&&/(?:AI|生成|立体|深蓝|青绿|珊瑚|财经信息图|visual metaphor|3D)/iu.test(safe(options.cardStyle));
 }
 
+export function resolveKnowledgeCardStyle(segmentStyle,defaultStyle){
+  return safe(segmentStyle)||safe(defaultStyle);
+}
+
 async function fetchInput(ctx,jobId,kind,file){
   return download(`${ctx.remoteBase}/api/internal/local-agent/digital-human/input?${new URLSearchParams({jobId,kind})}`,file,{authorization:`Bearer ${ctx.token}`});
 }
@@ -1125,7 +1129,7 @@ async function executeRecut(task,leaseToken,ctx){
           await download(`${ctx.remoteBase}/api/internal/local-agent/digital-human/input?${new URLSearchParams({jobId,kind:"material",mediaId:previous.mediaId})}`,file,{authorization:`Bearer ${ctx.token}`});
           return {material:{...previous,file}};
         }
-        const material=await directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{...plan.options,cardStyle:segment.cardStyle||"",aspectRatio:input.aspectRatio,researchReferences:references[i]});
+        const material=await directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{...plan.options,cardStyle:resolveKnowledgeCardStyle(segment.cardStyle,plan.options.cardStyle),aspectRatio:input.aspectRatio,researchReferences:references[i]});
         return {material};
       }));for(const item of batch)materials.push(item.material);
     }
