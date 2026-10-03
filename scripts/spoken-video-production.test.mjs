@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, normalizePresentationText, normalizeSubtitleSrt, repairRequestedKnowledgeCards, requiresStrictAiKnowledgeCards, resolveKnowledgeCardStyle, retryAiKnowledgeCard, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, DEFAULT_AI_KNOWLEDGE_CARD_STYLE, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, normalizePresentationText, normalizeSubtitleSrt, repairRequestedKnowledgeCards, requiresStrictAiKnowledgeCards, resolveKnowledgeCardStyle, retryAiKnowledgeCard, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions, unifiedAiKnowledgeCardOptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -42,6 +42,20 @@ test("explicit all-AI card styling disables local card fallback",()=>{
   assert.equal(requiresStrictAiKnowledgeCards({forceCard:true,cardStyle:"全部用 AI 生成，统一深蓝财经信息图"}),true);
   assert.equal(requiresStrictAiKnowledgeCards({forceCard:true,cardStyle:"简洁专业"}),false);
   assert.equal(requiresStrictAiKnowledgeCards({forceCard:false,cardStyle:"AI 深蓝财经信息图"}),false);
+});
+
+test("basic and smart production share the V23 strict AI card defaults",()=>{
+  for(const productionMode of ["basic","smart"]){
+    const options=unifiedAiKnowledgeCardOptions({productionMode});
+    assert.equal(requiresStrictAiKnowledgeCards(options),true);
+    assert.equal(options.cardStyle,DEFAULT_AI_KNOWLEDGE_CARD_STYLE);
+  }
+});
+
+test("an explicit style can refine but not disable the unified strict AI policy",()=>{
+  const options=unifiedAiKnowledgeCardOptions({cardStyle:"品牌蓝紫渐变，金色重点"});
+  assert.equal(options.cardStyle,"品牌蓝紫渐变，金色重点");
+  assert.equal(requiresStrictAiKnowledgeCards(options),true);
 });
 
 test("segments inherit the planned AI card style instead of clearing it",()=>{

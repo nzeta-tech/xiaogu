@@ -462,8 +462,14 @@ export async function retryAiKnowledgeCard(generate,{attempts=3,delayMs=1500}={}
   throw failure;
 }
 
+export const DEFAULT_AI_KNOWLEDGE_CARD_STYLE="全部知识卡由 AI 生成；统一深蓝与深青色财经信息图风格，使用珊瑚橙和金色强调；优先明确的对比、因果、流程、矩阵或时间线；保留完整语义、全部枚举项、单位与数字区间；画面底部和人物画中画区域保留低细节安全区；禁止白底文档模板、文字重叠、残句、越界、空人物框和字幕框。";
+
+export function unifiedAiKnowledgeCardOptions(options={}){
+  return {...options,strictAiKnowledgeCards:true,cardStyle:resolveKnowledgeCardStyle(options.cardStyle,DEFAULT_AI_KNOWLEDGE_CARD_STYLE)};
+}
+
 export function requiresStrictAiKnowledgeCards(options={}){
-  return options.forceCard===true&&/(?:AI|生成|立体|深蓝|青绿|珊瑚|财经信息图|visual metaphor|3D)/iu.test(safe(options.cardStyle));
+  return options.strictAiKnowledgeCards===true||(options.forceCard===true&&/(?:AI|生成|立体|深蓝|青绿|珊瑚|财经信息图|visual metaphor|3D)/iu.test(safe(options.cardStyle)));
 }
 
 export function resolveKnowledgeCardStyle(segmentStyle,defaultStyle){
@@ -854,7 +860,8 @@ async function executeProduction(task,leaseToken,ctx){
         ()=>directSmartVideoWithCodex(baselineSegments,evidencePacks,dir),
         value=>Array.isArray(value)&&value.length===baselineSegments.length&&value.every((segment,index)=>segment?.id===baselineSegments[index].id&&segment.text===baselineSegments[index].text&&typeof segment.visualTreatment==="string"))
       : baselineSegments;
-    const materials=await mapVideoWork(segments,2,async(segment,i)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{aspectRatio:p.aspectRatio,researchReferences:references[i]}));
+    const aiCardOptions=unifiedAiKnowledgeCardOptions({aspectRatio:p.aspectRatio});
+    const materials=await mapVideoWork(segments,2,async(segment,i)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{...aiCardOptions,researchReferences:references[i]}));
     return {segments,references,evidencePacks,materials};
       },
     ],2,work=>work());
@@ -1010,7 +1017,7 @@ async function directedProductionMaterial(ctx,jobId,segment,evidencePack,dir,ind
 }
 async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index,options={}){
   if((segment.visualTreatment==="presenter"||segment.intent==="anchor"&&!segment.visualTreatment)&&segment.forceCard!==true)return presenterAnchorMaterial(segment);
-  if(segment.visualTreatment==="official-source")return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
+  if(segment.visualTreatment==="official-source"&&!requiresStrictAiKnowledgeCards(options))return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
   const generateSceneFallback=segment.visualTreatment==="generated-scene"||["scene","emotion"].includes(segment.intent);
   return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:segment.cardStyle||options.cardStyle});
@@ -1098,6 +1105,7 @@ async function executeRecut(task,leaseToken,ctx){
       intent:segment.intent||(segment.material?.kind==="presenter"?"anchor":"explain"),
       layout:segment.layout||(segment.material?.kind==="presenter"?"presenter":"fullscreen"),
     }));
+    plan.options=unifiedAiKnowledgeCardOptions(plan.options);
     // Revisions can only download the immutable server-owned master. No HeyGen creation path exists here.
     const master=path.join(dir,"presenter-master.mp4");await fetchInput(ctx,jobId,"master",master);
     const subtitleFile=path.join(dir,"original.srt");let subtitleUrl="";
@@ -1124,7 +1132,8 @@ async function executeRecut(task,leaseToken,ctx){
       await report(ctx,task,leaseToken,jobId,"refining_visuals",20+Math.round(start/plan.segments.length*45),"正在优化画面与知识点呈现");
       const batch=await Promise.all(plan.segments.slice(start,start+2).map(async(segment,offset)=>{
         const i=start+offset,previous=input.materialPlan[i]?.material;
-        if(previous?.mediaId&&!segment.regenerate){
+        const previousIsLegacyKnowledgeCard=previous?.source==="xiaogu-knowledge-card";
+        if(previous?.mediaId&&!segment.regenerate&&!previousIsLegacyKnowledgeCard){
           const file=path.join(dir,`reused-${i}.${previous.kind==="video"?(previous.source?.includes("pexels.com")||previous.source?.includes("pixabay.com")?"mp4":"webm"):"jpg"}`);
           await download(`${ctx.remoteBase}/api/internal/local-agent/digital-human/input?${new URLSearchParams({jobId,kind:"material",mediaId:previous.mediaId})}`,file,{authorization:`Bearer ${ctx.token}`});
           return {material:{...previous,file}};
@@ -1133,9 +1142,9 @@ async function executeRecut(task,leaseToken,ctx){
         return {material};
       }));for(const item of batch)materials.push(item.material);
     }
-    const fulfilledMaterials=await repairRequestedKnowledgeCards(plan.segments,materials,input.instructions,(segment,index)=>productionMaterial(ctx,jobId,segment,dir,index,{...plan.options,forceCard:true,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}));
+    const fulfilledMaterials=await repairRequestedKnowledgeCards(plan.segments,materials,input.instructions,(segment,index)=>productionMaterial(ctx,jobId,segment,dir,index,{...plan.options,forceCard:true,aspectRatio:input.aspectRatio,cardStyle:resolveKnowledgeCardStyle(segment.cardStyle,plan.options.cardStyle),researchReferences:references[index]}));
     materials.splice(0,materials.length,...fulfilledMaterials);
-    const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,lockedLayouts,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:segment.cardStyle||plan.options.cardStyle,researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
+    const final=await renderWithCodexReview({master,segments:plan.segments,materials,subtitleUrl,script:input.script,dir,title:input.title,aspectRatio:input.aspectRatio,references,initialOptions:{...plan.options,lockedLayouts,renderCacheDir:renderCacheDirectory(ctx,task),timelineMode:"semantic",transitionSeconds:plan.options.transitionSeconds,snapCutsToCaptions:true,...(preserveMaterials?{reviewOnly:true}:{}),...(safe(input.subtitleSrt)?{subtitleFile}:{})},resolveMaterial:(segment,index)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[index],dir,index,{...plan.options,aspectRatio:input.aspectRatio,cardStyle:resolveKnowledgeCardStyle(segment.cardStyle,plan.options.cardStyle),researchReferences:references[index]}),onProgress:(message,progress)=>report(ctx,task,leaseToken,jobId,"quality_check",progress,message)});
     const archived=await archiveMaterials(ctx,jobId,final.materials);
     const videoUrl=await upload(ctx,jobId,"output",final.output,`${input.title}-修改版.mp4`,"video/mp4");
     const coverUrl=await upload(ctx,jobId,"cover",final.cover,`${input.title}-封面.jpg`,"image/jpeg");
