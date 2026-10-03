@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, normalizePresentationText, normalizeSubtitleSrt, repairRequestedKnowledgeCards, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
+import { assertRequestedKnowledgeCards, compactSrt, enforceRequestedKnowledgeCards, knowledgeCardNeedsGeneratedCard, knowledgeCardSpec, materialSearchQueries, normalizePresentationText, normalizeSubtitleSrt, repairRequestedKnowledgeCards, requiresStrictAiKnowledgeCards, retryAiKnowledgeCard, reusableLicense, requiresFullscreenKnowledgeCards, selectKnowledgeCardIndices, shouldGenerateCompleteKnowledgeCard, shouldPreserveRecutMaterials, shouldUseExplainerCard, smartTimelineSegments, snapCutsToCaptions } from "./spoken-video-production.mjs";
 
 test("same materials and template bypasses recut replanning",()=>{
   assert.equal(shouldPreserveRecutMaterials("使用与 V20 完全相同的素材、模板、人物、声音和口播原文，重新走一遍完整生成流程"),true);
@@ -19,6 +19,29 @@ test("recut subtitles repair a percentage range split across timed cues",()=>{
   assert.match(output,/收益率常年在\n\n2\n/);
   assert.match(output,/2\.5%—3\.5%区间/);
   assert.doesNotMatch(output,/2\.5%3\.5%/);
+});
+
+test("AI knowledge cards retry transient generation failures",async()=>{
+  const calls=[];
+  const card=await retryAiKnowledgeCard(async attempt=>{
+    calls.push(attempt);
+    if(attempt<3)throw new Error("fetch failed");
+    return {source:"xiaogu-ai-knowledge-card"};
+  },{delayMs:0});
+  assert.equal(card.source,"xiaogu-ai-knowledge-card");
+  assert.deepEqual(calls,[1,2,3]);
+});
+
+test("AI knowledge cards fail closed after retries",async()=>{
+  let calls=0;
+  await assert.rejects(()=>retryAiKnowledgeCard(async()=>{calls++;throw new Error("fetch failed");},{delayMs:0}),/fetch failed/);
+  assert.equal(calls,3);
+});
+
+test("explicit all-AI card styling disables local card fallback",()=>{
+  assert.equal(requiresStrictAiKnowledgeCards({forceCard:true,cardStyle:"全部用 AI 生成，统一深蓝财经信息图"}),true);
+  assert.equal(requiresStrictAiKnowledgeCards({forceCard:true,cardStyle:"简洁专业"}),false);
+  assert.equal(requiresStrictAiKnowledgeCards({forceCard:false,cardStyle:"AI 深蓝财经信息图"}),false);
 });
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
 

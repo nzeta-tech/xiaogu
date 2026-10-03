@@ -450,6 +450,22 @@ async function generateVisual(ctx,jobId,segment,dir,index,options={}){
   return {kind:"image",file,source:options.purpose==="knowledge-card"?"xiaogu-ai-knowledge-card":"xiaogu-generated-visual",license:"generated",title:safe(segment.visual)||"口播主题画面",query:segment.query,...(options.purpose==="knowledge-card"?{points:options.cardContent?.points||[],presentation:"generated-full-card"}:{})};
 }
 
+export async function retryAiKnowledgeCard(generate,{attempts=3,delayMs=1500}={}){
+  let failure;
+  for(let attempt=1;attempt<=attempts;attempt++){
+    try{return await generate(attempt);}
+    catch(error){
+      failure=error;
+      if(attempt<attempts&&delayMs>0)await new Promise(resolve=>setTimeout(resolve,delayMs*attempt));
+    }
+  }
+  throw failure;
+}
+
+export function requiresStrictAiKnowledgeCards(options={}){
+  return options.forceCard===true&&/(?:AI|生成|立体|深蓝|青绿|珊瑚|财经信息图|visual metaphor|3D)/iu.test(safe(options.cardStyle));
+}
+
 async function fetchInput(ctx,jobId,kind,file){
   return download(`${ctx.remoteBase}/api/internal/local-agent/digital-human/input?${new URLSearchParams({jobId,kind})}`,file,{authorization:`Bearer ${ctx.token}`});
 }
@@ -955,16 +971,23 @@ async function productionMaterial(ctx,jobId,segment,dir,index,options={}){
     // director card library instead: it chooses an actual comparison, flow,
     // timeline, metric or financial-mechanism composition from the relation.
     const points=knowledgePoints(segment),spec=knowledgeCardSpec(points,safe(segment.visual)||"核心要点",index,options.cardStyle,expression);
+    const explicitlyDesignedAiCard=requiresStrictAiKnowledgeCards(options);
+    const generateCompleteCard=()=>retryAiKnowledgeCard(()=>generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:expression.kind==="presenter"?"keypoints":safe(expression.kind),presentation:safe(spec.kind)}}));
     if(expression.kind==="presenter"&&options.forceCard){
       try{
-        return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:"keypoints",presentation:safe(spec.kind)}});
-      }catch(error){console.warn("[spoken-video] requested knowledge-card repair unavailable; using exact local card",String(error.message||error).slice(0,180));}
+        return await generateCompleteCard();
+      }catch(error){
+        if(explicitlyDesignedAiCard)throw new Error(`全 AI 知识卡生成失败：${String(error.message||error).slice(0,180)}`);
+        console.warn("[spoken-video] requested knowledge-card repair unavailable; using exact local card",String(error.message||error).slice(0,180));
+      }
     }
-    const explicitlyDesignedAiCard=options.forceCard&&/(?:AI|生成|立体|深蓝|青绿|珊瑚|财经信息图|visual metaphor|3D)/iu.test(safe(options.cardStyle));
     if(explicitlyDesignedAiCard||shouldGenerateCompleteKnowledgeCard(spec,points)||knowledgeCardNeedsGeneratedCard(spec)){
       try{
-        return await generateVisual(ctx,jobId,segment,dir,index,{purpose:"knowledge-card",style:["Professional educational infographic for spoken explanation",safe(options.cardStyle)].filter(Boolean).join("; "),researchReferences:options.researchReferences,cardContent:{title:safe(segment.visual)||"核心要点",points,narration:safe(segment.text),relation:safe(expressionSpec(segment).kind),presentation:safe(spec.kind)}});
-      }catch(error){console.warn("[spoken-video] generated full knowledge card unavailable; using adaptive local layout",String(error.message||error).slice(0,180));}
+        return await generateCompleteCard();
+      }catch(error){
+        if(explicitlyDesignedAiCard)throw new Error(`全 AI 知识卡生成失败：${String(error.message||error).slice(0,180)}`);
+        console.warn("[spoken-video] generated full knowledge card unavailable; using adaptive local layout",String(error.message||error).slice(0,180));
+      }
     }
     return createKnowledgeCard(segment,dir,index,{...options,cardSpec:spec});
   }
