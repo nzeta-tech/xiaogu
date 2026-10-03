@@ -1,7 +1,10 @@
 export function videoSafeLayout(width,height,fontSize=height>width?12:18){
   if(![width,height,fontSize].every(v=>Number.isFinite(v)&&v>0))throw new Error("Invalid video layout");
   // FFmpeg's SRT decoder uses a 288-high ASS canvas, not output pixels.
-  const scale=height/288,marginV=height>width?24:22;
+  // Portrait social-video controls and captions occupy the lower edge. Keep
+  // our two-line subtitle block above that interaction zone instead of merely
+  // clearing the physical frame boundary.
+  const scale=height/288,marginV=height>width?36:22;
   const subtitleTop=Math.floor(height-(marginV+fontSize*2.8+4)*scale);
   const size=height>width?340:300,gap=Math.ceil(6*scale);
   const pip={x:width-size-34,y:subtitleTop-gap-size,size};

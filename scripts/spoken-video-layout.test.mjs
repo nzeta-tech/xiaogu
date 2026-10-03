@@ -11,6 +11,9 @@ test("subtitle and PIP safety uses the same ASS coordinate scale for both aspect
     for(const size of sizes){const layout=videoSafeLayout(w,h,size);assert(layout.pipFits);assert(layout.pip.y+layout.pip.size<layout.subtitleTop);assert(layout.subtitleTop<h-layout.marginV*h/288);}
   }
   assert.equal(videoSafeLayout(320,240,70).pipFits,false);
+  assert.equal(videoSafeLayout(1080,1920,12).marginV,36);
+  assert.equal(videoSafeLayout(1920,1080,18).marginV,22);
+  assert(videoSafeLayout(1080,1920,12).subtitleTop<=1430);
   assert.throws(()=>videoSafeLayout(0,1920));
 });
 
