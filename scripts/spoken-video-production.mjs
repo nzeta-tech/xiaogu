@@ -1127,6 +1127,9 @@ async function executeRecut(task,leaseToken,ctx){
       undirected.forEach(({index},i)=>{plan.segments[index]={...directed[i],regenerate:true};});
       plan.segments=enforceRequestedKnowledgeCards(plan.segments,input.instructions);
     }
+    // A revision that explicitly asks for shot-composition changes receives the
+    // same six-layout grammar as a newly generated basic or smart video.
+    if(plan.editScope?.layout)plan.segments=diversifySemanticLayouts(plan.segments);
     const lockedLayouts=plan.editScope?.layout?{}:Object.fromEntries(input.materialPlan.map((segment,index)=>[segment.id||`s${index+1}`,segment.layout]).filter(([,layout])=>safe(layout)));
     if(!plan.editScope?.layout)plan.segments=plan.segments.map(segment=>lockedLayouts[segment.id]?{...segment,layout:lockedLayouts[segment.id]}:segment);
     const materials=[];
