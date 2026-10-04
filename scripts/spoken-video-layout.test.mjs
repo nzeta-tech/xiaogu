@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {mkdtemp,writeFile,readFile,rm} from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import {videoSafeLayout,safeSemanticLayout,expressionSafeTitleDuration,presenterOverlayFrame} from "./spoken-video-layout.mjs";
+import {videoSafeLayout,safeSemanticLayout,expressionSafeTitleDuration,presenterOverlayFrame,diversifySemanticLayouts,aiCardLayoutDirection} from "./spoken-video-layout.mjs";
 import {cachedVideoShot,mediaFingerprint} from "./spoken-video-render-cache.mjs";
 
 test("subtitle and PIP safety uses the same ASS coordinate scale for both aspect ratios",()=>{
@@ -32,6 +32,26 @@ test("smart presenter overlays stay above subtitles in portrait and landscape",(
     const safe=videoSafeLayout(width,height),frame=presenterOverlayFrame(layout,width,height,safe);
     assert(frame);assert(frame.x>=0&&frame.y>=0);assert(frame.x+frame.width<=width);assert(frame.y+frame.height<safe.subtitleTop);
   }
+});
+
+test("AI knowledge cards regain the six-layout V20 composition grammar",()=>{
+  const segments=diversifySemanticLayouts([
+    {id:"a",text:"先说结论。",intent:"anchor",layout:"fullscreen"},
+    {id:"b",text:"收益率是2.5%。",intent:"explain",expression:{kind:"keypoints"}},
+    {id:"c",text:"这是一个生活场景。",intent:"scene"},
+    {id:"d",text:"官方报告显示相关比例为20.4%。",intent:"evidence"},
+    {id:"e",text:"第一步整理现金流，第二步评估期限，第三步核对风险，并且逐项说明每个条件在不同市场环境下的影响。",intent:"explain",expression:{kind:"sequence"}},
+    {id:"f",text:"另一个简短机制说明。",intent:"explain",expression:{kind:"cause"}},
+  ]);
+  assert.deepEqual(segments.map(segment=>segment.layout),["presenter","presenter-data","presenter-overlay","presenter-evidence","fullscreen","presenter-pip"]);
+  assert.match(aiCardLayoutDirection("presenter-data"),/一个大数字/);
+  assert.match(aiCardLayoutDirection("presenter-pip"),/右下区域/);
+});
+
+test("semantic diversity breaks a third consecutive fullscreen card",()=>{
+  const long="这是一段需要完整解释的复杂知识内容，包含多个前提、多个步骤以及不同条件之间的联系，因此需要较大的视觉空间来准确呈现全部信息。";
+  const layouts=diversifySemanticLayouts([0,1,2].map(index=>({id:String(index),text:long,intent:"explain",expression:{kind:"sequence"}}))).map(segment=>segment.layout);
+  assert.deepEqual(layouts,["fullscreen","fullscreen","presenter-data"]);
 });
 
 test("intro title ends before a grounded diagram enters including its transition",()=>{

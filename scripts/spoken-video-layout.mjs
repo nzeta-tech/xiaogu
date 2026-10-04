@@ -22,6 +22,50 @@ export function safeSemanticLayout(segment,material){
   return segment.layout||"presenter-pip";
 }
 
+function relationKind(segment){
+  return String(segment?.expression?.kind||"").trim();
+}
+
+// Keep the presenter's visual continuity while giving whole AI-generated cards
+// several editorial roles. This is deterministic so basic and smart editions
+// share one composition grammar even when only smart mode runs the AI director.
+export function diversifySemanticLayouts(segments=[]){
+  let fullscreenRun=0,cardIndex=0;
+  return segments.map(segment=>{
+    if(segment?.forceFullscreen===true){fullscreenRun++;return {...segment,layout:"fullscreen"};}
+    if(segment?.layout==="presenter"||segment?.intent==="anchor"){
+      fullscreenRun=0;return {...segment,layout:"presenter"};
+    }
+    const text=String(segment?.text||""),relation=relationKind(segment);
+    const dense=Array.from(text).length>88||["sequence","timeline","parts"].includes(relation)&&Array.from(text).length>44;
+    const hasNumber=/\d+(?:\.\d+)?\s*(?:%|％|万|亿|元|年|个月|港币|美元)?/.test(text);
+    let layout;
+    if(segment?.intent==="evidence")layout=dense?"fullscreen":"presenter-evidence";
+    else if(["scene","emotion"].includes(segment?.intent))layout="presenter-overlay";
+    else if(dense)layout="fullscreen";
+    else {
+      const cycle=hasNumber
+        ? ["presenter-data","presenter-pip","fullscreen","presenter-data"]
+        : ["presenter-overlay","presenter-pip","presenter-data","fullscreen"];
+      layout=cycle[cardIndex%cycle.length];
+      cardIndex++;
+    }
+    // Do not let a long explanation collapse back into a slideshow. A compact
+    // data/evidence overlay is the safe breaker after two full-screen cards.
+    if(layout==="fullscreen"&&fullscreenRun>=2)layout=segment?.intent==="evidence"?"presenter-evidence":"presenter-data";
+    fullscreenRun=layout==="fullscreen"?fullscreenRun+1:0;
+    return {...segment,layout};
+  });
+}
+
+export function aiCardLayoutDirection(layout){
+  if(layout==="presenter-data")return "用于人物主画面上的数据浮层：整张卡只保留一个大数字、一个短标题和一句结论，文字必须超大且高对比，禁止表格与小字。";
+  if(layout==="presenter-evidence")return "用于人物主画面上的证据浮层：突出一个准确事实或引文与来源标签，最多三行正文，禁止装饰性数字和细小脚注。";
+  if(layout==="presenter-overlay")return "用于人物主画面上的场景浮层：以一个强视觉隐喻和极短标题为主，不超过一句辅助说明，禁止密集信息。";
+  if(layout==="presenter-pip")return "用于全屏知识卡并叠加圆形人物：右下区域不得放标题、数字或关键图形，核心内容集中在顶部和左侧。";
+  return "用于全屏知识卡：建立清楚的标题、主视觉与核心结论层级，底部字幕安全区保持低细节。";
+}
+
 export function presenterOverlayFrame(layout,width,height,safeLayout=videoSafeLayout(width,height)){
   const portrait=height>width;
   const specs=portrait?{

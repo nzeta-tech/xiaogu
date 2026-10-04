@@ -19,7 +19,7 @@ import { mapVideoWork } from "./spoken-video-concurrency.mjs";
 import { buildSpokenPresenterRequest } from "./spoken-video-motion.mjs";
 import { retryVideoStage, VideoStageOutputError, isRetryableVideoStageError } from "./spoken-video-stage.mjs";
 import { expandSmartSegments, presenterAnchorMaterial } from "./spoken-video-beats.mjs";
-import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration, presenterOverlayFrame } from "./spoken-video-layout.mjs";
+import { videoSafeLayout, safeSemanticLayout, expressionSafeTitleDuration, presenterOverlayFrame, diversifySemanticLayouts, aiCardLayoutDirection } from "./spoken-video-layout.mjs";
 import { mediaFingerprint, cachedVideoShot } from "./spoken-video-render-cache.mjs";
 import { buildEvidencePacks, createOfficialEvidenceCard, directSmartVideoWithCodex } from "./spoken-video-director.mjs";
 
@@ -833,7 +833,7 @@ async function executeProduction(task,leaseToken,ctx){
       ()=>planMaterials(dir,script,p.template||null),
       value=>Array.isArray(value)&&value.length===expected.length&&value.every((segment,index)=>segment?.id===expected[index].id&&segment.text===expected[index].text&&typeof segment.query==="string"&&typeof segment.visual==="string"));
     // The previous smart semantic edit is now the baseline for both editions.
-    const baselineSegments=smartTimelineSegments(plannedSegments);
+    const baselineSegments=diversifySemanticLayouts(smartTimelineSegments(plannedSegments));
     const checkpoint=await ctx.remote("/api/internal/local-agent/digital-human/checkpoint",{taskId:task.id,agentId:ctx.agentId,leaseToken,action:"state"});
     const resumeId=safe(checkpoint.providerJobId)||safe(p.resumeProviderJobId);
     if(!resumeId&&checkpoint.submissionStarted)throw new Error("口播提交结果待核对，请联系管理员，避免重复生成");
@@ -855,11 +855,12 @@ async function executeProduction(task,leaseToken,ctx){
       async()=>{
     const references=await researchSegmentsWithCodex(baselineSegments,dir,undefined,resume);
     const evidencePacks=buildEvidencePacks(baselineSegments,references);
-    const segments=productionMode==="smart"
+    const directedSegments=productionMode==="smart"
       ? await resume.getOrCreate("director-plan-v2",{segments:baselineSegments,evidencePacks},
         ()=>directSmartVideoWithCodex(baselineSegments,evidencePacks,dir),
         value=>Array.isArray(value)&&value.length===baselineSegments.length&&value.every((segment,index)=>segment?.id===baselineSegments[index].id&&segment.text===baselineSegments[index].text&&typeof segment.visualTreatment==="string"))
       : baselineSegments;
+    const segments=diversifySemanticLayouts(directedSegments);
     const aiCardOptions=unifiedAiKnowledgeCardOptions({aspectRatio:p.aspectRatio});
     const materials=await mapVideoWork(segments,2,async(segment,i)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{...aiCardOptions,researchReferences:references[i]}));
     return {segments,references,evidencePacks,materials};
@@ -1020,7 +1021,8 @@ async function uncachedDirectedMaterial(ctx,jobId,segment,evidencePack,dir,index
   if(segment.visualTreatment==="official-source"&&!requiresStrictAiKnowledgeCards(options))return createOfficialEvidenceCard(segment,evidencePack,dir,index,options.aspectRatio);
   const forceCard=segment.visualTreatment==="motion-card"||segment.forceCard||shouldUseExplainerCard(segment);
   const generateSceneFallback=segment.visualTreatment==="generated-scene"||["scene","emotion"].includes(segment.intent);
-  return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:segment.cardStyle||options.cardStyle});
+  const layoutDirection=aiCardLayoutDirection(segment.layout);
+  return productionMaterial(ctx,jobId,segment,dir,index,{...options,forceCard,generateSceneFallback,cardStyle:resolveKnowledgeCardStyle(segment.cardStyle||options.cardStyle,layoutDirection)});
 }
 
 async function archiveMaterials(ctx,jobId,materials){
