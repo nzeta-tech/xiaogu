@@ -39,10 +39,11 @@ import {
   tryUpdateWorkContent,
 } from "@/lib/db/repositories";
 import { buildThinkingProfileBrief, type ThinkingProfileSnapshot, type ThinkingProfileSummary } from "@/lib/thinking/profile-snapshot";
-import { logAvatarVisualUsage, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
+import { logAvatarVisualUsage, readAvatarVisualAsset, resolveAvatarVisualReferences } from "@/lib/avatar/visual-assets";
 import { buildCreativeCoachSkillRoutePrompt, parseCreativeCoachSkillRoute, renderCreativeCoachPersona, renderCreativeCoachSkill, renderProgressivelyLoadedCreativeCoachSkills, renderSelectedCreativeCoachMethods, resolveCreativeCoachRuntime, type CreativeCoachRuntime } from "@/lib/avatar/creative-coach-runtime";
 import { getCreationUserError, isRetryableCreationError } from "@/lib/creation/errors";
 import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
+import { resolveCreationReferenceImages } from "@/lib/creation/reference-images";
 import { buildLinkRemixResearchContext } from "@/lib/creation/link-remix-research";
 import { buildTrafficEvidencePackFromFastResearch, formatTrafficEvidencePack, planTrafficEvidenceSearch, type TrafficEvidencePack } from "@/lib/creation/traffic-copy-evidence";
 import { runFastResearch } from "@/lib/workbuddy/fast-research";
@@ -356,6 +357,16 @@ export async function executeCreationAppRun(input: {
       if (needsAvatarPhoto && visualAssetIds.length > 0 && visualReferences.length === 0) {
         throw new Error("数字分身形象照当前不可用，请检查隐私设置、照片状态和使用范围。");
       }
+      const inlineReferences = await resolveCreationReferenceImages({
+        values,
+        loadOwnedAvatarPhoto: async (assetId) => {
+          const loaded = await readAvatarVisualAsset(input.userId, assetId);
+          return loaded ? { contentType: loaded.asset.content_type, bytes: loaded.bytes } : null;
+        },
+      });
+      if (needsAvatarPhoto && visualAssetIds.length === 0 && inlineReferences.length === 0) {
+        throw new Error("人物参考图未能安全读取，请重新上传或从形象库中选择后再试。");
+      }
       const imageResult =
         effectiveApp.resultType === "image"
           ? await generateImageSet({
@@ -367,8 +378,8 @@ export async function executeCreationAppRun(input: {
               // For image remix, the source card must stay the primary image;
               // avatar references only define the optional inserted person.
               referenceImages: isImageCardRemix
-                ? [...extractReferenceImages(values), ...visualReferences.map((item) => item.dataUrl)].slice(0, 4)
-                : [...visualReferences.map((item) => item.dataUrl), ...extractReferenceImages(values)].slice(0, 4),
+                ? [...inlineReferences, ...visualReferences.map((item) => item.dataUrl)].slice(0, 4)
+                : [...visualReferences.map((item) => item.dataUrl), ...inlineReferences].slice(0, 4),
             })
           : null;
 
@@ -1557,6 +1568,10 @@ function buildImagePrompt(appName: string, fields: CreationField[], values: Reco
   const styleValue = stringifyCreationFieldValue(values.style);
   const isXiaohongshuVisual = stringifyCreationFieldValue(values.studio_parent) === "xiaohongshu-studio";
   const isImageCardRemix = appName === "知识卡片制作（图片）" && stringifyCreationFieldValue(values.creation_mode) === "image_remix";
+  const usesPortrait = stringifyCreationFieldValue(values.draw_portrait) === "yes";
+  if (usesPortrait) {
+    lines.push("人物身份硬约束：必须使用人物参考图中的同一位真人，保持其性别呈现、五官、年龄、发型和可识别身份；不得替换成相似人物，不得改变性别。若无法可靠保持本人形象，应停止生成而不是补画无关人物。");
+  }
   for (const field of fields) {
     const value = values[field.id];
     if (isEmptyCreationFieldValue(value)) continue;
@@ -1641,18 +1656,6 @@ function getImageStyleDirective(style: string, appName: string) {
   }
 
   return directives[style] ?? "";
-}
-
-function extractReferenceImages(values: Record<string, FieldValue>) {
-  const references: string[] = [];
-  const candidateValues = [values.reference_image, values.portrait_reference_image];
-
-  for (const candidate of candidateValues) {
-    const images = Array.isArray(candidate) ? candidate : [candidate];
-    references.push(...images.filter((image): image is string => typeof image === "string" && image.startsWith("data:image/")));
-  }
-
-  return references;
 }
 
 function parseSharedTrafficEvidencePack(raw: string): TrafficEvidencePack | null {

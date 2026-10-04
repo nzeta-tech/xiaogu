@@ -241,6 +241,15 @@ test("text-led image card hides the image remix branch", () => {
   assert.deepEqual(fields.find(field => field.id === "reference_image")?.visibleWhen, [{ fieldId: "draw_portrait", equals: "yes" }]);
 });
 
+test("image composition requests use remix mode and keep source and portrait slots separate", () => {
+  const fields = buildConversationAppFields(getCreationAppBySlug("image-card"), "把第一张国庆海报上嵌入我本人的形象照图片2");
+  assert.equal(fields.find(field => field.id === "creation_mode")?.presentation, "data");
+  assert.equal(fields.find(field => field.id === "creation_mode")?.initialValue, "image_remix");
+  assert.ok(fields.some(field => field.id === "remix_instruction"));
+  assert.ok(fields.some(field => field.id === "portrait_reference_image"));
+  assert.equal(fields.find(field => field.id === "reference_image")?.label, "上传原图 / 参考图");
+});
+
 test("a fully prefilled hidden form remains submittable", () => {
   const fields = [{ id: "source", label: "素材", type: "textarea", required: true, presentation: "data", initialValue: "已从对话带入" }];
   const state = resolveConversationFormState(fields, { source: "已从对话带入" });

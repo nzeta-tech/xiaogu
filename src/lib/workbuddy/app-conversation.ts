@@ -273,7 +273,9 @@ export function resolveConversationAppSource(pendingInstruction: string, followu
 export function buildConversationAppFields(app: CreationApp, source: string): ConversationAppField[] {
   const initialValues = createCreationAppInitialValues(app);
   const base = app.fields.map((field) => fieldToConversationField(field, source, initialValues[field.id]));
-  if (app.slug === "image-card" && source.trim()) return lockImageCardToTextCreation(base);
+  if (app.slug === "image-card" && source.trim()) return isImageCardTransformRequest(source)
+    ? lockImageCardToRemixCreation(base)
+    : lockImageCardToTextCreation(base);
   if (app.slug !== "link-remix") return base;
   const dynamic = new Map<string, ConversationAppField>();
   for (const target of remixCapabilityOptions) {
@@ -290,6 +292,20 @@ export function buildConversationAppFields(app: CreationApp, source: string): Co
     }
   }
   return [...base, ...dynamic.values()];
+}
+
+export function isImageCardTransformRequest(source: string) {
+  const normalized = source.replace(/\s+/g, "");
+  return /(嵌入|合成|二创|抠图|换人|替换人物|放到.*图|把.*图.*(?:放|加|合成|嵌入).*图|保留原图|基于.*图片)/u.test(normalized);
+}
+
+function lockImageCardToRemixCreation(fields: ConversationAppField[]) {
+  return fields.map(field => {
+    if (field.id === "creation_mode") return { ...field, presentation: "data" as const, initialValue: "image_remix" };
+    if (field.id === "source") return { ...field, presentation: "data" as const };
+    if (field.id === "remix_instruction") return { ...field, initialValue: field.initialValue || "保留二创底图的核心文字、主体和构图，按用户要求完成图片合成。" };
+    return field;
+  });
 }
 
 /** Upgrade persisted forms created before newer field constraints existed. */
