@@ -32,7 +32,7 @@ if (["localhost", "127.0.0.1", "[::1]"].includes(new URL(remoteBase).hostname)
 const agentIdBase = process.env.LOCAL_AGENT_ID?.trim();
 const agentId = agentIdBase ? `${agentIdBase}-${os.hostname()}` : `${os.hostname()}-${process.pid}`;
 const pollIntervalMs = boundedNumber("LOCAL_AGENT_POLL_INTERVAL_MS", 3000, 500, 60000);
-const leaseSeconds = boundedNumber("LOCAL_AGENT_LEASE_SECONDS", 600, 60, 1800);
+const leaseSeconds = boundedNumber("LOCAL_AGENT_LEASE_SECONDS", 1800, 60, 3600);
 const capabilities = (process.env.LOCAL_AGENT_CAPABILITIES || "source.inspect").split(",").map((value) => value.trim()).filter(Boolean);
 const heartbeatIntervalMs = boundedNumber("LOCAL_AGENT_HEARTBEAT_INTERVAL_MS", 15000, 5000, 60000);
 const transcriptBatchMs = boundedNumber("LOCAL_AGENT_TRANSCRIPT_BATCH_MS", 400, 300, 1000);
