@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createOriginLookup, validateConfig, summarizeStatus } from './host-agent-runtime.mjs';
+import { readFileSync } from 'node:fs';
 const config = { environment: 'development', baseUrl: 'http://localhost:3000', agentId: 'xiaogu-dev-media', workerRoot: '/tmp/worker', stateRoot: '/tmp/state', envFiles: ['/tmp/dev.env'] };
 test('development rejects production destinations and identities', () => {
   assert.equal(validateConfig(config), config);
@@ -45,4 +46,12 @@ test('status requires the exact environment worker and every production dependen
   assert.equal(check({ protocol_version: 2 }).available, false);
   assert.equal(check({ health: { ...node.health, heygenCli: 'unhealthy' } }).available, false);
   assert.equal(check({}, false).available, false);
+});
+
+test('production image packages the local Agent lease runtime', () => {
+  const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  assert.match(
+    dockerfile,
+    /COPY scripts\/local-agent\.mjs scripts\/local-agent-lease\.mjs \/xiaogu\/scripts\//,
+  );
 });
