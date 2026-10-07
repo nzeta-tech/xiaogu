@@ -29,8 +29,11 @@ import { singlePassArgs } from "./spoken-video-single-pass.mjs";
 import { preflightShots, changedReviewScope } from "./spoken-video-preflight.mjs";
 import { measureVideoStage, performanceScope, videoMetrics } from "./spoken-video-performance.mjs";
 import { uploadVideoParts } from "./spoken-video-multipart-upload.mjs";
+import { downloadPresenterMaster } from "./spoken-video-master-download.mjs";
 const exec = promisify(execFile);
 export const RECUT_PLANNING_TIMEOUT_MS = 60 * 60 * 1000;
+export const VISUAL_GENERATION_TIMEOUT_MS = 12 * 60 * 1000;
+export const VIDEO_MATERIAL_CONCURRENCY = Math.max(1, Math.min(2, Number(process.env.LOCAL_AGENT_VIDEO_MATERIAL_CONCURRENCY) || 1));
 // A long vertical recut can require a single FFmpeg filter graph with dozens of
 // inputs. Keep its deadline aligned with the user-visible production timeout;
 // planning alone is not the only long-running stage.
@@ -442,11 +445,15 @@ async function generateVisual(ctx,jobId,segment,dir,index,options={}){
   const evidence=(Array.isArray(options.researchReferences)?options.researchReferences:[]).filter(source=>source.kind==="webpage"||source.kind==="document").slice(0,2).map(source=>`${safe(source.title)}：${safe(source.excerpt)}`).join("；");
   const context=[safe(segment.text),evidence?`检索资料摘要（仅供构思画面）：${evidence}`:""].filter(Boolean).join("\n").slice(0,1000);
   const cardContent=options.cardContent?{...options.cardContent,points:(options.cardContent.points||[]).map(normalizePresentationText),narration:normalizePresentationText(options.cardContent.narration)}:undefined;
-  const response=await fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/visual`,{method:"POST",headers:{authorization:`Bearer ${ctx.token}`,"content-type":"application/json"},body:JSON.stringify({jobId,visual:concept.slice(0,160),context:normalizePresentationText(context),purpose:options.purpose||"scene",style:safe(options.style).slice(0,1500),cardContent}),signal:AbortSignal.timeout(300000)});
-  if(!response.ok||!response.body){const error=await response.json().catch(()=>({}));throw new Error(safe(error.error)||`补充画面生成失败（${response.status}）`);}
+  const bytes=await retryVideoStage(async attempt=>{
+    const response=await fetch(`${ctx.remoteBase}/api/internal/local-agent/digital-human/visual`,{method:"POST",headers:{authorization:`Bearer ${ctx.token}`,"content-type":"application/json","x-xiaogu-visual-attempt":String(attempt)},body:JSON.stringify({jobId,visual:concept.slice(0,160),context:normalizePresentationText(context),purpose:options.purpose||"scene",style:safe(options.style).slice(0,1500),cardContent}),signal:AbortSignal.timeout(VISUAL_GENERATION_TIMEOUT_MS)});
+    if(!response.ok||!response.body){const error=await response.json().catch(()=>({}));throw Object.assign(new Error(safe(error.error)||`补充画面生成失败（${response.status}）`),{status:response.status});}
+    const output=Buffer.from(await response.arrayBuffer());
+    if(output.length<10000)throw new VideoStageOutputError("补充画面文件异常");
+    return output;
+  },{attempts:3});
   const file=path.join(dir,`generated-visual-${index}-${randomUUID()}.jpg`);
-  await pipeline(Readable.fromWeb(response.body),createWriteStream(file));
-  if((await stat(file)).size<10000)throw new Error("补充画面文件异常");
+  await writeFile(file,bytes);
   return {kind:"image",file,source:options.purpose==="knowledge-card"?"xiaogu-ai-knowledge-card":"xiaogu-generated-visual",license:"generated",title:safe(segment.visual)||"口播主题画面",query:segment.query,...(options.purpose==="knowledge-card"?{points:options.cardContent?.points||[],presentation:"generated-full-card"}:{})};
 }
 
@@ -834,7 +841,7 @@ async function executeProduction(task,leaseToken,ctx){
         ()=>directSmartVideoWithCodex(baselineSegments,evidencePacks,dir),
         value=>Array.isArray(value)&&value.length===baselineSegments.length&&value.every((segment,index)=>segment?.id===baselineSegments[index].id&&segment.text===baselineSegments[index].text&&typeof segment.visualTreatment==="string"))
       : baselineSegments;
-    const materials=await mapVideoWork(segments,2,async(segment,i)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{aspectRatio:p.aspectRatio,researchReferences:references[i]}));
+    const materials=await mapVideoWork(segments,VIDEO_MATERIAL_CONCURRENCY,async(segment,i)=>directedProductionMaterial(ctx,jobId,segment,evidencePacks[i],dir,i,{aspectRatio:p.aspectRatio,researchReferences:references[i]}));
     return {segments,references,evidencePacks,materials};
       },
     ],2,work=>work());
@@ -1071,17 +1078,28 @@ async function executeRecut(task,leaseToken,ctx){
       intent:segment.intent||(segment.material?.kind==="presenter"?"anchor":"explain"),
       layout:segment.layout||(segment.material?.kind==="presenter"?"presenter":"fullscreen"),
     }));
-    // Revisions can only download the immutable server-owned master. No HeyGen creation path exists here.
-    const master=path.join(dir,"presenter-master.mp4");await fetchInput(ctx,jobId,"master",master);
+    // Revisions can only download the immutable, checksummed server-owned master.
+    // Range resume keeps a long download from restarting the whole revision.
+    const master=path.join(dir,"presenter-master.mp4");
+    await downloadPresenterMaster({
+      url:`${ctx.remoteBase}/api/internal/local-agent/digital-human/input?${new URLSearchParams({jobId,kind:"master"})}`,
+      headers:{authorization:`Bearer ${ctx.token}`},identity:input.master,
+      cacheDir:path.join(path.dirname(ctx.videoCacheScope),"masters"),file:master,
+    });
     const subtitleFile=path.join(dir,"original.srt");let subtitleUrl="";
     if(safe(input.subtitleSrt))await writeFile(subtitleFile,normalizeSubtitleSrt(input.subtitleSrt));
     else if(safe(input.providerJobId)){const remote=await heygenPoll(input.providerJobId);subtitleUrl=remote.subtitleUrl||"";}
     const changedSegments=plan.segments.filter(segment=>segment.regenerate);
     const resume=videoResumeCache(process.env.LOCAL_AGENT_VIDEO_WORKDIR||os.tmpdir(),{endpoint:ctx.remoteBase,owner:task.owner_user_id||task.ownerUserId||jobId});
-    const refreshedReferences=changedSegments.length?await researchSegmentsWithCodex(changedSegments,dir,undefined,resume):[];
+    const existingReferences=plan.segments.map((segment,index)=>Array.isArray(input.materialPlan[index]?.researchReferences)?input.materialPlan[index].researchReferences:[]);
+    const researchSegments=changedSegments.filter(segment=>{
+      const index=plan.segments.findIndex(candidate=>candidate.id===segment.id);
+      return index<0||existingReferences[index].length===0;
+    });
+    const refreshedReferences=researchSegments.length?await researchSegmentsWithCodex(researchSegments,dir,undefined,resume):[];
+    const refreshedById=new Map(researchSegments.map((segment,index)=>[segment.id,refreshedReferences[index]||[]]));
     const references=plan.segments.map((segment,index)=>{
-      const changedIndex=changedSegments.findIndex(changed=>changed.id===segment.id);
-      return changedIndex>=0?refreshedReferences[changedIndex]:input.materialPlan[index]?.researchReferences||[];
+      return refreshedById.get(segment.id)||existingReferences[index];
     });
     const evidencePacks=buildEvidencePacks(plan.segments,references);
     const undirected=plan.segments.map((segment,index)=>({segment,index})).filter(({segment})=>segment.regenerate&&!segment.visualTreatment);
@@ -1093,9 +1111,9 @@ async function executeRecut(task,leaseToken,ctx){
     const lockedLayouts=plan.editScope?.layout?{}:Object.fromEntries(input.materialPlan.map((segment,index)=>[segment.id||`s${index+1}`,segment.layout]).filter(([,layout])=>safe(layout)));
     if(!plan.editScope?.layout)plan.segments=plan.segments.map(segment=>lockedLayouts[segment.id]?{...segment,layout:lockedLayouts[segment.id]}:segment);
     const materials=[];
-    for(let start=0;start<plan.segments.length;start+=2){
-      await report(ctx,task,leaseToken,jobId,"refining_visuals",20+Math.round(start/plan.segments.length*45),"正在优化画面与知识点呈现");
-      const batch=await Promise.all(plan.segments.slice(start,start+2).map(async(segment,offset)=>{
+    for(let start=0;start<plan.segments.length;start+=VIDEO_MATERIAL_CONCURRENCY){
+      await report(ctx,task,leaseToken,jobId,"refining_visuals",20+Math.round(start/plan.segments.length*45),`正在准备第 ${Math.min(start+1,plan.segments.length)} / ${plan.segments.length} 个画面`,{completedVisuals:start,totalVisuals:plan.segments.length});
+      const batch=await Promise.all(plan.segments.slice(start,start+VIDEO_MATERIAL_CONCURRENCY).map(async(segment,offset)=>{
         const i=start+offset,previous=input.materialPlan[i]?.material;
         if(previous?.mediaId&&!segment.regenerate){
           const file=path.join(dir,`reused-${i}.${previous.kind==="video"?(previous.source?.includes("pexels.com")||previous.source?.includes("pixabay.com")?"mp4":"webm"):"jpg"}`);

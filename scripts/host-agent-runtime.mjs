@@ -5,17 +5,54 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { setDefaultResultOrder } from 'node:dns';
+import dns, { setDefaultResultOrder } from 'node:dns';
 
 setDefaultResultOrder('ipv4first');
 
 const productionOrigin = 'https://xiaogu.nzeta.ai';
+const productionHostname = new URL(productionOrigin).hostname;
+
+export function createOriginLookup(config, { lookup = dns.lookup.bind(dns), resolve4 = dns.resolve4.bind(dns) } = {}) {
+  const serviceHostname = new URL(config.baseUrl).hostname;
+  const originHostname = config.originDnsName;
+  let cursor = 0;
+  return function originLookup(hostname, options, callback) {
+    if (typeof options === 'function') { callback = options; options = {}; }
+    const normalizedOptions = typeof options === 'number' ? { family: options } : (options || {});
+    if (!originHostname || hostname !== serviceHostname) return lookup(hostname, options, callback);
+    resolve4(originHostname, (error, addresses) => {
+      if (error || !Array.isArray(addresses) || !addresses.length) {
+        callback(error || Object.assign(new Error(`Origin DNS returned no addresses for ${originHostname}`), { code: 'ENOTFOUND' }));
+        return;
+      }
+      const ordered = addresses.map(value => typeof value === 'string' ? value : value.address).filter(Boolean);
+      if (!ordered.length) {
+        callback(Object.assign(new Error(`Origin DNS returned no IPv4 addresses for ${originHostname}`), { code: 'ENOTFOUND' }));
+        return;
+      }
+      cursor %= ordered.length;
+      const rotated = [...ordered.slice(cursor), ...ordered.slice(0, cursor)];
+      cursor = (cursor + 1) % ordered.length;
+      if (normalizedOptions.all) callback(null, rotated.map(address => ({ address, family: 4 })));
+      else callback(null, rotated[0], 4);
+    });
+  };
+}
+
+function installOriginDispatcher(config) {
+  if (!config.originDnsName) return;
+  const require = createRequire(path.join(config.workerRoot, 'package.json'));
+  const { Agent, setGlobalDispatcher } = require('undici');
+  setGlobalDispatcher(new Agent({ connect: { lookup: createOriginLookup(config) } }));
+}
+
 export function validateConfig(config) {
   if (!['production', 'development'].includes(config.environment)) throw new Error('Explicit environment required');
   const url = new URL(config.baseUrl);
   const production = config.environment === 'production';
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('Use a plain service origin');
   if (production ? url.origin !== productionOrigin : !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('Environment and endpoint mismatch');
+  if (config.originDnsName && (!production || url.hostname !== productionHostname || !/^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.elb\.amazonaws\.com$/i.test(config.originDnsName))) throw new Error('Origin DNS override mismatch');
   if (!path.isAbsolute(config.workerRoot) || !path.isAbsolute(config.stateRoot)) throw new Error('Absolute runtime and state paths required');
   const expectedId = `xiaogu-${production ? 'prod' : 'dev'}-media`;
   if (config.agentId !== expectedId) throw new Error('Environment and agent identity mismatch');
@@ -37,6 +74,7 @@ export function summarizeStatus(config, payload, now = Date.now()) {
 async function main() {
   const [configFile, mode] = process.argv.slice(2);
   const config = validateConfig(JSON.parse(fs.readFileSync(configFile, 'utf8')));
+  installOriginDispatcher(config);
   // Read only the scoped credential. Project env files must not override the target,
   // identity or worker paths selected by the environment config.
   let token;

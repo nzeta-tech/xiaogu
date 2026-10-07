@@ -6,6 +6,13 @@ export type SpokenJob = {id:string;title:string;status:string;progress:number;er
 export const activeVideo=(job:SpokenJob)=>["queued","processing"].includes(job.status);
 const versionNumber=(job:SpokenJob)=>job.request_json?.revision_number||1;
 const stageLabels:Record<string,string>={queued:"等待制作",downloading_master:"正在下载并校验原口播母片",uploading:"正在上传成片并校验完整性",planning:"正在规划分镜",planning_revision:"正在整理修改要求",refining_visuals:"正在优化画面",heygen_submitting:"正在准备口播",heygen_rendering:"正在制作口播",presenter_ready:"口播已完成",researching:"正在准备画面素材",materials_ready:"画面准备就绪",composing:"正在剪辑画面",quality_check:"正在检查并完善成片",recovering:"正在恢复制作"};
+const friendlyStages=[{label:"理解内容",until:20},{label:"准备人物与画面",until:68},{label:"剪辑合成",until:95},{label:"最后检查",until:100}];
+function waitHint(progress:number,waitingSeconds:number){
+  if(progress>=95)return "已经接近完成，通常还需要几分钟";
+  if(progress>=68)return "正在合成较大的视频文件，通常还需要 5–15 分钟";
+  if(progress>=20)return "AI 画面会逐张完成，通常还需要 10–30 分钟";
+  return waitingSeconds<180?"正在启动制作，通常几分钟内会进入画面准备":"仍在理解内容和规划画面，请耐心等待";
+}
 export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:SpokenJob;versions:SpokenJob[];available:boolean;onRefresh:()=>Promise<void>}){
   const [selected,setSelected]=useState("");const [instructions,setInstructions]=useState("");const [editing,setEditing]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");const lock=useRef(false);const requestKey=useRef<{text:string;base:string;id:string}|null>(null);const textRef=useRef<HTMLTextAreaElement>(null);
   const sorted=[...versions].sort((a,b)=>versionNumber(b)-versionNumber(a));
@@ -13,6 +20,7 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
   const chosen=versions.find(v=>v.id===(selected||currentId))||root;
   const preview=chosen.video_url?chosen:versions.find(v=>v.id===chosen.request_json?.base_version_id&&v.video_url)||sorted.find(v=>v.status==="completed"&&v.video_url);
   const running=sorted.find(activeVideo);const anyCompleted=versions.some(v=>v.status==="completed");
+  const progressRequest=running?.request_json as (SpokenJob["request_json"]&{completedVisuals?:number;totalVisuals?:number})|undefined;
   const [now,setNow]=useState(0);
   const runningId=running?.id;
   useEffect(()=>{if(!runningId)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[runningId]);
@@ -39,7 +47,7 @@ export function SpokenVideoVersions({root,versions,available,onRefresh}:{root:Sp
       <div className={styles.versionList} role="group" aria-label={`${root.title}的版本`}>
         {sorted.map(v=><button key={v.id} type="button" className={`${styles.versionOption} ${chosen.id===v.id?styles.chosenVersion:""}`} aria-pressed={chosen.id===v.id} onClick={()=>{setSelected(v.id);setError("");setNotice("");}}><span><strong>V{versionNumber(v)}{v.id===root.id?" · 初版":""}</strong><small>{v.id===currentId?"当前版本":activeVideo(v)?"制作中":v.status==="failed"?"未完成":"已发布"}</small></span><p>{v.request_json?.edit_instructions||"首次生成的完整视频"}</p></button>)}
       </div>
-      {running?<div className={styles.revisionProgress} role="status"><strong>{stageLabels[running.request_json?.stage||""]||"正在制作新版本"}</strong><div className={styles.progressRow}><progress aria-label="修改进度" value={running.progress||0} max={100}/><span>{running.progress||0}%</span></div><p>已等待 {Math.floor(waitingSeconds/60)} 分 {waitingSeconds%60} 秒。{preview?"当前播放的是已有版本，制作完成后可切换查看。":"你可以离开此页面，稍后回来查看。"}</p></div>:null}
+      {running?<div className={styles.revisionProgress} role="status"><strong>{stageLabels[running.request_json?.stage||""]||"正在认真制作你的新版本"}</strong><div className={styles.progressRow}><progress aria-label="视频制作进度" value={running.progress||0} max={100}/><span>{running.progress||0}%</span></div><div className={styles.progressSteps}>{friendlyStages.map((step,index)=>{const previous=index?friendlyStages[index-1].until:0;const active=(running.progress||0)>=previous;const done=(running.progress||0)>=step.until;return <span key={step.label} data-state={done?"done":active?"active":"pending"}>{done?"✓ ":""}{step.label}</span>;})}</div>{progressRequest?.totalVisuals?<p>画面准备：已完成 {Math.min(progressRequest.completedVisuals||0,progressRequest.totalVisuals)} / {progressRequest.totalVisuals} 个</p>:null}<p>已制作 {Math.floor(waitingSeconds/60)} 分 {waitingSeconds%60} 秒 · {waitHint(running.progress||0,waitingSeconds)}。</p><p>{preview?"你可以先观看已有版本，新版完成后再切换。":"不用停留在这里，可以先做其他事情，稍后回来查看。"}</p></div>:null}
       {chosen.status==="failed"?<div className={styles.revisionFailure} role="alert"><strong>这个版本未能完成</strong><p>{/^(仅支持|成片质检未通过|Codex 质检未通过)/.test(chosen.error_message||"")?chosen.error_message:preview?"已有成片已保留。请调整修改要求后重试，或稍后再试。":"生成未完成，请稍后重试。"}</p>{preview?<button type="button" onClick={()=>{setInstructions(chosen.request_json?.edit_instructions||"");setEditing(true);textRef.current?.focus();}}>重新修改</button>:null}</div>:null}
       {deliveryNotes.length?<div className={styles.revisionFailure} role="status"><strong>已发布 · 成片有待改进项</strong><p>已完成一次质检。红色问题会影响事实可信度或成片可用性；黄色问题影响观看体验。</p>{(reviewRequest?.quality_issues||deliveryNotes.map(message=>({level:"warning" as const,title:"画面检查",message}))).map((issue,index)=><p key={index} style={{color:issue.level==="critical"?"#b42318":"#8a5a00"}}><b>{issue.level==="critical"?"● 需要立即处理":"● 建议优化"}</b> · 《{issue.title}》：{issue.message}</p>)}</div>:null}
       {warnings.length?<details className={styles.sourceDetails}><summary>画面优化建议（不影响交付）</summary>{warnings.map((warning,index)=><p key={index}>{warning}</p>)}</details>:null}

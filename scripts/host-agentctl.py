@@ -17,6 +17,7 @@ ROOT = HOME / '.xiaogu-agent'
 REPO = Path(__file__).resolve().parents[1]
 DOMAIN = f'gui/{os.getuid()}'
 CONTROL_PROXY = 'http://127.0.0.1:7890'
+PRODUCTION_ORIGIN_DNS = 'cheap-llm-3z-1728036415.ap-southeast-2.elb.amazonaws.com'
 
 
 def run(args, check=True, **kwargs):
@@ -85,7 +86,7 @@ def main():
                       agentId=f'xiaogu-{"prod" if production else "dev"}-media', workerRoot=str(worker),
                       stateRoot=str(state), version=worker.parent.name if production else 'development',
                       envFiles=[str(config_dir / 'prod.env')] if production else [str(REPO / name) for name in ['.env', '.env.local', '.env.development.local']],
-                      controlProxy=CONTROL_PROXY if production else '')
+                      controlProxy='', **({'originDnsName': PRODUCTION_ORIGIN_DNS} if production else {}))
         config_file.write_text(json.dumps(config, indent=2) + '\n')
         config_file.chmod(0o600)
         data = dict(Label=label, ProgramArguments=[node, str(installed), str(config_file), '--run'],
