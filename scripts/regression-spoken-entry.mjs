@@ -43,7 +43,7 @@ try {
   await page.goto(base+'/create');
   const card = page.locator('article.workspaceHubCard').filter({has:page.getByText('口播视频生成',{exact:true})});
   await card.waitFor(); check(await card.isVisible(),'all applications card visible');
-  check((await card.innerText()).includes('50 起 积分 · 口播视频'),'correct price and output');
+  check((await card.innerText()).includes('30 起 积分 · 口播视频'),'correct price and output');
   check((await card.innerText()).includes('充值用户专享'),'paid badge');
   await page.getByRole('button',{name:'短视频 & 直播'}).click();
   check(await card.isVisible(),'video category shows card');
@@ -71,7 +71,7 @@ try {
   await api('/api/digital-human-videos'); await api('/api/spoken-photos'); await api('/api/spoken-voices');
   await page.getByRole('button',{name:/智能版/}).click();
   check((await page.getByRole('button',{name:/智能版/}).getAttribute('aria-pressed'))==='true','smart mode selectable');
-  check((await page.locator('body').innerText()).includes('100 积分 / 条 · 成功后扣除'),'smart price displayed');
+  check(/智能版(?:\s*·)?\s*50\s*积分/.test(await page.locator('body').innerText()),'smart price displayed');
   await page.goto(base+'/create'); await card.waitFor();
   await page.reload(); await card.waitFor();
   check(await card.isVisible(),'hub entry survives reload after grant');

@@ -22,7 +22,7 @@ try{
  let completed;
  for(let i=0;i<180;i++){const row=(await pool.query('select status,progress,request_json,video_url from digital_human_video_jobs where id=$1',[job.id])).rows[0];if(i%6===0)console.log(JSON.stringify({stage:row.request_json.stage,status:row.status,progress:row.progress}));if(row.status==='completed'){completed=row;break;}if(row.status==='failed')throw new Error('Real video task failed; inspect privacy-safe worker diagnostics');await wait(10000);}
  check(completed,'real video completes');const r=await fetch(base+`/api/digital-human-videos/${job.id}/media`,{headers:{cookie,range:'bytes=0-31'}});check(r.status===206,'video Range playback');const bytes=Buffer.from(await r.arrayBuffer());check(bytes.includes(Buffer.from('ftyp')),'MP4 signature');
- const usage=(await pool.query('select count(*)::int as n,sum(quota_cost)::int as cost from usage_logs where user_id=$1',[id])).rows[0];check(usage.n===1&&usage.cost===50,'exactly one 50-credit debit');
+ const usage=(await pool.query('select count(*)::int as n,sum(quota_cost)::int as cost from usage_logs where user_id=$1',[id])).rows[0];check(usage.n===1&&usage.cost===30,'exactly one 30-credit debit');
  await pool.query("update digital_human_video_jobs set status='completed' where id=$1",[job.id]);check((await pool.query('select count(*)::int as n from usage_logs where user_id=$1',[id])).rows[0].n===1,'completion replay not charged');
  const out={passed:true,assertions,voiceClone:true,videoGenerated:true,playback:true,charged:50};console.log(JSON.stringify(out));await writeFile('/tmp/xiaogu-spoken-live-result.json',JSON.stringify(out));
 }finally{

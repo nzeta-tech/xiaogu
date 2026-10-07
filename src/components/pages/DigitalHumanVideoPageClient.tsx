@@ -21,6 +21,7 @@ type Payload = {
   assets: DigitalHumanAsset[];
   jobs: DigitalHumanVideoJob[];
   providers: Record<DigitalHumanProvider, boolean>;
+  spokenVideoPrices?: { basic: number; smart: number };
   error?: string;
 };
 type ResourcePayload = {
@@ -369,10 +370,10 @@ export function DigitalHumanVideoPageClient() {
         <form className="digitalHumanComposer" onSubmit={submit}>
           <div className="digitalHumanModePicker" role="tablist" aria-label="选择创作方式">
             <button className={creationMode === "quick" ? "active" : ""} onClick={() => { setCreationMode("quick"); setCreativePlan(null); }} role="tab" type="button">
-              <strong>快速生成</strong><span>原生合成成片，不做二次转码</span>
+              <strong>基础版 · {payload.spokenVideoPrices?.basic ?? 30} 积分</strong><span>原生合成成片，不做二次转码</span>
             </button>
             <button className={creationMode === "smart" ? "active" : ""} onClick={() => { setCreationMode("smart"); setCreativePlan(null); }} role="tab" type="button">
-              <strong>智能创作</strong><span>锁定原文，自动设计分镜与画面节奏</span>
+              <strong>智能版 · {payload.spokenVideoPrices?.smart ?? 50} 积分</strong><span>锁定原文，自动设计分镜与画面节奏</span>
             </button>
             <a href={appPath(`/workbuddy?mode=video&objective=${encodeURIComponent(title || "把我的定稿口播文案制作成口播视频，原文逐字不变")}`)}>在 WorkBuddy 中创作 →</a>
           </div>
@@ -649,7 +650,7 @@ export function DigitalHumanVideoPageClient() {
             }
             type="submit"
           >
-            {busy ? "正在提交…" : creationMode === "smart" ? "按分镜生成视频" : "生成口播视频"}
+            {busy ? "正在提交…" : creationMode === "smart" ? `按分镜生成视频（${payload.spokenVideoPrices?.smart ?? 50}积分）` : `生成口播视频（${payload.spokenVideoPrices?.basic ?? 30}积分）`}
           </button>
         </form>
         <aside className="digitalHumanJobs">

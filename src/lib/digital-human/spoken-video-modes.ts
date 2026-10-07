@@ -1,4 +1,4 @@
-export const SPOKEN_VIDEO_PRICES = { basic: 50, smart: 100 } as const;
+export const SPOKEN_VIDEO_PRICES = { basic: 30, smart: 50 } as const;
 
 export type SpokenVideoProductionMode = keyof typeof SPOKEN_VIDEO_PRICES;
 

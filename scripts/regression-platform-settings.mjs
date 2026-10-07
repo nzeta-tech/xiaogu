@@ -150,7 +150,7 @@ try {
   assert(dailyLimit.response.status === 429, `daily limit not enforced: ${dailyLimit.response.status}`);
   const oldOrder = (await pool.query("insert into orders(user_id,provider,status,amount_cents,currency,quota_amount,created_at) values ($1,'regression','pending',100,'CNY',10,now()-interval '10 minutes') returning id", [invitee.id])).rows[0];
   await pool.query("insert into orders(user_id,provider,status,amount_cents,currency,quota_amount) values ($1,'regression','pending',100,'CNY',10)", [invitee.id]);
-  const pendingLimit = await request(inviteeCookie, "/api/billing/orders", { method: "POST", body: JSON.stringify({ planCode: "starter_300", provider: "stripe" }) });
+  const pendingLimit = await request(inviteeCookie, "/api/billing/orders", { method: "POST", body: JSON.stringify({ planCode: "trial_29", provider: "stripe" }) });
   assert(pendingLimit.response.status === 429, `pending order limit not enforced: ${pendingLimit.response.status}`);
   assert((await pool.query("select status from orders where id=$1", [oldOrder.id])).rows[0].status === "cancelled", "expired pending order not cancelled");
 

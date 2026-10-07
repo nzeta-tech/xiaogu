@@ -4,6 +4,7 @@ import { getQuotaCost, type QuotaAction } from "./quota";
 import type { SessionUser } from "@/lib/auth/session";
 import { tryExpireStaleAppRuns, tryGetSystemSettings } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
+import { freeAppLimitError, getFreeAppLimits } from "./free-usage-policy";
 
 export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number, options: { skipConcurrentCreationLimit?: boolean; appSlug?: string } = {}) {
   if (options.appSlug) {
@@ -56,6 +57,31 @@ export async function requireQuota(user: SessionUser, action: QuotaAction, confi
       balance: null,
     };
   }
+
+  const freeLimits = quotaCost === 0 ? getFreeAppLimits(options.appSlug) : null;
+  if (freeLimits && options.appSlug) {
+    const result = await query<{ daily_used: string; monthly_used: string }>(
+      `select
+         count(*) filter (where ar.completed_at >= date_trunc('day', now()))::text as daily_used,
+         count(*) filter (where ar.completed_at >= date_trunc('month', now()))::text as monthly_used
+       from app_runs ar
+       join apps a on a.id = ar.app_id
+       where ar.user_id = $1 and a.slug = $2 and ar.status = 'succeeded'`,
+      [user.id, options.appSlug],
+    );
+    const limitError = freeAppLimitError({
+      dailyUsed: Number(result.rows[0]?.daily_used ?? 0),
+      monthlyUsed: Number(result.rows[0]?.monthly_used ?? 0),
+    }, freeLimits);
+    if (limitError) {
+      return { ok: false as const, response: Response.json({ error: limitError, code: "FREE_USAGE_LIMIT" }, { status: 429 }), quotaCost, balance: null };
+    }
+  }
+
+  // Permanently free applications must remain usable without a paid balance or
+  // an external metering provider. Successful runs are still stored locally.
+  if (quotaCost === 0) return { ok: true as const, quotaCost, balance: null };
+
   const balance = await getQuotaBalance(user.id);
 
   if (balance.mode === "unconfigured") {

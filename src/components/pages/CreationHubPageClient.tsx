@@ -64,7 +64,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     pointsLabel: `${SPOKEN_VIDEO_PRICES.basic} 起`,
     badge: "新",
     description: "选择照片与声音，把定稿口播文案生成带字幕、剪辑和封面的视频。",
-    hint: "基础版 50 积分，智能版 100 积分，成功后扣除；照片与声音可在数字分身中管理。",
+    hint: `基础版 ${SPOKEN_VIDEO_PRICES.basic} 积分，智能版 ${SPOKEN_VIDEO_PRICES.smart} 积分，成功后扣除；照片与声音可在数字分身中管理。`,
     actionLabel: "使用",
     goals: ["attention", "trust", "conversion", "brand"],
   },
@@ -73,7 +73,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     appSlug: "xiaohongshu-studio",
     name: "小红书笔记创作",
     emoji: "◉",
-    pointsLabel: "8",
+    pointsLabel: "15",
     badge: "新",
     description: "从真实选题生成笔记、竖版图文卡片和发布前风险检查，一次备齐发布包。",
     hint: "先完成一条真实笔记，再按段落制作可下载的图文卡片。",
@@ -85,7 +85,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     appSlug: "wechat-studio",
     name: "公众号文章创作",
     emoji: "✦",
-    pointsLabel: "8",
+    pointsLabel: "15",
     badge: "新",
     description: "从选题到成文、配图、排版，再一键提交到公众号草稿箱，发布一页完成。",
     hint: "输入一个想法，先生成文章，再用配图把阅读节奏做完整。",
@@ -97,7 +97,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     appSlug: "ppt-maker",
     name: "PPT轻松制作",
     emoji: "📊",
-    pointsLabel: "12",
+    pointsLabel: "15",
     badge: "新",
     description: "输入主题或上传资料，自动生成可下载、可编辑的汇报 PPT。",
     hint: "输入想法或上传资料，轻松生成一份可下载、可编辑的专业 PPT。",
@@ -121,7 +121,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     appSlug: "link-remix",
     name: "爆款话题二创",
     emoji: "🔗",
-    pointsLabel: "8",
+    pointsLabel: "15",
     badge: "新",
     description: "粘贴抖音、视频号或公众号文章链接，自动提取原内容，创作成口播文案、公众号文章、小红书笔记或朋友圈。",
     hint: "选择想创作的题材，直接复用对应正式应用的步骤、选项和结果页。",
@@ -133,7 +133,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     appSlug: "image-card",
     name: "知识卡片制作（图片）",
     emoji: "🪄",
-    pointsLabel: "5",
+    pointsLabel: "免费",
     badge: "火",
     description: "将文章、口述稿或主题转成原创知识卡片，可自由选择视觉样式和画面比例。",
     hint: "优先保证中文可读性、信息层级和内容来源清晰。",
@@ -228,7 +228,7 @@ const allWorkspaceCards: WorkspaceCard[] = [
     appSlug: "lead-package",
     name: "【引流资料】制作",
     emoji: "🎁",
-    pointsLabel: "5",
+    pointsLabel: "15",
     description: "从一个具体问题出发，完整生成资料定位、内容目录、正文、领取说明和发布文案。",
     hint: "资料用于帮助用户整理问题，不替代正式保险建议。",
     actionLabel: "使用",
@@ -583,7 +583,7 @@ export function CreationHubPageClient() {
               </div>
 
               <div className="workspaceHubCardFooter">
-                <span>{card.pointsLabel} 积分 · {getCardOutputLabel(card)}</span>
+                <span>{card.pointsLabel === "免费" ? "永久免费" : `${card.pointsLabel} 积分`} · {getCardOutputLabel(card)}</span>
                 {unavailable
                   ? <button className="workspaceHubUseButton" disabled title={getUnavailableLabel(card)} type="button">{getUnavailableLabel(card)}</button>
                   : <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>{resolveWorkspaceActionLabel(card)} <span aria-hidden="true">→</span></a>}

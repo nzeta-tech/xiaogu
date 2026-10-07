@@ -31,6 +31,7 @@ import { resolveTrafficCoverSource } from "@/lib/creation/traffic-cover-source";
 import { creationNeedsAvatarPhoto } from "@/lib/creation/avatar-visual-input";
 import { buildTrafficGenerationValues, buildTrafficTopicAnalysisValues } from "@/lib/creation/traffic-workflow-contract";
 import { createCreationAppInitialValues } from "@/lib/creation/app-input-values";
+import { FREE_APP_LIMITS } from "@/lib/billing/free-usage-policy";
 
 type FieldValue = string | string[];
 type CreativeCoachOption = { id: string; name: string; version: number; coach_scope: "personal" | "platform"; capabilities: string[]; identity_card: CreativeCoachIdentityCard };
@@ -1159,23 +1160,24 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           </div>
           {isLeadCopy && !isMultiChannelPolishLayout ? (
             <div className="app-meta leadCopyMeta">
-              <span>{app.points} 积分/次</span>
+              <span>{app.points === 0 ? "永久免费" : `${app.points} 积分/次`}</span>
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
             </div>
           ) : isXiaohongshuCheck ? (
             <div className="app-meta xiaohongshuCheckMeta">
-              <span>{app.points} 积分/次</span>
+              <span>{app.points === 0 ? "永久免费" : `${app.points} 积分/次`}</span>
               <strong>审核型工具</strong>
             </div>
           ) : isPolicyDiagnosis ? (
             <div className="app-meta policyDiagnosisMeta">
-              <span>{app.points} 积分/次</span>
+              <span>{app.points === 0 ? "永久免费" : `${app.points} 积分/次`}</span>
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
               <em>工具型诊断页</em>
             </div>
           ) : !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && !isMultiChannelPolishLayout && !isCompactWechatFlow && !isCompactWriteCopyFlow && !isCompactRecruitPage ? (
             <div className="app-meta">
-              <span>{pageApp.points} 积分/次</span>
+              <span>{pageApp.points === 0 ? "永久免费" : `${pageApp.points} 积分/次`}</span>
+              {isImageCard ? <em>每天 {FREE_APP_LIMITS["image-card"].daily} 次 · 每月 {FREE_APP_LIMITS["image-card"].monthly} 次</em> : null}
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
               {pageApp.requiresThinking ? <em>建议先完善人设</em> : null}
             </div>
@@ -1907,13 +1909,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           <section className="submit-section submitSection creationStickyAction">
             <div className="creationSubmitSummary">
               <strong>{remixAutoParsingPending ? "正在自动解析素材" : missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
-              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : draftStatus === "recreated" ? "已回填上次创作内容" : "输入内容会随作品保存"} · 本次消耗 ${app.points} 积分`}</span>
+              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : draftStatus === "recreated" ? "已回填上次创作内容" : "输入内容会随作品保存"} · ${app.points === 0 ? "本次免费" : `本次消耗 ${app.points} 积分`}`}</span>
               <i aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></i>
             </div>
             <button className="primaryButton submit-button submitButton" disabled={loading || trafficTopicsLoading || remixAutoParsingPending || recreationPrefillStatus === "loading"} onClick={() => void handleSubmit()} type="button">
               {trafficTopicsLoading ? "正在分析并推荐选题..." : loading
                 ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isImageCard ? `正在生成 ${imageCardSelectedStyleCount || 1} 张知识卡片...` : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
-                : recreationPrefillStatus === "loading" ? "正在载入上次参数..." : remixAutoParsingPending ? "素材自动解析中..." : usesTrafficWorkflow && !trafficTopics.length ? "分析并推荐选题" : usesTrafficWorkflow ? `生成所选${selectedTrafficTopicIds.length}个选题（${app.points}积分）` : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isImageCard ? `生成 ${imageCardSelectedStyleCount || 1} 张知识卡片 · ${app.points}积分` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                : recreationPrefillStatus === "loading" ? "正在载入上次参数..." : remixAutoParsingPending ? "素材自动解析中..." : usesTrafficWorkflow && !trafficTopics.length ? "分析并推荐选题" : usesTrafficWorkflow ? `生成所选${selectedTrafficTopicIds.length}个选题（${app.points}积分）` : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isImageCard ? `免费生成 ${imageCardSelectedStyleCount || 1} 张知识卡片` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>
