@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiPath, appPath } from "@/lib/client/url";
 import { usePageMeta } from "@/lib/client/page-meta";
+import { getBillingPlanPresentation } from "@/lib/billing/plans";
 
 type Plan = {
   code: string;
@@ -251,29 +252,30 @@ export function BillingPageClient() {
         </div>
 
         <div className="pricingGrid">
-          {plans.map((plan) => (
-            <article className={`pricingCard ${plan.recommended ? "featured" : ""}`} key={plan.code}>
-              <div className="planTopline">
-                <span>{plan.name}</span>
-                {plan.recommended ? <em>推荐</em> : null}
-              </div>
-              <div className="planPrice">
-                ¥{((plan.amountCents + Math.ceil(plan.amountCents * commerceConfig.feeRatePercent / 100)) / 100).toFixed(2)}
-                <small>{plan.currency}</small>
-              </div>
-              <strong>{plan.quotaAmount.toLocaleString("zh-CN")} 点额度</strong>
-              <p>{plan.description}</p>
-              {commerceConfig.feeRatePercent > 0 ? <small>含 {commerceConfig.feeRatePercent}% 支付服务费</small> : null}
-              <ul>
-                <li>热点发现与话题拆解</li>
-                <li>短视频口播稿生成</li>
-                <li>文案改写与合规提示</li>
-              </ul>
-              <button className={plan.recommended ? "primaryButton" : "secondaryButton"} onClick={() => void buyPlan(plan)} disabled={Boolean(busyPlan) || !activePaymentProvider}>
-                {busyPlan === plan.code ? "创建订单中" : "立即充值"}
-              </button>
-            </article>
-          ))}
+          {plans.map((plan) => {
+            const presentation = getBillingPlanPresentation(plan);
+            return (
+              <article className={`pricingCard ${plan.recommended ? "featured" : ""}`} key={plan.code}>
+                <div className="planTopline">
+                  <span>{plan.name}</span>
+                  {plan.recommended ? <em>推荐</em> : null}
+                </div>
+                <div className="planPrice">
+                  ¥{((plan.amountCents + Math.ceil(plan.amountCents * commerceConfig.feeRatePercent / 100)) / 100).toFixed(2)}
+                  <small>{plan.currency}</small>
+                </div>
+                <strong>{plan.quotaAmount.toLocaleString("zh-CN")} 点额度</strong>
+                <p>{presentation.description}</p>
+                {commerceConfig.feeRatePercent > 0 ? <small>含 {commerceConfig.feeRatePercent}% 支付服务费</small> : null}
+                <ul>
+                  {presentation.usageExamples.map((example) => <li key={example}>{example}</li>)}
+                </ul>
+                <button className={plan.recommended ? "primaryButton" : "secondaryButton"} onClick={() => void buyPlan(plan)} disabled={Boolean(busyPlan) || !activePaymentProvider}>
+                  {busyPlan === plan.code ? "创建订单中" : "立即充值"}
+                </button>
+              </article>
+            );
+          })}
         </div>
         {commerceConfig.helpImageUrl ? (
           <div className="billingHelpMedia">
