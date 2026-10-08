@@ -4,7 +4,7 @@ import { getQuotaCost, type QuotaAction } from "./quota";
 import type { SessionUser } from "@/lib/auth/session";
 import { tryExpireStaleAppRuns, tryGetSystemSettings } from "@/lib/db/repositories";
 import { query } from "@/lib/db/client";
-import { freeAppLimitError, getFreeAppLimits } from "./free-usage-policy";
+import { getFreeAppLimits, resolveFreeAppQuotaCost } from "./free-usage-policy";
 
 export async function requireQuota(user: SessionUser, action: QuotaAction, configuredCost?: number, options: { skipConcurrentCreationLimit?: boolean; appSlug?: string } = {}) {
   if (options.appSlug) {
@@ -48,7 +48,7 @@ export async function requireQuota(user: SessionUser, action: QuotaAction, confi
       return { ok: false as const, response: Response.json({ error: "创作请求过于频繁，请稍后再试" }, { status: 429 }), quotaCost: 0, balance: null };
     }
   }
-  const quotaCost = configuredCost ?? getQuotaCost(action);
+  let quotaCost = configuredCost ?? getQuotaCost(action);
   if (!Number.isInteger(quotaCost) || quotaCost < 0 || quotaCost > 100000) {
     return {
       ok: false as const,
@@ -69,17 +69,14 @@ export async function requireQuota(user: SessionUser, action: QuotaAction, confi
        where ar.user_id = $1 and a.slug = $2 and ar.status = 'succeeded'`,
       [user.id, options.appSlug],
     );
-    const limitError = freeAppLimitError({
+    quotaCost = resolveFreeAppQuotaCost({
       dailyUsed: Number(result.rows[0]?.daily_used ?? 0),
       monthlyUsed: Number(result.rows[0]?.monthly_used ?? 0),
     }, freeLimits);
-    if (limitError) {
-      return { ok: false as const, response: Response.json({ error: limitError, code: "FREE_USAGE_LIMIT" }, { status: 429 }), quotaCost, balance: null };
-    }
   }
 
-  // Permanently free applications must remain usable without a paid balance or
-  // an external metering provider. Successful runs are still stored locally.
+  // Runs still inside an application's free allowance do not require a paid
+  // balance or an external metering provider. Successful runs remain auditable.
   if (quotaCost === 0) return { ok: true as const, quotaCost, balance: null };
 
   const balance = await getQuotaBalance(user.id);

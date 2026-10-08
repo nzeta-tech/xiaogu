@@ -583,7 +583,7 @@ export function CreationHubPageClient() {
               </div>
 
               <div className="workspaceHubCardFooter">
-                <span>{card.pointsLabel === "免费" ? "永久免费" : `${card.pointsLabel} 积分`} · {getCardOutputLabel(card)}</span>
+                <span>{card.appSlug === "image-card" ? "每日前 3 次免费，超出 5 积分/次" : card.pointsLabel === "免费" ? "永久免费" : `${card.pointsLabel} 积分`} · {getCardOutputLabel(card)}</span>
                 {unavailable
                   ? <button className="workspaceHubUseButton" disabled title={getUnavailableLabel(card)} type="button">{getUnavailableLabel(card)}</button>
                   : <a className="workspaceHubUseButton" href={resolveWorkspaceHref(card)}>{resolveWorkspaceActionLabel(card)} <span aria-hidden="true">→</span></a>}

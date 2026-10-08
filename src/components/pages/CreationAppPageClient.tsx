@@ -1176,8 +1176,8 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
             </div>
           ) : !isGeneralContent && !isTopicPicker && !isWechatArticlePolish && !isVideoScriptPolish && !isMultiChannelPolishLayout && !isCompactWechatFlow && !isCompactWriteCopyFlow && !isCompactRecruitPage ? (
             <div className="app-meta">
-              <span>{pageApp.points === 0 ? "永久免费" : `${pageApp.points} 积分/次`}</span>
-              {isImageCard ? <em>每天 {FREE_APP_LIMITS["image-card"].daily} 次 · 每月 {FREE_APP_LIMITS["image-card"].monthly} 次</em> : null}
+              <span>{isImageCard ? `每日前 ${FREE_APP_LIMITS["image-card"].daily} 次免费` : pageApp.points === 0 ? "永久免费" : `${pageApp.points} 积分/次`}</span>
+              {isImageCard ? <em>每月前 {FREE_APP_LIMITS["image-card"].monthly} 次免费 · 超出后 {FREE_APP_LIMITS["image-card"].overageCost} 积分/次</em> : null}
               {pageApp.badge ? <strong>{pageApp.badge}</strong> : null}
               {pageApp.requiresThinking ? <em>建议先完善人设</em> : null}
             </div>
@@ -1909,13 +1909,13 @@ export function CreationAppPageClient({ app }: { app: CreationApp }) {
           <section className="submit-section submitSection creationStickyAction">
             <div className="creationSubmitSummary">
               <strong>{remixAutoParsingPending ? "正在自动解析素材" : missingRequiredFields.length ? `还需完成：${missingRequiredFields.map((field) => field.label).join("、")}` : "必填信息已完成"}</strong>
-              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : draftStatus === "recreated" ? "已回填上次创作内容" : "输入内容会随作品保存"} · ${app.points === 0 ? "本次免费" : `本次消耗 ${app.points} 积分`}`}</span>
+              <span>{remixAutoParsingPending ? "素材自动解析进行中，需要一些时间，请耐心等待，保持页面不要关闭。" : `${draftStatus === "restored" ? "已载入待编辑作品" : draftStatus === "recreated" ? "已回填上次创作内容" : "输入内容会随作品保存"} · ${isImageCard ? `免费额度用完后 ${FREE_APP_LIMITS["image-card"].overageCost} 积分/次` : app.points === 0 ? "本次免费" : `本次消耗 ${app.points} 积分`}`}</span>
               <i aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></i>
             </div>
             <button className="primaryButton submit-button submitButton" disabled={loading || trafficTopicsLoading || remixAutoParsingPending || recreationPrefillStatus === "loading"} onClick={() => void handleSubmit()} type="button">
               {trafficTopicsLoading ? "正在分析并推荐选题..." : loading
                 ? isPolicyDiagnosis ? "复核中..." : isXiaohongshuCheck ? "检查中..." : isWechatImages ? "正在生成 4 张配图..." : isImageCard ? `正在生成 ${imageCardSelectedStyleCount || 1} 张知识卡片...` : isPolicyRenewalCard ? "正在生成保单提醒卡..." : "创作中..."
-                : recreationPrefillStatus === "loading" ? "正在载入上次参数..." : remixAutoParsingPending ? "素材自动解析中..." : usesTrafficWorkflow && !trafficTopics.length ? "分析并推荐选题" : usesTrafficWorkflow ? `生成所选${selectedTrafficTopicIds.length}个选题（${app.points}积分）` : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isImageCard ? `免费生成 ${imageCardSelectedStyleCount || 1} 张知识卡片` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
+                : recreationPrefillStatus === "loading" ? "正在载入上次参数..." : remixAutoParsingPending ? "素材自动解析中..." : usesTrafficWorkflow && !trafficTopics.length ? "分析并推荐选题" : usesTrafficWorkflow ? `生成所选${selectedTrafficTopicIds.length}个选题（${app.points}积分）` : isLinkRemix ? `生成${remixCapabilityLabel(values.remix_target)}（${app.points}积分）` : isXiaohongshuCheck ? `开始检查（${app.points}积分）` : isPolicyDiagnosis ? `开始复核（${app.points}积分）` : isWechatImages ? `生成 4 张配图 · ${app.points}积分` : isImageCard ? `生成 ${imageCardSelectedStyleCount || 1} 张知识卡片` : isPolicyRenewalCard ? `生成保单提醒卡 · ${app.points}积分` : `开始创作（${app.points}积分）`}
             </button>
           </section>
         </form>

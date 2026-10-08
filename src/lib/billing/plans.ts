@@ -16,7 +16,7 @@ export type BillingPlanPresentation = {
 const billingPlanPresentations: Record<string, BillingPlanPresentation> = {
   trial_29: {
     description: "适合初次体验，先完成一轮轻量创作。",
-    usageExamples: ["最多 5 次普通创作", "或 1 次重型创作 + 2 次普通创作", "知识卡片永久免费"],
+    usageExamples: ["最多 5 次普通创作", "或 1 次重型创作 + 2 次普通创作", "知识卡片每日前 3 次免费"],
   },
   creator_100: {
     description: "适合个人创作者的日常内容更新。",

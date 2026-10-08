@@ -36,7 +36,7 @@ test("commercial packages explain distinct, non-cumulative usage examples", () =
     "最多 200 次普通创作",
   ]);
   assert.deepEqual(presentations.map((item) => item.usageExamples.at(-1)), [
-    "知识卡片永久免费",
+    "知识卡片每日前 3 次免费",
     "或 3 次基础口播视频",
     "或 10 次基础口播视频",
     "或 33 次基础口播视频",
